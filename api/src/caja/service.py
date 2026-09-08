@@ -2083,9 +2083,90 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
         .order_by(CashSession.fecha_cierre.desc())
     )
     result = await db.execute(query)
+    rows = result.all()
+    if not rows:
+        return []
+
+    # 1. Obtener pagos reales registrados por el POS para todas las sesiones del período
+    session_ids = [session_obj.id for session_obj, _, _ in rows]
+    payments_by_session: dict[uuid.UUID, dict] = {}
+
+    if session_ids:
+        pay_query = (
+            select(
+                Sale.session_id,
+                SalePayment.forma_pago,
+                SalePayment.moneda,
+                func.coalesce(func.sum(SalePayment.monto), 0).label("total_monto"),
+            )
+            .select_from(SalePayment)
+            .join(Sale, Sale.id == SalePayment.sale_id)
+            .where(
+                Sale.session_id.in_(session_ids),
+                Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
+            )
+            .group_by(Sale.session_id, SalePayment.forma_pago, SalePayment.moneda)
+        )
+        pay_res = await db.execute(pay_query)
+        for sid, fp_raw, mon, monto in pay_res.all():
+            if sid not in payments_by_session:
+                payments_by_session[sid] = {
+                    "tarjeta": Decimal("0"),
+                    "transferencia": Decimal("0"),
+                    "qr_pix": Decimal("0"),
+                    "extra_club": Decimal("0"),
+                    "cheque": Decimal("0"),
+                    "otro": Decimal("0"),
+                    "efectivo_pyg": Decimal("0"),
+                    "efectivo_brl": Decimal("0"),
+                    "efectivo_usd": Decimal("0"),
+                }
+            fp = (fp_raw or "").upper()
+            m = Decimal(str(monto or 0))
+            if "EFECTIVO" in fp:
+                if mon == "BRL":
+                    payments_by_session[sid]["efectivo_brl"] += m
+                elif mon == "USD":
+                    payments_by_session[sid]["efectivo_usd"] += m
+                else:
+                    payments_by_session[sid]["efectivo_pyg"] += m
+            elif any(t in fp for t in ["TARJETA", "BANCARD", "DINELCO", "DEBITO", "CREDITO"]) and "QR" not in fp:
+                payments_by_session[sid]["tarjeta"] += m
+            elif "QR" in fp or "PIX" in fp:
+                payments_by_session[sid]["qr_pix"] += m
+            elif "TRANSFERENCIA" in fp or "TRANSF" in fp:
+                payments_by_session[sid]["transferencia"] += m
+            elif "EXTRA_CLUB" in fp or "CLUB" in fp or "CREDITO_CLIENTE" in fp:
+                payments_by_session[sid]["extra_club"] += m
+            elif "CHEQUE" in fp:
+                payments_by_session[sid]["cheque"] += m
+            else:
+                payments_by_session[sid]["otro"] += m
+
     out = []
-    for session_obj, count, register_nombre in result.all():
-        monto_cierre_esperado = float(count.monto_total) - float(count.diferencia or 0)
+    for session_obj, count, register_nombre in rows:
+        pays = payments_by_session.get(session_obj.id, {})
+
+        # Desglose de medios electrónicos certificados por el POS
+        m_tarjeta = float(count.monto_tarjeta or 0) or float(pays.get("tarjeta", 0))
+        m_transf_qr = float(count.monto_transferencia or 0) or float(pays.get("transferencia", 0) + pays.get("qr_pix", 0))
+        m_extra_club = float(pays.get("extra_club", 0))
+        m_cheque = float(count.monto_cheque or 0) or float(pays.get("cheque", 0))
+        m_otro = float(count.monto_otro or 0) or float(pays.get("otro", 0))
+
+        # Efectivo contado en gaveta
+        m_ef_pyg = float(count.monto_efectivo or 0)
+        m_ef_brl = float(count.monto_efectivo_brl or 0)
+        m_ef_usd = float(count.monto_efectivo_usd or 0)
+
+        # Monto total declarado de la sesión: Efectivo físico contado en gaveta (PYG + divisas) + Medios de pago electrónicos certificados por el POS
+        monto_electronico = m_tarjeta + m_transf_qr + m_extra_club + m_cheque + m_otro
+        efectivo_total_contado = float(count.monto_total or 0)
+        monto_declarado_total = efectivo_total_contado + monto_electronico
+
+        diferencia_gs = float(count.diferencia) if count.diferencia is not None else 0.0
+        monto_cierre_esperado = monto_declarado_total - diferencia_gs
+
         out.append({
             "session_id": str(session_obj.id),
             "cajero_nombre": session_obj.cajero_nombre or "—",
@@ -2094,19 +2175,20 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             "fecha_cierre": session_obj.fecha_cierre,
             "monto_apertura": float(session_obj.monto_apertura or 0),
             "monto_cierre_esperado": monto_cierre_esperado,
-            "monto_cierre": float(session_obj.monto_cierre) if session_obj.monto_cierre is not None else float(count.monto_total or 0),
-            "monto_efectivo": float(count.monto_efectivo or 0),
-            "monto_efectivo_usd": float(count.monto_efectivo_usd or 0),
-            "monto_efectivo_brl": float(count.monto_efectivo_brl or 0),
-            "monto_tarjeta": float(count.monto_tarjeta or 0),
-            "monto_transferencia": float(count.monto_transferencia or 0),
-            "monto_cheque": float(count.monto_cheque or 0),
-            "monto_otro": float(count.monto_otro or 0),
-            "monto_total": float(count.monto_total or 0),
-            "diferencia": float(count.diferencia) if count.diferencia is not None else 0.0,
+            "monto_cierre": monto_declarado_total,
+            "monto_efectivo": m_ef_pyg,
+            "monto_efectivo_usd": m_ef_usd,
+            "monto_efectivo_brl": m_ef_brl,
+            "monto_tarjeta": m_tarjeta,
+            "monto_transferencia": m_transf_qr,
+            "monto_extra_club": m_extra_club,
+            "monto_cheque": m_cheque,
+            "monto_otro": m_otro,
+            "monto_total": monto_declarado_total,
+            "diferencia": diferencia_gs,
             "diferencia_usd": float(count.diferencia_usd or 0),
             "diferencia_brl": float(count.diferencia_brl or 0),
-            "requiere_revision": bool(count.requiere_revision),
+            "requiere_revision": bool(count.requiere_revision or diferencia_gs != 0),
             "observaciones": count.observaciones or session_obj.observaciones or "",
         })
     return out

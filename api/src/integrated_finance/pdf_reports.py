@@ -15,7 +15,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import requests
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -34,44 +34,56 @@ _FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", 
 FONT_REGULAR = "Helvetica"
 FONT_BOLD = "Helvetica-Bold"
 try:
-    pdfmetrics.registerFont(TTFont("Lato", os.path.join(_FONTS_DIR, "Lato-Regular.ttf")))
-    pdfmetrics.registerFont(TTFont("Lato-Bold", os.path.join(_FONTS_DIR, "Lato-Bold.ttf")))
-    pdfmetrics.registerFont(TTFont("Lato-Medium", os.path.join(_FONTS_DIR, "Lato-Medium.ttf")))
-    pdfmetrics.registerFont(TTFont("Lato-SemiBold", os.path.join(_FONTS_DIR, "Lato-SemiBold.ttf")))
-    pdfmetrics.registerFontFamily("Lato", normal="Lato", bold="Lato-Bold")
-    FONT_REGULAR = "Lato"
-    FONT_BOLD = "Lato-Bold"
-except Exception:
-    pass  # sin los .ttf disponibles, se sigue viendo bien con Helvetica
+    reg_ttf = os.path.join(_FONTS_DIR, "Lato-Regular.ttf")
+    bold_ttf = os.path.join(_FONTS_DIR, "Lato-Bold.ttf")
+    ita_ttf = os.path.join(_FONTS_DIR, "Lato-Italic.ttf")
+    bita_ttf = os.path.join(_FONTS_DIR, "Lato-BoldItalic.ttf")
+    if os.path.exists(reg_ttf) and os.path.exists(bold_ttf):
+        pdfmetrics.registerFont(TTFont("Lato", reg_ttf))
+        pdfmetrics.registerFont(TTFont("Lato-Bold", bold_ttf))
+        if os.path.exists(ita_ttf):
+            pdfmetrics.registerFont(TTFont("Lato-Italic", ita_ttf))
+        if os.path.exists(bita_ttf):
+            pdfmetrics.registerFont(TTFont("Lato-BoldItalic", bita_ttf))
+        pdfmetrics.registerFontFamily(
+            "Lato",
+            normal="Lato",
+            bold="Lato-Bold",
+            italic="Lato-Italic" if os.path.exists(ita_ttf) else "Lato",
+            boldItalic="Lato-BoldItalic" if os.path.exists(bita_ttf) else "Lato-Bold",
+        )
+        FONT_REGULAR = "Lato"
+        FONT_BOLD = "Lato-Bold"
+except Exception as e:
+    pass  # Cae a Helvetica si no están disponibles
 
 PY_TZ = ZoneInfo("America/Asuncion")
 
-PRIMARY_COLOR = HexColor("#1E40AF")
-GRAY_LIGHT = HexColor("#F3F4F6")
-GRAY_MEDIUM = HexColor("#6B7280")
-GRAY_DARK = HexColor("#1F2937")
+PRIMARY_COLOR = HexColor("#0F172A")    # Slate 900 ejecutivo
+ACCENT_BLUE = HexColor("#1E40AF")      # Royal Blue de acento
+GRAY_LIGHT = HexColor("#F1F5F9")
+GRAY_MEDIUM = HexColor("#64748B")
+GRAY_DARK = HexColor("#0F172A")
 RED = HexColor("#DC2626")
 GREEN = HexColor("#059669")
 WHITE = HexColor("#FFFFFF")
 
 PAGE_W, PAGE_H = A4
-MARGIN = 15 * mm
+MARGIN = 12 * mm
 
 
 def _fmt_gs(v) -> str:
-    # "Gs." en vez del simbolo ₲ -- Helvetica (fuente base de reportlab) no
-    # tiene el glifo del guarani y lo renderiza como un cuadrado vacio.
     n = int(round(float(v or 0)))
     return f"{'-' if n < 0 else ''}Gs. {abs(n):,}".replace(",", ".")
 
 
-def _logo_flowable(company: dict):
+def _logo_flowable(company: dict, max_w=38*mm, max_h=15*mm):
     # 1. Logo local de Extra Supermercado si existe
     local_logo = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "logo_extra.png")
     if os.path.exists(local_logo):
         try:
             img = Image(local_logo)
-            img._restrictSize(38 * mm, 15 * mm)
+            img._restrictSize(max_w, max_h)
             return img
         except Exception:
             pass
@@ -83,10 +95,10 @@ def _logo_flowable(company: dict):
             resp = requests.get(logo_url, timeout=2)
             if resp.ok and resp.content:
                 img = Image(io.BytesIO(resp.content))
-                img._restrictSize(38 * mm, 15 * mm)
+                img._restrictSize(max_w, max_h)
                 return img
         except Exception:
-            pass  # logo del cliente no disponible -- cae al wordmark propio
+            pass
 
     # 3. Wordmark vectorial de respaldo
     d = Drawing(42 * mm, 14 * mm)
@@ -97,8 +109,8 @@ def _logo_flowable(company: dict):
 
 
 class _AuditedCanvas(pdfcanvas.Canvas):
-    """Canvas que numera 'Página X de Y' de verdad (requiere saber el total de
-    páginas antes de dibujar el pie, por eso se buffean y se dibujan en save())."""
+    """Canvas que numera 'Página X de Y' y ajusta automáticamente la línea y pie
+    al ancho real de la página (soporta A4 portrait 210mm y landscape 297mm)."""
 
     def __init__(self, *args, footer_left="", footer_right="", **kwargs):
         pdfcanvas.Canvas.__init__(self, *args, **kwargs)
@@ -119,20 +131,21 @@ class _AuditedCanvas(pdfcanvas.Canvas):
         pdfcanvas.Canvas.save(self)
 
     def _draw_footer(self, total_pages):
-        self.setStrokeColor(HexColor("#E2E8F0"))
+        # Usar el ancho real del canvas actual
+        page_w = getattr(self, "_pagesize", (PAGE_W, PAGE_H))[0]
+        self.setStrokeColor(HexColor("#CBD5E1"))
         self.setLineWidth(0.5)
-        self.line(MARGIN, 13 * mm, PAGE_W - MARGIN, 13 * mm)
+        self.line(MARGIN, 12 * mm, page_w - MARGIN, 12 * mm)
         self.setFont(FONT_REGULAR, 7.5)
         self.setFillColor(GRAY_MEDIUM)
-        # Izquierda: Intelimarket (branding de plataforma)
-        self.drawString(MARGIN, 8.5 * mm, self._footer_left)
+        # Izquierda: Intelimarket
+        self.drawString(MARGIN, 7.5 * mm, self._footer_left)
         # Centro: Libre
         # Derecha: Paginación X de Y
-        self.drawRightString(PAGE_W - MARGIN, 8.5 * mm, f"Página {self._pageNumber} de {total_pages}")
+        self.drawRightString(page_w - MARGIN, 7.5 * mm, f"Página {self._pageNumber} de {total_pages}")
 
 
 def _base_doc(buffer, title: str, company: dict, generated_by: str = "") -> tuple:
-    # Pie de página oficial: izquierda Intelimarket, centro libre, derecha paginación
     footer_left = "Intelimarket — ERP Hecho para crecer"
 
     def _canvasmaker(*args, **kwargs):
@@ -145,12 +158,49 @@ def _base_doc(buffer, title: str, company: dict, generated_by: str = "") -> tupl
     )
     doc._audited_canvasmaker = _canvasmaker
     styles = getSampleStyleSheet()
+    styles["Normal"].fontName = FONT_REGULAR
+    styles["Normal"].fontSize = 7.5
+    styles["Normal"].leading = 10
     styles.add(ParagraphStyle("Header", fontName=FONT_BOLD, fontSize=12, leading=14, textColor=GRAY_DARK, spaceAfter=1))
     styles.add(ParagraphStyle("Sub", fontName=FONT_REGULAR, fontSize=7.5, leading=9.5, textColor=GRAY_MEDIUM))
     styles.add(ParagraphStyle("SectionTitle", fontName=FONT_BOLD, fontSize=10, leading=13, textColor=GRAY_DARK, spaceBefore=8, spaceAfter=4))
     styles.add(ParagraphStyle("Small", fontName=FONT_REGULAR, fontSize=7.5, leading=10, textColor=GRAY_MEDIUM))
     styles.add(ParagraphStyle("MetaRight", fontName=FONT_REGULAR, fontSize=7.5, leading=10, textColor=GRAY_MEDIUM, alignment=TA_RIGHT))
     styles.add(ParagraphStyle("Eyebrow", fontName=FONT_BOLD, fontSize=8, leading=10, textColor=WHITE, alignment=TA_LEFT))
+    return doc, styles
+
+
+def _base_landscape_doc(buffer, title: str, company: dict, generated_by: str = "") -> tuple:
+    """Documento A4 en formato horizontal (Landscape: 297mm x 210mm).
+    Ancho útil con márgenes de 12mm: 273mm."""
+    footer_left = "Intelimarket — ERP Hecho para crecer"
+
+    def _canvasmaker(*args, **kwargs):
+        return _AuditedCanvas(*args, footer_left=footer_left, footer_right="", **kwargs)
+
+    doc = SimpleDocTemplate(
+        buffer, pagesize=landscape(A4),
+        rightMargin=MARGIN, leftMargin=MARGIN, topMargin=10 * mm, bottomMargin=16 * mm,
+        title=title,
+    )
+    doc._audited_canvasmaker = _canvasmaker
+    styles = getSampleStyleSheet()
+    styles["Normal"].fontName = FONT_REGULAR
+    styles["Normal"].fontSize = 7.5
+    styles["Normal"].leading = 10
+    styles.add(ParagraphStyle("Header", fontName=FONT_BOLD, fontSize=13, leading=15, textColor=GRAY_DARK, spaceAfter=1))
+    styles.add(ParagraphStyle("Sub", fontName=FONT_REGULAR, fontSize=7.5, leading=9.5, textColor=GRAY_MEDIUM))
+    styles.add(ParagraphStyle("SectionTitle", fontName=FONT_BOLD, fontSize=10, leading=13, textColor=GRAY_DARK, spaceBefore=8, spaceAfter=4))
+    styles.add(ParagraphStyle("Small", fontName=FONT_REGULAR, fontSize=7.5, leading=10, textColor=GRAY_MEDIUM))
+    styles.add(ParagraphStyle("MetaRight", fontName=FONT_REGULAR, fontSize=7.5, leading=10, textColor=GRAY_MEDIUM, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle("Eyebrow", fontName=FONT_BOLD, fontSize=8.5, leading=11, textColor=WHITE, alignment=TA_LEFT))
+    # Estilos tipográficos para celdas matriciales
+    styles.add(ParagraphStyle("CellText", fontName=FONT_REGULAR, fontSize=6.8, leading=8.5, textColor=GRAY_DARK))
+    styles.add(ParagraphStyle("CellTextBold", fontName=FONT_BOLD, fontSize=6.8, leading=8.5, textColor=GRAY_DARK))
+    styles.add(ParagraphStyle("CellNum", fontName=FONT_REGULAR, fontSize=6.8, leading=8.5, textColor=GRAY_DARK, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle("CellNumBold", fontName=FONT_BOLD, fontSize=6.8, leading=8.5, textColor=GRAY_DARK, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle("CellHead", fontName=FONT_BOLD, fontSize=6.8, leading=8.5, textColor=WHITE))
+    styles.add(ParagraphStyle("CellHeadRight", fontName=FONT_BOLD, fontSize=6.8, leading=8.5, textColor=WHITE, alignment=TA_RIGHT))
     return doc, styles
 
 
@@ -212,6 +262,71 @@ def _company_header(company: dict, styles, report_title: str, subtitle: str, gen
         Spacer(1, 6),
         HRFlowable(width="100%", thickness=0.75, color=GRAY_LIGHT),
         Spacer(1, 6),
+    ]
+
+
+def _company_landscape_header(company: dict, styles, report_title: str, subtitle: str, generated_by: str = "") -> list:
+    """Encabezado corporativo premium para reportes horizontales (A4 Landscape, ancho útil 273mm)."""
+    now = datetime.now(PY_TZ)
+    fantasia = company.get("nombre_fantasia") or "EXTRA SUPERMERCADO MAYORISTA"
+    razon = company.get("razon_social") or "GRUPO SANTA TERESA E.A.S."
+    ruc = company.get("ruc") or "80150377-9"
+    direccion = company.get("direccion") or "Alejo Garcia esq. Carlos Antonio López"
+    ciudad = company.get("ciudad") or "Pedro Juan Caballero"
+
+    meta_table = Table(
+        [
+            [Paragraph(f"<b>Fecha Emisión:</b> {now.strftime('%d/%m/%Y %H:%M')}", styles["MetaRight"])],
+            [Paragraph(f"<b>Auditor/a:</b> {generated_by or 'Sistema'}", styles["MetaRight"])],
+            [Paragraph("<b>Zona Horaria:</b> America/Asuncion (PYT)", styles["MetaRight"])],
+        ],
+        colWidths=[85 * mm],
+    )
+    meta_table.setStyle(TableStyle([
+        ("TOPPADDING", (0, 0), (-1, -1), 1),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
+    header_table = Table(
+        [[
+            _logo_flowable(company, max_w=42*mm, max_h=16*mm),
+            [
+                Paragraph(fantasia.upper(), styles["Header"]),
+                Paragraph(f"<b>{razon}</b> · RUC: {ruc}", styles["Sub"]),
+                Paragraph(f"{direccion} · {ciudad}, Paraguay", styles["Sub"]),
+            ],
+            meta_table,
+        ]],
+        colWidths=[42 * mm, 146 * mm, 85 * mm],
+    )
+    header_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
+    # Accent bar horizontal de 273mm
+    bar_p = Paragraph(
+        f"<b>{(subtitle or report_title).upper()}</b>",
+        ParagraphStyle("EyebrowLandscape", fontName=FONT_BOLD, fontSize=8.5, leading=11, textColor=WHITE)
+    )
+    accent_t = Table([[bar_p]], colWidths=[273 * mm])
+    accent_t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#0F172A")),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+    ]))
+
+    return [
+        header_table,
+        Spacer(1, 5),
+        accent_t,
+        Spacer(1, 5),
     ]
 
 

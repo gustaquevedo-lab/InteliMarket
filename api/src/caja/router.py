@@ -1,6 +1,7 @@
 """Caja (Cash Register) API router"""
 
 from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -21,13 +22,33 @@ from api.src.caja.schemas import (
 from api.src.caja import service
 from api.src.caja import pdf_reports
 
+PY_TZ = ZoneInfo("America/Asuncion")
+
 router = APIRouter(prefix="/api/v1", tags=["caja"], dependencies=[Depends(require_auth)])
 
 
 async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
-    r = await db.execute(text("SELECT razon_social, ruc, logo_url FROM companies WHERE id = :cid"), {"cid": company_id})
+    r = await db.execute(
+        text("SELECT razon_social, nombre_fantasia, ruc, direccion, ciudad, logo_url FROM companies WHERE id = :cid"),
+        {"cid": company_id}
+    )
     row = r.first()
-    return {"razon_social": row.razon_social, "ruc": row.ruc, "logo_url": row.logo_url} if row else {"razon_social": "Empresa", "ruc": "N/A"}
+    if row:
+        return {
+            "razon_social": row.razon_social or "GRUPO SANTA TERESA E.A.S.",
+            "nombre_fantasia": row.nombre_fantasia or "EXTRA SUPERMERCADO MAYORISTA",
+            "ruc": row.ruc or "80150377-9",
+            "direccion": row.direccion or "Alejo Garcia esq. Carlos Antonio López",
+            "ciudad": row.ciudad or "Pedro Juan Caballero",
+            "logo_url": row.logo_url,
+        }
+    return {
+        "razon_social": "GRUPO SANTA TERESA E.A.S.",
+        "nombre_fantasia": "EXTRA SUPERMERCADO MAYORISTA",
+        "ruc": "80150377-9",
+        "direccion": "Alejo Garcia esq. Carlos Antonio López",
+        "ciudad": "Pedro Juan Caballero",
+    }
 
 
 def _pdf_response(pdf_bytes: bytes, filename: str) -> StreamingResponse:
@@ -341,13 +362,14 @@ async def export_arqueo_pdf(
     db: AsyncSession = Depends(get_db), user=Depends(require_auth),
 ):
     company_id = user["company_id"]
-    desde_dt = datetime.combine(fecha_desde, time.min, tzinfo=timezone.utc)
-    hasta_dt = datetime.combine(fecha_hasta, time.max, tzinfo=timezone.utc)
+    # Regla inmutable: Filtrar estrictamente sobre el día completo en zona horaria America/Asuncion
+    desde_dt = datetime.combine(fecha_desde, time.min).replace(tzinfo=PY_TZ)
+    hasta_dt = datetime.combine(fecha_hasta, time.max).replace(tzinfo=PY_TZ)
     sesiones = await service.get_arqueo_diario(db, company_id, desde_dt, hasta_dt)
     company = await _get_company_info(db, company_id)
     generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
     pdf_bytes = pdf_reports.generate_arqueo_diario_pdf(company, sesiones, fecha_desde, fecha_hasta, generated_by)
-    return _pdf_response(pdf_bytes, "arqueo_de_caja.pdf")
+    return _pdf_response(pdf_bytes, f"acta_arqueo_consolidado_{fecha_desde}_{fecha_hasta}.pdf")
 
 
 @router.get("/vault/export/movimientos.pdf")
@@ -356,13 +378,13 @@ async def export_vault_movimientos_pdf(
     db: AsyncSession = Depends(get_db), user=Depends(require_auth),
 ):
     company_id = user["company_id"]
-    desde_dt = datetime.combine(fecha_desde, time.min, tzinfo=timezone.utc)
-    hasta_dt = datetime.combine(fecha_hasta, time.max, tzinfo=timezone.utc)
+    desde_dt = datetime.combine(fecha_desde, time.min).replace(tzinfo=PY_TZ)
+    hasta_dt = datetime.combine(fecha_hasta, time.max).replace(tzinfo=PY_TZ)
     entries = await service.get_vault_movimientos(db, company_id, desde_dt, hasta_dt)
     company = await _get_company_info(db, company_id)
     generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
     pdf_bytes = pdf_reports.generate_boveda_movimientos_pdf(company, entries, fecha_desde, fecha_hasta, generated_by)
-    return _pdf_response(pdf_bytes, "movimientos_de_boveda.pdf")
+    return _pdf_response(pdf_bytes, f"movimientos_de_boveda_{fecha_desde}_{fecha_hasta}.pdf")
 
 
 @router.post("/vault/deposit")

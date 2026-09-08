@@ -26,6 +26,9 @@ build/
 .DS_Store
 Thumbs.db
 
+# Scratch
+scratch/
+
 # Environment files
 .env
 .env.local

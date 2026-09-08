@@ -20,25 +20,25 @@ from reportlab.lib.colors import HexColor
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle, KeepTogether
 
 from api.src.integrated_finance.pdf_reports import (
-    _base_doc, _company_header, _fmt_gs, _build, _totals_table,
+    _base_doc, _base_landscape_doc, _company_header, _company_landscape_header,
+    _fmt_gs, _build, _totals_table,
     RED, GRAY_LIGHT, PRIMARY_COLOR, WHITE, FONT_BOLD,
     GRAY_DARK, GRAY_MEDIUM,
 )
 
 
 def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde: date, fecha_hasta: date, generated_by: str = "") -> bytes:
-    """Acta de Arqueo y Conciliación Consolidada de Cajas en formato vertical A4.
-    Detalla por cajera/cajero, todas las formas de pago (PYG, BRL, USD, Tarjetas,
-    Transferencias, Cheques, Otros) y las diferencias con dictamen de auditoría."""
+    """Acta de Arqueo y Conciliación Consolidada de Cajas en formato HORIZONTAL (A4 Landscape, ancho útil 273mm).
+    Detalla por terminal y cajero todas las formas de pago (Efectivo PYG, BRL, USD, Tarjetas,
+    Transferencias/QR/PIX, Extra Club, Cheques/Otros), montos declarados, esperados, diferencias
+    y firmas de supervisión, tesorería y gerencia (sin firmas individuales de cajera)."""
     buffer = io.BytesIO()
-    doc, styles = _base_doc(buffer, "Acta de Arqueo Consolidado de Cajas", company, generated_by)
+    doc, styles = _base_landscape_doc(buffer, "Acta de Arqueo Consolidado de Cajas", company, generated_by)
     
-    # Ancho útil A4 vertical con márgenes de 12mm: 210mm - 24mm = 186mm
-    USABLE_W = 186 * mm
-
-    subtitulo = f"Período auditado: Del {fecha_desde.strftime('%d/%m/%Y')} al {fecha_hasta.strftime('%d/%m/%Y')}"
-    elements = _company_header(
-        company, styles, "ACTA DE ARQUEO CONSOLIDADO DE CAJAS",
+    USABLE_W = 273 * mm
+    subtitulo = f"Período Auditado: Del {fecha_desde.strftime('%d/%m/%Y')} al {fecha_hasta.strftime('%d/%m/%Y')}"
+    elements = _company_landscape_header(
+        company, styles, "ACTA DE ARQUEO Y CONCILIACIÓN CONSOLIDADA DE CAJAS",
         subtitulo,
         generated_by,
     )
@@ -54,268 +54,283 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
     total_diferencia = sum(s.get("diferencia") or 0 for s in sessiones)
     con_revision = sum(1 for s in sessiones if s.get("requiere_revision") or (s.get("diferencia") or 0) != 0)
 
-    # Acumulados por forma de pago
+    # Acumulados por moneda y medio de pago
+    sum_fondo = sum(s.get("monto_apertura") or 0 for s in sessiones)
     sum_efectivo_pyg = sum(s.get("monto_efectivo") or 0 for s in sessiones)
     sum_efectivo_brl = sum(s.get("monto_efectivo_brl") or 0 for s in sessiones)
     sum_efectivo_usd = sum(s.get("monto_efectivo_usd") or 0 for s in sessiones)
     sum_tarjeta = sum(s.get("monto_tarjeta") or 0 for s in sessiones)
     sum_transferencia = sum(s.get("monto_transferencia") or 0 for s in sessiones)
+    sum_extra_club = sum(s.get("monto_extra_club") or 0 for s in sessiones)
     sum_cheque = sum(s.get("monto_cheque") or 0 for s in sessiones)
     sum_otro = sum(s.get("monto_otro") or 0 for s in sessiones)
+    sum_electronico_total = sum_tarjeta + sum_transferencia + sum_extra_club + sum_cheque + sum_otro
 
     # ─────────────────────────────────────────────────────────────────────────
-    # 1. KPI CARDS RESUMEN (4 tarjetas horizontales = 186 mm / 4 = 46.5 mm c/u)
+    # 1. KPI CARDS PANORÁMICAS (5 tarjetas en 273mm = 54.6mm c/u)
     # ─────────────────────────────────────────────────────────────────────────
     dif_color = "#059669" if total_diferencia == 0 else ("#DC2626" if total_diferencia < 0 else "#D97706")
     dif_signo = "+" if total_diferencia > 0 else ""
     card_dif_text = f"{dif_signo}{_fmt_gs(total_diferencia)}"
+    dictamen_global = "CONFORME (SIN DIFERENCIA)" if total_diferencia == 0 else ("FALTANTE CONSOLIDADO" if total_diferencia < 0 else "SOBRANTE CONSOLIDADO")
 
     kpi_data = [
         [
-            Paragraph("<font size=6.5 color='#64748B'><b>TOTAL DECLARADO</b></font><br/>"
-                      f"<font size=10 color='#0F172A'><b>{_fmt_gs(total_contado)}</b></font><br/>"
-                      "<font size=6 color='#94A3B8'>Efectivo + Medios elect.</font>", styles["Normal"]),
-            Paragraph("<font size=6.5 color='#64748B'><b>TOTAL ESPERADO</b></font><br/>"
-                      f"<font size=10 color='#0F172A'><b>{_fmt_gs(total_esperado)}</b></font><br/>"
-                      "<font size=6 color='#94A3B8'>Ventas sistema + Fondo</font>", styles["Normal"]),
-            Paragraph("<font size=6.5 color='#64748B'><b>DIFERENCIA NETA</b></font><br/>"
-                      f"<font size=10 color='{dif_color}'><b>{card_dif_text}</b></font><br/>"
-                      f"<font size=6 color='{dif_color}'><b>{'CONFORME' if total_diferencia == 0 else ('FALTANTE' if total_diferencia < 0 else 'SOBRANTE')}</b></font>", styles["Normal"]),
-            Paragraph("<font size=6.5 color='#64748B'><b>SESIONES AUDITADAS</b></font><br/>"
-                      f"<font size=10 color='#0F172A'><b>{len(sessiones)} Turnos</b></font><br/>"
-                      f"<font size=6 color='{'#DC2626' if con_revision > 0 else '#059669'}'><b>{con_revision} con descuadre</b></font>", styles["Normal"]),
+            Paragraph("<font size=6.5 color='#64748B'><b>TOTAL DECLARADO (RENDIDO)</b></font><br/>"
+                      f"<font size=11 color='#0F172A'><b>{_fmt_gs(total_contado)}</b></font><br/>"
+                      "<font size=6 color='#94A3B8'>Efectivo físico + Medios electr.</font>", styles["Normal"]),
+            Paragraph("<font size=6.5 color='#64748B'><b>TOTAL ESPERADO SISTEMA</b></font><br/>"
+                      f"<font size=11 color='#0F172A'><b>{_fmt_gs(total_esperado)}</b></font><br/>"
+                      "<font size=6 color='#94A3B8'>Ventas registradas + Fondo fijo</font>", styles["Normal"]),
+            Paragraph("<font size=6.5 color='#64748B'><b>DIFERENCIA NETA CONSOLIDADA</b></font><br/>"
+                      f"<font size=11 color='{dif_color}'><b>{card_dif_text}</b></font><br/>"
+                      f"<font size=6 color='{dif_color}'><b>{dictamen_global}</b></font>", styles["Normal"]),
+            Paragraph("<font size=6.5 color='#64748B'><b>VENTAS NO EFECTIVO (POS/QR)</b></font><br/>"
+                      f"<font size=11 color='#1E40AF'><b>{_fmt_gs(sum_electronico_total)}</b></font><br/>"
+                      "<font size=6 color='#94A3B8'>Tarjetas + QR + PIX + Extra Club</font>", styles["Normal"]),
+            Paragraph("<font size=6.5 color='#64748B'><b>AUDITORÍA DE TERMINALES</b></font><br/>"
+                      f"<font size=11 color='#0F172A'><b>{len(sessiones)} Turnos</b></font><br/>"
+                      f"<font size=6 color='{'#DC2626' if con_revision > 0 else '#059669'}'><b>{con_revision} con descuadre / {len(sessiones) - con_revision} conformes</b></font>", styles["Normal"]),
         ]
     ]
-    t_kpis = Table(kpi_data, colWidths=[46.5 * mm, 46.5 * mm, 46.5 * mm, 46.5 * mm])
+    t_kpis = Table(kpi_data, colWidths=[54.6 * mm, 54.6 * mm, 54.6 * mm, 54.6 * mm, 54.6 * mm])
     t_kpis.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F8FAFC")),
-        ("BOX", (0, 0), (0, 0), 0.5, HexColor("#E2E8F0")),
-        ("BOX", (1, 0), (1, 0), 0.5, HexColor("#E2E8F0")),
-        ("BOX", (2, 0), (2, 0), 0.5, HexColor("#E2E8F0")),
-        ("BOX", (3, 0), (3, 0), 0.5, HexColor("#E2E8F0")),
-        ("PADDING", (0, 0), (-1, -1), 5),
+        ("BOX", (0, 0), (0, 0), 0.5, HexColor("#CBD5E1")),
+        ("BOX", (1, 0), (1, 0), 0.5, HexColor("#CBD5E1")),
+        ("BOX", (2, 0), (2, 0), 0.5, HexColor("#CBD5E1")),
+        ("BOX", (3, 0), (3, 0), 0.5, HexColor("#CBD5E1")),
+        ("BOX", (4, 0), (4, 0), 0.5, HexColor("#CBD5E1")),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]))
     elements.append(t_kpis)
-    elements.append(Spacer(1, 6))
+    elements.append(Spacer(1, 4))
 
     # ─────────────────────────────────────────────────────────────────────────
-    # 2. CONSOLIDADO GENERAL POR MEDIOS DE PAGO Y MONEDAS
+    # 2. PANEL RESUMEN DE RECAUDACIÓN POR MEDIO DE COBRO CONSOLIDADO
     # ─────────────────────────────────────────────────────────────────────────
-    resumen_mp_data = [
+    res_medios_data = [
         [
-            Paragraph("<font size=7.5><b>Efectivo Guaraníes (PYG):</b></font>", styles["Normal"]),
-            Paragraph(f"<font size=7.5><b>{_fmt_gs(sum_efectivo_pyg)}</b></font>", styles["Normal"]),
-            Paragraph("<font size=7.5><b>Tarjetas (Débito/Crédito):</b></font>", styles["Normal"]),
-            Paragraph(f"<font size=7.5><b>{_fmt_gs(sum_tarjeta)}</b></font>", styles["Normal"]),
-        ],
-        [
-            Paragraph("<font size=7.5><b>Efectivo Reales (R$):</b></font>", styles["Normal"]),
-            Paragraph(f"<font size=7.5><b>R$ {sum_efectivo_brl:,.2f}</b></font>", styles["Normal"]),
-            Paragraph("<font size=7.5><b>Transferencias / QR / PIX:</b></font>", styles["Normal"]),
-            Paragraph(f"<font size=7.5><b>{_fmt_gs(sum_transferencia)}</b></font>", styles["Normal"]),
-        ],
-        [
-            Paragraph("<font size=7.5><b>Efectivo Dólares (US$):</b></font>", styles["Normal"]),
-            Paragraph(f"<font size=7.5><b>US$ {sum_efectivo_usd:,.2f}</b></font>", styles["Normal"]),
-            Paragraph("<font size=7.5><b>Cheques / Vales / Otros:</b></font>", styles["Normal"]),
-            Paragraph(f"<font size=7.5><b>{_fmt_gs(sum_cheque + sum_otro)}</b></font>", styles["Normal"]),
-        ],
+            Paragraph("<font size=6 color='#64748B'>Efectivo PYG:</font> "
+                      f"<font size=6.8 color='#0F172A'><b>{_fmt_gs(sum_efectivo_pyg)}</b></font>", styles["Normal"]),
+            Paragraph("<font size=6 color='#64748B'>Efectivo BRL:</font> "
+                      f"<font size=6.8 color='#0F172A'><b>{f'R$ {sum_efectivo_brl:,.2f}' if sum_efectivo_brl > 0 else '—'}</b></font>", styles["Normal"]),
+            Paragraph("<font size=6 color='#64748B'>Efectivo USD:</font> "
+                      f"<font size=6.8 color='#0F172A'><b>{f'US$ {sum_efectivo_usd:,.2f}' if sum_efectivo_usd > 0 else '—'}</b></font>", styles["Normal"]),
+            Paragraph("<font size=6 color='#64748B'>Tarjetas POS:</font> "
+                      f"<font size=6.8 color='#1E40AF'><b>{_fmt_gs(sum_tarjeta)}</b></font>", styles["Normal"]),
+            Paragraph("<font size=6 color='#64748B'>Transf / QR / PIX:</font> "
+                      f"<font size=6.8 color='#1E40AF'><b>{_fmt_gs(sum_transferencia)}</b></font>", styles["Normal"]),
+            Paragraph("<font size=6 color='#64748B'>Extra Club:</font> "
+                      f"<font size=6.8 color='#1E40AF'><b>{_fmt_gs(sum_extra_club)}</b></font>", styles["Normal"]),
+        ]
     ]
-    t_resumen_mp = Table(resumen_mp_data, colWidths=[46 * mm, 47 * mm, 46 * mm, 47 * mm])
-    t_resumen_mp.setStyle(TableStyle([
+    t_res_medios = Table(res_medios_data, colWidths=[45.5 * mm, 45.5 * mm, 45.5 * mm, 45.5 * mm, 45.5 * mm, 45.5 * mm])
+    t_res_medios.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F1F5F9")),
-        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
         ("INNERGRID", (0, 0), (-1, -1), 0.25, HexColor("#E2E8F0")),
-        ("PADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-        ("ALIGN", (3, 0), (3, -1), "RIGHT"),
     ]))
-    elements.append(t_resumen_mp)
-    elements.append(Spacer(1, 8))
+    elements.append(t_res_medios)
+    elements.append(Spacer(1, 5))
 
     # ─────────────────────────────────────────────────────────────────────────
-    # 3. DETALLE INDIVIDUAL POR CAJERA Y TERMINAL (GRILLA VERTICAL A4)
+    # 3. GRILLA MATRICIAL PANORÁMICA COMPLETA (14 COLUMNAS = 273mm)
     # ─────────────────────────────────────────────────────────────────────────
-    elements.append(Paragraph("<font size=8.5 color='#1E293B'><b>DETALLE CONSOLIDADO POR CAJERA/O Y TERMINAL</b></font>", styles["Normal"]))
-    elements.append(Spacer(1, 3))
+    head_left = styles.get("CellHead", styles["Normal"])
+    head_right = styles.get("CellHeadRight", styles["MetaRight"])
+    cell_text = styles.get("CellText", styles["Normal"])
+    cell_bold = styles.get("CellTextBold", styles["Normal"])
+    cell_num = styles.get("CellNum", styles["MetaRight"])
+    cell_num_bold = styles.get("CellNumBold", styles["MetaRight"])
 
-    # Columnas principales: 50 + 26 + 20 + 30 + 30 + 30 = 186 mm
     header_row = [
-        Paragraph("<font size=7.5 color='#FFFFFF'><b>Cajero/a</b></font>", styles["Normal"]),
-        Paragraph("<font size=7.5 color='#FFFFFF'><b>Caja / Terminal</b></font>", styles["Normal"]),
-        Paragraph("<font size=7.5 color='#FFFFFF'><b>Cierre</b></font>", styles["Normal"]),
-        Paragraph("<font size=7.5 color='#FFFFFF'><b>Esperado</b></font>", styles["MetaRight"]),
-        Paragraph("<font size=7.5 color='#FFFFFF'><b>Declarado</b></font>", styles["MetaRight"]),
-        Paragraph("<font size=7.5 color='#FFFFFF'><b>Diferencia</b></font>", styles["MetaRight"]),
+        Paragraph("<b>Terminal</b>", head_left),
+        Paragraph("<b>Cajero/a Responsable</b>", head_left),
+        Paragraph("<b>Cierre</b>", head_left),
+        Paragraph("<b>Fondo Fijo</b>", head_right),
+        Paragraph("<b>Efec. PYG</b>", head_right),
+        Paragraph("<b>Reales (R$)</b>", head_right),
+        Paragraph("<b>Dólares ($)</b>", head_right),
+        Paragraph("<b>Tarjetas POS</b>", head_right),
+        Paragraph("<b>Transf / QR</b>", head_right),
+        Paragraph("<b>Extra Club</b>", head_right),
+        Paragraph("<b>Total Rendido</b>", head_right),
+        Paragraph("<b>Esperado</b>", head_right),
+        Paragraph("<b>Diferencia</b>", head_right),
+        Paragraph("<b>Dictamen</b>", head_left),
     ]
     table_rows = [header_row]
 
-    style_cmds = [
-        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 3.5),
-        ("TOPPADDING", (0, 0), (-1, 0), 3.5),
-        ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
+    # Anchos milimétricos calibrados: 20+34+18+19+22+18+16+21+21+20+23+22+20+19 = 273mm
+    col_widths = [
+        20 * mm, 34 * mm, 18 * mm, 19 * mm, 22 * mm, 18 * mm, 16 * mm,
+        21 * mm, 21 * mm, 20 * mm, 23 * mm, 22 * mm, 20 * mm, 19 * mm,
     ]
 
-    row_idx = 1
-    for s in sessiones:
+    style_cmds = [
+        ("BACKGROUND", (0, 0), (-1, 0), HexColor("#0F172A")),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 3.5),
+        ("TOPPADDING", (0, 0), (-1, 0), 3.5),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+    ]
+
+    for idx, s in enumerate(sessiones, start=1):
         fc_loc = _to_asuncion_tz(s.get("fecha_cierre"))
         fc_str = fc_loc.strftime("%d/%m %H:%M") if fc_loc else "—"
-        
-        ap_loc = _to_asuncion_tz(s.get("fecha_apertura"))
-        ap_str = ap_loc.strftime("%H:%M") if ap_loc else ""
+
+        fondo = s.get("monto_apertura") or 0
+        m_ef_pyg = s.get("monto_efectivo") or 0
+        m_ef_brl = s.get("monto_efectivo_brl") or 0
+        m_ef_usd = s.get("monto_efectivo_usd") or 0
+        m_tarj = s.get("monto_tarjeta") or 0
+        m_transf = s.get("monto_transferencia") or 0
+        m_extra_club = s.get("monto_extra_club") or 0
 
         esp = s.get("monto_cierre_esperado") or 0
         cont = (s.get("monto_total") if s.get("monto_total") is not None else s.get("monto_cierre")) or 0
         dif = s.get("diferencia") if s.get("diferencia") is not None else (cont - esp)
         req_rev = bool(s.get("requiere_revision") or dif != 0)
 
-        dif_txt = _fmt_gs(dif) if dif is not None else "s/d"
+        dif_txt = _fmt_gs(dif) if dif is not None else "0"
         if dif and dif > 0:
             dif_txt = f"+{dif_txt}"
 
-        estado_badge = "REVISIÓN" if req_rev else "EXACTO"
+        estado_badge = "REVISIÓN" if req_rev else "CONFORME"
         badge_color = "#DC2626" if req_rev else "#059669"
 
-        ap_badge = f" <font size=6 color='#64748B'>(Ap: {ap_str})</font>" if ap_str else ""
-        cajero_cell = Paragraph(
-            f"<b>{s.get('cajero_nombre') or '—'}</b>{ap_badge}",
-            styles["Small"],
-        )
-        caja_cell = Paragraph(f"<font size=7.5>{s.get('register_nombre') or 'Caja'}</font>", styles["Normal"])
-        cierre_cell = Paragraph(f"<font size=7.5>{fc_str}</font>", styles["Normal"])
-        esp_cell = Paragraph(f"<font size=7.5>{_fmt_gs(esp)}</font>", styles["MetaRight"])
-        cont_cell = Paragraph(f"<font size=7.5><b>{_fmt_gs(cont)}</b></font>", styles["MetaRight"])
-        dif_cell = Paragraph(
-            f"<font size=7.5 color='{badge_color}'><b>{dif_txt}</b></font> "
-            f"<font size=6 color='{badge_color}'>[{estado_badge}]</font>",
-            styles["MetaRight"],
-        )
+        caja_cell = Paragraph(f"<b>{s.get('register_nombre') or 'Caja'}</b>", cell_bold)
+        cajero_cell = Paragraph(f"{s.get('cajero_nombre') or '—'}", cell_text)
+        cierre_cell = Paragraph(f"<font color='#64748B'>{fc_str}</font>", cell_text)
+        fondo_cell = Paragraph(_fmt_gs(fondo), cell_num)
+        ef_pyg_cell = Paragraph(_fmt_gs(m_ef_pyg), cell_num)
+        ef_brl_cell = Paragraph(f"R$ {m_ef_brl:,.2f}" if m_ef_brl > 0 else "—", cell_num)
+        ef_usd_cell = Paragraph(f"US$ {m_ef_usd:,.2f}" if m_ef_usd > 0 else "—", cell_num)
+        tarj_cell = Paragraph(_fmt_gs(m_tarj) if m_tarj > 0 else "—", cell_num)
+        transf_cell = Paragraph(_fmt_gs(m_transf) if m_transf > 0 else "—", cell_num)
+        club_cell = Paragraph(_fmt_gs(m_extra_club) if m_extra_club > 0 else "—", cell_num)
+        cont_cell = Paragraph(f"<b>{_fmt_gs(cont)}</b>", cell_num_bold)
+        esp_cell = Paragraph(_fmt_gs(esp), cell_num)
+        dif_cell = Paragraph(f"<font color='{badge_color}'><b>{dif_txt}</b></font>", cell_num)
+        dict_cell = Paragraph(f"<font color='{badge_color}'><b>{estado_badge}</b></font>", cell_text)
 
-        table_rows.append([cajero_cell, caja_cell, cierre_cell, esp_cell, cont_cell, dif_cell])
-
-        # Fila B: Desglose exhaustivo de formas de pago declaradas
-        m_ef_pyg = s.get("monto_efectivo") or 0
-        m_ef_brl = s.get("monto_efectivo_brl") or 0
-        m_ef_usd = s.get("monto_efectivo_usd") or 0
-        m_tarj = s.get("monto_tarjeta") or 0
-        m_transf = s.get("monto_transferencia") or 0
-        m_cheq = s.get("monto_cheque") or 0
-        m_otro = s.get("monto_otro") or 0
-        obs = (s.get("observaciones") or "").strip()
-
-        breakdown_text = (
-            f"<b>Desglose Medios:</b> "
-            f"Efec. Gs: <b>{_fmt_gs(m_ef_pyg)}</b> · "
-            f"Reales: <b>R$ {m_ef_brl:,.2f}</b> · "
-            f"Dólares: <b>US$ {m_ef_usd:,.2f}</b> · "
-            f"Tarjetas: <b>{_fmt_gs(m_tarj)}</b> · "
-            f"Transf/QR: <b>{_fmt_gs(m_transf)}</b>"
-        )
-        if m_cheq > 0:
-            breakdown_text += f" · Cheques: <b>{_fmt_gs(m_cheq)}</b>"
-        if m_otro > 0:
-            breakdown_text += f" · Otros: <b>{_fmt_gs(m_otro)}</b>"
-        if obs:
-            breakdown_text += f"<br/><font color='#475569'><i>Obs: {obs}</i></font>"
-
-        breakdown_cell = Paragraph(f"<font size=6.5 color='#334155'>{breakdown_text}</font>", styles["Normal"])
-        table_rows.append([breakdown_cell, "", "", "", "", ""])
-
-        # Estilos para este par de filas
-        bg_main = WHITE if (row_idx // 2) % 2 == 0 else HexColor("#F8FAFC")
-        bg_sub = HexColor("#F1F5F9") if (row_idx // 2) % 2 == 0 else HexColor("#E2E8F0")
-
-        # Fila A styles
-        style_cmds.extend([
-            ("BACKGROUND", (0, row_idx), (-1, row_idx), bg_main),
-            ("TOPPADDING", (0, row_idx), (-1, row_idx), 2.5),
-            ("BOTTOMPADDING", (0, row_idx), (-1, row_idx), 1),
-            ("VALIGN", (0, row_idx), (-1, row_idx), "MIDDLE"),
-        ])
-        # Fila B styles (colspan total de 0 a 5)
-        style_cmds.extend([
-            ("SPAN", (0, row_idx + 1), (5, row_idx + 1)),
-            ("BACKGROUND", (0, row_idx + 1), (-1, row_idx + 1), bg_sub),
-            ("TOPPADDING", (0, row_idx + 1), (-1, row_idx + 1), 1),
-            ("BOTTOMPADDING", (0, row_idx + 1), (-1, row_idx + 1), 2.5),
-            ("LINEBELOW", (0, row_idx + 1), (-1, row_idx + 1), 0.5, HexColor("#CBD5E1")),
+        table_rows.append([
+            caja_cell, cajero_cell, cierre_cell, fondo_cell,
+            ef_pyg_cell, ef_brl_cell, ef_usd_cell,
+            tarj_cell, transf_cell, club_cell,
+            cont_cell, esp_cell, dif_cell, dict_cell,
         ])
 
-        row_idx += 2
+        bg_color = WHITE if idx % 2 != 0 else HexColor("#F8FAFC")
+        style_cmds.extend([
+            ("BACKGROUND", (0, idx), (-1, idx), bg_color),
+            ("TOPPADDING", (0, idx), (-1, idx), 2.2),
+            ("BOTTOMPADDING", (0, idx), (-1, idx), 2.2),
+            ("LINEBELOW", (0, idx), (-1, idx), 0.25, HexColor("#E2E8F0")),
+        ])
 
-    # Fila de Totales Finales
+    # Fila de Totales Generales Finales
     tot_dif_txt = _fmt_gs(total_diferencia)
     if total_diferencia > 0:
         tot_dif_txt = f"+{tot_dif_txt}"
 
-    totales_label = Paragraph("<font size=7.5 color='#FFFFFF'><b>TOTALES GENERALES CONSOLIDADOS</b></font>", styles["Normal"])
-    tot_esp_cell = Paragraph(f"<font size=7.5 color='#FFFFFF'><b>{_fmt_gs(total_esperado)}</b></font>", styles["MetaRight"])
-    tot_cont_cell = Paragraph(f"<font size=7.5 color='#FFFFFF'><b>{_fmt_gs(total_contado)}</b></font>", styles["MetaRight"])
-    tot_dif_cell = Paragraph(f"<font size=7.5 color='#FFFFFF'><b>{tot_dif_txt}</b></font>", styles["MetaRight"])
+    tot_label = Paragraph("<b>TOTALES GENERALES CONSOLIDADOS</b>", head_left)
+    tot_fondo = Paragraph(f"<b>{_fmt_gs(sum_fondo)}</b>", head_right)
+    tot_ef_pyg = Paragraph(f"<b>{_fmt_gs(sum_efectivo_pyg)}</b>", head_right)
+    tot_ef_brl = Paragraph(f"<b>{f'R$ {sum_efectivo_brl:,.2f}' if sum_efectivo_brl > 0 else '—'}</b>", head_right)
+    tot_ef_usd = Paragraph(f"<b>{f'US$ {sum_efectivo_usd:,.2f}' if sum_efectivo_usd > 0 else '—'}</b>", head_right)
+    tot_tarj = Paragraph(f"<b>{_fmt_gs(sum_tarjeta)}</b>", head_right)
+    tot_transf = Paragraph(f"<b>{_fmt_gs(sum_transferencia)}</b>", head_right)
+    tot_club = Paragraph(f"<b>{_fmt_gs(sum_extra_club)}</b>", head_right)
+    tot_cont = Paragraph(f"<b>{_fmt_gs(total_contado)}</b>", head_right)
+    tot_esp = Paragraph(f"<b>{_fmt_gs(total_esperado)}</b>", head_right)
+    tot_dif = Paragraph(f"<b>{tot_dif_txt}</b>", head_right)
+    tot_dict = Paragraph("<b>TOTAL</b>", head_left)
 
-    table_rows.append([totales_label, "", "", tot_esp_cell, tot_cont_cell, tot_dif_cell])
-    style_cmds.extend([
-        ("SPAN", (0, row_idx), (2, row_idx)),
-        ("BACKGROUND", (0, row_idx), (-1, row_idx), PRIMARY_COLOR),
-        ("TOPPADDING", (0, row_idx), (-1, row_idx), 3.5),
-        ("BOTTOMPADDING", (0, row_idx), (-1, row_idx), 3.5),
-        ("VALIGN", (0, row_idx), (-1, row_idx), "MIDDLE"),
+    tot_row_idx = len(table_rows)
+    table_rows.append([
+        tot_label, "", "", tot_fondo,
+        tot_ef_pyg, tot_ef_brl, tot_ef_usd,
+        tot_tarj, tot_transf, tot_club,
+        tot_cont, tot_esp, tot_dif, tot_dict,
     ])
 
-    t_main = Table(table_rows, colWidths=[50 * mm, 26 * mm, 20 * mm, 30 * mm, 30 * mm, 30 * mm], repeatRows=1)
+    style_cmds.extend([
+        ("SPAN", (0, tot_row_idx), (2, tot_row_idx)),
+        ("BACKGROUND", (0, tot_row_idx), (-1, tot_row_idx), HexColor("#0F172A")),
+        ("TOPPADDING", (0, tot_row_idx), (-1, tot_row_idx), 3.5),
+        ("BOTTOMPADDING", (0, tot_row_idx), (-1, tot_row_idx), 3.5),
+        ("VALIGN", (0, tot_row_idx), (-1, tot_row_idx), "MIDDLE"),
+    ])
+
+    t_main = Table(table_rows, colWidths=col_widths, repeatRows=1)
     t_main.setStyle(TableStyle(style_cmds))
     elements.append(t_main)
-    elements.append(Spacer(1, 8))
+    elements.append(Spacer(1, 6))
 
     # ─────────────────────────────────────────────────────────────────────────
-    # 4. DECLARACIÓN DE CONFORMIDAD Y TRIPLE FIRMA DE AUDITORÍA
+    # 4. DECLARACIÓN LEGAL Y TRIPLES FIRMAS INSTITUCIONALES (SIN CAJERA)
     # ─────────────────────────────────────────────────────────────────────────
     aviso_leg = Paragraph(
         "<font size=6.5 color='#64748B'><i>El presente documento constituye el acta oficial de arqueo consolidado "
-        "y conciliación de valores físicos y electrónicos procesados en el período. Las diferencias registradas "
-        "fueron informadas y quedan sujetas a las normas internas de auditoría y control de caja.</i></font>",
+        "y auditoría general de valores físicos y electrónicos de la sucursal. Los importes reflejan fielmente las "
+        "recaudaciones de caja y las diferencias determinadas quedan asentadas para su registro contable y control interno.</i></font>",
         styles["Normal"],
     )
 
+    # 3 firmas institucionales en 273mm con separadores y líneas vectoriales continuas
+    # Dejamos espacio para firma física con una fila vacía de altura 14mm
     firmas_cells = [
+        ["", "", ""],
         [
-            Paragraph(
-                "<font size=7 color='#64748B'>____________________________________</font><br/>"
-                "<font size=7.5 color='#0F172A'><b>FIRMA Y ACLARACIÓN CAJERO/A</b></font><br/>"
-                "<font size=6.5 color='#64748B'>Responsable de Turno<br/>Fecha: ____/____/________</font>",
-                styles["Normal"],
-            ),
-            Paragraph(
-                "<font size=7 color='#64748B'>____________________________________</font><br/>"
-                "<font size=7.5 color='#0F172A'><b>SUPERVISOR/A DE CAJAS</b></font><br/>"
-                "<font size=6.5 color='#64748B'>Verificación y Cuadre Físico<br/>Fecha: ____/____/________</font>",
-                styles["Normal"],
-            ),
-            Paragraph(
-                "<font size=7 color='#64748B'>____________________________________</font><br/>"
-                "<font size=7.5 color='#0F172A'><b>TESORERÍA / GERENCIA</b></font><br/>"
-                "<font size=6.5 color='#64748B'>Recepción y Custodia de Fondos<br/>Fecha: ____/____/________</font>",
-                styles["Normal"],
-            ),
-        ]
+            Paragraph("<font size=7.5 color='#0F172A'><b>SUPERVISIÓN GENERAL DE CAJAS</b></font>", styles["Normal"]),
+            Paragraph("<font size=7.5 color='#0F172A'><b>TESORERÍA / CUSTODIA DE FONDOS</b></font>", styles["Normal"]),
+            Paragraph("<font size=7.5 color='#0F172A'><b>GERENCIA GENERAL / AUDITORÍA</b></font>", styles["Normal"]),
+        ],
+        [
+            Paragraph("<font size=6.5 color='#64748B'>Verificación y Arqueo Físico de Cajas<br/>Fecha: ____/____/________   Hora: ____:____</font>", styles["Normal"]),
+            Paragraph("<font size=6.5 color='#64748B'>Recepción y Certificación de Valores<br/>Fecha: ____/____/________   Hora: ____:____</font>", styles["Normal"]),
+            Paragraph("<font size=6.5 color='#64748B'>Aprobación y Cierre Contable de Operaciones<br/>Fecha: ____/____/________   Hora: ____:____</font>", styles["Normal"]),
+        ],
     ]
-    t_firmas = Table(firmas_cells, colWidths=[62 * mm, 62 * mm, 62 * mm])
+    # 3 bloques de 82mm con márgenes intermedios: 82 + 13.5 (spacer) + 82 + 13.5 (spacer) + 82 = 273mm
+    t_firmas = Table(
+        [
+            [firmas_cells[0][0], "", firmas_cells[0][1], "", firmas_cells[0][2]],
+            [firmas_cells[1][0], "", firmas_cells[1][1], "", firmas_cells[1][2]],
+            [firmas_cells[2][0], "", firmas_cells[2][1], "", firmas_cells[2][2]],
+        ],
+        colWidths=[82 * mm, 13.5 * mm, 82 * mm, 13.5 * mm, 82 * mm],
+        rowHeights=[14 * mm, None, None],
+    )
     t_firmas.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LINEABOVE", (0, 1), (0, 1), 0.75, HexColor("#94A3B8")),
+        ("LINEABOVE", (2, 1), (2, 1), 0.75, HexColor("#94A3B8")),
+        ("LINEABOVE", (4, 1), (4, 1), 0.75, HexColor("#94A3B8")),
+        ("TOPPADDING", (0, 1), (-1, 1), 3),
+        ("BOTTOMPADDING", (0, 1), (-1, 1), 1),
+        ("TOPPADDING", (0, 2), (-1, 2), 1),
         ("LEFTPADDING", (0, 0), (-1, -1), 2),
         ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
     ]))
 
-    # KeepTogether garantiza que el aviso y las 3 firmas nunca se dividan entre páginas
+    # KeepTogether asegura que las firmas institucionales no se dividan jamás
     elements.append(KeepTogether([
         aviso_leg,
-        Spacer(1, 8),
+        Spacer(1, 6),
         t_firmas,
     ]))
 
