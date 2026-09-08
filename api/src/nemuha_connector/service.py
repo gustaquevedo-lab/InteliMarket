@@ -952,7 +952,14 @@ def _iva_monto(total: Decimal, tasa: Decimal) -> Decimal:
     return total - (total / (Decimal("1") + tasa / Decimal("100")))
 
 
+ENABLE_LEGACY_SALES_SYNC = False
+
+
 async def sync_sales(db: AsyncSession, company_id: str, since: date | None) -> int:
+    # Las ventas ya no se realizan en el sistema legacy (operación 100% en Intelimarket POS desde 01/09/2026).
+    if not ENABLE_LEGACY_SALES_SYNC:
+        return 0
+
     # /sales/{id}/items no trae join con products — se guarda el nombre real acá
     # mismo en descripcion para que el frontend no caiga a un fallback genérico.
     nombre_por_producto = {r["ID_PRODUTO"]: r["DS_PRODUTO"] for r in await _fetch("SELECT ID_PRODUTO, DS_PRODUTO FROM est_produto")}
@@ -1059,6 +1066,10 @@ async def sync_sales(db: AsyncSession, company_id: str, since: date | None) -> i
 # (VL_RECEBIMENTO viene NULL en la mayoria de las filas).
 
 async def sync_sale_payments(db: AsyncSession, company_id: str, since: date | None) -> int:
+    # Los cobros de ventas ya no se sincronizan desde el legacy (operación 100% en Intelimarket POS).
+    if not ENABLE_LEGACY_SALES_SYNC:
+        return 0
+
     # ID_MOEDA importa: ~8.6% de los recibos historicos son en Real brasileno
     # (zona de frontera) y un puñado en Dolar — VL_RECEBIDO es el monto en esa
     # moneda tal cual, sin convertir (VL_RECEBIMENTO/COTACAO vienen NULL). Antes
@@ -1113,6 +1124,10 @@ async def sync_sale_payments(db: AsyncSession, company_id: str, since: date | No
 # historico), ya que el legado no modela un flujo de aprobacion propio.
 
 async def sync_customer_returns(db: AsyncSession, company_id: str, since: date | None) -> int:
+    # Las devoluciones de clientes ya no se sincronizan desde el legacy (operación 100% en Intelimarket POS).
+    if not ENABLE_LEGACY_SALES_SYNC:
+        return 0
+
     sql = """
         SELECT d.ID_DEVOLUCAO, d.CD_DEVOLUCAO, d.OBSERVACAO, d.DT_DEVOLUCAO, d.ID_VENDA, v.ID_PESSOA
         FROM ven_devolucao d
@@ -2693,9 +2708,10 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("cash_sessions", sync_cash_sessions),
         ("catalog_prices_and_scales", sync_catalog_prices_and_scales),
         ("promotions", sync_promotions),
-        ("sales", sync_sales),
-        ("sale_payments", sync_sale_payments),
-        ("customer_returns", sync_customer_returns),
+        # Las ventas, pagos y devoluciones de clientes ya no se sincronizan desde el legacy (operación 100% en Intelimarket POS desde el 01/09/2026)
+        # ("sales", sync_sales),
+        # ("sale_payments", sync_sale_payments),
+        # ("customer_returns", sync_customer_returns),
         ("stock", sync_stock),
         ("inventory_adjustments", sync_inventory_adjustments),
         ("credit_accounts", sync_credit_accounts),
