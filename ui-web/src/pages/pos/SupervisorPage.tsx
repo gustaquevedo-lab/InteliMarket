@@ -104,7 +104,11 @@ interface CreditApprovalRequest {
   id: string
   motivo?: string
   cliente_nombre?: string
+  customer_nombre?: string
   monto?: number
+  limite_credito?: number
+  saldo_disponible?: number
+  exceso?: number
   estado: string
   solicitado_por_nombre?: string
   aprobado_gerente_id?: string | null
@@ -1612,22 +1616,42 @@ try {
                       <div className="flex items-start justify-between gap-3 mb-2.5">
                         <div className="min-w-0 flex-1">
                           <div className="text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">
-                            {c.aprobado_gerente_id ? "Requiere firma final" : "Línea / Sobregiro"}
+                            {c.aprobado_gerente_id ? "Requiere firma final (Gerencia)" : "Línea / Sobregiro de Crédito"}
                           </div>
                           <div className="font-bold text-sm text-slate-900 dark:text-white mt-0.5 truncate">
-                            {c.cliente_nombre || "Cliente en Caja"}
+                            {c.cliente_nombre || c.customer_nombre || "Cliente en Caja"}
                           </div>
                           <div className="text-[11px] text-slate-500 dark:text-slate-400">
                             {c.solicitado_por_nombre ? `Por ${c.solicitado_por_nombre} · ` : ""}{timeSince(c.created_at)}
                           </div>
+
+                          {/* Discriminación de la línea de crédito */}
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2.5 text-xs bg-white/90 dark:bg-slate-900/90 p-2.5 rounded-xl border border-blue-200 dark:border-blue-800/60 shadow-xs">
+                            <div>
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500 block uppercase font-bold">Límite Total:</span>
+                              <span className="font-bold text-slate-700 dark:text-slate-200" style={monoFont}>{formatPYG(c.limite_credito || 0)}</span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500 block uppercase font-bold">Saldo Disp.:</span>
+                              <span className="font-bold text-emerald-600 dark:text-emerald-400" style={monoFont}>{formatPYG(c.saldo_disponible || 0)}</span>
+                            </div>
+                            {c.exceso != null && c.exceso > 0 && (
+                              <div>
+                                <span className="text-[10px] text-rose-500 block uppercase font-bold">Exceso:</span>
+                                <span className="font-black text-rose-600 dark:text-rose-400" style={monoFont}>+{formatPYG(c.exceso)}</span>
+                              </div>
+                            )}
+                          </div>
+
                           {c.motivo && (
-                            <div className="text-xs bg-white/80 dark:bg-slate-900/80 p-2 rounded-xl mt-2 text-slate-700 dark:text-slate-300 border border-blue-200 dark:border-blue-800">
-                              {c.motivo}
+                            <div className="text-xs bg-amber-50 dark:bg-amber-950/40 p-2.5 rounded-xl mt-2 text-amber-800 dark:text-amber-200 border border-amber-200/80 dark:border-amber-800/80 font-medium leading-relaxed">
+                              ⚠️ {c.motivo}
                             </div>
                           )}
                         </div>
                         {c.monto != null && (
                           <div className="text-right shrink-0">
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500 block uppercase font-bold">Compra</span>
                             <div className="font-black text-base text-blue-600 dark:text-blue-400" style={monoFont}>
                               {formatPYG(c.monto)}
                             </div>
