@@ -38,8 +38,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const token = localStorage.getItem("access_token")
-    if (token) {
-      api.auth.me().then((u) => {
+    if (!token) {
+      setLoading(false)
+      return
+    }
+
+    // Una estacion (etiquetas) no tiene a nadie que sepa una contrasena. Si el
+    // API esta caido, mandarla al login es un callejon sin salida: el operador
+    // ve una pantalla que no puede completar. Se reintenta hasta que vuelva.
+    const esEstacion = !!localStorage.getItem("station_token")
+    let cancelado = false
+    let reintento: ReturnType<typeof setTimeout> | undefined
+
+    const identificar = async () => {
+      try {
+        const u = await api.auth.me()
+        if (cancelado) return
         const claims = decodeToken(token)
         setUser({
           id: u.id, email: u.email, nombre: u.nombre, rol: u.rol,
@@ -47,18 +61,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           tenant_id: u.tenant_id, tenant_slug: u.tenant_slug,
           foto_url: (u as any).foto_url,
         })
-      }).catch(() => {
-        // Una estacion de etiquetas no tiene a nadie que sepa una contrasena:
-        // si /auth/me falla por un corte pasajero, borrar su credencial la deja
-        // muerta hasta que un administrador genere un enlace nuevo. Se conserva
-        // y se reintenta en la proxima carga.
-        if (!localStorage.getItem("station_token")) {
-          localStorage.removeItem("access_token")
-          localStorage.removeItem("user_email")
+        setLoading(false)
+      } catch {
+        if (cancelado) return
+        if (esEstacion) {
+          // Se conserva la credencial y se vuelve a intentar. No se apaga
+          // "loading": mostrar el cargador es mas honesto que un login que el
+          // gondolero no puede resolver.
+          reintento = setTimeout(identificar, 5000)
+          return
         }
-      }).finally(() => setLoading(false))
-    } else {
-      setLoading(false)
+        localStorage.removeItem("access_token")
+        localStorage.removeItem("user_email")
+        setLoading(false)
+      }
+    }
+
+    identificar()
+    return () => {
+      cancelado = true
+      if (reintento) clearTimeout(reintento)
     }
   }, [])
 
