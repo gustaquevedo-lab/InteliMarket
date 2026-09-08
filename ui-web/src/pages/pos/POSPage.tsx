@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
+import { createPortal } from "react-dom"
 import {
   Search, ScanLine, ShoppingCart, Calculator, ClipboardList, Save, Loader2, Sun, Moon, Plus, Minus, Trash2, User, Pause, Play,
   Percent, X, CheckCircle, Printer, RefreshCw, Banknote,
@@ -8372,7 +8373,7 @@ export default function POSPage() {
       )}
 
       {/* ── 8. MODAL DE COBRO MULTIMONEDA & PASARELAS POS BANCARD / DINELCO (F12) ── */}
-      {showPaymentModal && (
+      {showPaymentModal && createPortal(
         <div className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 animate-fade-in">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-5xl w-full max-h-[92vh] shadow-2xl text-slate-900 dark:text-slate-100 overflow-hidden flex flex-col">
             
@@ -10059,6 +10060,7 @@ export default function POSPage() {
               </div>
             </div>
           </div>
+          , document.body
         )}
 
       {/* ── 9. MODAL DE CLIENTES (F9) CON BÚSQUEDA EN VIVO Y ALTA RÁPIDA ───────── */}
