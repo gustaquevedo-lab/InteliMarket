@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from datetime import date, timedelta
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
-from api.src.petty_cash import service
+from api.src.petty_cash import service, pdf_reports
 from api.src.petty_cash.schemas import (
     ExpenseCategoryCreate, ExpenseCategoryResponse,
     ExpenseCreate, ExpenseUpdate, ExpenseResponse, ExpenseSummary,
@@ -16,15 +18,43 @@ from api.src.petty_cash.schemas import (
     FundCountCreate, FundCountConfirm, PettyCashFundCountResponse,
 )
 
+async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
+    r = await db.execute(
+        text("SELECT razon_social, nombre_fantasia, ruc, direccion, ciudad, logo_url FROM companies WHERE id = :cid"),
+        {"cid": company_id}
+    )
+    row = r.first()
+    if row:
+        return {
+            "razon_social": row.razon_social or "GRUPO SANTA TERESA E.A.S.",
+            "nombre_fantasia": row.nombre_fantasia or "EXTRA SUPERMERCADO MAYORISTA",
+            "ruc": row.ruc or "80150377-9",
+            "direccion": row.direccion or "Alejo Garcia esq. Carlos Antonio López",
+            "ciudad": row.ciudad or "Pedro Juan Caballero",
+            "logo_url": row.logo_url,
+        }
+    return {
+        "razon_social": "GRUPO SANTA TERESA E.A.S.",
+        "nombre_fantasia": "EXTRA SUPERMERCADO MAYORISTA",
+        "ruc": "80150377-9",
+        "direccion": "Alejo Garcia esq. Carlos Antonio López",
+        "ciudad": "Pedro Juan Caballero",
+    }
+
+
+def _pdf_response(pdf_bytes: bytes, filename: str) -> StreamingResponse:
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}", "Content-Length": str(len(pdf_bytes))},
+    )
+
+
 router = APIRouter(
     prefix="/api/v1/expenses",
     tags=["expenses"],
 )
 
-# Router separado (no /{expense_id} de por medio) para evitar el bug de
-# orden de rutas ya visto en este sistema: si /funds viviera bajo el mismo
-# prefix que /{expense_id} y se registrara despues, "funds" se interpretaria
-# como un expense_id.
 funds_router = APIRouter(
     prefix="/api/v1/petty-cash-funds",
     tags=["expenses"],
@@ -47,6 +77,42 @@ async def create_fund(
     user=Depends(require_auth),
 ):
     return await service.create_fund(db, user["company_id"], data, user.get("id"))
+
+
+@funds_router.get("/reports/funds-status")
+async def get_funds_status_report_endpoint(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_funds_detailed_summary(db, user["company_id"])
+
+
+@funds_router.get("/reports/funds-status.pdf")
+async def export_funds_status_pdf_endpoint(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company = await _get_company_info(db, user["company_id"])
+    funds = await service.get_funds_detailed_summary(db, user["company_id"])
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_libro_fondos_fijos_pdf(company, funds, generated_by)
+    return _pdf_response(pdf_bytes, f"estado_fondos_fijos_{date.today()}.pdf")
+
+
+@funds_router.get("/{fund_id}/export/rendicion.pdf")
+async def export_fund_rendicion_pdf_endpoint(
+    fund_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company = await _get_company_info(db, user["company_id"])
+    data = await service.get_fund_rendicion_data(db, user["company_id"], fund_id)
+    if "error" in data:
+        raise HTTPException(status_code=404, detail=data["error"])
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_rendicion_fondo_fijo_pdf(company, data["fund"], data["expenses"], generated_by)
+    nombre_limpio = data["fund"]["nombre"].replace(" ", "_").lower()
+    return _pdf_response(pdf_bytes, f"acta_rendicion_{nombre_limpio}_{date.today()}.pdf")
 
 
 @funds_router.patch("/{fund_id}", response_model=PettyCashFundResponse)
@@ -211,6 +277,56 @@ async def expense_dashboard(
     hasta = fecha_hasta or date.today()
     desde = fecha_desde or (hasta - timedelta(days=29))
     return await service.get_expense_dashboard(db, user["company_id"], desde, hasta)
+
+
+@router.get("/reports/by-sector")
+async def get_expenses_by_sector_report_endpoint(
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_expenses_by_sector_report(db, user["company_id"], fecha_desde, fecha_hasta)
+
+
+@router.get("/reports/by-sector.pdf")
+async def export_expenses_by_sector_pdf_endpoint(
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company = await _get_company_info(db, user["company_id"])
+    data = await service.get_expenses_by_sector_report(db, user["company_id"], fecha_desde, fecha_hasta)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_gastos_por_sector_pdf(company, data, fecha_desde, fecha_hasta, generated_by)
+    return _pdf_response(pdf_bytes, f"gastos_por_sector_{fecha_desde}_{fecha_hasta}.pdf")
+
+
+@router.get("/reports/fiscal-purchases")
+async def get_fiscal_purchases_report_endpoint(
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    fund_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_fiscal_purchases_report(db, user["company_id"], fecha_desde, fecha_hasta, fund_id=fund_id)
+
+
+@router.get("/reports/fiscal-purchases.pdf")
+async def export_fiscal_purchases_pdf_endpoint(
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    fund_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company = await _get_company_info(db, user["company_id"])
+    data = await service.get_fiscal_purchases_report(db, user["company_id"], fecha_desde, fecha_hasta, fund_id=fund_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_libro_compras_fiscal_pdf(company, data, fecha_desde, fecha_hasta, generated_by)
+    return _pdf_response(pdf_bytes, f"libro_compras_fiscal_{fecha_desde}_{fecha_hasta}.pdf")
 
 
 @router.get("/config/approval", response_model=ExpenseApprovalConfig)

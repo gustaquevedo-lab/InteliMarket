@@ -175,7 +175,113 @@ type PendingItem =
   | { kind: "auth"; id: string; created_at: string; data: AuthRequest }
   | { kind: "vault"; id: string; created_at: string; data: VaultApproval }
 
-// ── SINTETIZADOR DE AUDIO (Web Audio API) ──────────────────────────────────
+// ── SINTETIZADOR DE AUDIO BLINDADO (Web Audio API Singleton) ───────────────
+let sharedAudioCtx: AudioContext | null = null
+
+function getSharedAudioContext(): AudioContext | null {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
+    if (!AudioCtx) return null
+    if (!sharedAudioCtx || sharedAudioCtx.state === "closed") {
+      sharedAudioCtx = new AudioCtx()
+    }
+    return sharedAudioCtx
+  } catch {
+    return null
+  }
+}
+
+async function unlockAudioContext(): Promise<boolean> {
+  const ctx = getSharedAudioContext()
+  if (!ctx) return false
+  if (ctx.state === "suspended") {
+    try {
+      await ctx.resume()
+    } catch {}
+  }
+  return ctx.state === "running"
+}
+
+// ALARMA ESTILO PEDIDOSYA / DELIVERY PRO: Fuerte, Penetante, Multi-tono y con Armónicos
+export function playPedidosYaAlarm() {
+  try {
+    const ctx = getSharedAudioContext()
+    if (!ctx) return
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {})
+    }
+
+    const t0 = ctx.currentTime
+    const master = ctx.createGain()
+    master.connect(ctx.destination)
+    master.gain.setValueAtTime(0.88, t0) // Volumen audible y potente
+
+    // Ráfagas rítmicas insistentes estilo campana digital de entrega
+    // B5 (987.77 Hz) + E6 (1318.51 Hz), y luego C6 (1046.5 Hz) + F6 (1396.9 Hz)
+    const bursts = [
+      { at: 0.00, f1: 987.77, f2: 1318.51, dur: 0.10 },
+      { at: 0.12, f1: 987.77, f2: 1318.51, dur: 0.14 },
+
+      { at: 0.36, f1: 1046.50, f2: 1396.91, dur: 0.10 },
+      { at: 0.48, f1: 1046.50, f2: 1396.91, dur: 0.14 },
+
+      { at: 0.74, f1: 1174.66, f2: 1567.98, dur: 0.11 },
+      { at: 0.88, f1: 1318.51, f2: 1760.00, dur: 0.45 },
+    ]
+
+    for (const b of bursts) {
+      const start = t0 + b.at
+
+      // Oscilador 1: fundamental senoidal pura y brillante
+      const osc1 = ctx.createOscillator()
+      osc1.type = "sine"
+      osc1.frequency.setValueAtTime(b.f1, start)
+
+      // Oscilador 2: armónico superior tipo triángulo para presencia
+      const osc2 = ctx.createOscillator()
+      osc2.type = "triangle"
+      osc2.frequency.setValueAtTime(b.f2, start)
+
+      // Oscilador 3: diente de sierra suave filtrado para darle el filo "eléctrico" de PedidosYa
+      const osc3 = ctx.createOscillator()
+      osc3.type = "sawtooth"
+      osc3.frequency.setValueAtTime(b.f2 * 0.5, start)
+
+      const g = ctx.createGain()
+      g.gain.setValueAtTime(0.001, start)
+      g.gain.linearRampToValueAtTime(0.85, start + 0.012)
+      g.gain.exponentialRampToValueAtTime(0.0001, start + b.dur)
+
+      const g3 = ctx.createGain()
+      g3.gain.setValueAtTime(0.15, start)
+
+      osc1.connect(g)
+      osc2.connect(g)
+      osc3.connect(g3)
+      g3.connect(g)
+      g.connect(master)
+
+      osc1.start(start)
+      osc2.start(start)
+      osc3.start(start)
+
+      const stopAt = start + b.dur + 0.04
+      osc1.stop(stopAt)
+      osc2.stop(stopAt)
+      osc3.stop(stopAt)
+    }
+
+    // Vibración agresiva háptica en móvil
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      try {
+        navigator.vibrate([220, 80, 220, 80, 320, 100, 500])
+      } catch {}
+    }
+  } catch {
+    // Manejado silenciosamente si no hay permisos
+  }
+}
+
 type AlertStep = {
   at: number                 // offset desde el inicio (s)
   freq: number               // frecuencia base (Hz)
@@ -183,14 +289,16 @@ type AlertStep = {
   type?: OscillatorType
   vol?: number
   glideTo?: number           // desliza la frecuencia hasta este valor
-  wobble?: { rate: number; depth: number }  // LFO sobre la frecuencia (efecto "poco común")
+  wobble?: { rate: number; depth: number }
 }
 
 function playAlertSound(steps: AlertStep[]) {
   try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
-    if (!AudioCtx) return
-    const ctx = new AudioCtx()
+    const ctx = getSharedAudioContext()
+    if (!ctx) return
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {})
+    }
     const master = ctx.createGain()
     master.connect(ctx.destination)
     const t0 = ctx.currentTime
@@ -214,77 +322,65 @@ function playAlertSound(steps: AlertStep[]) {
         lfo.stop(start + s.dur)
       }
       g.gain.setValueAtTime(0.0001, start)
-      g.gain.exponentialRampToValueAtTime(s.vol || 0.2, start + 0.012)
+      g.gain.exponentialRampToValueAtTime(s.vol || 0.65, start + 0.012)
       g.gain.exponentialRampToValueAtTime(0.0001, start + s.dur)
       osc.connect(g)
       g.connect(master)
       osc.start(start)
       osc.stop(start + s.dur + 0.03)
     }
-    const total = steps.reduce((m, s) => Math.max(m, s.at + s.dur), 0)
-    setTimeout(() => { ctx.close().catch(() => {}) }, (total + 0.2) * 1000)
-  } catch (e) {
-    // Audio context bloqueado por el navegador
+  } catch {
+    // Audio bloqueado
   }
 }
 
 export type EventSoundKind =
-  | "nuevo_pedido"     // llegó una autorización de piso
+  | "nuevo_pedido"     // llegó una autorización de piso -> PedidosYa Alarm
   | "nuevo_retiro"     // cajera pidió un Drop Cash
   | "nueva_entrega"    // cierre de turno entregado
   | "drop_urgente"     // caja superó el tope de sangría
-  | "aprobacion"       // llega un pedido de aprobación (crédito/inventario)
+  | "aprobacion"       // llega un pedido de aprobación (crédito/inventario) -> PedidosYa Alarm
   | "stock_bajo"       // apareció stock crítico nuevo
   | "positivo"         // acción exitosa
   | "error"
 
 const ALERT_SOUNDS: Record<EventSoundKind, AlertStep[]> = {
-  // Radar ping: eco descendente con wobble — autorización nueva
-  nuevo_pedido: [
-    { at: 0, freq: 1240, dur: 0.14, type: "sine", vol: 0.22, wobble: { rate: 28, depth: 70 } },
-    { at: 0.16, freq: 880, dur: 0.14, type: "sine", vol: 0.18, glideTo: 1108 },
-  ],
-  // Drop cash: escala menor descendente con deslizamiento final
+  nuevo_pedido: [], // Atendido por playPedidosYaAlarm()
   nuevo_retiro: [
-    { at: 0, freq: 659, dur: 0.12, type: "triangle", vol: 0.2 },
-    { at: 0.13, freq: 587, dur: 0.12, type: "triangle", vol: 0.2 },
-    { at: 0.26, freq: 494, dur: 0.24, type: "triangle", vol: 0.2, glideTo: 440 },
+    { at: 0, freq: 659, dur: 0.12, type: "triangle", vol: 0.65 },
+    { at: 0.13, freq: 587, dur: 0.12, type: "triangle", vol: 0.65 },
+    { at: 0.26, freq: 494, dur: 0.24, type: "triangle", vol: 0.70, glideTo: 440 },
   ],
-  // Cierre de turno: campanilla brillante D6→G6
   nueva_entrega: [
-    { at: 0, freq: 1174, dur: 0.2, type: "triangle", vol: 0.18 },
-    { at: 0.22, freq: 1568, dur: 0.3, type: "triangle", vol: 0.16, glideTo: 1318 },
+    { at: 0, freq: 1174, dur: 0.2, type: "triangle", vol: 0.60 },
+    { at: 0.22, freq: 1568, dur: 0.3, type: "triangle", vol: 0.65, glideTo: 1318 },
   ],
-  // ALARMA: sirena de dos tonos ascendente — superó tope de sangría
   drop_urgente: [
-    { at: 0, freq: 660, dur: 0.18, type: "square", vol: 0.16, glideTo: 880 },
-    { at: 0.2, freq: 880, dur: 0.18, type: "square", vol: 0.16, glideTo: 660 },
-    { at: 0.4, freq: 660, dur: 0.18, type: "square", vol: 0.16, glideTo: 880 },
-    { at: 0.6, freq: 1040, dur: 0.3, type: "sawtooth", vol: 0.12, wobble: { rate: 22, depth: 150 } },
+    { at: 0, freq: 660, dur: 0.18, type: "square", vol: 0.60, glideTo: 880 },
+    { at: 0.2, freq: 880, dur: 0.18, type: "square", vol: 0.65, glideTo: 660 },
+    { at: 0.4, freq: 660, dur: 0.18, type: "square", vol: 0.65, glideTo: 880 },
+    { at: 0.6, freq: 1040, dur: 0.3, type: "sawtooth", vol: 0.55, wobble: { rate: 22, depth: 150 } },
   ],
-  // Aprobación: sonda suave ascendente con vibrato
-  aprobacion: [
-    { at: 0, freq: 523, dur: 0.14, type: "sine", vol: 0.18, glideTo: 587 },
-    { at: 0.16, freq: 659, dur: 0.22, type: "sine", vol: 0.18, glideTo: 784, wobble: { rate: 18, depth: 28 } },
-  ],
-  // Stock bajo: "gong" grave con caída de tono
+  aprobacion: [], // Atendido por playPedidosYaAlarm()
   stock_bajo: [
-    { at: 0, freq: 220, dur: 0.5, type: "sawtooth", vol: 0.14, glideTo: 147, wobble: { rate: 8, depth: 32 } },
-    { at: 0.05, freq: 110, dur: 0.6, type: "sine", vol: 0.18, glideTo: 82 },
+    { at: 0, freq: 220, dur: 0.5, type: "sawtooth", vol: 0.45, glideTo: 147, wobble: { rate: 8, depth: 32 } },
+    { at: 0.05, freq: 110, dur: 0.6, type: "sine", vol: 0.55, glideTo: 82 },
   ],
-  // Acción confirmada: ascenso corto y alegre
   positivo: [
-    { at: 0, freq: 659, dur: 0.1, type: "sine", vol: 0.18 },
-    { at: 0.11, freq: 987, dur: 0.18, type: "sine", vol: 0.16, glideTo: 1174 },
+    { at: 0, freq: 659, dur: 0.1, type: "sine", vol: 0.60 },
+    { at: 0.11, freq: 987, dur: 0.18, type: "sine", vol: 0.65, glideTo: 1174 },
   ],
-  // Error: zumbido grave con oscilación fuerte
   error: [
-    { at: 0, freq: 180, dur: 0.3, type: "square", vol: 0.14, wobble: { rate: 35, depth: 95 } },
+    { at: 0, freq: 180, dur: 0.3, type: "square", vol: 0.60, wobble: { rate: 35, depth: 95 } },
   ],
 }
 
 function playEventSound(kind: EventSoundKind) {
-  playAlertSound(ALERT_SOUNDS[kind])
+  if (kind === "nuevo_pedido" || kind === "aprobacion") {
+    playPedidosYaAlarm()
+  } else {
+    playAlertSound(ALERT_SOUNDS[kind])
+  }
 }
 
 function systemNotify(title: string, body: string) {
@@ -320,27 +416,32 @@ export default function SupervisorPage() {
   const toast = useToast()
   const { dark, toggle: toggleTheme } = useTheme()
 
-  // ── DESBLOQUEO DE AUDIO EN DISPOSITIVOS MÓVILES (TOUCH UNLOCK) ────────────
+  // ── ESTADO DE ENLACE EN TIEMPO REAL (SSE) Y PANTALLA DESPIERTA ──────────
+  const [isSseConnected, setIsSseConnected] = useState(false)
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [keepScreenOn, setKeepScreenOn] = useState<boolean>(() => {
+    const saved = localStorage.getItem("supervisor_keep_screen_on")
+    return saved !== null ? saved === "true" : true
+  })
+  const [alarmMuted, setAlarmMuted] = useState(false)
+  const [audioReady, setAudioReady] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false
+    const ctx = getSharedAudioContext()
+    return ctx ? ctx.state === "running" : false
+  })
+
+  // ── DESBLOQUEO DE AUDIO UNIVERSAL TÁCTIL (IOS SAFARI Y ANDROID CHROME) ────
   useEffect(() => {
-    const unlockAudio = () => {
-      try {
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
-        if (AudioCtx) {
-          const dummy = new AudioCtx()
-          dummy.resume().then(() => dummy.close()).catch(() => {})
-        }
-      } catch (e) {}
+    const doUnlock = async () => {
+      const ok = await unlockAudioContext()
+      if (ok) setAudioReady(true)
     }
-    window.addEventListener("touchstart", unlockAudio, { once: true, passive: true })
-    window.addEventListener("click", unlockAudio, { once: true })
+    const events = ["touchstart", "touchend", "pointerdown", "click", "keydown"]
+    events.forEach((ev) => window.addEventListener(ev, doUnlock, { passive: true }))
     return () => {
-      window.removeEventListener("touchstart", unlockAudio)
-      window.removeEventListener("click", unlockAudio)
+      events.forEach((ev) => window.removeEventListener(ev, doUnlock))
     }
   }, [])
-
-  // ── ESTADO DE ENLACE EN TIEMPO REAL (SSE) ────────────────────────────────
-  const [isSseConnected, setIsSseConnected] = useState(false)
 
   // ── SONIDO Y AVISOS SONOROS ──────────────────────────────────────────────
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
@@ -355,7 +456,35 @@ export default function SupervisorPage() {
     if (next && typeof navigator !== "undefined" && "Notification" in window && Notification.permission === "default") {
       Notification.requestPermission().catch(() => {})
     }
-    if (next) playEventSound("positivo")
+    if (next) {
+      unlockAudioContext().then(() => setAudioReady(true))
+      playEventSound("positivo")
+    }
+  }
+
+  const toggleKeepScreenOn = () => {
+    const next = !keepScreenOn
+    setKeepScreenOn(next)
+    localStorage.setItem("supervisor_keep_screen_on", String(next))
+    if (next) {
+      toast.success("Pantalla siempre activa", "Se evitará que el celular se suspenda en segundo plano.")
+    } else {
+      toast.info("Pantalla normal", "El teléfono se apagará según su configuración habitual.")
+    }
+  }
+
+  // PRUEBA EXPLÍCITA DE ALARMA PEDIDOSYA
+  const testAlarmSound = async () => {
+    await unlockAudioContext()
+    setAudioReady(true)
+    setAlarmMuted(false)
+    playPedidosYaAlarm()
+    toast.success("Alarma PedidosYa Probada", "Sonido estridente y vibración háptica activados.")
+  }
+
+  const muteCurrentAlarm = () => {
+    setAlarmMuted(true)
+    toast.info("Alarma silenciada", "Se reactivará automáticamente con el próximo pedido entrante.")
   }
 
   const emitSound = useCallback((kind: EventSoundKind) => {

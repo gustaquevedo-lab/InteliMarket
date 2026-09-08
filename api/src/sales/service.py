@@ -525,6 +525,20 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
                         "credito",
                         "/supervisor",
                     )
+                # Broadcast en tiempo real (SSE) a supervisores
+                try:
+                    from api.src.events.manager import manager
+                    await manager.broadcast(str(data.company_id), {
+                        "type": "credit_approval_requested",
+                        "request_id": str(app_req.id),
+                        "customer_nombre": cust_nom,
+                        "monto": float(monto_credito),
+                        "limite_credito": float(check.get("limite_credito", 0)),
+                        "exceso": float(exceso),
+                        "motivo": f"Exceso de línea por {float(exceso):,.0f} Gs.",
+                    })
+                except Exception as b_err:
+                    logger.warning("Error emitiendo SSE de crédito: %s", b_err)
             except Exception as notif_err:
                 logger.warning("Error creando notificaciones de crédito: %s", notif_err)
 

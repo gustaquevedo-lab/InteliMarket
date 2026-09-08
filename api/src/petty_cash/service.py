@@ -382,6 +382,19 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
     approval_config = await get_approval_config(db, company_id)
     auto_aprobado = monto <= Decimal(str(approval_config.umbral_aprobacion))
 
+    notas_val = data.notas
+    if getattr(data, "ruc", None) or getattr(data, "timbrado", None) or getattr(data, "numero_factura", None) or getattr(data, "iva_10", None) or getattr(data, "iva_5", None) or getattr(data, "exentas", None):
+        fiscal_dict = {
+            "ruc": data.ruc,
+            "timbrado": data.timbrado,
+            "numero_factura": data.numero_factura,
+            "iva_10": float(data.iva_10) if data.iva_10 is not None else None,
+            "iva_5": float(data.iva_5) if data.iva_5 is not None else None,
+            "exentas": float(data.exentas) if data.exentas is not None else None,
+            "custom_note": data.notas or "",
+        }
+        notas_val = json.dumps(fiscal_dict)
+
     exp = Expense(
         company_id=uuid.UUID(company_id),
         branch_id=uuid.UUID(data.branch_id) if data.branch_id else (fund.branch_id if fund else None),
@@ -396,6 +409,7 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         fecha_gasto=data.fecha_gasto or date.today(),
         registrado_por=uuid.UUID(user_id),
         estado="aprobado" if auto_aprobado else "pendiente",
+        notas=notas_val,
     )
     db.add(exp)
     await db.flush()
@@ -821,4 +835,310 @@ async def get_expense_dashboard(db: AsyncSession, company_id: str, fecha_desde: 
         "tendencia_mensual": tendencia_mensual,
         "top_proveedores": top_proveedores,
         "sugerencias": sugerencias,
+    }
+
+
+# ── Reportes Especializados de Fondos Fijos y Rendiciones ─────────────────────
+
+async def get_expenses_by_sector_report(
+    db: AsyncSession, company_id: str, fecha_desde: date, fecha_hasta: date
+) -> dict:
+    cid = uuid.UUID(company_id)
+    cost_centers = await list_cost_centers(db, company_id)
+
+    # 1. Agrupación directa por centro de costo
+    r_sector = await db.execute(
+        select(Expense.cost_center_id, sa_func.sum(Expense.monto))
+        .where(
+            Expense.company_id == cid,
+            Expense.anulado == False,
+            Expense.fecha_gasto >= fecha_desde,
+            Expense.fecha_gasto <= fecha_hasta,
+        )
+        .group_by(Expense.cost_center_id)
+    )
+    directo_by_cc = {cc_id: Decimal(str(total)) for cc_id, total in r_sector.all()}
+
+    sectores_activos = [cc for cc in cost_centers if cc.tipo == "sector"]
+    global_pool = sum((directo_by_cc.get(cc.id, Decimal("0")) for cc in cost_centers if cc.tipo == "global"), Decimal("0"))
+    peso_total = sum((cc.peso_prorateo for cc in sectores_activos), Decimal("0"))
+
+    total_periodo = await _sum_expenses(db, cid, fecha_desde, fecha_hasta)
+    sin_asignar = directo_by_cc.get(None, Decimal("0"))
+
+    por_sector = []
+    for cc in sectores_activos:
+        directo = directo_by_cc.get(cc.id, Decimal("0"))
+        prorrateado = (global_pool * cc.peso_prorateo / peso_total) if peso_total > 0 else Decimal("0")
+        por_sector.append({
+            "cost_center_id": str(cc.id),
+            "nombre": cc.nombre,
+            "directo": float(directo),
+            "prorrateado": float(prorrateado),
+            "total": float(directo + prorrateado),
+        })
+    por_sector.sort(key=lambda s: s["total"], reverse=True)
+
+    # 2. Detalle de comprobantes con sus imputaciones
+    q_detalle = (
+        select(
+            Expense.id,
+            Expense.fecha_gasto,
+            Expense.descripcion,
+            Expense.proveedor,
+            Expense.monto,
+            Expense.comprobante_url,
+            Expense.tipo_pago,
+            Expense.estado,
+            Expense.notas,
+            CostCenter.nombre.label("sector_nombre"),
+            PettyCashFund.nombre.label("fund_nombre"),
+            ExpenseCategory.nombre.label("categoria_nombre"),
+        )
+        .outerjoin(CostCenter, Expense.cost_center_id == CostCenter.id)
+        .outerjoin(PettyCashFund, Expense.fund_id == PettyCashFund.id)
+        .outerjoin(ExpenseCategory, Expense.category_id == ExpenseCategory.id)
+        .where(
+            Expense.company_id == cid,
+            Expense.anulado == False,
+            Expense.fecha_gasto >= fecha_desde,
+            Expense.fecha_gasto <= fecha_hasta,
+        )
+        .order_by(Expense.fecha_gasto.desc(), Expense.created_at.desc())
+    )
+    res_det = await db.execute(q_detalle)
+    detalle_gastos = []
+    for row in res_det.mappings().all():
+        detalle_gastos.append({
+            "id": str(row["id"]),
+            "fecha_gasto": row["fecha_gasto"],
+            "descripcion": row["descripcion"],
+            "proveedor": row["proveedor"],
+            "monto": float(row["monto"] or 0),
+            "comprobante_url": row["comprobante_url"],
+            "tipo_pago": row["tipo_pago"],
+            "estado": row["estado"],
+            "notas": row["notas"],
+            "sector_nombre": row["sector_nombre"],
+            "fund_nombre": row["fund_nombre"],
+            "categoria_nombre": row["categoria_nombre"],
+        })
+
+    return {
+        "fecha_desde": fecha_desde,
+        "fecha_hasta": fecha_hasta,
+        "total_periodo": float(total_periodo),
+        "por_sector": por_sector,
+        "sin_asignar": float(sin_asignar),
+        "total_gastos_count": len(detalle_gastos),
+        "detalle_gastos": detalle_gastos,
+    }
+
+
+async def get_funds_detailed_summary(db: AsyncSession, company_id: str) -> list[dict]:
+    funds_raw = await list_funds(db, company_id)
+    summary = []
+    for f in funds_raw:
+        aut = float(f.get("monto_autorizado") or 0)
+        sal = float(f.get("saldo_actual") or 0)
+        gast = aut - sal
+        liq = (sal / aut * 100) if aut > 0 else 0.0
+        
+        if not f.get("activo", True):
+            estado_desc = "INACTIVO"
+        elif liq < 20.0:
+            estado_desc = "CRÍTICO (REPONER)"
+        elif liq < 40.0:
+            estado_desc = "PREVENTIVO"
+        else:
+            estado_desc = "NORMAL (ÓPTIMO)"
+
+        summary.append({
+            "id": str(f["id"]),
+            "nombre": f["nombre"],
+            "branch_id": str(f["branch_id"]) if f.get("branch_id") else None,
+            "branch_nombre": f.get("branch_nombre"),
+            "custodio_id": str(f["custodio_id"]) if f.get("custodio_id") else None,
+            "custodio_nombre": f.get("custodio_nombre"),
+            "monto_autorizado": aut,
+            "saldo_actual": sal,
+            "gastado": gast,
+            "liquidez_pct": round(liq, 1),
+            "alerta_reposicion": liq < 20.0,
+            "estado_desc": estado_desc,
+            "activo": f.get("activo", True),
+            "created_at": f.get("created_at"),
+        })
+    # Mostramos primero los fondos con menor liquidez
+    summary.sort(key=lambda x: (not x["activo"], x["liquidez_pct"]))
+    return summary
+
+
+async def get_fiscal_purchases_report(
+    db: AsyncSession, company_id: str, fecha_desde: date, fecha_hasta: date, fund_id: str | None = None
+) -> dict:
+    cid = uuid.UUID(company_id)
+    query = (
+        select(
+            Expense.id,
+            Expense.fecha_gasto,
+            Expense.descripcion,
+            Expense.proveedor,
+            Expense.monto,
+            Expense.notas,
+            CostCenter.nombre.label("sector_nombre"),
+            PettyCashFund.nombre.label("fund_nombre"),
+        )
+        .outerjoin(CostCenter, Expense.cost_center_id == CostCenter.id)
+        .outerjoin(PettyCashFund, Expense.fund_id == PettyCashFund.id)
+        .where(
+            Expense.company_id == cid,
+            Expense.anulado == False,
+            Expense.fecha_gasto >= fecha_desde,
+            Expense.fecha_gasto <= fecha_hasta,
+        )
+    )
+    if fund_id:
+        query = query.where(Expense.fund_id == uuid.UUID(fund_id))
+
+    query = query.order_by(Expense.fecha_gasto.asc(), Expense.created_at.asc())
+    rows = (await db.execute(query)).mappings().all()
+
+    items = []
+    tot_general = 0.0
+    tot_grav10 = 0.0
+    tot_iva10 = 0.0
+    tot_iva5 = 0.0
+    tot_exentas = 0.0
+
+    for r in rows:
+        monto = float(r["monto"] or 0)
+        tot_general += monto
+        notas_str = r["notas"] or ""
+        
+        # Extracción de campos fiscales estructurados o cálculo estándar
+        fiscal_data = {}
+        if notas_str.strip().startswith("{") and notas_str.strip().endswith("}"):
+            try:
+                fiscal_data = json.loads(notas_str)
+            except Exception:
+                fiscal_data = {}
+
+        ruc = fiscal_data.get("ruc")
+        timbrado = fiscal_data.get("timbrado")
+        nro_factura = fiscal_data.get("numero_factura")
+
+        # Discriminación impositiva
+        iva_10_val = fiscal_data.get("iva_10")
+        iva_5_val = fiscal_data.get("iva_5")
+        exentas_val = fiscal_data.get("exentas")
+
+        desc_lower = (r["descripcion"] or "").lower()
+        if exentas_val is not None and exentas_val > 0:
+            ex = float(exentas_val)
+            g10 = monto - ex
+            i10 = round(g10 / 11) if g10 > 0 else 0.0
+            g10 = g10 - i10
+            i5 = 0.0
+        elif any(k in desc_lower for k in ["combustible", "nafta", "diesel", "gasoil", "peaje", "exenta"]):
+            # Combustibles y tasas en Paraguay son exentas de IVA crédito
+            ex = monto
+            g10 = 0.0
+            i10 = 0.0
+            i5 = 0.0
+        elif iva_10_val is not None:
+            i10 = float(iva_10_val)
+            g10 = monto - i10
+            i5 = float(iva_5_val or 0)
+            ex = float(exentas_val or 0)
+        else:
+            # Estándar IVA 10% incluido en el total
+            i10 = round(monto / 11)
+            g10 = monto - i10
+            i5 = 0.0
+            ex = 0.0
+
+        tot_grav10 += g10
+        tot_iva10 += i10
+        tot_iva5 += i5
+        tot_exentas += ex
+
+        items.append({
+            "id": str(r["id"]),
+            "fecha": r["fecha_gasto"],
+            "ruc": ruc or "—",
+            "proveedor": r["proveedor"] or "Varios",
+            "numero_factura": nro_factura or "S/N",
+            "timbrado": timbrado or "—",
+            "sector": r["sector_nombre"] or "General",
+            "fund_nombre": r["fund_nombre"] or "Caja Chica",
+            "descripcion": r["descripcion"],
+            "gravada_10": g10,
+            "iva_10": i10,
+            "iva_5": i5,
+            "exentas": ex,
+            "total": monto,
+        })
+
+    return {
+        "fecha_desde": fecha_desde,
+        "fecha_hasta": fecha_hasta,
+        "total_general": tot_general,
+        "total_gravada_10": tot_grav10,
+        "total_iva_10": tot_iva10,
+        "total_iva_5": tot_iva5,
+        "total_exentas": tot_exentas,
+        "items": items,
+    }
+
+
+async def get_fund_rendicion_data(db: AsyncSession, company_id: str, fund_id: str) -> dict:
+    fund = await get_fund(db, fund_id)
+    if not fund or str(fund.company_id) != company_id:
+        return {"error": "Fondo no encontrado"}
+
+    custodio_nombre = await _get_user_nombre(db, str(fund.custodio_id)) if fund.custodio_id else "Sin asignar"
+    fund_dict = {
+        "id": str(fund.id),
+        "nombre": fund.nombre,
+        "custodio_nombre": custodio_nombre,
+        "monto_autorizado": float(fund.monto_autorizado),
+        "saldo_actual": float(fund.saldo_actual),
+        "gastado": float(fund.monto_autorizado - fund.saldo_actual),
+    }
+
+    q_expenses = (
+        select(
+            Expense.id,
+            Expense.fecha_gasto,
+            Expense.descripcion,
+            Expense.proveedor,
+            Expense.monto,
+            CostCenter.nombre.label("sector_nombre"),
+        )
+        .outerjoin(CostCenter, Expense.cost_center_id == CostCenter.id)
+        .where(
+            Expense.fund_id == fund.id,
+            Expense.anulado == False,
+            Expense.estado != "rechazado",
+        )
+        .order_by(Expense.fecha_gasto.asc(), Expense.created_at.asc())
+        .limit(100)
+    )
+    rows = (await db.execute(q_expenses)).mappings().all()
+    expenses = [
+        {
+            "id": str(r["id"]),
+            "fecha_gasto": r["fecha_gasto"],
+            "descripcion": r["descripcion"],
+            "proveedor": r["proveedor"],
+            "monto": float(r["monto"] or 0),
+            "sector_nombre": r["sector_nombre"],
+        }
+        for r in rows
+    ]
+
+    return {
+        "fund": fund_dict,
+        "expenses": expenses,
     }

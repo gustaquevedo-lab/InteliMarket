@@ -101,6 +101,13 @@ class ExpenseCreate(BaseModel):
     comprobante_url: Optional[str] = None
     tipo_pago: str = "efectivo"
     fecha_gasto: Optional[date] = None
+    ruc: Optional[str] = None
+    timbrado: Optional[str] = None
+    numero_factura: Optional[str] = None
+    iva_10: Optional[Decimal] = None
+    iva_5: Optional[Decimal] = None
+    exentas: Optional[Decimal] = None
+    notas: Optional[str] = None
 
 
 class ExpenseUpdate(BaseModel):
@@ -111,6 +118,10 @@ class ExpenseUpdate(BaseModel):
     proveedor: Optional[str] = None
     comprobante_url: Optional[str] = None
     tipo_pago: Optional[str] = None
+    ruc: Optional[str] = None
+    timbrado: Optional[str] = None
+    numero_factura: Optional[str] = None
+    notas: Optional[str] = None
 
 
 class ExpenseApprovalConfig(BaseModel):

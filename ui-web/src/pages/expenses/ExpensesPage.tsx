@@ -4,7 +4,8 @@ import {
   TrendingDown, BarChart3, Ban, Receipt as ReceiptIcon, Building2, Sparkles,
   AlertTriangle, ThumbsUp, ThumbsDown, Layers, PiggyBank, UserCircle2, Landmark,
   Paperclip, ClipboardCheck, Scale, Filter, Eye, RefreshCw, ShieldAlert, ArrowRight,
-  SlidersHorizontal, Check, AlertCircle, FileText, Download, Calendar, Tag
+  SlidersHorizontal, Check, AlertCircle, FileText, Download, Calendar, Tag,
+  FileSpreadsheet, Printer, PieChart, BookOpen, FileCheck
 } from "lucide-react"
 import {
   api, API_ORIGIN, type Expense, type ExpenseCategory, type CostCenter,
@@ -15,7 +16,8 @@ import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
 import { useAuth } from "../../context/AuthContext"
 
-type Tab = "dashboard" | "fondos" | "list" | "arqueos" | "sectores" | "categories"
+type Tab = "dashboard" | "fondos" | "list" | "arqueos" | "sectores" | "categories" | "reportes"
+type ReportSubTab = "sector" | "fondos" | "fiscal" | "rendicion"
 
 export default function ExpensesPage() {
   const [tab, setTab] = useState<Tab>("dashboard")
@@ -92,6 +94,23 @@ export default function ExpensesPage() {
   const [selectedFundMovements, setSelectedFundMovements] = useState<{ fund: PettyCashFund; movements: any[] } | null>(null)
   const [loadingMovements, setLoadingMovements] = useState(false)
 
+  // 📊 Centro de Reportes
+  const [reportSubTab, setReportSubTab] = useState<ReportSubTab>("sector")
+  const getTodayAsuncion = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Asuncion' }).format(new Date())
+  const getStartOfMonthAsuncion = () => {
+    const today = getTodayAsuncion()
+    return `${today.slice(0, 7)}-01`
+  }
+  const [repFechaDesde, setRepFechaDesde] = useState(getStartOfMonthAsuncion())
+  const [repFechaHasta, setRepFechaHasta] = useState(getTodayAsuncion())
+  const [repFundId, setRepFundId] = useState("")
+  const [reportSectorData, setReportSectorData] = useState<any>(null)
+  const [reportFundsData, setReportFundsData] = useState<any[] | null>(null)
+  const [reportFiscalData, setReportFiscalData] = useState<any>(null)
+  const [loadingReport, setLoadingReport] = useState(false)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
+  const [rendicionFundId, setRendicionFundId] = useState("")
+
   const toast = useToast()
   const { user } = useAuth()
 
@@ -145,6 +164,93 @@ export default function ExpensesPage() {
   useEffect(() => {
     fetchAll()
   }, [tab, filterEstado, filterCategory])
+
+  const fetchReportData = async () => {
+    setLoadingReport(true)
+    try {
+      if (reportSubTab === "sector") {
+        const data = await api.expenses.reports.bySector({ fecha_desde: repFechaDesde, fecha_hasta: repFechaHasta })
+        setReportSectorData(data)
+      } else if (reportSubTab === "fondos") {
+        const data = await api.expenses.reports.fundsStatus()
+        setReportFundsData(data)
+      } else if (reportSubTab === "fiscal") {
+        const data = await api.expenses.reports.fiscalPurchases({
+          fecha_desde: repFechaDesde,
+          fecha_hasta: repFechaHasta,
+          fund_id: repFundId || undefined
+        })
+        setReportFiscalData(data)
+      }
+    } catch (e: any) {
+      toast.error("Error al cargar reporte", e.message)
+    } finally {
+      setLoadingReport(false)
+    }
+  }
+
+  useEffect(() => {
+    if (tab === "reportes") {
+      fetchReportData()
+    }
+  }, [tab, reportSubTab, repFechaDesde, repFechaHasta, repFundId])
+
+  const handleDownloadSectorPdf = async () => {
+    setDownloadingPdf(true)
+    try {
+      await api.expenses.reports.downloadBySectorPdf({ fecha_desde: repFechaDesde, fecha_hasta: repFechaHasta })
+      toast.success("PDF Generado", "El reporte de gastos por sector se descargó correctamente.")
+    } catch (e: any) {
+      toast.error("Error al descargar PDF", e.message)
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
+
+  const handleDownloadFundsPdf = async () => {
+    setDownloadingPdf(true)
+    try {
+      await api.expenses.reports.downloadFundsStatusPdf()
+      toast.success("PDF Generado", "El estado consolidado de fondos fijos se descargó correctamente.")
+    } catch (e: any) {
+      toast.error("Error al descargar PDF", e.message)
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
+
+  const handleDownloadFiscalPdf = async () => {
+    setDownloadingPdf(true)
+    try {
+      await api.expenses.reports.downloadFiscalPurchasesPdf({
+        fecha_desde: repFechaDesde,
+        fecha_hasta: repFechaHasta,
+        fund_id: repFundId || undefined
+      })
+      toast.success("PDF Generado", "El libro fiscal de compras menores se descargó correctamente.")
+    } catch (e: any) {
+      toast.error("Error al descargar PDF", e.message)
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
+
+  const handleDownloadRendicionPdf = async (targetFundId?: string) => {
+    const fid = targetFundId || rendicionFundId || funds[0]?.id
+    if (!fid) {
+      toast.warning("Seleccioná un fondo", "Indicá de qué fondo fijo querés generar el acta de rendición.")
+      return
+    }
+    setDownloadingPdf(true)
+    try {
+      await api.expenses.reports.downloadRendicionPdf(fid)
+      toast.success("Acta Generada", "El acta de rendición con firmas institucionales se descargó correctamente.")
+    } catch (e: any) {
+      toast.error("Error al generar acta de rendición", e.message)
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
 
   const handleCreateExpense = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -584,6 +690,7 @@ export default function ExpensesPage() {
           { k: "arqueos" as Tab, l: "Auditoría de Arqueos", i: Scale, count: pendingCounts.length },
           { k: "sectores" as Tab, l: "Centros de Costo", i: Layers, count: costCenters.length },
           { k: "categories" as Tab, l: "Categorías", i: Wallet, count: categories.length },
+          { k: "reportes" as Tab, l: "Centro de Reportes", i: FileSpreadsheet },
         ].map((t) => {
           const Icon = t.i
           const active = tab === t.k
@@ -1307,6 +1414,622 @@ export default function ExpensesPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* 📊 CENTRO DE REPORTES Y LIQUIDACIÓN DE FONDOS FIJOS */}
+          {tab === "reportes" && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              {/* Header & Subtítulo Institucional */}
+              <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-6 rounded-3xl text-white shadow-xl border border-indigo-500/20 relative overflow-hidden">
+                <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                      Régimen de Fondos Fijos & Contabilidad
+                    </span>
+                    <h2 className="text-2xl font-black tracking-tight mt-2 flex items-center gap-2.5 text-white">
+                      <FileSpreadsheet className="w-7 h-7 text-indigo-400" /> Centro de Reportes y Liquidación de Fondos
+                    </h2>
+                    <p className="text-xs text-slate-300 mt-1">
+                      Auditoría por sector, libro de compras fiscales (DNIT/SET), control de custodias y actas oficiales de rendición.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => fetchReportData()}
+                      disabled={loadingReport}
+                      className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-all flex items-center gap-1.5 border border-white/10"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loadingReport ? "animate-spin" : ""}`} /> Actualizar Datos
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Barra de Filtros y Subpestañas */}
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+                  {/* Selector de Subreporte */}
+                  <div className="flex flex-wrap gap-1.5 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
+                    {[
+                      { id: "sector" as ReportSubTab, label: "Gastos por Sector", icon: Layers },
+                      { id: "fondos" as ReportSubTab, label: "Libro de Fondos Fijos", icon: PiggyBank },
+                      { id: "fiscal" as ReportSubTab, label: "Libro Fiscal IVA", icon: BookOpen },
+                      { id: "rendicion" as ReportSubTab, label: "Rendición y Reposición", icon: FileCheck },
+                    ].map(st => {
+                      const Icon = st.icon
+                      const active = reportSubTab === st.id
+                      return (
+                        <button
+                          key={st.id}
+                          onClick={() => setReportSubTab(st.id)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            active
+                              ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm font-extrabold"
+                              : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                          }`}
+                        >
+                          <Icon className="w-3.5 h-3.5" />
+                          <span>{st.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {/* Selector de Rango de Fechas (Horario Asunción) */}
+                  {reportSubTab !== "fondos" && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/80 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
+                        <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                        <span className="text-[11px] font-bold text-slate-500">Desde:</span>
+                        <input
+                          type="date"
+                          value={repFechaDesde}
+                          onChange={e => setRepFechaDesde(e.target.value)}
+                          className="bg-transparent text-xs font-mono font-bold text-slate-900 dark:text-white outline-none"
+                        />
+                        <span className="text-[11px] font-bold text-slate-500 ml-1">Hasta:</span>
+                        <input
+                          type="date"
+                          value={repFechaHasta}
+                          onChange={e => setRepFechaHasta(e.target.value)}
+                          className="bg-transparent text-xs font-mono font-bold text-slate-900 dark:text-white outline-none"
+                        />
+                      </div>
+
+                      {/* Botones rápidos de período */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            const hoy = getTodayAsuncion()
+                            setRepFechaDesde(hoy)
+                            setRepFechaHasta(hoy)
+                          }}
+                          className="px-2 py-1 rounded-lg text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        >
+                          Hoy
+                        </button>
+                        <button
+                          onClick={() => {
+                            setRepFechaDesde(getStartOfMonthAsuncion())
+                            setRepFechaHasta(getTodayAsuncion())
+                          }}
+                          className="px-2 py-1 rounded-lg text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        >
+                          Este Mes
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* SUBTAB 1: GASTOS POR SECTOR Y CENTRO DE COSTO */}
+                {reportSubTab === "sector" && (
+                  <div className="space-y-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-indigo-50/60 dark:bg-indigo-950/30 p-3.5 rounded-2xl border border-indigo-100 dark:border-indigo-900/50">
+                      <div>
+                        <h4 className="text-sm font-bold text-indigo-950 dark:text-indigo-200">
+                          Informe Consolidado de Gastos por Sector
+                        </h4>
+                        <p className="text-xs text-indigo-700/80 dark:text-indigo-400">
+                          Imputación directa a sectores operativos con prorrateo de gastos globales según peso configurado.
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleDownloadSectorPdf}
+                        disabled={downloadingPdf}
+                        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md hover:shadow-indigo-500/20 flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
+                      >
+                        {downloadingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                        Descargar Acta PDF Firmada
+                      </button>
+                    </div>
+
+                    {loadingReport ? (
+                      <div className="flex justify-center py-12">
+                        <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+                      </div>
+                    ) : reportSectorData ? (
+                      <div className="space-y-5">
+                        {/* KPI Cards */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                            <span className="text-[11px] font-bold text-slate-500 uppercase">Total Período</span>
+                            <p className="text-lg font-black font-mono text-slate-900 dark:text-white mt-1">
+                              {formatPYG(reportSectorData.total_periodo)}
+                            </p>
+                            <span className="text-[10px] text-slate-400 font-medium">
+                              {reportSectorData.total_gastos_count} comprobantes
+                            </span>
+                          </div>
+
+                          <div className="p-3.5 rounded-2xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
+                            <span className="text-[11px] font-bold text-blue-700 dark:text-blue-300 uppercase">Gasto Directo</span>
+                            <p className="text-lg font-black font-mono text-blue-900 dark:text-blue-100 mt-1">
+                              {formatPYG(reportSectorData.por_sector?.reduce((acc: number, s: any) => acc + (s.directo || 0), 0) || 0)}
+                            </p>
+                            <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+                              Imputación por sector
+                            </span>
+                          </div>
+
+                          <div className="p-3.5 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800">
+                            <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 uppercase">Prorrateo Global</span>
+                            <p className="text-lg font-black font-mono text-emerald-900 dark:text-emerald-100 mt-1">
+                              {formatPYG(reportSectorData.por_sector?.reduce((acc: number, s: any) => acc + (s.prorrateado || 0), 0) || 0)}
+                            </p>
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                              Distribución transversal
+                            </span>
+                          </div>
+
+                          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                            <span className="text-[11px] font-bold text-slate-500 uppercase">Sin Asignar</span>
+                            <p className={`text-lg font-black font-mono mt-1 ${reportSectorData.sin_asignar > 0 ? "text-rose-600" : "text-slate-600"}`}>
+                              {formatPYG(reportSectorData.sin_asignar)}
+                            </p>
+                            <span className="text-[10px] text-slate-400 font-medium">
+                              {reportSectorData.sin_asignar > 0 ? "Requiere imputación" : "100% asignado"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Tabla Resumen por Sector */}
+                        <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-100/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
+                                <th className="p-3">Sector / Centro de Costo</th>
+                                <th className="p-3 text-right">Gasto Directo</th>
+                                <th className="p-3 text-right">Prorrateo Global</th>
+                                <th className="p-3 text-right">Total Consolidado</th>
+                                <th className="p-3 text-center">Participación %</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                              {reportSectorData.por_sector?.map((s: any) => {
+                                const pct = reportSectorData.total_periodo > 0 ? (s.total / reportSectorData.total_periodo * 100) : 0
+                                return (
+                                  <tr key={s.cost_center_id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                                    <td className="p-3 font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                      <Building2 className="w-3.5 h-3.5 text-indigo-500" />
+                                      {s.nombre}
+                                    </td>
+                                    <td className="p-3 text-right font-mono text-slate-700 dark:text-slate-300">
+                                      {formatPYG(s.directo)}
+                                    </td>
+                                    <td className="p-3 text-right font-mono text-slate-500">
+                                      {formatPYG(s.prorrateado)}
+                                    </td>
+                                    <td className="p-3 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                                      {formatPYG(s.total)}
+                                    </td>
+                                    <td className="p-3 text-center">
+                                      <div className="flex items-center justify-center gap-2">
+                                        <div className="w-16 bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                                          <div
+                                            className="bg-indigo-600 h-1.5 rounded-full"
+                                            style={{ width: `${Math.min(pct, 100)}%` }}
+                                          />
+                                        </div>
+                                        <span className="font-mono text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                                          {pct.toFixed(1)}%
+                                        </span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Detalle de Comprobantes Recientes */}
+                        {reportSectorData.detalle_gastos?.length > 0 && (
+                          <div className="space-y-2">
+                            <h5 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                              Comprobantes Registrados ({reportSectorData.detalle_gastos.length})
+                            </h5>
+                            <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 max-h-96">
+                              <table className="w-full text-left text-xs border-collapse">
+                                <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
+                                  <tr>
+                                    <th className="p-2.5">Fecha</th>
+                                    <th className="p-2.5">Sector</th>
+                                    <th className="p-2.5">Concepto</th>
+                                    <th className="p-2.5">Proveedor</th>
+                                    <th className="p-2.5">Fondo Fijo</th>
+                                    <th className="p-2.5 text-right">Monto</th>
+                                    <th className="p-2.5 text-center">Comprobante</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                  {reportSectorData.detalle_gastos.map((g: any) => (
+                                    <tr key={g.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                                      <td className="p-2.5 font-mono text-[11px] text-slate-500">{g.fecha_gasto}</td>
+                                      <td className="p-2.5 font-semibold text-slate-800 dark:text-slate-200">{g.sector_nombre || "—"}</td>
+                                      <td className="p-2.5 text-slate-600 dark:text-slate-300 max-w-xs truncate">{g.descripcion}</td>
+                                      <td className="p-2.5 text-slate-600 dark:text-slate-400">{g.proveedor || "—"}</td>
+                                      <td className="p-2.5 text-slate-500">{g.fund_nombre || "Caja Chica"}</td>
+                                      <td className="p-2.5 text-right font-mono font-bold text-slate-900 dark:text-white">{formatPYG(g.monto)}</td>
+                                      <td className="p-2.5 text-center">
+                                        {g.comprobante_url ? (
+                                          <a
+                                            href={`${API_ORIGIN}${g.comprobante_url}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:underline"
+                                          >
+                                            <Paperclip className="w-3 h-3" /> Ver
+                                          </a>
+                                        ) : (
+                                          <span className="text-[10px] text-slate-400">Sin archivo</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
+                {/* SUBTAB 2: LIBRO DE FONDOS FIJOS (CAJAS CHICAS) */}
+                {reportSubTab === "fondos" && (
+                  <div className="space-y-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-50/60 dark:bg-emerald-950/30 p-3.5 rounded-2xl border border-emerald-100 dark:border-emerald-900/50">
+                      <div>
+                        <h4 className="text-sm font-bold text-emerald-950 dark:text-emerald-200">
+                          Libro Consolidado y Monitoreo de Fondos Fijos
+                        </h4>
+                        <p className="text-xs text-emerald-700/80 dark:text-emerald-400">
+                          Control de saldos en gaveta, nivel de liquidez por sector, alertas de reposición y custodios.
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleDownloadFundsPdf}
+                        disabled={downloadingPdf}
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-md hover:shadow-emerald-500/20 flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
+                      >
+                        {downloadingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                        Descargar Libro de Fondos PDF (A4 Landscape)
+                      </button>
+                    </div>
+
+                    {loadingReport ? (
+                      <div className="flex justify-center py-12">
+                        <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+                      </div>
+                    ) : reportFundsData ? (
+                      <div className="space-y-5">
+                        {/* KPI Cards Fondos */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                            <span className="text-[11px] font-bold text-slate-500 uppercase">Monto Total Autorizado</span>
+                            <p className="text-lg font-black font-mono text-slate-900 dark:text-white mt-1">
+                              {formatPYG(reportFundsData.reduce((acc, f) => acc + (f.monto_autorizado || 0), 0))}
+                            </p>
+                            <span className="text-[10px] text-slate-400 font-medium">{reportFundsData.length} fondos registrados</span>
+                          </div>
+
+                          <div className="p-3.5 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800">
+                            <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 uppercase">Disponible en Gavetas</span>
+                            <p className="text-lg font-black font-mono text-emerald-900 dark:text-emerald-100 mt-1">
+                              {formatPYG(reportFundsData.reduce((acc, f) => acc + (f.saldo_actual || 0), 0))}
+                            </p>
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Efectivo para cambio/gastos</span>
+                          </div>
+
+                          <div className="p-3.5 rounded-2xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
+                            <span className="text-[11px] font-bold text-blue-700 dark:text-blue-300 uppercase">Gastado / A Reponer</span>
+                            <p className="text-lg font-black font-mono text-blue-900 dark:text-blue-100 mt-1">
+                              {formatPYG(reportFundsData.reduce((acc, f) => acc + (f.gastado || 0), 0))}
+                            </p>
+                            <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">Comprobantes acumulados</span>
+                          </div>
+
+                          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                            <span className="text-[11px] font-bold text-slate-500 uppercase">Alertas Reposición</span>
+                            <p className="text-lg font-black font-mono mt-1 text-rose-600">
+                              {reportFundsData.filter(f => f.alerta_reposicion).length} Fondos
+                            </p>
+                            <span className="text-[10px] text-slate-400 font-medium">Saldo menor al 20%</span>
+                          </div>
+                        </div>
+
+                        {/* Tabla de Fondos */}
+                        <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-100/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
+                                <th className="p-3">Fondo / Sector</th>
+                                <th className="p-3">Custodio Responsable</th>
+                                <th className="p-3 text-right">Monto Autorizado</th>
+                                <th className="p-3 text-right">Saldo en Gaveta</th>
+                                <th className="p-3 text-right">Gastado / Por Rendir</th>
+                                <th className="p-3 text-center">Nivel de Liquidez</th>
+                                <th className="p-3 text-center">Estado</th>
+                                <th className="p-3 text-right">Acción</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                              {reportFundsData.map((f: any) => (
+                                <tr key={f.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                                  <td className="p-3 font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                    <PiggyBank className="w-4 h-4 text-emerald-500" />
+                                    {f.nombre}
+                                  </td>
+                                  <td className="p-3 text-slate-600 dark:text-slate-300 font-medium">
+                                    {f.custodio_nombre || "Sin custodio asignado"}
+                                  </td>
+                                  <td className="p-3 text-right font-mono font-semibold text-slate-700 dark:text-slate-300">
+                                    {formatPYG(f.monto_autorizado)}
+                                  </td>
+                                  <td className="p-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                    {formatPYG(f.saldo_actual)}
+                                  </td>
+                                  <td className="p-3 text-right font-mono text-slate-500">
+                                    {formatPYG(f.gastado)}
+                                  </td>
+                                  <td className="p-3 text-center">
+                                    <div className="flex items-center justify-center gap-2">
+                                      <div className="w-16 bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                                        <div
+                                          className={`h-1.5 rounded-full ${
+                                            f.liquidez_pct < 20 ? "bg-rose-500" : f.liquidez_pct < 40 ? "bg-amber-500" : "bg-emerald-500"
+                                          }`}
+                                          style={{ width: `${Math.min(f.liquidez_pct, 100)}%` }}
+                                        />
+                                      </div>
+                                      <span className="font-mono text-[11px] font-bold">
+                                        {f.liquidez_pct}%
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="p-3 text-center">
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                      f.alerta_reposicion
+                                        ? "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border border-rose-200"
+                                        : f.liquidez_pct < 40
+                                        ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+                                        : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                                    }`}>
+                                      {f.estado_desc}
+                                    </span>
+                                  </td>
+                                  <td className="p-3 text-right">
+                                    <button
+                                      onClick={() => handleDownloadRendicionPdf(f.id)}
+                                      disabled={downloadingPdf}
+                                      className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 text-[11px] font-bold transition-all inline-flex items-center gap-1"
+                                      title="Descargar Acta de Rendición"
+                                    >
+                                      <Printer className="w-3 h-3" /> Rendición
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
+                {/* SUBTAB 3: LIBRO FISCAL DE COMPRAS MENORES (IVA DNIT) */}
+                {reportSubTab === "fiscal" && (
+                  <div className="space-y-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-amber-50/60 dark:bg-amber-950/30 p-3.5 rounded-2xl border border-amber-100 dark:border-amber-900/50">
+                      <div>
+                        <h4 className="text-sm font-bold text-amber-950 dark:text-amber-200">
+                          Libro Fiscal de Compras Menores y Crédito Fiscal IVA
+                        </h4>
+                        <p className="text-xs text-amber-700/80 dark:text-amber-400">
+                          Discriminación de Facturas por Caja Chica: Bases 10%, 5%, Exentas y Liquidación de Impuesto DNIT / SET.
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleDownloadFiscalPdf}
+                        disabled={downloadingPdf}
+                        className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all shadow-md hover:shadow-amber-500/20 flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
+                      >
+                        {downloadingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                        Descargar Libro Compras Fiscal PDF (A4 Landscape)
+                      </button>
+                    </div>
+
+                    {loadingReport ? (
+                      <div className="flex justify-center py-12">
+                        <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+                      </div>
+                    ) : reportFiscalData ? (
+                      <div className="space-y-5">
+                        {/* KPI Cards Fiscales */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                            <span className="text-[11px] font-bold text-slate-500 uppercase">Total Compras</span>
+                            <p className="text-lg font-black font-mono text-slate-900 dark:text-white mt-1">
+                              {formatPYG(reportFiscalData.total_general)}
+                            </p>
+                            <span className="text-[10px] text-slate-400 font-medium">
+                              {reportFiscalData.items?.length || 0} comprobantes
+                            </span>
+                          </div>
+
+                          <div className="p-3.5 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800">
+                            <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 uppercase">Crédito IVA 10%</span>
+                            <p className="text-lg font-black font-mono text-emerald-900 dark:text-emerald-100 mt-1">
+                              {formatPYG(reportFiscalData.total_iva_10)}
+                            </p>
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                              Gravada: {formatPYG(reportFiscalData.total_gravada_10)}
+                            </span>
+                          </div>
+
+                          <div className="p-3.5 rounded-2xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
+                            <span className="text-[11px] font-bold text-blue-700 dark:text-blue-300 uppercase">Crédito IVA 5%</span>
+                            <p className="text-lg font-black font-mono text-blue-900 dark:text-blue-100 mt-1">
+                              {formatPYG(reportFiscalData.total_iva_5)}
+                            </p>
+                            <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">Canasta básica</span>
+                          </div>
+
+                          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                            <span className="text-[11px] font-bold text-slate-500 uppercase">Exentas / No Gravadas</span>
+                            <p className="text-lg font-black font-mono text-slate-700 dark:text-slate-300 mt-1">
+                              {formatPYG(reportFiscalData.total_exentas)}
+                            </p>
+                            <span className="text-[10px] text-slate-400 font-medium">Combustibles / tasas</span>
+                          </div>
+                        </div>
+
+                        {/* Tabla Fiscal */}
+                        <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-100/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
+                                <th className="p-2.5">Fecha</th>
+                                <th className="p-2.5">RUC</th>
+                                <th className="p-2.5">Proveedor</th>
+                                <th className="p-2.5">N° Factura</th>
+                                <th className="p-2.5">Timbrado</th>
+                                <th className="p-2.5">Sector</th>
+                                <th className="p-2.5 text-right">Gravada 10%</th>
+                                <th className="p-2.5 text-right">IVA 10%</th>
+                                <th className="p-2.5 text-right">Exentas</th>
+                                <th className="p-2.5 text-right">Total (Gs.)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                              {reportFiscalData.items?.map((it: any) => (
+                                <tr key={it.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                                  <td className="p-2.5 font-mono text-[11px] text-slate-500">{it.fecha}</td>
+                                  <td className="p-2.5 font-mono text-[11px] text-slate-700 dark:text-slate-300">{it.ruc}</td>
+                                  <td className="p-2.5 font-semibold text-slate-900 dark:text-white max-w-[150px] truncate">{it.proveedor}</td>
+                                  <td className="p-2.5 font-mono text-[11px] text-slate-700 dark:text-slate-300">{it.numero_factura}</td>
+                                  <td className="p-2.5 font-mono text-[11px] text-slate-500">{it.timbrado}</td>
+                                  <td className="p-2.5 text-slate-600 dark:text-slate-300">{it.sector}</td>
+                                  <td className="p-2.5 text-right font-mono text-slate-600 dark:text-slate-400">{formatPYG(it.gravada_10)}</td>
+                                  <td className="p-2.5 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">{formatPYG(it.iva_10)}</td>
+                                  <td className="p-2.5 text-right font-mono text-slate-500">{formatPYG(it.exentas)}</td>
+                                  <td className="p-2.5 text-right font-mono font-black text-slate-900 dark:text-white">{formatPYG(it.total)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
+                {/* SUBTAB 4: GENERADOR DE RENDICIÓN Y REPOSICIÓN OFICIAL */}
+                {reportSubTab === "rendicion" && (
+                  <div className="space-y-6">
+                    <div className="bg-slate-50 dark:bg-slate-800/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                          <h4 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <FileCheck className="w-5 h-5 text-indigo-600" /> Solicitud de Reposición y Rendición de Fondo Fijo
+                          </h4>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Generá el acta impresa con la relación de comprobantes para que el custodio entregue a Tesorería y se libre el cheque o desembolso.
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleDownloadRendicionPdf()}
+                          disabled={downloadingPdf || funds.length === 0}
+                          className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md hover:shadow-indigo-500/20 flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
+                        >
+                          {downloadingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                          Descargar Acta de Rendición PDF
+                        </button>
+                      </div>
+
+                      {/* Selector de Fondo Fijo */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                        <div className="sm:col-span-2">
+                          <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                            Seleccionar Caja Chica / Fondo Fijo del Sector:
+                          </label>
+                          <select
+                            value={rendicionFundId || (funds[0]?.id || "")}
+                            onChange={e => setRendicionFundId(e.target.value)}
+                            className="input-field w-full text-xs font-semibold"
+                          >
+                            {funds.map(f => (
+                              <option key={f.id} value={f.id}>
+                                {f.nombre} — Saldo Disp: {formatPYG(f.saldo_actual)} / Aut: {formatPYG(f.monto_autorizado)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Resumen del Fondo Seleccionado */}
+                    {(() => {
+                      const curFund = funds.find(f => f.id === (rendicionFundId || funds[0]?.id))
+                      if (!curFund) return null
+                      const aut = curFund.monto_autorizado || 0
+                      const sal = curFund.saldo_actual || 0
+                      const gast = aut - sal
+                      return (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                            <span className="text-xs font-bold text-slate-500 uppercase">Fondo Autorizado</span>
+                            <p className="text-xl font-black font-mono text-slate-900 dark:text-white mt-1">
+                              {formatPYG(aut)}
+                            </p>
+                            <span className="text-[11px] text-slate-400">Límite asignado a {curFund.nombre}</span>
+                          </div>
+
+                          <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+                            <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase">Saldo Actual en Gaveta</span>
+                            <p className="text-xl font-black font-mono text-emerald-900 dark:text-emerald-100 mt-1">
+                              {formatPYG(sal)}
+                            </p>
+                            <span className="text-[11px] text-emerald-600 dark:text-emerald-400">Disponible para gastos</span>
+                          </div>
+
+                          <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800">
+                            <span className="text-xs font-bold text-rose-700 dark:text-rose-300 uppercase">Total a Reponer por Tesorería</span>
+                            <p className="text-xl font-black font-mono text-rose-900 dark:text-rose-100 mt-1">
+                              {formatPYG(gast)}
+                            </p>
+                            <span className="text-[11px] text-rose-600 dark:text-rose-400">Monto total de los comprobantes</span>
+                          </div>
+                        </div>
+                      )
+                    })()}
+                  </div>
+                )}
               </div>
             </div>
           )}

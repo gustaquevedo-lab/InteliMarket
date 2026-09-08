@@ -297,6 +297,16 @@ async def approve_credit_request(db: AsyncSession, request_id: str, user_id: str
         await db.commit()
 
     await db.refresh(request)
+    try:
+        from api.src.events.manager import manager
+        await manager.broadcast(str(request.company_id), {
+            "type": "credit_approval_resolved",
+            "request_id": str(request.id),
+            "estado": request.estado,
+            "completo": request.estado == "aprobado",
+        })
+    except Exception:
+        pass
     return {"success": True, "request": request, "completo": request.estado == "aprobado"}
 
 
@@ -340,6 +350,17 @@ async def reject_credit_request(db: AsyncSession, request_id: str, user_id: str,
     await db.flush()
     await db.commit()
     await db.refresh(request)
+    try:
+        from api.src.events.manager import manager
+        await manager.broadcast(str(request.company_id), {
+            "type": "credit_approval_resolved",
+            "request_id": str(request.id),
+            "estado": request.estado,
+            "completo": True,
+            "motivo": motivo,
+        })
+    except Exception:
+        pass
     return {"success": True, "request": request}
 
 

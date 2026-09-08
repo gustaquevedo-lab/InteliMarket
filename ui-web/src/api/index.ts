@@ -2151,6 +2151,22 @@ export const api = {
         confirm: (countId: string, data: { ajustar: boolean; observaciones?: string }) => client.post<PettyCashFundCount>(`/v1/petty-cash-funds/counts/${countId}/confirm`, data),
       },
     },
+    reports: {
+      bySector: (params: { fecha_desde: string; fecha_hasta: string }) =>
+        client.get<any>("/v1/expenses/reports/by-sector", params as any),
+      downloadBySectorPdf: (params: { fecha_desde: string; fecha_hasta: string }) =>
+        downloadAuthenticated("/v1/expenses/reports/by-sector.pdf", params, `gastos_por_sector_${params.fecha_desde}_${params.fecha_hasta}.pdf`),
+      fiscalPurchases: (params: { fecha_desde: string; fecha_hasta: string; fund_id?: string }) =>
+        client.get<any>("/v1/expenses/reports/fiscal-purchases", params as any),
+      downloadFiscalPurchasesPdf: (params: { fecha_desde: string; fecha_hasta: string; fund_id?: string }) =>
+        downloadAuthenticated("/v1/expenses/reports/fiscal-purchases.pdf", params, `libro_compras_fiscal_${params.fecha_desde}_${params.fecha_hasta}.pdf`),
+      fundsStatus: () =>
+        client.get<any[]>("/v1/petty-cash-funds/reports/funds-status"),
+      downloadFundsStatusPdf: () =>
+        downloadAuthenticated("/v1/petty-cash-funds/reports/funds-status.pdf", {}, `estado_fondos_fijos.pdf`),
+      downloadRendicionPdf: (fundId: string) =>
+        downloadAuthenticated(`/v1/petty-cash-funds/${fundId}/export/rendicion.pdf`, {}, `acta_rendicion_fondo_${fundId.slice(0, 8)}.pdf`),
+    },
   },
   financial: {
     invoices: {
