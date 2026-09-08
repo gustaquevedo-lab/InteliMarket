@@ -6,26 +6,11 @@ import {
   ChevronRight, Building2, Store, Activity, Layers, Download, Check, Sparkles, X,
   PackageCheck, Inbox, Send
 } from "lucide-react"
-import { api, type BankAccount, type BankTransaction, type VaultDashboard, type VaultEntry } from "../../api"
+import { api, downloadAuthenticated, type BankAccount, type BankTransaction, type VaultDashboard, type VaultEntry } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatDateTime } from "../../utils/format"
 
-const API_BASE = import.meta.env.VITE_API_URL || "/api"
-
-async function downloadPdf(endpoint: string, filename: string) {
-  const token = localStorage.getItem("access_token")
-  const res = await fetch(`${API_BASE}${endpoint}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-  if (!res.ok) throw new Error("No se pudo generar el PDF")
-  const blob = await res.blob()
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
-}
+const downloadPdf = (endpoint: string, filename: string) => downloadAuthenticated(endpoint, undefined, filename)
 
 interface ApSupplierAging {
   supplier_id: string

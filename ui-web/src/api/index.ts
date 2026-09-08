@@ -19,7 +19,7 @@ export interface CustomerLostDemand {
 
 const rawApiUrl = import.meta.env.VITE_API_URL || ""
 const isLocalhostOrRelative = !rawApiUrl || rawApiUrl.startsWith("/") || rawApiUrl.includes("intelimarket-ia")
-const API_BASE = isLocalhostOrRelative ? "/api" : rawApiUrl
+export const API_BASE = isLocalhostOrRelative ? "/api" : rawApiUrl
 export const API_ORIGIN = API_BASE.startsWith("http") ? API_BASE.replace(/\/api\/?$/, "") : (typeof window !== "undefined" ? window.location.origin : "")
 export const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
@@ -140,7 +140,7 @@ export const client = {
   delete: <T>(endpoint: string) => request<T>(endpoint, { method: "DELETE" }),
 }
 
-async function downloadAuthenticated(path: string, params: Record<string, any> | undefined, filename: string) {
+export async function downloadAuthenticated(path: string, params: Record<string, any> | undefined, filename: string) {
   const token = localStorage.getItem("access_token")
   const cleanPath = path.startsWith("/") ? path : `/${path}`
   const qs = params ? new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => [k, String(v)]))).toString() : ""
@@ -1120,6 +1120,10 @@ export const api = {
       get: (id: string) => client.get<any>(`/v1/caja/treasury-remittances/${id}`),
       receive: (id: string, data?: { observaciones?: string }) => client.post<any>(`/v1/caja/treasury-remittances/${id}/receive`, data || {}),
     },
+    downloadArqueoConsolidadoPdf: (fecha_desde: string, fecha_hasta: string) =>
+      downloadAuthenticated("/v1/caja/export/arqueo.pdf", { fecha_desde, fecha_hasta }, `acta_arqueo_consolidado_${fecha_desde}_${fecha_hasta}.pdf`),
+    downloadCierrePdf: (sessionId: string) =>
+      downloadAuthenticated(`/v1/cash-sessions/${sessionId}/export/cierre.pdf`, undefined, `cierre_caja_${sessionId.slice(0, 8)}.pdf`),
   },
   vault: {
     dashboard: () => client.get<VaultDashboard>("/v1/vault/dashboard"),

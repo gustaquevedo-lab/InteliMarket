@@ -8,6 +8,8 @@ import {
 } from "lucide-react"
 import {
   api,
+  downloadAuthenticated,
+  API_BASE,
   type CashRegister,
   type CashHandoff,
   type DonationStats,
@@ -19,30 +21,7 @@ import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDateTime } from "../../utils/format"
 
-const API_BASE = import.meta.env.VITE_API_URL || "/api"
-
-async function downloadPdf(endpoint: string, filename: string) {
-  const token = localStorage.getItem("access_token")
-  const res = await fetch(`${API_BASE}${endpoint}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-  if (!res.ok) {
-    let errorDetail = "No se pudo generar el PDF"
-    try {
-      const errJson = await res.json()
-      if (errJson?.detail) errorDetail = errJson.detail
-    } catch {}
-    throw new Error(errorDetail)
-  }
-  const blob = await res.blob()
-  const fileBlob = new Blob([blob], { type: "application/pdf" })
-  const url = URL.createObjectURL(fileBlob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 10000)
-}
+const downloadPdf = (endpoint: string, filename: string) => downloadAuthenticated(endpoint, undefined, filename)
 
 interface SessionSummary {
   id: string
