@@ -55,6 +55,7 @@ class ProductCreate(BaseModel):
 
 
 class ProductUpdate(BaseModel):
+    sku: Optional[str] = None
     categoria_id: Optional[UUID] = None
     supplier_id: Optional[UUID] = None
     codigo_barra: Optional[str] = None

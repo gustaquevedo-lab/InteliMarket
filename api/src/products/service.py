@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import select, func, text, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from fastapi import HTTPException
 
 from api.src.products.models import Product, ProductCategory
 from api.src.products.schemas import ProductCreate, ProductUpdate, CategoryCreate
@@ -79,9 +80,67 @@ async def get_product(db: AsyncSession, product_id: str) -> Product | None:
     except ValueError:
         return None
     result = await db.execute(
-        select(Product).options(selectinload(Product.categoria)).where(Product.id == p_uuid)
+        select(Product).options(selectinload(Product.categoria), selectinload(Product.supplier)).where(Product.id == p_uuid)
     )
     return result.scalar_one_or_none()
+
+
+async def update_product(db: AsyncSession, product_id: str, data: ProductUpdate) -> Product | None:
+    try:
+        p_uuid = UUID(product_id)
+    except ValueError:
+        return None
+
+    result = await db.execute(
+        select(Product)
+        .options(selectinload(Product.categoria), selectinload(Product.supplier))
+        .where(Product.id == p_uuid)
+    )
+    product = result.scalar_one_or_none()
+    if not product:
+        return None
+
+    update_dict = data.model_dump(exclude_unset=True)
+
+    # Validar que si el SKU cambia, no choque con otro de la misma empresa
+    new_sku = update_dict.get("sku")
+    if new_sku and str(new_sku).strip() and str(new_sku).strip() != product.sku:
+        clean_sku = str(new_sku).strip()
+        existing = await get_product_by_sku(db, str(product.company_id), clean_sku)
+        if existing and existing.id != product.id:
+            raise HTTPException(status_code=400, detail="Ya existe otro producto con ese SKU")
+        update_dict["sku"] = clean_sku
+
+    # Normalizar código de barras si viene en el payload
+    if "codigo_barra" in update_dict:
+        cb = update_dict["codigo_barra"]
+        update_dict["codigo_barra"] = cb.strip() if isinstance(cb, str) and cb.strip() else None
+
+    for field, value in update_dict.items():
+        if hasattr(product, field):
+            setattr(product, field, value)
+
+    product.updated_at = func.now()
+    await db.flush()
+    await db.refresh(product)
+    return product
+
+
+async def delete_product(db: AsyncSession, product_id: str) -> bool:
+    try:
+        p_uuid = UUID(product_id)
+    except ValueError:
+        return False
+
+    result = await db.execute(select(Product).where(Product.id == p_uuid))
+    product = result.scalar_one_or_none()
+    if not product:
+        return False
+
+    product.activo = False
+    product.updated_at = func.now()
+    await db.flush()
+    return True
 
 
 async def get_product_by_sku(db: AsyncSession, company_id: str, sku: str) -> Product | None:

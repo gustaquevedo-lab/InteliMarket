@@ -59,6 +59,14 @@ class Product(Base):
     categoria = relationship("ProductCategory")
     supplier = relationship("Supplier", foreign_keys=[supplier_id], lazy="select")
 
+    @property
+    def categoria_nombre(self) -> str | None:
+        return self.categoria.nombre if self.categoria else None
+
+    @property
+    def supplier_nombre(self) -> str | None:
+        return self.supplier.razon_social if self.supplier else None
+
 
 # Alias expected by some modules (customer360, etc.)
 Category = ProductCategory
