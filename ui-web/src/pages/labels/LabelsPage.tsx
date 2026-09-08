@@ -38,6 +38,7 @@ import { api, type Product, type Supplier, type Category } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
 import { renderGondola, DISENO_GONDOLA_DEFAULT, FUENTES_ETIQUETA, type DisenoGondola } from "../../utils/labelCanvas"
+import { precioEstandar } from "../../utils/precios"
 // Estático: ver el comentario en GondolaPage -- el import dinámico rompía la
 // impresión en pestañas abiertas desde antes de un despliegue.
 import { printRawViaQz, listarImpresoras } from "../../utils/qzTray"
@@ -382,7 +383,9 @@ export default function LabelsPage() {
   }, [])
 
   const addProduct = (p: Product, qty: number = 1) => {
-    const precio = Number(p.precio_venta) || 0
+    // Precio de lista, no el de la promo vigente: la etiqueta sigue en la
+    // gondola mucho despues de que la oferta termino.
+    const precio = precioEstandar(p)
     // Generar escala mayorista estándar sugerida si no trae
     const defaultScales: PriceScaleTier[] = [
       { min_qty: 3, precio_unitario: Math.round(precio * 0.9) },

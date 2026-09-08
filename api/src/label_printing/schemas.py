@@ -117,6 +117,11 @@ class ResolvedLabelItem(BaseModel):
     cantidad: int
     categoria_nombre: Optional[str] = None
     escalas: list[PriceScaleTierItem] = Field(default_factory=list)
+    # precio_venta de arriba es SIEMPRE el estandar. Estos dos existen solo
+    # para poder avisar en pantalla que el producto esta en oferta hoy y que
+    # el cartel, a proposito, no la refleja.
+    en_promocion: bool = False
+    precio_promocional: Optional[Decimal] = None
 
 
 # ── Impresión Zebra ────────────────────────────────────────────────────────

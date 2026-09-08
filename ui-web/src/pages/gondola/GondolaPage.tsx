@@ -7,6 +7,7 @@ import { renderGondola, canvasAZplGrafico, DISENO_GONDOLA_DEFAULT, type DisenoGo
 // fetch dynamically imported module"), porque el chunk cambia de nombre en
 // cada build. Cargarlo junto con la página elimina esa ventana de rotura.
 import { printRawViaQz } from "../../utils/qzTray"
+import { precioEstandar, estaEnPromocion } from "../../utils/precios"
 
 /**
  * Estación de etiquetas de góndola.
@@ -29,6 +30,9 @@ interface ItemCola {
   stock: number | null
   stock_reservado: number
   stock_minimo: number
+  // El cartel lleva el precio de lista. Esto es solo para avisarle al
+  // gondolero que hoy se vende mas barato, y que eso es a proposito.
+  en_promocion: boolean
 }
 
 /**
@@ -159,7 +163,13 @@ export default function GondolaPage() {
       const stockReservado = stockResp ? Number(stockResp.cantidad_reservada) || 0 : 0
       // Solo cuenta como mayorista si de verdad es más barato: hay productos
       // con una escala cargada al mismo precio, y mostrarla sería engañoso.
-      const precio = Number(p.precio_venta) || 0
+      // Precio de LISTA, nunca el promocional: la etiqueta sobrevive a la
+      // oferta. El backend ya lo resuelve asi; el fallback repite el criterio
+      // por si la consulta de escalas fallo.
+      // Se toma del producto y no de la respuesta de escalas: products.list ya
+      // trae precio_regular, asi que el criterio no depende de que el backend
+      // este al dia. Un solo lugar decide que es "el precio estandar".
+      const precio = precioEstandar(p)
       escalas = escalas.filter((e) => e.precio_unitario > 0 && e.precio_unitario < precio)
 
       setCola((prev) => {
@@ -177,6 +187,7 @@ export default function GondolaPage() {
             stock: Number.isFinite(stock as number) ? stock : null,
             stock_reservado: stockReservado,
             stock_minimo: Number(p.stock_minimo) || 0,
+            en_promocion: estaEnPromocion(p),
           },
           ...prev,
         ]
@@ -334,6 +345,11 @@ export default function GondolaPage() {
                     <span className="text-slate-600"> · sin mayorista</span>
                   )}
                 </div>
+                {i.en_promocion && (
+                  <div className="mt-1 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-sky-500/15 text-sky-300 text-[10px] font-bold">
+                    Hoy en promoción — el cartel lleva el precio normal
+                  </div>
+                )}
               </div>
               <StockBadge item={i} />
               <div className="flex items-center gap-1.5">

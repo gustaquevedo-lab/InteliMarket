@@ -88,14 +88,36 @@ async def delete_template(db: AsyncSession, company_id: str, template_id: str) -
 
 # ── Resolución de origen ────────────────────────────────────────────────────
 
+def _precio_estandar(product: Product):
+    """Precio de lista del producto, ignorando promociones vigentes.
+
+    Las etiquetas de gondola sobreviven a las promociones: una oferta dura
+    dias, el cartel se queda colgado meses. Si se imprimiera el precio de hoy,
+    la gondola quedaria anunciando un precio que ya no existe.
+
+    Cuando hay una promo de precio fijo vigente, promotions/service.py PISA
+    Product.precio_venta con el precio promocional y guarda el de lista en
+    precio_regular. Asi que el estandar es precio_regular cuando lo hay.
+
+    Se exige > 0 porque hay filas heredadas del legacy con precio_regular en
+    cero: tomarlas al pie de la letra imprimiria carteles de Gs. 0.
+    """
+    regular = product.precio_regular or 0
+    return regular if regular > 0 else (product.precio_venta or 0)
+
+
 def _to_resolved(product: Product, cantidad: int, costo_unitario=None, proveedor_nombre: str | None = None, fecha: str | None = None) -> ResolvedLabelItem:
+    estandar = _precio_estandar(product)
+    en_promo = bool(product.precio_venta is not None and estandar != product.precio_venta)
     return ResolvedLabelItem(
         product_id=product.id,
         nombre=product.nombre,
         categoria_nombre=product.categoria.nombre if product.categoria else None,
         sku=product.sku,
         codigo_barra=product.codigo_barra,
-        precio_venta=product.precio_venta or 0,
+        precio_venta=estandar,
+        en_promocion=en_promo,
+        precio_promocional=product.precio_venta if en_promo else None,
         costo_unitario=costo_unitario if costo_unitario is not None else product.costo_promedio,
         proveedor_nombre=proveedor_nombre,
         fecha=fecha,
