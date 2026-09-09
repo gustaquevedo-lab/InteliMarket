@@ -14,6 +14,7 @@ import {
 import { api } from "../../api"
 import { formatPYG } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
+import { useTheme } from "../../context/ThemeContext"
 
 interface Promotion360ModalProps {
   promoId: string
@@ -29,6 +30,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
   onUpdate
 }) => {
   const { addToast } = useToast()
+  const { dark: isDark } = useTheme()
   const [activeTab, setActiveTab] = useState<TabType>("finanzas")
   const [loading, setLoading] = useState(true)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
@@ -127,7 +129,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
         {/* HEADER SUPERIOR */}
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/60 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-500/20 border border-amber-300 dark:border-amber-500/40 flex items-center justify-center text-amber-700 dark:text-amber-400">
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
@@ -216,8 +218,8 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
             onClick={() => setActiveTab("clientes")}
             className={`py-3 px-3.5 border-b-2 flex items-center gap-2 transition whitespace-nowrap ${
               activeTab === "clientes"
-                ? "border-amber-500 text-amber-400 font-semibold"
-                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-200"
+                ? "border-amber-500 text-amber-600 dark:text-amber-400 font-bold"
+                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
             }`}
           >
             <Users className="w-4 h-4" />
@@ -227,22 +229,22 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
             onClick={() => setActiveTab("ia")}
             className={`py-3 px-3.5 border-b-2 flex items-center gap-2 transition whitespace-nowrap ${
               activeTab === "ia"
-                ? "border-amber-500 text-amber-400 font-semibold"
-                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-200"
+                ? "border-amber-500 text-amber-600 dark:text-amber-400 font-bold"
+                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
             }`}
           >
-            <Sparkles className="w-4 h-4 text-purple-400" />
+            <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" />
             <span>Trade Intelligence (IA)</span>
           </button>
           <button
             onClick={() => setActiveTab("informe_encargados")}
             className={`py-3 px-3.5 border-b-2 flex items-center gap-2 transition whitespace-nowrap ${
               activeTab === "informe_encargados"
-                ? "border-amber-500 text-amber-400 font-semibold"
-                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-200"
+                ? "border-amber-500 text-amber-600 dark:text-amber-400 font-bold"
+                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
             }`}
           >
-            <FileText className="w-4 h-4 text-blue-400" />
+            <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
             <span>Informe para Encargados (Salón y Cajas)</span>
           </button>
         </div>
@@ -251,7 +253,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
         <div className="flex-1 overflow-y-auto p-6 bg-white dark:bg-slate-900/50">
           {loading ? (
             <div className="flex flex-col items-center justify-center h-64 gap-3 text-slate-500 dark:text-slate-400">
-              <Loader2 className="w-8 h-8 animate-spin text-amber-400" />
+              <Loader2 className="w-8 h-8 animate-spin text-amber-600 dark:text-amber-400" />
               <p className="text-sm">Consolidando métricas comerciales y financieras...</p>
             </div>
           ) : !data ? (
@@ -342,7 +344,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                                   : 50
                               }%`
                             }}
-                            className="bg-cyan-500 flex items-center justify-center text-[10px] font-bold text-white px-2 truncate transition-all"
+                            className="bg-cyan-600 dark:bg-cyan-500 flex items-center justify-center text-[10px] font-bold text-white px-2 truncate transition-all"
                             title="Aporte Proveedor Scan-Back"
                           >
                             Proveedor: {formatPYG(data.total_nc_scanback_pyg)}
@@ -459,20 +461,20 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
               {/* TAB 2: GRÁFICOS DE DESEMPEÑO */}
               {activeTab === "graficos" && (
                 <div className="space-y-6 animate-in fade-in duration-150">
-                  <div className="bg-slate-100/60 dark:bg-slate-100 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-5">
+                  <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-xl p-5">
                     <div className="flex items-center justify-between mb-4">
                       <div>
-                        <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">Curva Diaria de Ventas Promocionales (Gs.)</h3>
+                        <h3 className="text-sm font-bold text-slate-900 dark:text-slate-200">Curva Diaria de Ventas Promocionales (Gs.)</h3>
                         <p className="text-xs text-slate-500 dark:text-slate-400">Evolución de facturación real vs unidades vendidas por día</p>
                       </div>
                       <div className="flex items-center gap-4 text-xs">
                         <div className="flex items-center gap-1.5">
                           <span className="w-3 h-3 rounded bg-emerald-500 inline-block" />
-                          <span className="text-slate-600 dark:text-slate-300">Ventas Promo (Gs.)</span>
+                          <span className="text-slate-700 dark:text-slate-300 font-medium">Ventas Promo (Gs.)</span>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <span className="w-3 h-3 rounded bg-amber-500 inline-block" />
-                          <span className="text-slate-600 dark:text-slate-300">Descuento Cedido (Gs.)</span>
+                          <span className="text-slate-700 dark:text-slate-300 font-medium">Descuento Cedido (Gs.)</span>
                         </div>
                       </div>
                     </div>
@@ -491,20 +493,28 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                                 <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.0} />
                               </linearGradient>
                             </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                            <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#334155" : "#e2e8f0"} />
                             <XAxis
                               dataKey="fecha"
-                              stroke="#94a3b8"
-                              tick={{ fontSize: 11 }}
+                              stroke={isDark ? "#94a3b8" : "#64748b"}
+                              tick={{ fontSize: 11, fill: isDark ? "#94a3b8" : "#64748b" }}
                               tickFormatter={(val) => val.slice(5)}
                             />
                             <YAxis
-                              stroke="#94a3b8"
-                              tick={{ fontSize: 11 }}
+                              stroke={isDark ? "#94a3b8" : "#64748b"}
+                              tick={{ fontSize: 11, fill: isDark ? "#94a3b8" : "#64748b" }}
                               tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`}
                             />
                             <Tooltip
-                              contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: "8px" }}
+                              contentStyle={{
+                                backgroundColor: isDark ? "#0f172a" : "#ffffff",
+                                borderColor: isDark ? "#334155" : "#cbd5e1",
+                                borderRadius: "8px",
+                                color: isDark ? "#f8fafc" : "#0f172a",
+                                boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)"
+                              }}
+                              itemStyle={{ color: isDark ? "#f8fafc" : "#0f172a" }}
+                              labelStyle={{ color: isDark ? "#94a3b8" : "#475569", fontWeight: 600 }}
                               formatter={(value: any) => [formatPYG(value), ""]}
                               labelFormatter={(label) => `Fecha: ${label}`}
                             />
@@ -625,7 +635,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                   {/* Score Card */}
                   <div className="bg-gradient-to-r from-purple-50 via-slate-50 to-indigo-50 dark:from-purple-950/40 dark:via-slate-800/60 dark:to-indigo-950/40 border border-purple-200 dark:border-purple-800/40 rounded-xl p-5 flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 rounded-2xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-600 dark:text-purple-300">
+                      <div className="w-14 h-14 rounded-2xl bg-purple-100 dark:bg-purple-500/20 border border-purple-300 dark:border-purple-500/40 flex items-center justify-center text-purple-700 dark:text-purple-300">
                         <Sparkles className="w-7 h-7" />
                       </div>
                       <div>
@@ -633,7 +643,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                           <h3 className="text-base font-bold text-slate-900 dark:text-white">
                             Evaluación Comercial de la Campaña (Trade Marketing AI)
                           </h3>
-                          <span className="text-xs uppercase font-black px-2.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-500/30 text-purple-700 dark:text-purple-200 border border-purple-300 dark:border-purple-400/40">
+                          <span className="text-xs uppercase font-black px-2.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-500/30 text-purple-800 dark:text-purple-200 border border-purple-300 dark:border-purple-400/40">
                             {data.trade_intelligence?.calificacion_general || "Muy Buena"}
                           </span>
                         </div>
@@ -646,7 +656,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                       <span className="text-xs text-slate-500 dark:text-slate-400 block font-medium">Índice de Eficiencia</span>
                       <span className="text-3xl font-black text-purple-700 dark:text-purple-300">
                         {data.trade_intelligence?.score_eficiencia || 85}
-                        <span className="text-base font-normal text-slate-400">/100</span>
+                        <span className="text-base font-normal text-slate-400 dark:text-slate-500">/100</span>
                       </span>
                     </div>
                   </div>
@@ -743,7 +753,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                   {/* Simulación Visual de la Ficha Membretada */}
                   <div className="bg-white text-slate-900 rounded-xl p-6 shadow-xl border border-slate-300 space-y-5 text-xs font-sans">
                     {/* Encabezado Ficha */}
-                    <div className="border-b-2 border-slate-200 dark:border-slate-800 pb-3 flex items-start justify-between">
+                    <div className="border-b-2 border-slate-200 pb-3 flex items-start justify-between">
                       <div>
                         <h2 className="text-base font-black text-slate-900 uppercase tracking-tight">
                           GRUPO SANTA TERESA E.A.S.
@@ -843,7 +853,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                               ))
                             ) : (
                               <tr>
-                                <td colSpan={5} className="py-3 text-center text-slate-500 dark:text-slate-400">
+                                <td colSpan={5} className="py-3 text-center text-slate-500">
                                   No hay productos asociados en esta ficha.
                                 </td>
                               </tr>
@@ -878,14 +888,14 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
         {/* FOOTER INFERIOR */}
         <div className="px-6 py-3 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/80 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 shrink-0">
           <span className="flex items-center gap-1.5">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
             Extra Supermercado Mayorista • Módulo de Gestión Comercial y Trade Marketing
           </span>
           <div className="flex items-center gap-3">
             <button
               onClick={handleDownloadReportPdf}
               disabled={downloadingPdf || loading}
-              className="hover:text-emerald-400 transition flex items-center gap-1 font-medium"
+              className="text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition flex items-center gap-1 font-medium"
             >
               {downloadingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
               Descargar Informe Oficial PDF
@@ -894,7 +904,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
             <button
               onClick={handleDownloadProductsPdf}
               disabled={downloadingProductsPdf || loading}
-              className="hover:text-violet-400 transition flex items-center gap-1 font-medium"
+              className="text-slate-600 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 transition flex items-center gap-1 font-medium"
               title="Lista de productos en A4 horizontal (landscape)"
             >
               {downloadingProductsPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
