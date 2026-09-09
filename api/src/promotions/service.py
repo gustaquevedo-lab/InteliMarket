@@ -1177,8 +1177,8 @@ async def get_promotion_analytics_360(
     payment_stats = {}
 
     for pid, prod in products_map.items():
-        costo = float(prod.costo_promedio or prod.costo_unitario or 0)
-        reg = float(prod.precio_regular or prod.precio_unitario or 0)
+        costo = float(prod.costo_promedio or prod.ultimo_costo or 0)
+        reg = float(prod.precio_regular or prod.precio_venta or 0)
         promo_p = float(calcular_precio_promocional(
             tipo=p.tipo,
             precio_regular=Decimal(str(reg)),
@@ -1485,8 +1485,8 @@ async def generate_promotion_report_pdf(
             select(Product).where(Product.id.in_(producto_ids))
         )
         for prod in prods_res.scalars().all():
-            costo = float(prod.costo_promedio or prod.costo_unitario or 0)
-            reg = float(prod.precio_regular or prod.precio_unitario or 0)
+            costo = float(prod.costo_promedio or prod.ultimo_costo or 0)
+            reg = float(prod.precio_regular or prod.precio_venta or 0)
             promo_p = float(calcular_precio_promocional(
                 tipo=promo.tipo,
                 precio_regular=Decimal(str(reg)),
