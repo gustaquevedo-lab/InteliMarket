@@ -8,6 +8,7 @@ from uuid import UUID
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
+from api.src.rbac.deps import require_permission
 from api.src.inventory.schemas import (
     WarehouseCreate, WarehouseResponse,
     StockResponse, MovementCreate, MovementResponse,
@@ -26,7 +27,7 @@ async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
 
 
 @router.post("/warehouses", response_model=WarehouseResponse, status_code=status.HTTP_201_CREATED)
-async def create_warehouse(body: WarehouseCreate, db: AsyncSession = Depends(get_db)):
+async def create_warehouse(body: WarehouseCreate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("inventory:adjust"))):
     return await service.create_warehouse(db, body)
 
 
@@ -56,7 +57,7 @@ async def get_stock_map(company_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/inventory/movements", response_model=MovementResponse, status_code=status.HTTP_201_CREATED)
-async def record_movement(body: MovementCreate, db: AsyncSession = Depends(get_db)):
+async def record_movement(body: MovementCreate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("inventory:adjust"))):
     return await service.record_movement(db, body)
 
 
@@ -154,12 +155,12 @@ async def export_kardex_pdf(
 
 
 @router.post("/inventory/transfers", response_model=TransferResponse, status_code=status.HTTP_201_CREATED)
-async def create_transfer(body: TransferCreate, db: AsyncSession = Depends(get_db)):
+async def create_transfer(body: TransferCreate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("inventory:transfer"))):
     return await service.create_transfer(db, body)
 
 
 @router.post("/inventory/transfers/{transfer_id}/complete", response_model=TransferResponse)
-async def complete_transfer(transfer_id: str, db: AsyncSession = Depends(get_db)):
+async def complete_transfer(transfer_id: str, db: AsyncSession = Depends(get_db), _=Depends(require_permission("inventory:transfer"))):
     result = await service.complete_transfer(db, transfer_id)
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo completar la transferencia")
@@ -179,12 +180,12 @@ async def list_adjustments(
 
 
 @router.post("/inventory/adjustments", response_model=AdjustmentResponse, status_code=status.HTTP_201_CREATED)
-async def create_adjustment(body: AdjustmentCreate, db: AsyncSession = Depends(get_db)):
+async def create_adjustment(body: AdjustmentCreate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("inventory:adjust"))):
     return await service.create_adjustment(db, body)
 
 
 @router.post("/inventory/adjustments/{adjustment_id}/approve", response_model=AdjustmentResponse)
-async def approve_adjustment(adjustment_id: str, db: AsyncSession = Depends(get_db)):
+async def approve_adjustment(adjustment_id: str, db: AsyncSession = Depends(get_db), _=Depends(require_permission("inventory:adjust"))):
     result = await service.approve_adjustment(db, adjustment_id)
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo aprobar el ajuste")
@@ -195,6 +196,7 @@ async def approve_adjustment(adjustment_id: str, db: AsyncSession = Depends(get_
 async def record_quick_merma(
     body: dict,
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("inventory:adjust")),
 ):
     try:
         return await service.record_quick_merma(

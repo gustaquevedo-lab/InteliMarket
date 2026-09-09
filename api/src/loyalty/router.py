@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
+from api.src.rbac.deps import require_permission
 from api.src.loyalty.schemas import (
     LoyaltyConfigCreate, LoyaltyConfigUpdate, LoyaltyConfigResponse,
     PointsCreate, PointsResponse, PointsBalance,
@@ -19,15 +20,19 @@ async def get_config(company_id: str, db: AsyncSession = Depends(get_db), user=D
 
 
 @router.put("/config/{company_id}", response_model=LoyaltyConfigResponse)
-async def update_config(company_id: str, body: LoyaltyConfigUpdate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def update_config(company_id: str, body: LoyaltyConfigUpdate, db: AsyncSession = Depends(get_db), user=Depends(require_auth), _=Depends(require_permission("crm:campaigns"))):
     result = await service.update_config(db, company_id, body)
     if not result:
         raise HTTPException(status_code=404, detail="Config no encontrada")
     return result
 
 
+# La acreditacion automatica de puntos por venta NO pasa por aca -- sales/service.py
+# llama a loyalty_service.earn_points() directo, sin pasar por este endpoint HTTP.
+# Este POST es solo para ajustes manuales (sumar o restar puntos a mano), por eso
+# se gatea: antes cualquier token valido podia regalarse puntos a si mismo.
 @router.post("/points", response_model=PointsResponse, status_code=status.HTTP_201_CREATED)
-async def add_points(body: PointsCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def add_points(body: PointsCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth), _=Depends(require_permission("crm:update"))):
     return await service.earn_points(db, body)
 
 
@@ -42,7 +47,7 @@ async def get_history(customer_id: str, company_id: str = Query(), limit: int = 
 
 
 @router.post("/rewards", response_model=LoyaltyRewardResponse, status_code=status.HTTP_201_CREATED)
-async def create_reward(body: LoyaltyRewardCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def create_reward(body: LoyaltyRewardCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth), _=Depends(require_permission("crm:campaigns"))):
     return await service.create_reward(db, body)
 
 
@@ -60,7 +65,7 @@ async def list_rewards(company_id: str, activo: bool | None = Query(None), db: A
 
 
 @router.put("/rewards/{reward_id}", response_model=LoyaltyRewardResponse)
-async def update_reward(reward_id: str, body: LoyaltyRewardUpdate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def update_reward(reward_id: str, body: LoyaltyRewardUpdate, db: AsyncSession = Depends(get_db), user=Depends(require_auth), _=Depends(require_permission("crm:campaigns"))):
     result = await service.update_reward(db, reward_id, body)
     if not result:
         raise HTTPException(status_code=404, detail="Recompensa no encontrada")
@@ -68,7 +73,7 @@ async def update_reward(reward_id: str, body: LoyaltyRewardUpdate, db: AsyncSess
 
 
 @router.delete("/rewards/{reward_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_reward(reward_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def delete_reward(reward_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth), _=Depends(require_permission("crm:campaigns"))):
     deleted = await service.delete_reward(db, reward_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Recompensa no encontrada")

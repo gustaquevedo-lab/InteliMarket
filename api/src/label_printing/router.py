@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
+from api.src.rbac.deps import require_permission
 from api.src.label_printing import service, qz_signing, tspl, calibracion, zpl_gondola
 from api.src.label_printing.schemas import (
     LabelPrinterConfigUpsert, LabelPrinterConfigResponse,
@@ -81,7 +82,7 @@ async def resolve_labels(filtro: LabelSourceFilter, db: AsyncSession = Depends(g
 
 
 @router.post("/print/zebra", response_model=PrintZebraResponse)
-async def print_zebra(data: PrintZebraRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def print_zebra(data: PrintZebraRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth), _=Depends(require_permission("label_printing:manage"))):
     printer_config = await service.get_printer_config(db, user["company_id"], "zebra_zpl")
     if not printer_config:
         raise HTTPException(status_code=400, detail="No hay una impresora Zebra configurada para esta empresa")
@@ -103,7 +104,7 @@ async def print_zebra(data: PrintZebraRequest, db: AsyncSession = Depends(get_db
 
 
 @router.post("/print/pantum", response_model=PrintPantumResponse)
-async def print_pantum(data: PrintPantumRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def print_pantum(data: PrintPantumRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth), _=Depends(require_permission("label_printing:manage"))):
     """Genera los comandos TSPL de la cola de etiquetas para la Pantum.
 
     El frontend los manda tal cual a la impresora via QZ Tray en modo raw. No

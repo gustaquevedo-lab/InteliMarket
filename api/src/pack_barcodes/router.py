@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
+from api.src.rbac.deps import require_permission
 from api.src.pack_barcodes import service
 from api.src.pack_barcodes.schemas import PackBarcodeCreate, PackBarcodeUpdate, PackBarcodeResponse
 
@@ -28,7 +29,7 @@ async def list_pack_barcodes(product_id: str, db: AsyncSession = Depends(get_db)
 
 
 @router.post("", response_model=PackBarcodeResponse, status_code=201)
-async def create_pack_barcode(product_id: str, data: PackBarcodeCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def create_pack_barcode(product_id: str, data: PackBarcodeCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth), _=Depends(require_permission("pack_barcodes:manage"))):
     try:
         return await service.create_pack_barcode(db, user["company_id"], product_id, data)
     except service.PackBarcodeCollisionError as e:
@@ -36,7 +37,7 @@ async def create_pack_barcode(product_id: str, data: PackBarcodeCreate, db: Asyn
 
 
 @router.patch("/{pack_id}", response_model=PackBarcodeResponse)
-async def update_pack_barcode(product_id: str, pack_id: str, data: PackBarcodeUpdate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def update_pack_barcode(product_id: str, pack_id: str, data: PackBarcodeUpdate, db: AsyncSession = Depends(get_db), user=Depends(require_auth), _=Depends(require_permission("pack_barcodes:manage"))):
     try:
         pack = await service.update_pack_barcode(db, user["company_id"], pack_id, data)
     except service.PackBarcodeCollisionError as e:
@@ -47,7 +48,7 @@ async def update_pack_barcode(product_id: str, pack_id: str, data: PackBarcodeUp
 
 
 @router.delete("/{pack_id}")
-async def delete_pack_barcode(product_id: str, pack_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def delete_pack_barcode(product_id: str, pack_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth), _=Depends(require_permission("pack_barcodes:manage"))):
     success = await service.delete_pack_barcode(db, pack_id)
     if not success:
         raise HTTPException(status_code=404, detail="Código de pack no encontrado")

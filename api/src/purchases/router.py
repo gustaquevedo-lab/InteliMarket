@@ -46,7 +46,7 @@ router = APIRouter(prefix="/api/v1", tags=["purchases"], dependencies=[Depends(r
 # ── Suppliers ─────────────────────────────────────────────────────────────────
 
 @router.post("/suppliers", response_model=SupplierResponse, status_code=status.HTTP_201_CREATED)
-async def create_supplier(body: SupplierCreate, db: AsyncSession = Depends(get_db)):
+async def create_supplier(body: SupplierCreate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("suppliers:create"))):
     return await service.create_supplier(db, body)
 
 
@@ -69,7 +69,7 @@ async def get_supplier(supplier_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/suppliers/{supplier_id}", response_model=SupplierResponse)
-async def update_supplier(supplier_id: str, body: SupplierUpdate, db: AsyncSession = Depends(get_db)):
+async def update_supplier(supplier_id: str, body: SupplierUpdate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("suppliers:update"))):
     result = await service.update_supplier(db, supplier_id, body)
     if not result:
         raise HTTPException(status_code=404, detail="Proveedor no encontrado")
@@ -303,7 +303,7 @@ async def convert_requisition_to_po(
 # ── Purchase Receipts ─────────────────────────────────────────────────────────
 
 @router.post("/purchase-receipts", response_model=ReceiptResponse, status_code=status.HTTP_201_CREATED)
-async def create_receipt(body: ReceiptCreate, db: AsyncSession = Depends(get_db)):
+async def create_receipt(body: ReceiptCreate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("purchases:receive"))):
     receipt = await service.create_receipt(db, body)
     if receipt.purchase_order_id and not receipt.requiere_revision:
         try:
@@ -334,7 +334,7 @@ async def get_receipt_items(receipt_id: str, db: AsyncSession = Depends(get_db))
 
 
 @router.post("/purchase-receipts/{receipt_id}/cancel", response_model=ReceiptResponse)
-async def cancel_receipt(receipt_id: str, db: AsyncSession = Depends(get_db)):
+async def cancel_receipt(receipt_id: str, db: AsyncSession = Depends(get_db), _=Depends(require_permission("purchases:receive"))):
     try:
         return await service.cancel_receipt(db, receipt_id)
     except ValueError as e:
