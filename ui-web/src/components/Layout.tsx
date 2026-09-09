@@ -13,6 +13,7 @@ import {
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
 import { useFeatures } from "../context/FeatureContext"
+import { usePermissions } from "../context/PermissionsContext"
 import { api } from "../api"
 import Logo from "./Logo"
 import NotificationBell from "./NotificationBell"
@@ -24,6 +25,7 @@ interface NavItem {
   label: string
   path: string
   feature?: string
+  permission?: string
   superadminOnly?: boolean
 }
 
@@ -77,14 +79,19 @@ const navGroups: NavGroup[] = [
   {
     title: "Operaciones de Salón",
     items: [
-      { icon: LayoutGrid, label: "Hub Operaciones (PWA)", path: "/operaciones-salon" },
+      // Permission "salon:manage" -- las 6 pantallas de gestion real de este
+      // bloque (todas sus escrituras estan gateadas por ese permiso en el
+      // backend). Verificador y TV Digital quedan sin permission a proposito:
+      // son pantallas de kiosko/display, no de gestion, y no llaman a
+      // ningun endpoint gateado.
+      { icon: LayoutGrid, label: "Hub Operaciones (PWA)", path: "/operaciones-salon", permission: "salon:manage" },
       { icon: Scan, label: "Verificador de Precios (Kiosko)", path: "/verificador" },
       { icon: Monitor, label: "TV Digital Carnicería (55\")", path: "/tv/carniceria" },
-      { icon: Scale, label: "Carnicería & Desposte", path: "/desposte" },
-      { icon: Carrot, label: "Verdulería & Frescos", path: "/frescos" },
-      { icon: ChefHat, label: "Panadería & Rotisería", path: "/panaderia-rotiseria" },
-      { icon: ShieldCheck, label: "Inocuidad & HACCP", path: "/haccp" },
-      { icon: Wrench, label: "Mantenimiento & Equipos", path: "/equipos-mantenimiento" },
+      { icon: Scale, label: "Carnicería & Desposte", path: "/desposte", permission: "salon:manage" },
+      { icon: Carrot, label: "Verdulería & Frescos", path: "/frescos", permission: "salon:manage" },
+      { icon: ChefHat, label: "Panadería & Rotisería", path: "/panaderia-rotiseria", permission: "salon:manage" },
+      { icon: ShieldCheck, label: "Inocuidad & HACCP", path: "/haccp", permission: "salon:manage" },
+      { icon: Wrench, label: "Mantenimiento & Equipos", path: "/equipos-mantenimiento", permission: "salon:manage" },
     ]
   },
   {
@@ -183,6 +190,7 @@ export default function Layout() {
   const { user, logout } = useAuth()
   const { theme, setTheme } = useTheme()
   const { hasFeature } = useFeatures()
+  const { hasPermission } = usePermissions()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -232,6 +240,7 @@ export default function Layout() {
     ? allNavItems.filter(item =>
         item.label.toLowerCase().includes(searchQuery.toLowerCase()) &&
         (!item.feature || hasFeature(item.feature)) &&
+        (!item.permission || hasPermission(item.permission)) &&
         (!item.superadminOnly || user?.is_superadmin)
       ).slice(0, 8)
     : []
@@ -278,6 +287,7 @@ export default function Layout() {
           {navGroups.map((group) => {
             const visibleItems = group.items.filter((item) => {
               if (item.superadminOnly && !user?.is_superadmin) return false
+              if (item.permission && !hasPermission(item.permission)) return false
               return !item.feature || hasFeature(item.feature)
             })
             if (visibleItems.length === 0) return null

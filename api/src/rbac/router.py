@@ -23,6 +23,23 @@ def _is_tenant_admin(user: dict) -> bool:
     return bool(user.get("is_superadmin", False) or user.get("rol") == "admin")
 
 
+@router.get("/me/permissions")
+async def get_my_permissions(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Permisos reales del usuario logueado -- el frontend lo usa una vez al
+    entrar para decidir que mostrar en el menu y que rutas permitir, en vez
+    de repetir un check_permission por cada item de pantalla."""
+    is_admin = bool(user.get("is_superadmin", False))
+    if not is_admin:
+        is_admin = await service.is_administrador(db, uuid.UUID(user["id"]), uuid.UUID(user["tenant_id"]))
+    permissions = [] if is_admin else await service.get_effective_permissions(
+        db, uuid.UUID(user["id"]), uuid.UUID(user["tenant_id"])
+    )
+    return {"is_administrador": is_admin, "permissions": permissions}
+
+
 @router.get("/permissions", response_model=List[PermissionResponse])
 async def list_permissions(
     db: AsyncSession = Depends(get_db),

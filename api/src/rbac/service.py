@@ -245,6 +245,39 @@ async def check_permission(db: AsyncSession, user_id: uuid.UUID, tenant_id: uuid
     return False
 
 
+async def get_effective_permissions(db: AsyncSession, user_id: uuid.UUID, tenant_id: uuid.UUID) -> List[str]:
+    """Todos los nombres de permiso que el usuario tiene de verdad, via
+    cualquiera de sus roles RBAC -- usado por el frontend para decidir que
+    mostrar en el menu y que rutas permitir, sin repetir un check_permission
+    por cada item."""
+    result = await db.execute(
+        select(Permission.name).distinct().join(
+            RolePermission, RolePermission.permission_id == Permission.id
+        ).join(
+            UserRole, UserRole.role_id == RolePermission.role_id
+        ).where(
+            UserRole.user_id == user_id,
+            UserRole.tenant_id == tenant_id,
+        )
+    )
+    return [row[0] for row in result.all()]
+
+
+async def is_administrador(db: AsyncSession, user_id: uuid.UUID, tenant_id: uuid.UUID) -> bool:
+    admin_role = await db.execute(select(Role).where(Role.name == "Administrador"))
+    admin = admin_role.scalar_one_or_none()
+    if not admin:
+        return False
+    is_admin = await db.execute(
+        select(UserRole).where(
+            UserRole.user_id == user_id,
+            UserRole.tenant_id == tenant_id,
+            UserRole.role_id == admin.id,
+        )
+    )
+    return is_admin.scalar_one_or_none() is not None
+
+
 async def seed_default_roles(db: AsyncSession, tenant_id: uuid.UUID) -> None:
     existing_perms = await db.execute(select(Permission).limit(1))
     if existing_perms.scalar_one_or_none():

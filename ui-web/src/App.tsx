@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { ThemeProvider } from "./context/ThemeContext"
 import { AuthProvider, useAuth } from "./context/AuthContext"
 import { FeatureProvider, useFeatures } from "./context/FeatureContext"
+import { PermissionsProvider, usePermissions } from "./context/PermissionsContext"
 import { OfflineProvider } from "./context/OfflineContext"
 import { PWAUpdatePrompt } from "./components/PWAUpdatePrompt"
 import Layout from "./components/Layout"
@@ -190,6 +191,27 @@ function FeatureRoute({ feature, children }: { feature: string; children: React.
   return <>{children}</>
 }
 
+function PermissionRoute({ permission, children }: { permission: string; children: React.ReactNode }) {
+  const { hasPermission, loading } = usePermissions()
+  if (loading) return <PageLoader />
+  if (!hasPermission(permission)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-body-light dark:bg-body-dark">
+        <div className="text-center p-8 animate-fade-in">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+            <span className="text-2xl">🔒</span>
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">No tenés acceso a este módulo</h2>
+          <p className="text-gray-500 dark:text-gray-400 max-w-xs mx-auto">
+            Tu rol no incluye permiso para esta pantalla. Si creés que deberías tenerlo, pedile a un administrador que te lo asigne desde Permisos & Roles.
+          </p>
+        </div>
+      </div>
+    )
+  }
+  return <>{children}</>
+}
+
 function AppRoutes() {
   const isElectron = typeof window !== "undefined" && !!(window as any).electronAPI
   return (
@@ -301,13 +323,13 @@ function AppRoutes() {
         <Route path="boutique" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="boutique_pedidos"><BoutiquePage /></FeatureRoute></Suspense>} />
         <Route path="servicios" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="servicios"><ServiciosPage /></FeatureRoute></Suspense>} />
         <Route path="supermer" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><SupermerPage /></FeatureRoute></Suspense>} />
-        <Route path="operaciones-salon" element={<Suspense fallback={<PageLoader />}><SalonOperacionesPwaPage /></Suspense>} />
+        <Route path="operaciones-salon" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><SalonOperacionesPwaPage /></PermissionRoute></Suspense>} />
         <Route path="deposito" element={<Suspense fallback={<PageLoader />}><DepositoRecepcionPage /></Suspense>} />
-        <Route path="desposte" element={<Suspense fallback={<PageLoader />}><CarniceriaDespostePage /></Suspense>} />
-        <Route path="frescos" element={<Suspense fallback={<PageLoader />}><VerduleriaFrescosPage /></Suspense>} />
-        <Route path="panaderia-rotiseria" element={<Suspense fallback={<PageLoader />}><PanaderiaRotiseriaPage /></Suspense>} />
-        <Route path="haccp" element={<Suspense fallback={<PageLoader />}><HaccpPage /></Suspense>} />
-        <Route path="equipos-mantenimiento" element={<Suspense fallback={<PageLoader />}><EquipmentPage /></Suspense>} />
+        <Route path="desposte" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><CarniceriaDespostePage /></PermissionRoute></Suspense>} />
+        <Route path="frescos" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><VerduleriaFrescosPage /></PermissionRoute></Suspense>} />
+        <Route path="panaderia-rotiseria" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><PanaderiaRotiseriaPage /></PermissionRoute></Suspense>} />
+        <Route path="haccp" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><HaccpPage /></PermissionRoute></Suspense>} />
+        <Route path="equipos-mantenimiento" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><EquipmentPage /></PermissionRoute></Suspense>} />
         <Route path="dsd" element={<Suspense fallback={<PageLoader />}><DsdPage /></Suspense>} />
         <Route path="esl" element={<Suspense fallback={<PageLoader />}><EslPage /></Suspense>} />
         <Route path="escalas" element={<Suspense fallback={<PageLoader />}><ScalesPage /></Suspense>} />
@@ -359,14 +381,16 @@ export default function App() {
     <ThemeProvider>
       <AuthProvider>
         <FeatureProvider>
-          <OfflineProvider>
-            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-              <PWAUpdatePrompt />
-              <ErrorBoundary>
-                <AppRoutes />
-              </ErrorBoundary>
-            </BrowserRouter>
-          </OfflineProvider>
+          <PermissionsProvider>
+            <OfflineProvider>
+              <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+                <PWAUpdatePrompt />
+                <ErrorBoundary>
+                  <AppRoutes />
+                </ErrorBoundary>
+              </BrowserRouter>
+            </OfflineProvider>
+          </PermissionsProvider>
         </FeatureProvider>
       </AuthProvider>
     </ThemeProvider>
