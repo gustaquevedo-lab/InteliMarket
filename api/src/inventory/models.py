@@ -14,12 +14,17 @@ class Warehouse(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False)
     branch_id = Column(UUID(as_uuid=True))
-    codigo = Column(String(10), nullable=False)
+    parent_id = Column(UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=True)
+    codigo = Column(String(20), nullable=False)
     nombre = Column(String(100), nullable=False)
     direccion = Column(Text)
-    tipo = Column(String(20), default="principal")
+    tipo = Column(String(30), default="principal")
+    responsable = Column(String(100))
+    descripcion = Column(Text)
     activo = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    parent = relationship("Warehouse", remote_side=[id], backref="subdepositos", lazy="selectin")
 
 
 class Stock(Base):

@@ -8,24 +8,44 @@ from decimal import Decimal
 
 
 class WarehouseCreate(BaseModel):
-    company_id: UUID
+    company_id: Optional[UUID] = None
     branch_id: Optional[UUID] = None
-    codigo: str = Field(min_length=1, max_length=10)
+    parent_id: Optional[UUID] = None
+    codigo: str = Field(min_length=1, max_length=20)
     nombre: str = Field(min_length=1, max_length=100)
     direccion: Optional[str] = None
     tipo: str = "principal"
+    responsable: Optional[str] = None
+    descripcion: Optional[str] = None
+    activo: bool = True
+
+
+class WarehouseUpdate(BaseModel):
+    codigo: Optional[str] = None
+    nombre: Optional[str] = None
+    parent_id: Optional[UUID] = None
+    direccion: Optional[str] = None
+    tipo: Optional[str] = None
+    responsable: Optional[str] = None
+    descripcion: Optional[str] = None
+    activo: Optional[bool] = None
 
 
 class WarehouseResponse(BaseModel):
     id: UUID
     company_id: UUID
     branch_id: Optional[UUID] = None
+    parent_id: Optional[UUID] = None
     codigo: str
     nombre: str
     direccion: Optional[str] = None
     tipo: str
+    responsable: Optional[str] = None
+    descripcion: Optional[str] = None
     activo: bool
     created_at: datetime
+    parent_nombre: Optional[str] = None
+    subdepositos_count: Optional[int] = 0
 
     class Config:
         from_attributes = True

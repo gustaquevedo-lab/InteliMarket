@@ -10,7 +10,7 @@ from api.src.db import get_db
 from api.src.auth.middleware import require_auth
 from api.src.rbac.deps import require_permission
 from api.src.inventory.schemas import (
-    WarehouseCreate, WarehouseResponse,
+    WarehouseCreate, WarehouseUpdate, WarehouseResponse,
     StockResponse, MovementCreate, MovementResponse,
     TransferCreate, TransferResponse,
     AdjustmentCreate, AdjustmentResponse,
@@ -27,13 +27,54 @@ async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
 
 
 @router.post("/warehouses", response_model=WarehouseResponse, status_code=status.HTTP_201_CREATED)
-async def create_warehouse(body: WarehouseCreate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("inventory:adjust"))):
-    return await service.create_warehouse(db, body)
+async def create_warehouse(
+    body: WarehouseCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        default_company_id = UUID(user.get("company_id")) if user.get("company_id") else None
+        return await service.create_warehouse(db, body, default_company_id=default_company_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/companies/{company_id}/warehouses", response_model=list[WarehouseResponse])
 async def list_warehouses(company_id: str, db: AsyncSession = Depends(get_db)):
     return await service.list_warehouses(db, company_id)
+
+
+@router.put("/warehouses/{warehouse_id}", response_model=WarehouseResponse)
+async def update_warehouse(
+    warehouse_id: str,
+    body: WarehouseUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        company_id = UUID(user.get("company_id"))
+        return await service.update_warehouse(
+            db=db,
+            warehouse_id=warehouse_id,
+            data=body.model_dump(exclude_unset=True),
+            company_id=company_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/warehouses/{warehouse_id}")
+async def delete_warehouse(
+    warehouse_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        company_id = UUID(user.get("company_id"))
+        await service.delete_warehouse(db=db, warehouse_id=warehouse_id, company_id=company_id)
+        return {"ok": True, "message": "Depósito dado de baja correctamente"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/warehouses/{warehouse_id}/stock", response_model=list[StockResponse])

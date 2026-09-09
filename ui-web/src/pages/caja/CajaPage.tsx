@@ -4023,16 +4023,17 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
 
       {/* 📋 MODAL: PLANILLA DE PUNTEO DE ARQUEO DETALLADO (FASE 5) */}
       {punteoModalOpen && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-4xl w-full p-6 shadow-2xl space-y-5 my-8">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-[96vw] max-w-6xl xl:max-w-7xl max-h-[92vh] flex flex-col p-5 sm:p-6 shadow-2xl my-auto">
+            {/* Header fijo */}
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center border border-purple-500/30">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/10 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center border border-purple-200 dark:border-purple-500/30 shrink-0">
                   <ClipboardCheck className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-base text-white">Planilla de Punteo de Arqueo y Control de Vouchers</h3>
-                  <p className="text-xs text-slate-400">
+                  <h3 className="font-bold text-base sm:text-lg text-slate-900 dark:text-white">Planilla de Punteo de Arqueo y Control de Vouchers</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     {punteoData?.session_data ? (
                       `Caja: ${punteoData.session_data.register_nombre || "Caja"} · Cajero/a: ${punteoData.session_data.cajero_nombre || "—"} · Turno: ${punteoData.session_data.id.slice(0, 8).toUpperCase()}`
                     ) : "Cotejo físico comprobante por comprobante"}
@@ -4051,15 +4052,16 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                         toast.error("Error", "No se pudo generar el PDF de punteo.")
                       }
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-purple-600/30"
+                    className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-purple-600/30 whitespace-nowrap"
                   >
                     <FileText className="w-3.5 h-3.5" />
-                    Descargar Planilla PDF
+                    <span className="hidden sm:inline">Descargar Planilla PDF</span>
+                    <span className="sm:hidden">PDF</span>
                   </button>
                 )}
                 <button
                   onClick={() => setPunteoModalOpen(false)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -4067,14 +4069,14 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
             </div>
 
             {punteoLoading ? (
-              <div className="py-20 text-center space-y-3">
-                <Loader2 className="w-8 h-8 animate-spin mx-auto text-purple-400" />
-                <p className="text-xs text-slate-400">Cargando transacciones y vouchers de la sesión...</p>
+              <div className="py-24 text-center space-y-3">
+                <Loader2 className="w-8 h-8 animate-spin mx-auto text-purple-600 dark:text-purple-400" />
+                <p className="text-xs text-slate-500 dark:text-slate-400">Cargando transacciones y vouchers de la sesión...</p>
               </div>
             ) : punteoData ? (
-              <div className="space-y-4">
+              <div className="flex-1 overflow-y-auto space-y-4 py-3 pr-1">
                 {/* 1. Resumen de Comprobantes por Medio de Pago */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
                   {Object.entries(punteoData.summary_by_method || {}).map(([key, val]: [string, any]) => {
                     const cant = val.cantidad || 0
                     const monto = Number(val.monto_gs || 0)
@@ -4089,28 +4091,28 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                       <div
                         key={key}
                         onClick={() => setPunteoFilterCanal(punteoFilterCanal === key ? "todos" : key)}
-                        className={`p-2.5 rounded-xl border text-xs space-y-1 cursor-pointer transition-all ${
+                        className={`p-2.5 rounded-xl border text-xs space-y-1.5 cursor-pointer transition-all ${
                           punteoFilterCanal === key
-                            ? "bg-purple-950/40 border-purple-500 ring-1 ring-purple-500"
-                            : "bg-slate-800/70 border-slate-700/60 hover:border-slate-600"
+                            ? "bg-purple-50 dark:bg-purple-950/50 border-purple-500 ring-2 ring-purple-500/40"
+                            : "bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/70 hover:border-purple-300 dark:hover:border-slate-600"
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-bold text-purple-300 truncate" title={val.label || key}>
+                        <div className="flex items-center justify-between gap-1.5 min-w-0">
+                          <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 truncate block" title={val.label || key}>
                             {val.label || key}
                           </span>
                           {faltantes > 0 && (
-                            <span className="px-1.5 py-0.2 bg-rose-500/20 text-rose-300 text-[9px] font-bold rounded">
+                            <span className="px-1.5 py-0.5 bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 text-[9px] font-bold rounded border border-rose-200 dark:border-rose-800 shrink-0 whitespace-nowrap">
                               {faltantes} faltante{faltantes !== 1 ? "s" : ""}
                             </span>
                           )}
                         </div>
-                        <div className="font-mono font-black text-white text-xs">
+                        <div className="font-mono font-black text-slate-900 dark:text-white text-xs">
                           {formatPYG(monto)}
                         </div>
-                        <div className="text-[10px] text-slate-400 flex items-center justify-between">
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between whitespace-nowrap">
                           <span>{cant} voucher{cant !== 1 ? "s" : ""}</span>
-                          <span className="text-emerald-400 font-mono">{conformes} ✓</span>
+                          <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">{conformes} ✓</span>
                         </div>
                       </div>
                     )
@@ -4145,31 +4147,31 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   const isCuadrado = difVouchers === 0 && countFaltantes === 0 && countDiscrepantes === 0
 
                   return (
-                    <div className="p-3.5 rounded-2xl bg-gradient-to-r from-slate-850 via-slate-800 to-indigo-950/40 border border-slate-700/80 space-y-3">
+                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 space-y-2.5">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block">
                             Arqueo de Comprobantes Físicos en Gaveta / Sobre
                           </span>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className="text-xs text-slate-300">
-                              Esperado: <strong className="font-mono text-white">{formatPYG(totEsperado)}</strong>
+                          <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                            <span className="text-xs text-slate-600 dark:text-slate-300">
+                              Esperado: <strong className="font-mono text-slate-900 dark:text-white">{formatPYG(totEsperado)}</strong>
                             </span>
-                            <span className="text-slate-500">·</span>
-                            <span className="text-xs text-slate-300">
-                              Físico Cotejado: <strong className="font-mono text-emerald-400">{formatPYG(totFisico)}</strong>
+                            <span className="text-slate-300 dark:text-slate-600">·</span>
+                            <span className="text-xs text-slate-600 dark:text-slate-300">
+                              Físico Cotejado: <strong className="font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(totFisico)}</strong>
                             </span>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 shrink-0">
                           <span
-                            className={`px-3 py-1 rounded-xl text-xs font-black font-mono border ${
+                            className={`px-3 py-1.5 rounded-xl text-xs font-black font-mono border whitespace-nowrap ${
                               isCuadrado
-                                ? "bg-emerald-950/60 text-emerald-300 border-emerald-700"
+                                ? "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700"
                                 : difVouchers < 0
-                                ? "bg-rose-950/60 text-rose-300 border-rose-700"
-                                : "bg-amber-950/60 text-amber-300 border-amber-700"
+                                ? "bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-700"
+                                : "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700"
                             }`}
                           >
                             {isCuadrado
@@ -4179,13 +4181,13 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-700/60 text-slate-400">
-                        <div className="flex items-center gap-3">
-                          <span className="text-emerald-400 font-semibold">✓ {countConformes} Conformes</span>
-                          <span className={countFaltantes > 0 ? "text-rose-400 font-bold" : "text-slate-500"}>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] pt-1.5 border-t border-slate-200 dark:border-slate-700/60 text-slate-600 dark:text-slate-400">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">✓ {countConformes} Conformes</span>
+                          <span className={countFaltantes > 0 ? "text-rose-600 dark:text-rose-400 font-bold" : "text-slate-400 dark:text-slate-500"}>
                             ✕ {countFaltantes} Faltantes
                           </span>
-                          <span className={countDiscrepantes > 0 ? "text-amber-400 font-bold" : "text-slate-500"}>
+                          <span className={countDiscrepantes > 0 ? "text-amber-600 dark:text-amber-400 font-bold" : "text-slate-400 dark:text-slate-500"}>
                             ≠ {countDiscrepantes} Con Discrepancia
                           </span>
                         </div>
@@ -4193,15 +4195,15 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           <button
                             type="button"
                             onClick={() => handleSetAllVoucherStatus("conforme")}
-                            className="text-purple-400 hover:text-purple-300 font-bold"
+                            className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300 font-bold transition whitespace-nowrap"
                           >
                             Marcar Todos Conformes
                           </button>
-                          <span className="text-slate-600">·</span>
+                          <span className="text-slate-300 dark:text-slate-600">·</span>
                           <button
                             type="button"
                             onClick={() => handleSetAllVoucherStatus("faltante")}
-                            className="text-slate-400 hover:text-rose-300"
+                            className="text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-300 font-semibold transition whitespace-nowrap"
                           >
                             Marcar Todos Faltantes
                           </button>
@@ -4218,6 +4220,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     const matchSearch =
                       !punteoSearch ||
                       v.numero_ticket?.toLowerCase().includes(punteoSearch.toLowerCase()) ||
+                      v.nro_boleta?.toLowerCase().includes(punteoSearch.toLowerCase()) ||
                       v.medio_pago?.toLowerCase().includes(punteoSearch.toLowerCase()) ||
                       v.codigo_autorizacion?.toLowerCase().includes(punteoSearch.toLowerCase()) ||
                       v.tarjeta_marca?.toLowerCase().includes(punteoSearch.toLowerCase()) ||
@@ -4233,16 +4236,16 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
                           <input
                             type="text"
-                            placeholder="Buscar por N° ticket, tarjeta, autorización, NSU..."
+                            placeholder="Buscar por nro ticket, boleta/voucher, código autorización, marca..."
                             value={punteoSearch}
-                            onChange={e => setPunteoSearch(e.target.value)}
-                            className="w-full pl-8 pr-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                            onChange={(e) => setPunteoSearch(e.target.value)}
+                            className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
                           />
                         </div>
                         <select
                           value={punteoFilterCanal}
                           onChange={e => setPunteoFilterCanal(e.target.value)}
-                          className="bg-slate-800 border border-slate-700 rounded-xl text-xs text-white px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                          className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500 shrink-0"
                         >
                           <option value="todos">Todos los Canales ({allV.length})</option>
                           <option value="TARJETA_BANCARD">Bancard Tarjeta</option>
@@ -4250,31 +4253,32 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           <option value="BANCARD_QR">Bancard QR</option>
                           <option value="DINELCO_QR">Dinelco QR</option>
                           <option value="PIX">PIX Brasil</option>
-                          <option value="TRANSFERENCIA">Transferencias SIPAP</option>
+                          <option value="TRANSFERENCIA">Transferencia SIPAP</option>
                           <option value="EXTRA_CLUB">Extra Club</option>
-                          <option value="VALES">Vales / Cheques</option>
-                          <option value="EFECTIVO">Efectivo</option>
+                          <option value="VALES">Vales & Cheques</option>
+                          <option value="EFECTIVO">Efectivo Físico</option>
+                          <option value="OTROS">Otros</option>
                         </select>
                       </div>
 
                       {/* 4. Tabla Detallada con Detalles de Transacción y Cotejo de Pertinencia */}
-                      <div className="border border-slate-700/80 rounded-xl overflow-hidden max-h-[360px] overflow-y-auto">
-                        <table className="w-full text-left text-xs border-collapse">
-                          <thead className="bg-slate-800 text-slate-400 font-bold uppercase tracking-wider sticky top-0 text-[10px] z-10">
+                      <div className="border border-slate-200 dark:border-slate-700/80 rounded-xl overflow-x-auto max-h-[440px] overflow-y-auto bg-white dark:bg-slate-900 shadow-sm">
+                        <table className="w-full min-w-[960px] text-left text-xs border-collapse">
+                          <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider sticky top-0 text-[10px] z-10 border-b border-slate-200 dark:border-slate-700">
                             <tr>
-                              <th className="p-2.5">Hora</th>
-                              <th className="p-2.5">Ticket / Factura</th>
-                              <th className="p-2.5">Instrumento / Canal</th>
-                              <th className="p-2.5">Autoriz. / NSU</th>
-                              <th className="p-2.5">Tarjeta / Titular</th>
-                              <th className="p-2.5 text-right">Monto Gs.</th>
-                              <th className="p-2.5 text-center">Cotejo Físico & Pertinencia</th>
+                              <th className="p-2.5 whitespace-nowrap">Hora</th>
+                              <th className="p-2.5 whitespace-nowrap">Ticket / Factura</th>
+                              <th className="p-2.5 whitespace-nowrap">Instrumento / Canal</th>
+                              <th className="p-2.5 whitespace-nowrap">Boleta / Voucher / Aut.</th>
+                              <th className="p-2.5 whitespace-nowrap">Tarjeta / Titular</th>
+                              <th className="p-2.5 text-right whitespace-nowrap">Monto Gs.</th>
+                              <th className="p-2.5 text-center whitespace-nowrap">Cotejo Físico & Pertinencia</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-slate-800">
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                             {filtered.length === 0 ? (
                               <tr>
-                                <td colSpan={7} className="p-8 text-center text-slate-500">
+                                <td colSpan={7} className="p-10 text-center text-slate-500 dark:text-slate-400">
                                   No hay comprobantes con el filtro aplicado.
                                 </td>
                               </tr>
@@ -4290,74 +4294,85 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                     key={v.id}
                                     className={`transition-colors ${
                                       isFaltante
-                                        ? "bg-rose-950/30 text-rose-200"
+                                        ? "bg-rose-50/80 dark:bg-rose-950/30 text-rose-950 dark:text-rose-200"
                                         : isDiscrepante
-                                        ? "bg-amber-950/30 text-amber-200"
-                                        : "hover:bg-slate-800/40 text-slate-300"
+                                        ? "bg-amber-50/80 dark:bg-amber-950/30 text-amber-950 dark:text-amber-200"
+                                        : "hover:bg-slate-50 dark:hover:bg-slate-800/40 text-slate-800 dark:text-slate-300"
                                     }`}
                                   >
-                                    <td className="p-2.5 font-mono text-[11px] text-slate-400">
+                                    <td className="p-2.5 font-mono text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
                                       {v.fecha ? new Date(v.fecha).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}
                                     </td>
-                                    <td className="p-2.5 font-mono font-bold text-white">
+                                    <td className="p-2.5 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
                                       {v.numero_ticket}
                                     </td>
-                                    <td className="p-2.5">
-                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                    <td className="p-2.5 whitespace-nowrap">
+                                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${
                                         v.canal_key?.includes("BANCARD")
-                                          ? "bg-blue-950/80 text-blue-300 border border-blue-800"
+                                          ? "bg-blue-100 text-blue-800 border border-blue-200 dark:bg-blue-950/80 dark:text-blue-200 dark:border-blue-700"
                                           : v.canal_key?.includes("DINELCO")
-                                          ? "bg-rose-950/80 text-rose-300 border border-rose-800"
+                                          ? "bg-rose-100 text-rose-800 border border-rose-200 dark:bg-rose-950/80 dark:text-rose-200 dark:border-rose-700"
                                           : v.canal_key === "PIX"
-                                          ? "bg-teal-950/80 text-teal-300 border border-teal-800"
+                                          ? "bg-teal-100 text-teal-800 border border-teal-200 dark:bg-teal-950/80 dark:text-teal-200 dark:border-teal-700"
                                           : v.canal_key === "TRANSFERENCIA"
-                                          ? "bg-indigo-950/80 text-indigo-300 border border-indigo-800"
+                                          ? "bg-indigo-100 text-indigo-800 border border-indigo-200 dark:bg-indigo-950/80 dark:text-indigo-200 dark:border-indigo-700"
                                           : v.canal_key === "EXTRA_CLUB"
-                                          ? "bg-amber-950/80 text-amber-300 border border-amber-800"
-                                          : "bg-slate-800 text-slate-300 border border-slate-700"
+                                          ? "bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-950/80 dark:text-amber-200 dark:border-amber-700"
+                                          : "bg-slate-100 text-slate-800 border border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700"
                                       }`}>
                                         {v.medio_pago}
                                       </span>
                                     </td>
-                                    <td className="p-2.5 font-mono text-[11px] text-slate-300">
-                                      {v.codigo_autorizacion !== "—" ? (
-                                        <span className="text-white font-bold">{v.codigo_autorizacion}</span>
-                                      ) : (
-                                        <span className="text-slate-500">—</span>
-                                      )}
-                                      {v.nsu !== "—" && (
-                                        <span className="text-slate-500 text-[10px] ml-1">({v.nsu})</span>
+                                    <td className="p-2.5 font-mono text-[11px] whitespace-nowrap">
+                                      {v.nro_boleta && v.nro_boleta !== "—" ? (
+                                        <div className="text-emerald-700 dark:text-emerald-400 font-bold flex items-center gap-1.5">
+                                          <span className="text-[9px] uppercase tracking-wider text-emerald-800 dark:text-emerald-300 font-sans font-semibold bg-emerald-100 dark:bg-emerald-950/80 px-1.5 py-0.2 rounded border border-emerald-200 dark:border-emerald-800">Boleta:</span>
+                                          <span>{v.nro_boleta}</span>
+                                        </div>
+                                      ) : null}
+                                      {v.codigo_autorizacion && v.codigo_autorizacion !== "—" ? (
+                                        <div className="text-slate-800 dark:text-slate-200 font-semibold flex items-center gap-1.5 mt-0.5">
+                                          <span className="text-[9px] text-slate-600 dark:text-slate-400 font-sans font-normal bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-200 dark:border-slate-700">Aut:</span>
+                                          <span>{v.codigo_autorizacion}</span>
+                                        </div>
+                                      ) : (!v.nro_boleta || v.nro_boleta === "—") ? (
+                                        <span className="text-slate-400 dark:text-slate-500">—</span>
+                                      ) : null}
+                                      {v.nsu && v.nsu !== "—" && (
+                                        <div className="text-slate-500 dark:text-slate-400 text-[10px] mt-0.5">
+                                          NSU: {v.nsu}
+                                        </div>
                                       )}
                                     </td>
-                                    <td className="p-2.5 text-xs text-slate-300">
+                                    <td className="p-2.5 text-xs whitespace-nowrap">
                                       {v.tarjeta_marca !== "—" ? (
-                                        <div className="font-semibold text-slate-200">
-                                          {v.tarjeta_marca} <span className="font-mono text-slate-400 text-[10px]">{v.tarjeta_pan}</span>
+                                        <div className="font-semibold text-slate-800 dark:text-slate-200">
+                                          {v.tarjeta_marca} <span className="font-mono text-slate-500 dark:text-slate-400 text-[10px]">{v.tarjeta_pan}</span>
                                         </div>
                                       ) : v.titular !== "—" ? (
-                                        <span className="text-slate-300">{v.titular}</span>
+                                        <span className="text-slate-700 dark:text-slate-300">{v.titular}</span>
                                       ) : (
-                                        <span className="text-slate-500">—</span>
+                                        <span className="text-slate-400 dark:text-slate-500">—</span>
                                       )}
                                     </td>
-                                    <td className="p-2.5 font-mono font-bold text-right text-white">
+                                    <td className="p-2.5 font-mono font-bold text-right text-slate-900 dark:text-white whitespace-nowrap">
                                       {formatPYG(v.monto_gs)}
                                       {v.moneda !== "PYG" && (
-                                        <div className="text-[10px] text-slate-400 font-normal">
+                                        <div className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
                                           {v.moneda} {v.monto_original?.toFixed(2)}
                                         </div>
                                       )}
                                     </td>
-                                    <td className="p-2 text-center">
-                                      <div className="inline-flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-700/80">
+                                    <td className="p-2 text-center whitespace-nowrap">
+                                      <div className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 whitespace-nowrap">
                                         <button
                                           type="button"
                                           title="Comprobante presente y conforme"
                                           onClick={() => handleSetVoucherStatus(v.id, "conforme")}
-                                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition whitespace-nowrap ${
                                             isConforme
                                               ? "bg-emerald-600 text-white shadow-sm"
-                                              : "text-slate-400 hover:text-white"
+                                              : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700"
                                           }`}
                                         >
                                           ✓ Conforme
@@ -4366,10 +4381,10 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                           type="button"
                                           title="Comprobante físico no encontrado / faltante"
                                           onClick={() => handleSetVoucherStatus(v.id, "faltante")}
-                                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition whitespace-nowrap ${
                                             isFaltante
                                               ? "bg-rose-600 text-white shadow-sm"
-                                              : "text-slate-400 hover:text-rose-300"
+                                              : "text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-300 hover:bg-slate-200 dark:hover:bg-slate-700"
                                           }`}
                                         >
                                           ✕ Faltante
@@ -4387,10 +4402,10 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                               }))
                                             }
                                           }}
-                                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition whitespace-nowrap ${
                                             isDiscrepante
                                               ? "bg-amber-600 text-white shadow-sm"
-                                              : "text-slate-400 hover:text-amber-300"
+                                              : "text-slate-600 dark:text-slate-300 hover:text-amber-600 dark:hover:text-amber-300 hover:bg-slate-200 dark:hover:bg-slate-700"
                                           }`}
                                         >
                                           ≠ Discrepancia
@@ -4409,8 +4424,8 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 })()}
 
                 {/* 5. Dictamen y Asiento de Auditoría de Comprobantes */}
-                <div className="space-y-2 pt-2 border-t border-slate-800">
-                  <label className="input-label text-slate-300 font-bold block text-xs">
+                <div className="space-y-1.5 pt-1 border-t border-slate-200 dark:border-slate-800">
+                  <label className="input-label text-slate-700 dark:text-slate-300 font-bold block text-xs">
                     Dictamen y Observaciones del Control de Comprobantes Físicos:
                   </label>
                   <textarea
@@ -4418,86 +4433,88 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     value={punteoObsDictamen}
                     onChange={e => setPunteoObsDictamen(e.target.value)}
                     placeholder="Asiente cualquier discrepancia o faltante detectado en los comprobantes (ej: 'Voucher Bancard #1048 ausente en sobre; se corroboró cierre de lote POS digital exitoso')..."
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs text-white placeholder-slate-500 outline-none focus:border-purple-500"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 outline-none focus:ring-2 focus:ring-purple-500"
                   />
-                </div>
-
-                {/* 6. Footer de Acciones */}
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-800 text-xs">
-                  <span className="text-slate-400">
-                    Total auditado: <b className="text-white">{punteoData.total_vouchers || 0}</b> comprobantes registrados.
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPunteoModalOpen(false)}
-                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold transition"
-                    >
-                      Cerrar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSavePunteoAudit}
-                      disabled={savingPunteoAudit}
-                      className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold transition flex items-center gap-1.5 shadow-md"
-                    >
-                      {savingPunteoAudit ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Asentando...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Check className="w-3.5 h-3.5" />
-                          <span>Guardar Auditoría</span>
-                        </>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleIncorporateVaultAndBanks(punteoData.session_data.id)}
-                      disabled={incorporatingSessionId === punteoData.session_data.id}
-                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition flex items-center gap-1.5 shadow-md shadow-emerald-600/30"
-                    >
-                      {incorporatingSessionId === punteoData.session_data.id ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Incorporando...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Building2 className="w-3.5 h-3.5" />
-                          <span>Asentar en Bóveda & Bancos</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
                 </div>
               </div>
             ) : (
-              <div className="py-12 text-center text-slate-400 text-xs">
+              <div className="py-12 text-center text-slate-500 dark:text-slate-400 text-xs">
                 No se encontraron datos para la planilla de punteo.
+              </div>
+            )}
+
+            {/* 6. Footer de Acciones Fijo */}
+            {punteoData && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-200 dark:border-slate-800 text-xs shrink-0 mt-2">
+                <span className="text-slate-500 dark:text-slate-400">
+                  Total auditado: <b className="text-slate-900 dark:text-white">{punteoData.total_vouchers || 0}</b> comprobantes registrados.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPunteoModalOpen(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold border border-slate-200 dark:border-slate-700 transition"
+                  >
+                    Cerrar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSavePunteoAudit}
+                    disabled={savingPunteoAudit}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-bold transition flex items-center gap-1.5 shadow-md"
+                  >
+                    {savingPunteoAudit ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Asentando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Guardar Auditoría</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleIncorporateVaultAndBanks(punteoData.session_data.id)}
+                    disabled={incorporatingSessionId === punteoData.session_data.id}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition flex items-center gap-1.5 shadow-md shadow-emerald-600/30 whitespace-nowrap"
+                  >
+                    {incorporatingSessionId === punteoData.session_data.id ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Incorporando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Building2 className="w-3.5 h-3.5" />
+                        <span>Asentar en Bóveda & Bancos</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </div>
       )}
       {showExportArqueoModal && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 my-8">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 my-8">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-500/30">
                   <FileText className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-base text-white">Acta de Arqueo Consolidada</h3>
-                  <p className="text-[11px] text-slate-400">Formato oficial A4 Vertical · Auditoría de Cajas</p>
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">Acta de Arqueo Consolidada</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Formato oficial A4 Vertical · Auditoría de Cajas</p>
                 </div>
               </div>
               <button
                 onClick={() => setShowExportArqueoModal(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -4505,7 +4522,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
 
             {/* Accesos rápidos */}
             <div className="space-y-2">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Períodos Rápidos</label>
+              <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Períodos Rápidos</label>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -4514,7 +4531,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     setArqueoFechaDesde(hoy)
                     setArqueoFechaHasta(hoy)
                   }}
-                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-semibold border border-slate-700 transition text-center"
+                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-slate-700 transition text-center"
                 >
                   📅 Hoy
                 </button>
@@ -4527,7 +4544,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     setArqueoFechaDesde(ayerStr)
                     setArqueoFechaHasta(ayerStr)
                   }}
-                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-semibold border border-slate-700 transition text-center"
+                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-slate-700 transition text-center"
                 >
                   ⏮ Ayer
                 </button>
@@ -4539,7 +4556,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     setArqueoFechaDesde(getPyDateStr(d))
                     setArqueoFechaHasta(getPyDateStr())
                   }}
-                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-semibold border border-slate-700 transition text-center"
+                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-slate-700 transition text-center"
                 >
                   🗓 Últimos 7 Días
                 </button>
@@ -4551,7 +4568,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     setArqueoFechaDesde(getPyDateStr(d))
                     setArqueoFechaHasta(getPyDateStr())
                   }}
-                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-semibold border border-slate-700 transition text-center"
+                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-slate-700 transition text-center"
                 >
                   📊 Últimos 30 Días
                 </button>
@@ -4561,28 +4578,28 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
             {/* Selectores de Rango Manual */}
             <div className="grid grid-cols-2 gap-3 pt-2">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Fecha Desde</label>
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Fecha Desde</label>
                 <input
                   type="date"
                   value={arqueoFechaDesde}
                   onChange={(e) => setArqueoFechaDesde(e.target.value)}
-                  className="w-full bg-slate-800/90 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  className="w-full bg-slate-50 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Fecha Hasta</label>
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Fecha Hasta</label>
                 <input
                   type="date"
                   value={arqueoFechaHasta}
                   onChange={(e) => setArqueoFechaHasta(e.target.value)}
-                  className="w-full bg-slate-800/90 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  className="w-full bg-slate-50 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 />
               </div>
             </div>
 
-            <div className="p-3 bg-slate-800/50 rounded-xl border border-slate-750 text-[11px] text-slate-400 space-y-1">
-              <p className="font-semibold text-slate-300">Detalles incluidos en el documento:</p>
-              <ul className="list-disc list-inside space-y-0.5 text-slate-400">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-750 text-[11px] text-slate-600 dark:text-slate-400 space-y-1">
+              <p className="font-semibold text-slate-800 dark:text-slate-300">Detalles incluidos en el documento:</p>
+              <ul className="list-disc list-inside space-y-0.5 text-slate-600 dark:text-slate-400">
                 <li>Desglose por cajera y caja registradora</li>
                 <li>Totales por efectivo (₲, R$, US$), tarjetas, transferencias y cheques</li>
                 <li>Diferencias, faltantes/sobrantes y dictamen de auditoría</li>
@@ -4590,11 +4607,11 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               </ul>
             </div>
 
-            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-200 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => setShowExportArqueoModal(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
               >
                 Cancelar
               </button>

@@ -1,6 +1,6 @@
 """Inventory service with costing logic"""
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 import uuid
@@ -16,19 +16,162 @@ from api.src.inventory.schemas import (
 from api.src.products.models import Product
 
 
-async def create_warehouse(db: AsyncSession, data: WarehouseCreate) -> Warehouse:
-    warehouse = Warehouse(**data.model_dump())
+async def create_warehouse(db: AsyncSession, data: WarehouseCreate, default_company_id: uuid.UUID | None = None) -> dict:
+    dump = data.model_dump(exclude_unset=True)
+    if not dump.get("company_id") and default_company_id:
+        dump["company_id"] = default_company_id
+    if not dump.get("company_id"):
+        raise ValueError("company_id es requerido")
+
+    # Validar unicidad de código
+    existing = await db.execute(
+        select(Warehouse).where(
+            Warehouse.company_id == dump["company_id"],
+            Warehouse.codigo == dump["codigo"],
+            Warehouse.activo == True,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise ValueError(f"Ya existe un depósito activo con el código '{dump['codigo']}'")
+
+    # Validar parent_id si fue provisto
+    parent_nombre = None
+    if dump.get("parent_id"):
+        parent_wh = await db.execute(
+            select(Warehouse).where(Warehouse.id == dump["parent_id"], Warehouse.company_id == dump["company_id"])
+        )
+        p_obj = parent_wh.scalar_one_or_none()
+        if not p_obj:
+            raise ValueError("El depósito principal indicado no existe")
+        parent_nombre = p_obj.nombre
+        if not dump.get("tipo") or dump.get("tipo") == "principal":
+            dump["tipo"] = "subdeposito"
+
+    warehouse = Warehouse(**dump)
     db.add(warehouse)
     await db.flush()
+    await db.commit()
     await db.refresh(warehouse)
-    return warehouse
+
+    return {
+        "id": warehouse.id,
+        "company_id": warehouse.company_id,
+        "branch_id": warehouse.branch_id,
+        "parent_id": warehouse.parent_id,
+        "codigo": warehouse.codigo,
+        "nombre": warehouse.nombre,
+        "direccion": warehouse.direccion,
+        "tipo": warehouse.tipo,
+        "responsable": warehouse.responsable,
+        "descripcion": warehouse.descripcion,
+        "activo": warehouse.activo,
+        "created_at": warehouse.created_at,
+        "parent_nombre": parent_nombre,
+        "subdepositos_count": 0,
+    }
 
 
-async def list_warehouses(db: AsyncSession, company_id: str) -> list[Warehouse]:
+async def list_warehouses(db: AsyncSession, company_id: str) -> list[dict]:
+    cid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
     result = await db.execute(
-        select(Warehouse).where(Warehouse.company_id == company_id, Warehouse.activo == True)
+        select(Warehouse)
+        .where(Warehouse.company_id == cid)
+        .order_by(Warehouse.codigo, Warehouse.nombre)
     )
-    return list(result.scalars().all())
+    warehouses = list(result.scalars().all())
+    wh_map = {str(w.id): w.nombre for w in warehouses}
+    wh_counts: dict[str, int] = {}
+    for w in warehouses:
+        if w.parent_id:
+            pid = str(w.parent_id)
+            wh_counts[pid] = wh_counts.get(pid, 0) + 1
+
+    return [
+        {
+            "id": w.id,
+            "company_id": w.company_id,
+            "branch_id": w.branch_id,
+            "parent_id": w.parent_id,
+            "codigo": w.codigo,
+            "nombre": w.nombre,
+            "direccion": w.direccion,
+            "tipo": w.tipo or "principal",
+            "responsable": w.responsable,
+            "descripcion": w.descripcion,
+            "activo": w.activo,
+            "created_at": w.created_at,
+            "parent_nombre": wh_map.get(str(w.parent_id)) if w.parent_id else None,
+            "subdepositos_count": wh_counts.get(str(w.id), 0),
+        }
+        for w in warehouses
+    ]
+
+
+async def update_warehouse(db: AsyncSession, warehouse_id: str, data: dict, company_id: uuid.UUID) -> dict:
+    wid = uuid.UUID(warehouse_id) if isinstance(warehouse_id, str) else warehouse_id
+    result = await db.execute(
+        select(Warehouse).where(Warehouse.id == wid, Warehouse.company_id == company_id)
+    )
+    wh = result.scalar_one_or_none()
+    if not wh:
+        raise ValueError("Depósito no encontrado")
+
+    for k, v in data.items():
+        if hasattr(wh, k) and v is not None:
+            setattr(wh, k, v)
+
+    await db.flush()
+    await db.commit()
+    await db.refresh(wh)
+
+    parent_nombre = None
+    if wh.parent_id:
+        p_res = await db.execute(select(Warehouse.nombre).where(Warehouse.id == wh.parent_id))
+        parent_nombre = p_res.scalar_one_or_none()
+
+    sub_count_res = await db.execute(
+        select(func.count()).select_from(Warehouse).where(Warehouse.parent_id == wh.id, Warehouse.activo == True)
+    )
+    sub_count = sub_count_res.scalar() or 0
+
+    return {
+        "id": wh.id,
+        "company_id": wh.company_id,
+        "branch_id": wh.branch_id,
+        "parent_id": wh.parent_id,
+        "codigo": wh.codigo,
+        "nombre": wh.nombre,
+        "direccion": wh.direccion,
+        "tipo": wh.tipo,
+        "responsable": wh.responsable,
+        "descripcion": wh.descripcion,
+        "activo": wh.activo,
+        "created_at": wh.created_at,
+        "parent_nombre": parent_nombre,
+        "subdepositos_count": sub_count,
+    }
+
+
+async def delete_warehouse(db: AsyncSession, warehouse_id: str, company_id: uuid.UUID) -> bool:
+    wid = uuid.UUID(warehouse_id) if isinstance(warehouse_id, str) else warehouse_id
+    result = await db.execute(
+        select(Warehouse).where(Warehouse.id == wid, Warehouse.company_id == company_id)
+    )
+    wh = result.scalar_one_or_none()
+    if not wh:
+        raise ValueError("Depósito no encontrado")
+
+    stock_res = await db.execute(
+        select(func.sum(Stock.cantidad)).where(Stock.warehouse_id == wid)
+    )
+    total_stock = stock_res.scalar() or 0
+    if total_stock > 0:
+        raise ValueError(f"No se puede dar de baja el depósito porque posee {total_stock} unidades de stock almacenadas. Transfiéralas antes de darlo de baja.")
+
+    wh.activo = False
+    await db.flush()
+    await db.commit()
+    return True
 
 
 async def get_stock(db: AsyncSession, warehouse_id: str, product_id: str) -> Stock | None:

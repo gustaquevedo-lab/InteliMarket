@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from decimal import Decimal
 import uuid
 import base64
+import re
 
 TZ_ASUNCION = ZoneInfo("America/Asuncion")
 
@@ -2527,10 +2528,16 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     breakdown = cierre["payments_breakdown"]
     medios_dict = breakdown.get("medios_individuales", {})
 
+    cid = uuid.UUID(company_id)
+    sid = uuid.UUID(session_id)
     tasa_brl = Decimal(str(breakdown.get("tasa_brl") or 1400))
     tasa_usd = Decimal(str(breakdown.get("tasa_usd") or 7800))
 
-    # Obtener todas las transacciones de pago de la sesion vinculadas con transacciones de terminal POS
+    # 1. Obtener la sesión para conocer el rango de fechas
+    res_sess = await db.execute(select(CashSession).where(CashSession.id == sid))
+    session_obj = res_sess.scalar_one_or_none()
+
+    # 2. Obtener todas las transacciones de pago vinculadas con ventas de la sesión
     vouchers_res = await db.execute(
         select(
             SalePayment.id,
@@ -2543,21 +2550,59 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             Sale.numero_interno,
             Sale.tipo_comprobante,
             Sale.observaciones.label("sale_obs"),
+            PosTerminalTransaction.id.label("pos_txn_id"),
             PosTerminalTransaction.codigo_autorizacion,
             PosTerminalTransaction.nsu,
             PosTerminalTransaction.nombre_tarjeta,
             PosTerminalTransaction.pan,
             PosTerminalTransaction.nombre_cliente,
+            PosTerminalTransaction.raw_response,
         )
         .select_from(SalePayment)
         .join(Sale, Sale.id == SalePayment.sale_id)
         .outerjoin(PosTerminalTransaction, PosTerminalTransaction.sale_id == Sale.id)
         .where(
-            Sale.session_id == uuid.UUID(session_id),
+            Sale.session_id == sid,
             Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
         )
         .order_by(SalePayment.fecha.asc())
     )
+    rows = vouchers_res.all()
+
+    # 3. Transacciones POS huérfanas de la sesión (ej. Dinelco o caídas temporales de red antes de vincular sale_id)
+    unlinked_pos_txns: list[PosTerminalTransaction] = []
+    if session_obj and session_obj.opened_at:
+        dt_start = session_obj.opened_at - timedelta(minutes=60)
+        dt_end = (session_obj.closed_at or datetime.now(timezone.utc)) + timedelta(minutes=60)
+        res_unlinked = await db.execute(
+            select(PosTerminalTransaction).where(
+                PosTerminalTransaction.company_id == cid,
+                PosTerminalTransaction.sale_id == None,
+                PosTerminalTransaction.created_at >= dt_start,
+                PosTerminalTransaction.created_at <= dt_end,
+                PosTerminalTransaction.exitosa == True,
+            ).order_by(PosTerminalTransaction.created_at.asc())
+        )
+        unlinked_pos_txns = list(res_unlinked.scalars().all())
+
+    # 4. Transacciones Bancard QR confirmadas de la ventana de la sesión
+    qr_txns = []
+    try:
+        from api.src.bancard_qr.models import BancardQrTransaction
+        if session_obj and session_obj.opened_at:
+            dt_start = session_obj.opened_at - timedelta(minutes=60)
+            dt_end = (session_obj.closed_at or datetime.now(timezone.utc)) + timedelta(minutes=60)
+            res_qr = await db.execute(
+                select(BancardQrTransaction).where(
+                    BancardQrTransaction.company_id == cid,
+                    BancardQrTransaction.status == "confirmed",
+                    BancardQrTransaction.created_at >= dt_start,
+                    BancardQrTransaction.created_at <= dt_end,
+                ).order_by(BancardQrTransaction.created_at.asc())
+            )
+            qr_txns = list(res_qr.scalars().all())
+    except Exception:
+        qr_txns = []
 
     vouchers = []
     vouchers_by_channel: dict[str, dict] = {
@@ -2573,7 +2618,11 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         "OTROS": {"canal_key": "OTROS", "canal_label": "Otros Comprobantes", "icon": "file-text", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
     }
 
-    for row in vouchers_res.all():
+    used_pos_ids = set()
+    used_qr_ids = set()
+    auto_linked_count = 0
+
+    for row in rows:
         fp_raw = (row.forma_pago or "").upper()
         mon = (row.moneda or "PYG").upper()
         m_dec = Decimal(str(row.monto or 0))
@@ -2612,6 +2661,103 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         m_gs = m_dec * tasa_brl if mon == "BRL" else (m_dec * tasa_usd if mon == "USD" else m_dec)
         m_gs_float = float(m_gs)
 
+        nro_boleta = None
+        codigo_autorizacion = row.codigo_autorizacion
+        nsu = row.nsu
+        tarjeta_marca = row.nombre_tarjeta
+        tarjeta_pan = row.pan
+        titular = row.nombre_cliente
+
+        # A. Si vino un PosTerminalTransaction directamente enlazado por sale_id:
+        if row.raw_response and isinstance(row.raw_response, dict):
+            raw = row.raw_response
+            nro_boleta = raw.get("nroBoleta") or raw.get("nro_boleta") or raw.get("boleta") or raw.get("ticket_numero")
+            if not tarjeta_pan:
+                tarjeta_pan = raw.get("ultimos4") or raw.get("pan")
+            if not codigo_autorizacion:
+                codigo_autorizacion = raw.get("codigoAutorizacion") or raw.get("cod_autorizacion")
+            if not nsu:
+                nsu = raw.get("nsu") or raw.get("nro_secuencia")
+
+        # B. Si no hay autorización y es tarjeta (Bancard o Dinelco), buscar en unlinked_pos_txns:
+        if (not codigo_autorizacion or codigo_autorizacion == "—") and ("TARJETA" in canal_key or "DINELCO" in canal_key or "BANCARD" in canal_key):
+            best_match = None
+            best_diff = None
+            row_fecha = row.fecha
+            if row_fecha and row_fecha.tzinfo is None:
+                row_fecha = row_fecha.replace(tzinfo=timezone.utc)
+
+            for txn in unlinked_pos_txns:
+                if txn.id in used_pos_ids:
+                    continue
+                txn_monto = Decimal(str(txn.monto or 0))
+                if abs(txn_monto - m_dec) < Decimal("1.00"):
+                    txn_fecha = txn.created_at
+                    if txn_fecha and txn_fecha.tzinfo is None:
+                        txn_fecha = txn_fecha.replace(tzinfo=timezone.utc)
+                    diff = abs((txn_fecha - row_fecha).total_seconds()) if row_fecha and txn_fecha else 0
+                    if best_diff is None or diff < best_diff:
+                        best_diff = diff
+                        best_match = txn
+
+            if best_match:
+                used_pos_ids.add(best_match.id)
+                codigo_autorizacion = best_match.codigo_autorizacion
+                nsu = best_match.nsu
+                tarjeta_marca = best_match.nombre_tarjeta or tarjeta_marca
+                tarjeta_pan = best_match.pan or tarjeta_pan
+                titular = best_match.nombre_cliente or titular
+                if best_match.raw_response and isinstance(best_match.raw_response, dict):
+                    raw = best_match.raw_response
+                    nro_boleta = raw.get("nroBoleta") or raw.get("nro_boleta") or raw.get("boleta") or raw.get("ticket_numero")
+                    if not tarjeta_pan:
+                        tarjeta_pan = raw.get("ultimos4") or raw.get("pan")
+                # Auto-reparación permanente del sale_id en base de datos:
+                try:
+                    best_match.sale_id = row.sale_id
+                    db.add(best_match)
+                    auto_linked_count += 1
+                except Exception:
+                    pass
+
+        # C. Si es Bancard QR, buscar en qr_txns por monto y fecha cercana:
+        if canal_key == "BANCARD_QR" and (not codigo_autorizacion or codigo_autorizacion == "—"):
+            best_qr = None
+            best_qr_diff = None
+            row_fecha = row.fecha
+            if row_fecha and row_fecha.tzinfo is None:
+                row_fecha = row_fecha.replace(tzinfo=timezone.utc)
+
+            for q in qr_txns:
+                if q.id in used_qr_ids:
+                    continue
+                q_monto = Decimal(str(q.amount or 0))
+                if abs(q_monto - m_dec) < Decimal("1.00"):
+                    q_fecha = q.created_at
+                    if q_fecha and q_fecha.tzinfo is None:
+                        q_fecha = q_fecha.replace(tzinfo=timezone.utc)
+                    diff = abs((q_fecha - row_fecha).total_seconds()) if row_fecha and q_fecha else 0
+                    if best_qr_diff is None or diff < best_qr_diff:
+                        best_qr_diff = diff
+                        best_qr = q
+
+            if best_qr:
+                used_qr_ids.add(best_qr.id)
+                codigo_autorizacion = best_qr.authorization_code
+                nro_boleta = best_qr.ticket_number
+                nsu = (best_qr.hook_alias or "")[-6:] if best_qr.hook_alias else None
+                tarjeta_pan = best_qr.card_last_numbers
+                tarjeta_marca = f"Bancard QR ({best_qr.account_type or 'APP'})"
+                payer = f"{best_qr.payer_name or ''} {best_qr.payer_lastname or ''}".strip()
+                if payer:
+                    titular = payer
+
+        # D. Fallback de cupón manual o comprobante escrito en observaciones:
+        if not nro_boleta and row.sale_obs:
+            m_cup = re.search(r'(?:cupon|cupón|voucher|boleta|comp|nro)[:\s#]*([a-zA-Z0-9\-_]+)', row.sale_obs, re.IGNORECASE)
+            if m_cup:
+                nro_boleta = m_cup.group(1)
+
         voucher_item = {
             "id": str(row.id),
             "sale_id": str(row.sale_id),
@@ -2623,11 +2769,12 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             "moneda": mon,
             "monto_original": float(m_dec),
             "monto_gs": m_gs_float,
-            "codigo_autorizacion": row.codigo_autorizacion or "—",
-            "nsu": row.nsu or "—",
-            "tarjeta_marca": row.nombre_tarjeta or ("Dinelco" if "DINELCO" in canal_key else ("Bancard" if "BANCARD" in canal_key else "—")),
-            "tarjeta_pan": f"•••• {row.pan}" if row.pan else "—",
-            "titular": row.nombre_cliente or "—",
+            "nro_boleta": nro_boleta or "—",
+            "codigo_autorizacion": codigo_autorizacion or "—",
+            "nsu": nsu or "—",
+            "tarjeta_marca": tarjeta_marca or ("Dinelco" if "DINELCO" in canal_key else ("Bancard" if "BANCARD" in canal_key else "—")),
+            "tarjeta_pan": f"•••• {tarjeta_pan}" if tarjeta_pan else "—",
+            "titular": titular or "—",
         }
 
         vouchers.append(voucher_item)
@@ -2635,6 +2782,12 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             vouchers_by_channel[canal_key]["total_esperado_gs"] += m_gs_float
             vouchers_by_channel[canal_key]["cantidad_esperada"] += 1
             vouchers_by_channel[canal_key]["vouchers"].append(voucher_item)
+
+    if auto_linked_count > 0:
+        try:
+            await db.commit()
+        except Exception:
+            pass
 
     # Filtrar solo canales que tengan transacciones
     canales_activos = [c for c in vouchers_by_channel.values() if c["cantidad_esperada"] > 0]

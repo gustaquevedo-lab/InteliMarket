@@ -239,7 +239,22 @@ export interface SmartReplenishmentResponse {
   items: SmartReplenishmentItem[]
 }
 
-export interface Warehouse { id: string; codigo?: string; nombre: string; direccion?: string; ciudad?: string; tipo?: string; activo?: boolean; company_id?: string; created_at?: string }
+export interface Warehouse {
+  id: string
+  codigo?: string
+  nombre: string
+  direccion?: string
+  ciudad?: string
+  tipo?: string
+  responsable?: string | null
+  descripcion?: string | null
+  parent_id?: string | null
+  parent_nombre?: string | null
+  subdepositos_count?: number
+  activo?: boolean
+  company_id?: string
+  created_at?: string
+}
 export interface StockItem { id?: string; product_id?: string; producto?: Product; product?: Product; nombre?: string; sku?: string; warehouse_id?: string; warehouse?: Warehouse; cantidad?: number; cantidad_reservada?: number; cantidad_disponible?: number; stock_minimo?: number; stock_maximo?: number; costo_promedio?: number; ultimo_costo?: number; costo_unitario?: number; lote?: string; fecha_vencimiento?: string; created_at?: string }
 export interface Company { id: string; nombre?: string; nombre_fantasia?: string; ruc?: string; razon_social?: string; direccion?: string; ciudad?: string; departamento?: string; telefono?: string; email?: string; logo_url?: string; activo?: boolean; config?: Record<string, unknown>; iva_condition?: string; regimen_tributario?: string; created_at?: string; updated_at?: string }
 export interface CashRegister { id: string; nombre: string; codigo?: string; tipo?: string; branch_id?: string; sucursal_id?: string; warehouse_id?: string; activo?: boolean; cash_drop_threshold?: number | null; diferencia_maxima_tolerada?: number | null; created_at?: string }
@@ -1091,7 +1106,9 @@ export const api = {
   },
   warehouses: {
     list: () => client.get<Warehouse[]>(`/v1/companies/${COMPANY_ID}/warehouses`),
-    create: (data: Partial<Warehouse>) => client.post<Warehouse>("/v1/warehouses", data),
+    create: (data: Partial<Warehouse>) => client.post<Warehouse>("/v1/warehouses", { company_id: COMPANY_ID, ...data }),
+    update: (id: string, data: Partial<Warehouse>) => client.put<Warehouse>(`/v1/warehouses/${id}`, data),
+    delete: (id: string) => client.delete<{ ok: boolean; message: string }>(`/v1/warehouses/${id}`),
   },
   stock: {
     lowStock: () => client.get<StockItem[]>(`/v1/companies/${COMPANY_ID}/low-stock`),
