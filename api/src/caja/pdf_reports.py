@@ -1166,4 +1166,148 @@ def generate_ventas_por_medio_pago_pdf(
     return buffer.getvalue()
 
 
+def generate_punteo_vouchers_pdf(
+    company: dict,
+    session_data: dict,
+    summary_by_method: dict,
+    vouchers: list[dict],
+    generated_by: str = "",
+) -> bytes:
+    """Planilla Oficial de Punteo de Arqueo y Control Cruzado de Comprobantes.
+    Permite cotejo físico individual con casillas [ ] de verificación,
+    desglose bimonetario inmutable y triple firma de responsabilidad."""
+    buffer = io.BytesIO()
+    doc, styles = _base_doc(buffer, "Planilla de Punteo de Arqueo", company, generated_by)
+    s = session_data
+    apertura_dt = s.get("fecha_apertura")
+    cierre_dt = s.get("fecha_cierre")
+    subtitulo = f"Caja: {s.get('register_nombre') or '—'}  |  Cajero/a: {s.get('cajero_nombre') or '—'}"
+
+    elements = _company_header(
+        company, styles, "Planilla Oficial de Punteo de Arqueo y Control de Vouchers",
+        subtitulo,
+        generated_by,
+    )
+
+    # 1. Metadatos de la sesión
+    ap_local = _to_asuncion_tz(apertura_dt)
+    ci_local = _to_asuncion_tz(cierre_dt)
+    apertura_str = ap_local.strftime("%d/%m/%Y %H:%M:%S") if ap_local else "—"
+    cierre_str = ci_local.strftime("%d/%m/%Y %H:%M:%S") if ci_local else "En curso"
+
+    meta_data = [
+        ["Cajero/a:", s.get("cajero_nombre") or "—", "Terminal / Caja:", s.get("register_nombre") or "—"],
+        ["Fecha Apertura:", apertura_str, "Fecha Cierre:", cierre_str],
+        ["ID Sesión:", str(s.get("id", "—"))[:8].upper(), "Estado:", str(s.get("estado", "cerrada")).upper()],
+    ]
+    t_meta = Table(meta_data, colWidths=[30 * mm, 60 * mm, 30 * mm, 60 * mm])
+    t_meta.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (0, -1), FONT_BOLD),
+        ("FONTNAME", (2, 0), (2, -1), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    elements.append(t_meta)
+    elements.append(Spacer(1, 8))
+
+    # 2. Resumen por instrumento
+    elements.append(Paragraph("<b>1. RESUMEN DE COMPROBANTES ESPERADOS POR INSTRUMENTO</b>", styles["Normal"]))
+    elements.append(Spacer(1, 3))
+
+    res_headers = ["Instrumento de Pago", "Cant. Comprobantes", "Monto Esperado (Gs.)"]
+    res_rows = [res_headers]
+    total_cant = 0
+    total_monto_no_ef = Decimal("0")
+
+    for k, v in summary_by_method.items():
+        cant = v.get("cantidad", 0)
+        monto = Decimal(str(v.get("monto_gs", 0)))
+        if cant > 0 or monto > 0:
+            total_cant += cant
+            total_monto_no_ef += monto
+            res_rows.append([v.get("label", k), str(cant), _fmt_gs(monto)])
+
+    res_rows.append(["TOTAL MEDIOS NO EFECTIVO", str(total_cant), _fmt_gs(total_monto_no_ef)])
+
+    t_res = Table(res_rows, colWidths=[90 * mm, 35 * mm, 55 * mm])
+    t_res.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("ALIGN", (1, 0), (1, -1), "CENTER"),
+        ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [WHITE, GRAY_LIGHT]),
+        ("BACKGROUND", (0, -1), (-1, -1), HexColor("#E2E8F0")),
+        ("FONTNAME", (0, -1), (-1, -1), FONT_BOLD),
+        ("LINEABOVE", (0, -1), (-1, -1), 1, PRIMARY_COLOR),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+    ]))
+    elements.append(t_res)
+    elements.append(Spacer(1, 8))
+
+    # 3. Lista detallada voucher por voucher para punteo físico
+    elements.append(Paragraph("<b>2. LISTA DETALLADA DE TRANSACCIONES / VOUCHERS PARA PUNTEO FÍSICO</b>", styles["Normal"]))
+    elements.append(Spacer(1, 3))
+
+    v_headers = ["[  ]", "Hora", "N° Comprobante", "Medio de Pago", "Moneda", "Monto Orig.", "Monto Equivalente (Gs.)"]
+    v_rows = [v_headers]
+
+    for v in vouchers:
+        dt = v.get("fecha")
+        local_dt = _to_asuncion_tz(dt) if dt else None
+        hora_str = local_dt.strftime("%H:%M:%S") if local_dt else "—"
+        v_rows.append([
+            "[   ]",
+            hora_str,
+            str(v.get("numero_ticket") or v.get("numero_venta") or "—"),
+            str(v.get("medio_pago") or v.get("forma_pago") or "—"),
+            str(v.get("moneda") or "PYG"),
+            _fmt_val(v.get("monto_original", v.get("monto", 0)), is_divisa=v.get("moneda") != "PYG"),
+            _fmt_gs(v.get("monto_gs", v.get("monto", 0))),
+        ])
+
+    if len(vouchers) == 0:
+        v_rows.append(["—", "—", "Sin comprobantes registrados", "—", "—", "—", "—"])
+
+    t_v = Table(v_rows, colWidths=[12 * mm, 18 * mm, 38 * mm, 45 * mm, 17 * mm, 25 * mm, 25 * mm], repeatRows=1)
+    t_v.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), HexColor("#334155")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("ALIGN", (1, 0), (1, -1), "CENTER"),
+        ("ALIGN", (4, 0), (4, -1), "CENTER"),
+        ("ALIGN", (5, 0), (6, -1), "RIGHT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, GRAY_LIGHT]),
+        ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    elements.append(t_v)
+    elements.append(Spacer(1, 14))
+
+    # 4. Firmas institucionales
+    firmas = [
+        ["_________________________________________", "_________________________________________", "_________________________________________"],
+        ["FIRMA CAJERO/A", "FIRMA SUPERVISOR DE CAJA", "FIRMA AUDITORÍA / TESORERÍA"],
+        [s.get("cajero_nombre") or "Cajero/a", "Supervisor de Turno", "GRUPO SANTA TERESA E.A.S."],
+    ]
+    t_firmas = Table(firmas, colWidths=[60 * mm, 60 * mm, 60 * mm])
+    t_firmas.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("FONTNAME", (0, 1), (-1, 1), FONT_BOLD),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(KeepTogether([t_firmas]))
+
+    _build(doc, elements)
+    return buffer.getvalue()
+
+
 

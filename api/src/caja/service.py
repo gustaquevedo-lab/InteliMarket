@@ -1,6 +1,6 @@
 """Caja (Cash Register) service"""
 
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timezone, date, timedelta, time
@@ -2116,11 +2116,23 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
         select(CashSession, CashCount, CashRegister.nombre)
         .join(CashRegister, CashRegister.id == CashSession.register_id)
         .join(CashCount, CashCount.session_id == CashSession.id)
+        .join(User, User.id == CashSession.user_id)
         .where(
             CashRegister.company_id == uuid.UUID(company_id),
             CashSession.estado == "cerrada",
             CashSession.fecha_cierre >= fecha_desde,
             CashSession.fecha_cierre <= fecha_hasta,
+            or_(
+                func.coalesce(
+                    (
+                        select(func.count(Sale.id))
+                        .where(Sale.session_id == CashSession.id)
+                        .scalar_subquery()
+                    ),
+                    0,
+                ) > 0,
+                func.extract("epoch", CashSession.fecha_cierre - CashSession.fecha_apertura) >= 120,
+            ),
         )
         .order_by(CashSession.fecha_cierre.desc())
     )
@@ -2486,6 +2498,100 @@ async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, c
         "session_data": session_data,
         "payments_breakdown": breakdown,
         "cash_drops": drops_list,
+    }
+
+
+async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id: str) -> dict | None:
+    """Obtiene los datos completos de arqueo y la lista voucher por voucher para punteo físico."""
+    cierre = await get_cierre_individual_report_data(db, session_id, company_id)
+    if not cierre:
+        return None
+
+    session_data = cierre["session_data"]
+    breakdown = cierre["payments_breakdown"]
+    medios_dict = breakdown.get("medios_individuales", {})
+
+    tasa_brl = Decimal(str(breakdown.get("tasa_brl") or 1400))
+    tasa_usd = Decimal(str(breakdown.get("tasa_usd") or 7800))
+
+    # Obtener todas las transacciones de pago de la sesion
+    vouchers_res = await db.execute(
+        select(
+            SalePayment.id,
+            SalePayment.forma_pago,
+            SalePayment.moneda,
+            SalePayment.monto,
+            SalePayment.fecha,
+            Sale.numero.label("numero_venta"),
+            Sale.numero_interno,
+            Sale.tipo_comprobante,
+        )
+        .select_from(SalePayment)
+        .join(Sale, Sale.id == SalePayment.sale_id)
+        .where(
+            Sale.session_id == uuid.UUID(session_id),
+            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
+        )
+        .order_by(SalePayment.fecha.asc())
+    )
+
+    vouchers = []
+    for row in vouchers_res.all():
+        fp_raw = (row.forma_pago or "").upper()
+        mon = (row.moneda or "PYG").upper()
+        m_dec = Decimal(str(row.monto or 0))
+
+        if "DINELCO" in fp_raw and "QR" in fp_raw:
+            medio_label = "Dinelco QR"
+            canal_key = "DINELCO_QR"
+        elif "QR" in fp_raw:
+            medio_label = "Bancard QR"
+            canal_key = "BANCARD_QR"
+        elif "DINELCO" in fp_raw:
+            medio_label = "Tarjeta Dinelco"
+            canal_key = "TARJETA_DINELCO"
+        elif "BANCARD" in fp_raw or "TARJETA" in fp_raw or "DEBITO" in fp_raw or "CREDITO" in fp_raw:
+            medio_label = "Tarjeta Bancard"
+            canal_key = "TARJETA_BANCARD"
+        elif "PIX" in fp_raw:
+            medio_label = "PIX Brasil"
+            canal_key = "PIX"
+        elif "EXTRA_CLUB" in fp_raw:
+            medio_label = "Extra Club (Crédito)"
+            canal_key = "EXTRA_CLUB"
+        elif "VALE" in fp_raw or "CHEQUE" in fp_raw:
+            medio_label = "Vale / Cheque"
+            canal_key = "VALES"
+        elif "TRANSFERENCIA" in fp_raw:
+            medio_label = "Transferencia Bancaria"
+            canal_key = "TRANSFERENCIA"
+        elif fp_raw == "EFECTIVO":
+            medio_label = f"Efectivo {mon}"
+            canal_key = "EFECTIVO"
+        else:
+            medio_label = row.forma_pago
+            canal_key = "OTROS"
+
+        m_gs = m_dec * tasa_brl if mon == "BRL" else (m_dec * tasa_usd if mon == "USD" else m_dec)
+
+        vouchers.append({
+            "id": str(row.id),
+            "fecha": row.fecha.isoformat() if row.fecha else None,
+            "numero_ticket": row.numero_interno or row.numero_venta or "—",
+            "tipo_comprobante": row.tipo_comprobante,
+            "medio_pago": medio_label,
+            "canal_key": canal_key,
+            "moneda": mon,
+            "monto_original": float(m_dec),
+            "monto_gs": float(m_gs),
+        })
+
+    return {
+        "session_data": session_data,
+        "summary_by_method": medios_dict,
+        "payments_breakdown": breakdown,
+        "vouchers": vouchers,
+        "total_vouchers": len(vouchers),
     }
 
 
