@@ -11,6 +11,9 @@ import ErrorBoundary from "./components/ErrorBoundary"
 
 const Login = lazy(() => import("./pages/Login"))
 const Dashboard = lazy(() => import("./pages/Dashboard"))
+const DepositoDashboard = lazy(() => import("./pages/RoleDashboards").then(m => ({ default: m.DepositoDashboard })))
+const AtencionClienteDashboard = lazy(() => import("./pages/RoleDashboards").then(m => ({ default: m.AtencionClienteDashboard })))
+const SalonDashboard = lazy(() => import("./pages/RoleDashboards").then(m => ({ default: m.SalonDashboard })))
 const MarketingPage = lazy(() => import("./pages/marketing/MarketingPage"))
 const SifenPage = lazy(() => import("./pages/sifen/SifenPage"))
 const InteliFactPage = lazy(() => import("./pages/sifen/InteliFactPage"))
@@ -213,6 +216,23 @@ function PermissionRoute({ permission, anyPermission, children }: { permission?:
   return <>{children}</>
 }
 
+// Fase 4 del plan de roles: cada rol operativo nuevo aterriza en un panel
+// con los KPI de su propio trabajo, en vez del Panel de Control Estrategico
+// completo (ventas/margen/caja consolidados) que no es su tarea diaria.
+// Administrador y cualquier rol sin match especifico siguen viendo el panel
+// completo de siempre -- esto no le saca nada a nadie, solo agrega vistas
+// mas utiles para los 3 roles nuevos.
+function DashboardRouter() {
+  const { isAdministrador, hasPermission, hasAnyPermission, loading } = usePermissions()
+  if (loading) return <PageLoader />
+  if (!isAdministrador) {
+    if (hasPermission("salon:manage")) return <Suspense fallback={<PageLoader />}><SalonDashboard /></Suspense>
+    if (hasPermission("inventory:adjust")) return <Suspense fallback={<PageLoader />}><DepositoDashboard /></Suspense>
+    if (hasAnyPermission("crm:update", "crm:campaigns")) return <Suspense fallback={<PageLoader />}><AtencionClienteDashboard /></Suspense>
+  }
+  return <Suspense fallback={<PageLoader />}><Dashboard /></Suspense>
+}
+
 function AppRoutes() {
   const isElectron = typeof window !== "undefined" && !!(window as any).electronAPI
   return (
@@ -253,7 +273,7 @@ function AppRoutes() {
       >
         <Route index element={<Navigate to={isElectron ? "/pos" : "/dashboard"} replace />} />
         {[
-          ["dashboard", <Dashboard />],
+          ["dashboard", <DashboardRouter />],
           ["self-checkout", <SelfCheckoutPage />],
           ["transferencias", <TransferenciasPage />],
           ["boveda", <BovedaPage />],
