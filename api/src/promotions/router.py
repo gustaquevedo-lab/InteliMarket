@@ -258,3 +258,30 @@ async def get_promotion_report_pdf(
             "Content-Disposition": f'inline; filename="informe_oficial_promocion_{promo_id[:8]}.pdf"'
         }
     )
+
+
+@router.get("/{promo_id}/products-report-pdf")
+async def get_promotion_products_report_pdf(
+    promo_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Genera el PDF horizontal A4 (landscape) con el listado premium de productos participantes en la promoción."""
+    import uuid
+    try:
+        pid = uuid.UUID(promo_id)
+        cid = uuid.UUID(str(user["company_id"]))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de promoción inválido")
+
+    user_name = user.get("nombre") or user.get("email") or "Comercial"
+    pdf_bytes = await service.generate_promotion_products_report_pdf(db, cid, pid, user_name)
+
+    nombre_safe = promo_id[:8]
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="productos_promo_{nombre_safe}.pdf"'
+        }
+    )

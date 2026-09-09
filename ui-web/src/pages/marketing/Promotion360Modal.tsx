@@ -32,6 +32,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
   const [activeTab, setActiveTab] = useState<TabType>("finanzas")
   const [loading, setLoading] = useState(true)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
+  const [downloadingProductsPdf, setDownloadingProductsPdf] = useState(false)
   const [data, setData] = useState<any>(null)
   const [clientSearch, setClientSearch] = useState("")
 
@@ -87,6 +88,28 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
       })
     } finally {
       setDownloadingPdf(false)
+    }
+  }
+
+  // Descarga de la Lista de Productos en PDF A4 Horizontal (landscape)
+  const handleDownloadProductsPdf = async () => {
+    if (!data) return
+    setDownloadingProductsPdf(true)
+    try {
+      await api.promotions.downloadProductsReportPdf(promoId, data.nombre)
+      addToast({
+        type: "success",
+        title: "Lista Descargada",
+        message: "La lista de productos en formato A4 horizontal se descargó con éxito."
+      })
+    } catch (err: any) {
+      addToast({
+        type: "error",
+        title: "Error de Descarga",
+        message: err?.message || "No se pudo generar el PDF de productos"
+      })
+    } finally {
+      setDownloadingProductsPdf(false)
     }
   }
 
@@ -864,8 +887,18 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
               disabled={downloadingPdf || loading}
               className="hover:text-emerald-400 transition flex items-center gap-1 font-medium"
             >
-              <Download className="w-3.5 h-3.5" />
+              {downloadingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
               Descargar Informe Oficial PDF
+            </button>
+            <span>•</span>
+            <button
+              onClick={handleDownloadProductsPdf}
+              disabled={downloadingProductsPdf || loading}
+              className="hover:text-violet-400 transition flex items-center gap-1 font-medium"
+              title="Lista de productos en A4 horizontal (landscape)"
+            >
+              {downloadingProductsPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+              Lista A4 Horizontal
             </button>
             <span>•</span>
             <button

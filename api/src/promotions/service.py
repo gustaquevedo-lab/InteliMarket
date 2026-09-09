@@ -25,7 +25,10 @@ from api.src.purchases.models import Supplier, PurchaseOrder
 from api.src.smart_pricing.models import TieredPrice
 from api.src.sales.models import Sale, SaleItem, SalePayment
 from api.src.customers.models import Customer
-from api.src.promotions.pdf_reports import generate_promotion_official_report_pdf
+from api.src.promotions.pdf_reports import (
+    generate_promotion_official_report_pdf,
+    generate_promotion_products_pdf,
+)
 
 PY_TZ = ZoneInfo("America/Asuncion")
 
@@ -1543,3 +1546,117 @@ async def generate_promotion_report_pdf(
     }
 
     return generate_promotion_official_report_pdf(company, promo_dict, products_details, user_name)
+
+
+async def generate_promotion_products_report_pdf(
+    db: AsyncSession,
+    company_id,
+    promotion_id,
+    user_name: str = "",
+) -> bytes:
+    """Genera el PDF horizontal A4 (landscape) con el listado premium de productos en promoción."""
+    # Reutiliza exactamente la misma lógica de carga de datos que generate_promotion_report_pdf
+    return await _build_products_pdf(db, company_id, promotion_id, user_name)
+
+
+async def _build_products_pdf(
+    db: AsyncSession,
+    company_id,
+    promotion_id,
+    user_name: str = "",
+) -> bytes:
+    """Núcleo compartido: carga promo + productos y llama al generador landscape."""
+    from sqlalchemy import select, text as sa_text
+    from api.src.promotions.models import Promotion
+    from api.src.products.models import Product
+    from api.src.purchases.models import Supplier
+
+    promo = await db.get(Promotion, promotion_id)
+    if not promo or str(promo.company_id) != str(company_id):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Promoción no encontrada")
+
+    # ── Datos de empresa ─────────────────────────────────────────────────────
+    r = await db.execute(
+        sa_text(
+            "SELECT razon_social, nombre_fantasia, ruc, direccion, ciudad, logo_url "
+            "FROM companies WHERE id = :cid"
+        ),
+        {"cid": str(company_id)},
+    )
+    row = r.first()
+    company = {
+        "razon_social": row.razon_social if row and row.razon_social else "GRUPO SANTA TERESA E.A.S.",
+        "nombre_fantasia": row.nombre_fantasia if row and row.nombre_fantasia else "EXTRA SUPERMERCADO MAYORISTA",
+        "ruc": row.ruc if row and row.ruc else "80150377-9",
+        "direccion": row.direccion if row and row.direccion else "Alejo Garcia esq. Carlos Antonio López",
+        "ciudad": row.ciudad if row and row.ciudad else "Pedro Juan Caballero",
+        "logo_url": row.logo_url if row else None,
+    }
+
+    # ── Proveedor ────────────────────────────────────────────────────────────
+    sup_nombre = None
+    sup_ruc = None
+    if promo.supplier_id:
+        s_res = await db.execute(
+            select(Supplier.razon_social, Supplier.ruc).where(Supplier.id == promo.supplier_id)
+        )
+        s_row = s_res.first()
+        if s_row:
+            sup_nombre, sup_ruc = s_row[0], s_row[1]
+
+    # ── Productos ────────────────────────────────────────────────────────────
+    producto_ids = promo.producto_ids or []
+    products_details = []
+    if producto_ids:
+        prods_res = await db.execute(
+            select(Product).where(Product.id.in_(producto_ids))
+        )
+        for prod in prods_res.scalars().all():
+            costo = float(prod.costo_promedio or prod.ultimo_costo or 0)
+            reg = float(prod.precio_regular or prod.precio_venta or 0)
+            promo_p = float(calcular_precio_promocional(
+                tipo=promo.tipo,
+                precio_regular=Decimal(str(reg)),
+                valor=promo.valor,
+                precio_fijo_promocional=promo.precio_fijo_promocional,
+                costo_unitario_referencia=Decimal(str(costo)),
+                base_calculo_pct=getattr(promo, 'base_calculo_pct', 'venta') or 'venta',
+                terminacion_psicologica=promo.terminacion_psicologica
+            ))
+            desc_u = max(0.0, reg - promo_p)
+            margen_g = promo_p - costo
+            margen_pct = round((margen_g / promo_p * 100), 2) if promo_p > 0 else 0.0
+
+            products_details.append({
+                "nombre": prod.nombre,
+                "sku": prod.sku,
+                "codigo_barra": prod.codigo_barra,
+                "unidad_medida": prod.unidad_medida or "UN",
+                "costo_unitario": costo,
+                "precio_regular": reg,
+                "precio_promocional": promo_p,
+                "descuento_unitario": desc_u,
+                "margen_unitario": margen_g,
+                "margen_pct": margen_pct,
+                "es_bajo_costo": promo_p < costo if costo > 0 else False,
+            })
+
+    # ── Dict de la promo ─────────────────────────────────────────────────────
+    promo_dict = {
+        "id": str(promo.id),
+        "nombre": promo.nombre,
+        "descripcion": getattr(promo, 'descripcion', '') or '',
+        "tipo": promo.tipo,
+        "valor": float(promo.valor or 0),
+        "origen": getattr(promo, 'origen', 'manual') or 'manual',
+        "financiamiento": getattr(promo, 'financiamiento', 'propio') or 'propio',
+        "valido_desde": promo.valido_desde,
+        "valido_hasta": promo.valido_hasta,
+        "estado": promo.estado,
+        "activo": promo.activo,
+        "supplier_nombre": sup_nombre,
+        "supplier_ruc": sup_ruc,
+    }
+
+    return generate_promotion_products_pdf(company, promo_dict, products_details, user_name)

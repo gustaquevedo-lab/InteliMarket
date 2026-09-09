@@ -2122,6 +2122,18 @@ export const api = {
       if (!res.ok) throw new Error("Error al obtener PDF");
       return await res.blob();
     },
+    downloadProductsReportPdf: (id: string, nombre?: string) => {
+      const cleanName = (nombre || "promocion").toLowerCase().replace(/[^a-z0-9]/gi, "_");
+      return downloadAuthenticated(`/v1/promotions/${id}/products-report-pdf`, {}, `lista_productos_${cleanName}.pdf`);
+    },
+    getProductsReportPdfBlob: async (id: string) => {
+      const token = localStorage.getItem("token") || "";
+      const res = await fetch(`/api/v1/promotions/${id}/products-report-pdf`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error("Error al obtener PDF de productos");
+      return await res.blob();
+    },
   },
   expenses: {
     categories: {
