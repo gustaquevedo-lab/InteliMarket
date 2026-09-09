@@ -8,44 +8,44 @@ router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 
 
 @router.get("/configs")
-def list_configs(db=Depends(get_db)):
-    return service.get_configs(db)
+async def list_configs(db=Depends(get_db)):
+    return await service.get_configs(db)
 
 
 @router.get("/configs/{config_id}")
-def get_config(config_id: int, db=Depends(get_db)):
-    config = service.get_config(db, config_id)
+async def get_config(config_id: int, db=Depends(get_db)):
+    config = await service.get_config(db, config_id)
     if not config:
         from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Configuraci\u00f3n no encontrada")
+        raise HTTPException(status_code=404, detail="Configuración no encontrada")
     return config
 
 
 @router.post("/configs", status_code=201)
-def create_config(config_data: dict = Body(...), db=Depends(get_db)):
-    return service.create_config(db, config_data)
+async def create_config(config_data: dict = Body(...), db=Depends(get_db)):
+    return await service.create_config(db, config_data)
 
 
 @router.put("/configs/{config_id}")
-def update_config(config_id: int, updates: dict = Body(...), db=Depends(get_db)):
-    config = service.update_config(db, config_id, updates)
+async def update_config(config_id: int, updates: dict = Body(...), db=Depends(get_db)):
+    config = await service.update_config(db, config_id, updates)
     if not config:
         from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Configuraci\u00f3n no encontrada")
+        raise HTTPException(status_code=404, detail="Configuración no encontrada")
     return config
 
 
 @router.delete("/configs/{config_id}")
-def delete_config(config_id: int, db=Depends(get_db)):
-    if not service.delete_config(db, config_id):
+async def delete_config(config_id: int, db=Depends(get_db)):
+    if not await service.delete_config(db, config_id):
         from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Configuraci\u00f3n no encontrada")
+        raise HTTPException(status_code=404, detail="Configuración no encontrada")
     return {"message": "Eliminada"}
 
 
 @router.post("/test")
-def test_webhook(evento: str = Query("test"), url: str = Query(...), db=Depends(get_db)):
-    delivery = service._send_to_url(
+async def test_webhook(evento: str = Query("test"), url: str = Query(...), db=Depends(get_db)):
+    delivery = await service._send_to_url(
         url=url,
         evento=evento,
         payload={"test": True, "message": "Webhook test from InteliMarket"},
@@ -62,5 +62,5 @@ def available_events():
 
 
 @router.get("/deliveries")
-def list_deliveries(config_id: int | None = Query(None), limit: int = Query(50, le=200), db=Depends(get_db)):
-    return service.get_deliveries(db, config_id, limit)
+async def list_deliveries(config_id: int | None = Query(None), limit: int = Query(50, le=200), db=Depends(get_db)):
+    return await service.get_deliveries(db, config_id, limit)
