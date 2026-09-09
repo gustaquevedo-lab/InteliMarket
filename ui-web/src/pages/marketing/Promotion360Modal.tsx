@@ -121,11 +121,11 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
   const modalContent = (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
       <div
-        className="bg-slate-900 border border-slate-700/80 w-full max-w-6xl h-[92vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-100"
+        className="bg-white dark:bg-slate-900 border border-slate-300/80 dark:border-slate-700/80 w-full max-w-6xl h-[92vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-900 dark:text-slate-100"
         onClick={(e) => e.stopPropagation()}
       >
         {/* HEADER SUPERIOR */}
-        <div className="px-6 py-4 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between shrink-0">
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/60 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
               <Sparkles className="w-5 h-5" />
@@ -140,7 +140,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                     className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border ${
                       data.activo
                         ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
-                        : "bg-slate-700/30 border-slate-600 text-slate-400"
+                        : "bg-slate-200 dark:bg-slate-700/30 border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400"
                     }`}
                   >
                     {data.activo ? "Vigente / Activa" : "Pausada"}
@@ -152,7 +152,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
+              <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-0.5">
                 <span>Vigencia: {data?.valido_desde} al {data?.valido_hasta}</span>
                 {data?.supplier_nombre && (
                   <>
@@ -180,7 +180,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-white hover:bg-slate-100 dark:bg-slate-800 transition"
               title="Cerrar modal"
             >
               <X className="w-5 h-5" />
@@ -189,13 +189,13 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
         </div>
 
         {/* NAVEGACIÓN POR PESTAÑAS */}
-        <div className="flex items-center gap-1 px-6 border-b border-slate-800 bg-slate-900/90 shrink-0 overflow-x-auto text-xs font-medium">
+        <div className="flex items-center gap-1 px-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/90 shrink-0 overflow-x-auto text-xs font-medium">
           <button
             onClick={() => setActiveTab("finanzas")}
             className={`py-3 px-3.5 border-b-2 flex items-center gap-2 transition whitespace-nowrap ${
               activeTab === "finanzas"
                 ? "border-amber-500 text-amber-400 font-semibold"
-                : "border-transparent text-slate-400 hover:text-slate-200"
+                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-200"
             }`}
           >
             <DollarSign className="w-4 h-4" />
@@ -206,7 +206,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
             className={`py-3 px-3.5 border-b-2 flex items-center gap-2 transition whitespace-nowrap ${
               activeTab === "graficos"
                 ? "border-amber-500 text-amber-400 font-semibold"
-                : "border-transparent text-slate-400 hover:text-slate-200"
+                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-200"
             }`}
           >
             <BarChart3 className="w-4 h-4" />
@@ -217,7 +217,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
             className={`py-3 px-3.5 border-b-2 flex items-center gap-2 transition whitespace-nowrap ${
               activeTab === "clientes"
                 ? "border-amber-500 text-amber-400 font-semibold"
-                : "border-transparent text-slate-400 hover:text-slate-200"
+                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-200"
             }`}
           >
             <Users className="w-4 h-4" />
@@ -228,7 +228,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
             className={`py-3 px-3.5 border-b-2 flex items-center gap-2 transition whitespace-nowrap ${
               activeTab === "ia"
                 ? "border-amber-500 text-amber-400 font-semibold"
-                : "border-transparent text-slate-400 hover:text-slate-200"
+                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-200"
             }`}
           >
             <Sparkles className="w-4 h-4 text-purple-400" />
@@ -239,7 +239,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
             className={`py-3 px-3.5 border-b-2 flex items-center gap-2 transition whitespace-nowrap ${
               activeTab === "informe_encargados"
                 ? "border-amber-500 text-amber-400 font-semibold"
-                : "border-transparent text-slate-400 hover:text-slate-200"
+                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-200"
             }`}
           >
             <FileText className="w-4 h-4 text-blue-400" />
@@ -248,14 +248,14 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
         </div>
 
         {/* CUERPO DEL MODAL (CON SCROLL INDEPENDIENTE) */}
-        <div className="flex-1 overflow-y-auto p-6 bg-slate-900/50">
+        <div className="flex-1 overflow-y-auto p-6 bg-white dark:bg-slate-900/50">
           {loading ? (
-            <div className="flex flex-col items-center justify-center h-64 gap-3 text-slate-400">
+            <div className="flex flex-col items-center justify-center h-64 gap-3 text-slate-500 dark:text-slate-400">
               <Loader2 className="w-8 h-8 animate-spin text-amber-400" />
               <p className="text-sm">Consolidando métricas comerciales y financieras...</p>
             </div>
           ) : !data ? (
-            <div className="flex flex-col items-center justify-center h-64 gap-2 text-slate-400">
+            <div className="flex flex-col items-center justify-center h-64 gap-2 text-slate-500 dark:text-slate-400">
               <AlertCircle className="w-8 h-8 text-rose-400" />
               <p className="text-sm">No se encontraron datos para esta promoción.</p>
             </div>
@@ -266,35 +266,35 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                 <div className="space-y-6 animate-in fade-in duration-150">
                   {/* KPI Cards */}
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-4 shadow-sm">
-                      <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
+                    <div className="bg-slate-100 dark:bg-slate-800/80 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-4 shadow-sm">
+                      <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
                         <span>Venta Neta Promoción</span>
                         <DollarSign className="w-4 h-4 text-emerald-400" />
                       </div>
                       <div className="text-2xl font-black text-emerald-400">
                         {formatPYG(data.total_ventas_promo_pyg)}
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1">
                         <span>Reg. teórico:</span>
                         <span className="line-through">{formatPYG(data.total_ventas_regular_pyg)}</span>
                       </div>
                     </div>
 
-                    <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-4 shadow-sm">
-                      <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
+                    <div className="bg-slate-100 dark:bg-slate-800/80 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-4 shadow-sm">
+                      <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
                         <span>Descuento Total Cedido</span>
                         <Tag className="w-4 h-4 text-rose-400" />
                       </div>
                       <div className="text-2xl font-black text-rose-400">
                         {formatPYG(data.total_descuento_cedido_pyg)}
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-1">
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                         En {data.unidades_totales_vendidas || 0} un. bonificadas
                       </div>
                     </div>
 
-                    <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-4 shadow-sm">
-                      <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
+                    <div className="bg-slate-100 dark:bg-slate-800/80 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-4 shadow-sm">
+                      <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
                         <span>Aporte Proveedor (Scan-Back)</span>
                         <ShieldCheck className="w-4 h-4 text-cyan-400" />
                       </div>
@@ -306,8 +306,8 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                       </div>
                     </div>
 
-                    <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-4 shadow-sm">
-                      <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
+                    <div className="bg-slate-100 dark:bg-slate-800/80 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-4 shadow-sm">
+                      <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
                         <span>Margen Neto Real (c/ Scan-Back)</span>
                         <TrendingUp className="w-4 h-4 text-amber-400" />
                       </div>
@@ -323,17 +323,17 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                   {/* Trade Marketing Split & Desglose Operativo */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Barra de Co-Financiamiento */}
-                    <div className="bg-slate-800/60 border border-slate-700/80 rounded-xl p-5 lg:col-span-2">
-                      <h3 className="text-sm font-bold text-slate-200 mb-2 flex items-center gap-2">
+                    <div className="bg-slate-100/60 dark:bg-slate-100 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-5 lg:col-span-2">
+                      <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-2">
                         <Award className="w-4 h-4 text-amber-400" />
                         Reparto Financiero de la Bonificación (Trade Spend)
                       </h3>
-                      <p className="text-xs text-slate-400 mb-4">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
                         Distribución del esfuerzo promocional entre el aporte del proveedor (vía Nota de Crédito) y la asunción directa de la tienda.
                       </p>
 
                       <div className="space-y-3">
-                        <div className="h-6 w-full rounded-lg overflow-hidden flex bg-slate-900 border border-slate-700">
+                        <div className="h-6 w-full rounded-lg overflow-hidden flex bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700">
                           <div
                             style={{
                               width: `${
@@ -366,38 +366,38 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                           <div className="p-3 bg-cyan-950/30 border border-cyan-800/40 rounded-lg">
                             <span className="text-cyan-400 font-semibold block">Aporte Proveedor</span>
                             <span className="text-lg font-bold text-white">{formatPYG(data.total_nc_scanback_pyg)}</span>
-                            <span className="text-[11px] text-slate-400 block mt-0.5">Recuperable mediante Nota de Crédito</span>
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">Recuperable mediante Nota de Crédito</span>
                           </div>
                           <div className="p-3 bg-amber-950/30 border border-amber-800/40 rounded-lg">
                             <span className="text-amber-400 font-semibold block">Aporte Extra Supermercado</span>
                             <span className="text-lg font-bold text-white">{formatPYG(data.total_aporte_tienda_pyg)}</span>
-                            <span className="text-[11px] text-slate-400 block mt-0.5">Sacrificio de margen de salón</span>
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">Sacrificio de margen de salón</span>
                           </div>
                         </div>
                       </div>
                     </div>
 
                     {/* KPIs de Cajas & Tickets */}
-                    <div className="bg-slate-800/60 border border-slate-700/80 rounded-xl p-5">
-                      <h3 className="text-sm font-bold text-slate-200 mb-3 flex items-center gap-2">
+                    <div className="bg-slate-100/60 dark:bg-slate-100 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-5">
+                      <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-3 flex items-center gap-2">
                         <Receipt className="w-4 h-4 text-emerald-400" />
                         Impacto en Salón y Cajas
                       </h3>
                       <div className="space-y-3 text-xs">
-                        <div className="flex justify-between py-2 border-b border-slate-700/50">
-                          <span className="text-slate-400">Tickets con la promoción:</span>
+                        <div className="flex justify-between py-2 border-b border-slate-300 dark:border-slate-700/50">
+                          <span className="text-slate-500 dark:text-slate-400">Tickets con la promoción:</span>
                           <span className="font-bold text-white">{data.tickets_totales_count || 0}</span>
                         </div>
-                        <div className="flex justify-between py-2 border-b border-slate-700/50">
-                          <span className="text-slate-400">Unidades facturadas:</span>
+                        <div className="flex justify-between py-2 border-b border-slate-300 dark:border-slate-700/50">
+                          <span className="text-slate-500 dark:text-slate-400">Unidades facturadas:</span>
                           <span className="font-bold text-emerald-400">{data.unidades_totales_vendidas || 0} un.</span>
                         </div>
-                        <div className="flex justify-between py-2 border-b border-slate-700/50">
-                          <span className="text-slate-400">Ticket medio promocional:</span>
+                        <div className="flex justify-between py-2 border-b border-slate-300 dark:border-slate-700/50">
+                          <span className="text-slate-500 dark:text-slate-400">Ticket medio promocional:</span>
                           <span className="font-bold text-white">{formatPYG(data.ticket_promedio_promo_pyg)}</span>
                         </div>
-                        <div className="flex justify-between py-2 border-b border-slate-700/50">
-                          <span className="text-slate-400">Uplift de rotación estimado:</span>
+                        <div className="flex justify-between py-2 border-b border-slate-300 dark:border-slate-700/50">
+                          <span className="text-slate-500 dark:text-slate-400">Uplift de rotación estimado:</span>
                           <span className="font-bold text-emerald-400">+{data.uplift_rotacion_pct || 0}%</span>
                         </div>
                       </div>
@@ -405,14 +405,14 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                   </div>
 
                   {/* Ranking de Productos Participantes */}
-                  <div className="bg-slate-800/60 border border-slate-700/80 rounded-xl p-5">
-                    <h3 className="text-sm font-bold text-slate-200 mb-3 flex items-center gap-2">
+                  <div className="bg-slate-100/60 dark:bg-slate-100 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-5">
+                    <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-3 flex items-center gap-2">
                       <Package className="w-4 h-4 text-blue-400" />
                       Rendimiento Individual de Productos en la Campaña
                     </h3>
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs text-left">
-                        <thead className="bg-slate-900/80 text-slate-400 font-semibold border-b border-slate-700">
+                        <thead className="bg-white dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 font-semibold border-b border-slate-300 dark:border-slate-700">
                           <tr>
                             <th className="py-2.5 px-3">Producto</th>
                             <th className="py-2.5 px-3">Código</th>
@@ -427,11 +427,11 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                         <tbody className="divide-y divide-slate-800">
                           {data.ranking_productos?.length > 0 ? (
                             data.ranking_productos.map((p: any) => (
-                              <tr key={p.producto_id} className="hover:bg-slate-800/40">
+                              <tr key={p.producto_id} className="hover:bg-slate-100/40 dark:bg-slate-100 dark:bg-slate-800/40">
                                 <td className="py-2.5 px-3 font-medium text-white">{p.nombre}</td>
-                                <td className="py-2.5 px-3 font-mono text-slate-400">{p.codigo_barra || "—"}</td>
-                                <td className="py-2.5 px-3 text-right font-mono text-slate-400">{formatPYG(p.costo_promedio)}</td>
-                                <td className="py-2.5 px-3 text-right font-mono text-slate-400">{formatPYG(p.precio_regular)}</td>
+                                <td className="py-2.5 px-3 font-mono text-slate-500 dark:text-slate-400">{p.codigo_barra || "—"}</td>
+                                <td className="py-2.5 px-3 text-right font-mono text-slate-500 dark:text-slate-400">{formatPYG(p.costo_promedio)}</td>
+                                <td className="py-2.5 px-3 text-right font-mono text-slate-500 dark:text-slate-400">{formatPYG(p.precio_regular)}</td>
                                 <td className="py-2.5 px-3 text-right font-mono font-bold text-amber-400">{formatPYG(p.precio_promocional)}</td>
                                 <td className="py-2.5 px-3 text-right font-semibold text-white">{p.unidades_vendidas}</td>
                                 <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400">{formatPYG(p.total_ventas_pyg)}</td>
@@ -459,20 +459,20 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
               {/* TAB 2: GRÁFICOS DE DESEMPEÑO */}
               {activeTab === "graficos" && (
                 <div className="space-y-6 animate-in fade-in duration-150">
-                  <div className="bg-slate-800/60 border border-slate-700/80 rounded-xl p-5">
+                  <div className="bg-slate-100/60 dark:bg-slate-100 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-5">
                     <div className="flex items-center justify-between mb-4">
                       <div>
-                        <h3 className="text-sm font-bold text-slate-200">Curva Diaria de Ventas Promocionales (Gs.)</h3>
-                        <p className="text-xs text-slate-400">Evolución de facturación real vs unidades vendidas por día</p>
+                        <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">Curva Diaria de Ventas Promocionales (Gs.)</h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Evolución de facturación real vs unidades vendidas por día</p>
                       </div>
                       <div className="flex items-center gap-4 text-xs">
                         <div className="flex items-center gap-1.5">
                           <span className="w-3 h-3 rounded bg-emerald-500 inline-block" />
-                          <span className="text-slate-300">Ventas Promo (Gs.)</span>
+                          <span className="text-slate-600 dark:text-slate-300">Ventas Promo (Gs.)</span>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <span className="w-3 h-3 rounded bg-amber-500 inline-block" />
-                          <span className="text-slate-300">Descuento Cedido (Gs.)</span>
+                          <span className="text-slate-600 dark:text-slate-300">Descuento Cedido (Gs.)</span>
                         </div>
                       </div>
                     </div>
@@ -535,15 +535,15 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                   </div>
 
                   {/* Desglose de Medios de Pago */}
-                  <div className="bg-slate-800/60 border border-slate-700/80 rounded-xl p-5">
-                    <h3 className="text-sm font-bold text-slate-200 mb-3">
+                  <div className="bg-slate-100/60 dark:bg-slate-100 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-5">
+                    <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-3">
                       Medios de Pago Utilizados en los Tickets de la Campaña
                     </h3>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       {data.desglose_medios_pago?.length > 0 ? (
                         data.desglose_medios_pago.map((mp: any) => (
-                          <div key={mp.forma_pago} className="p-3 bg-slate-900/60 border border-slate-700/60 rounded-lg">
-                            <span className="text-xs text-slate-400 font-semibold block">{mp.forma_pago}</span>
+                          <div key={mp.forma_pago} className="p-3 bg-white dark:bg-slate-900/60 border border-slate-300/60 dark:border-slate-300 dark:border-slate-700/60 rounded-lg">
+                            <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold block">{mp.forma_pago}</span>
                             <span className="text-base font-black text-white">{formatPYG(mp.monto)}</span>
                           </div>
                         ))
@@ -562,10 +562,10 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                 <div className="space-y-4 animate-in fade-in duration-150">
                   <div className="flex items-center justify-between gap-4">
                     <div>
-                      <h3 className="text-sm font-bold text-slate-200">
+                      <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">
                         Padrón de Clientes Compradores ({filteredClients.length})
                       </h3>
-                      <p className="text-xs text-slate-400">
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
                         Historial de clientes y tickets que aprovecharon las condiciones promocionales
                       </p>
                     </div>
@@ -575,14 +575,14 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                         placeholder="Buscar por RUC o Razón Social..."
                         value={clientSearch}
                         onChange={(e) => setClientSearch(e.target.value)}
-                        className="w-full px-3 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                        className="w-full px-3 py-1.5 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                       />
                     </div>
                   </div>
 
-                  <div className="bg-slate-800/60 border border-slate-700/80 rounded-xl overflow-hidden">
+                  <div className="bg-slate-100/60 dark:bg-slate-100 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl overflow-hidden">
                     <table className="w-full text-xs text-left">
-                      <thead className="bg-slate-900/80 text-slate-400 font-semibold border-b border-slate-700">
+                      <thead className="bg-white dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 font-semibold border-b border-slate-300 dark:border-slate-700">
                         <tr>
                           <th className="py-2.5 px-3">Cliente / Razón Social</th>
                           <th className="py-2.5 px-3">RUC / Cédula</th>
@@ -596,14 +596,14 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                       <tbody className="divide-y divide-slate-800">
                         {filteredClients.length > 0 ? (
                           filteredClients.map((c: any, idx: number) => (
-                            <tr key={c.cliente_id || idx} className="hover:bg-slate-800/40">
+                            <tr key={c.cliente_id || idx} className="hover:bg-slate-100/40 dark:bg-slate-100 dark:bg-slate-800/40">
                               <td className="py-2.5 px-3 font-semibold text-white">{c.nombre}</td>
-                              <td className="py-2.5 px-3 font-mono text-slate-400">{c.ruc || "—"}</td>
-                              <td className="py-2.5 px-3 text-right font-semibold text-slate-200">{c.cantidad_tickets}</td>
+                              <td className="py-2.5 px-3 font-mono text-slate-500 dark:text-slate-400">{c.ruc || "—"}</td>
+                              <td className="py-2.5 px-3 text-right font-semibold text-slate-700 dark:text-slate-200">{c.cantidad_tickets}</td>
                               <td className="py-2.5 px-3 text-right font-semibold text-emerald-400">{c.unidades_compradas} un.</td>
                               <td className="py-2.5 px-3 text-right font-mono font-bold text-white">{formatPYG(c.total_gastado_pyg)}</td>
                               <td className="py-2.5 px-3 text-right font-mono font-semibold text-amber-400">{formatPYG(c.descuento_obtenido_pyg)}</td>
-                              <td className="py-2.5 px-3 text-center text-slate-400">{c.ultimo_ticket_fecha || "—"}</td>
+                              <td className="py-2.5 px-3 text-center text-slate-500 dark:text-slate-400">{c.ultimo_ticket_fecha || "—"}</td>
                             </tr>
                           ))
                         ) : (
@@ -637,13 +637,13 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                             {data.trade_intelligence?.calificacion_general || "Muy Buena"}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-300 mt-0.5">
+                        <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
                           Diagnóstico algorítmico sobre rotación, blindaje de margen y poder de negociación de compra
                         </p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <span className="text-xs text-slate-400 block font-medium">Índice de Eficiencia</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400 block font-medium">Índice de Eficiencia</span>
                       <span className="text-3xl font-black text-purple-300">
                         {data.trade_intelligence?.score_eficiencia || 85}
                         <span className="text-base font-normal text-slate-500">/100</span>
@@ -653,22 +653,22 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
 
                   {/* Resumen Ejecutivo & Elasticidad */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                    <div className="bg-slate-800/60 border border-slate-700/80 rounded-xl p-4">
-                      <h4 className="font-bold text-slate-200 flex items-center gap-2 mb-2">
+                    <div className="bg-slate-100/60 dark:bg-slate-100 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-4">
+                      <h4 className="font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2 mb-2">
                         <TrendingUp className="w-4 h-4 text-emerald-400" />
                         Resumen Ejecutivo & Rotación
                       </h4>
-                      <p className="text-slate-300 leading-relaxed">
+                      <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
                         {data.trade_intelligence?.resumen_ejecutivo}
                       </p>
                     </div>
 
-                    <div className="bg-slate-800/60 border border-slate-700/80 rounded-xl p-4">
-                      <h4 className="font-bold text-slate-200 flex items-center gap-2 mb-2">
+                    <div className="bg-slate-100/60 dark:bg-slate-100 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-4">
+                      <h4 className="font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2 mb-2">
                         <DollarSign className="w-4 h-4 text-amber-400" />
                         Elasticidad de Precio & Comportamiento del Consumidor
                       </h4>
-                      <p className="text-slate-300 leading-relaxed">
+                      <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
                         {data.trade_intelligence?.analisis_elasticidad}
                       </p>
                     </div>
@@ -676,22 +676,22 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
 
                   {/* Blindaje de Margen y Negociación */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                    <div className="bg-slate-800/60 border border-slate-700/80 rounded-xl p-4">
-                      <h4 className="font-bold text-slate-200 flex items-center gap-2 mb-2">
+                    <div className="bg-slate-100/60 dark:bg-slate-100 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-4">
+                      <h4 className="font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2 mb-2">
                         <ShieldCheck className="w-4 h-4 text-cyan-400" />
                         Blindaje Financiero de Margen (Scan-Back)
                       </h4>
-                      <p className="text-slate-300 leading-relaxed">
+                      <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
                         {data.trade_intelligence?.analisis_margen}
                       </p>
                     </div>
 
-                    <div className="bg-slate-800/60 border border-slate-700/80 rounded-xl p-4">
-                      <h4 className="font-bold text-slate-200 flex items-center gap-2 mb-2">
+                    <div className="bg-slate-100/60 dark:bg-slate-100 dark:bg-slate-800/60 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-4">
+                      <h4 className="font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2 mb-2">
                         <Store className="w-4 h-4 text-indigo-400" />
                         Recomendación Táctica para Negociación de Compra
                       </h4>
-                      <p className="text-slate-300 leading-relaxed">
+                      <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
                         {data.trade_intelligence?.recomendacion_proveedor}
                       </p>
                     </div>
@@ -699,9 +699,9 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
 
                   {/* Bullets clave */}
                   {data.trade_intelligence?.puntos_clave?.length > 0 && (
-                    <div className="bg-slate-800/40 border border-slate-700/60 rounded-xl p-4">
-                      <h4 className="text-xs font-bold text-slate-300 mb-2">Puntos Críticos de Gestión:</h4>
-                      <ul className="space-y-1 text-xs text-slate-300">
+                    <div className="bg-slate-100/40 dark:bg-slate-100 dark:bg-slate-800/40 border border-slate-300/60 dark:border-slate-300 dark:border-slate-700/60 rounded-xl p-4">
+                      <h4 className="text-xs font-bold text-slate-600 dark:text-slate-300 mb-2">Puntos Críticos de Gestión:</h4>
+                      <ul className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
                         {data.trade_intelligence.puntos_clave.map((pt: string, i: number) => (
                           <li key={i} className="flex items-center gap-2">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
@@ -718,13 +718,13 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
               {activeTab === "informe_encargados" && (
                 <div className="space-y-6 animate-in fade-in duration-150">
                   {/* Barra de Acciones del Informe */}
-                  <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-4 flex items-center justify-between">
+                  <div className="bg-slate-100 dark:bg-slate-800/80 border border-slate-300/80 dark:border-slate-300 dark:border-slate-700/80 rounded-xl p-4 flex items-center justify-between">
                     <div>
                       <h3 className="text-sm font-bold text-white flex items-center gap-2">
                         <Building2 className="w-4 h-4 text-amber-400" />
                         Informe Técnico & Ficha Operativa para Salón y Cajas
                       </h3>
-                      <p className="text-xs text-slate-400 mt-0.5">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                         Documento oficial membretado con especificaciones para Encargado de Salón, Repositores y Cajeras.
                       </p>
                     </div>
@@ -743,7 +743,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                   {/* Simulación Visual de la Ficha Membretada */}
                   <div className="bg-white text-slate-900 rounded-xl p-6 shadow-xl border border-slate-300 space-y-5 text-xs font-sans">
                     {/* Encabezado Ficha */}
-                    <div className="border-b-2 border-slate-800 pb-3 flex items-start justify-between">
+                    <div className="border-b-2 border-slate-200 dark:border-slate-800 pb-3 flex items-start justify-between">
                       <div>
                         <h2 className="text-base font-black text-slate-900 uppercase tracking-tight">
                           GRUPO SANTA TERESA E.A.S.
@@ -843,7 +843,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                               ))
                             ) : (
                               <tr>
-                                <td colSpan={5} className="py-3 text-center text-slate-400">
+                                <td colSpan={5} className="py-3 text-center text-slate-500 dark:text-slate-400">
                                   No hay productos asociados en esta ficha.
                                 </td>
                               </tr>
@@ -876,7 +876,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
         </div>
 
         {/* FOOTER INFERIOR */}
-        <div className="px-6 py-3 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between text-xs text-slate-400 shrink-0">
+        <div className="px-6 py-3 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/80 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 shrink-0">
           <span className="flex items-center gap-1.5">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
             Extra Supermercado Mayorista • Módulo de Gestión Comercial y Trade Marketing
@@ -903,7 +903,7 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
             <span>•</span>
             <button
               onClick={onClose}
-              className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-semibold rounded-lg transition"
+              className="px-4 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white font-semibold rounded-lg transition"
             >
               Cerrar
             </button>
