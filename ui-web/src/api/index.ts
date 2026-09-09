@@ -273,6 +273,9 @@ export interface PipelineStats { total?: number; total_valor?: number; by_etapa?
 export interface ActivityStats { total?: number; completadas?: number; pendientes?: number; by_tipo?: Record<string, number>; por_tipo?: Record<string, number> }
 export interface Permission { id: string; name?: string; description?: string | null; module?: string; action?: string; created_at?: string }
 export interface Role { id: string; name?: string; description?: string | null; is_system?: boolean; is_default?: boolean; created_at?: string; permissions?: Permission[] }
+// Shape real de GET /rbac/users/{id}/roles -- distinto de Role (no trae description/permissions,
+// trae role_id/role_name porque es la fila de la tabla puente rbac_user_roles, no el rol en si)
+export interface UserRoleAssignment { user_id: string; tenant_id: string; role_id: string; role_name: string; created_at: string }
 export interface TenantUser { id: string; email: string; nombre: string; telefono?: string | null; rol: string; activo: boolean; is_superadmin: boolean; foto_url?: string | null; last_login?: string | null; created_at: string; tenant_rol: string; role_names: string[] }
 export interface PurchaseOrder { id: string; company_id?: string; supplier_id?: string; supplier?: Supplier; numero?: string; fecha?: string; fecha_entrega?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; tipo_cambio?: number; fecha_entrega_estimada?: string | null; prioridad?: string; condiciones_pago?: string; created_by_name?: string; user_id?: string; descuento_total?: number; iva_10?: number; iva_5?: number; observaciones?: string | null; items?: PurchaseOrderItem[]; created_at?: string; updated_at?: string }
 export interface PurchaseRequisitionItem { id: string; requisition_id: string; product_id: string; variant_id?: string | null; descripcion?: string | null; cantidad_solicitada: number; cantidad_aprobada?: number | null; precio_estimado?: number | null; total_estimado?: number | null; observaciones?: string | null; created_at: string }
@@ -1326,7 +1329,7 @@ export const api = {
     deleteRole: (id: string) => client.delete<void>(`/v1/rbac/roles/${id}`),
     assignRole: (userId: string, roleId: string) => client.post<void>(`/v1/rbac/users/${userId}/roles`, { role_id: roleId }),
     removeRole: (userId: string, roleId: string) => client.delete<void>(`/v1/rbac/users/${userId}/roles/${roleId}`),
-    userRoles: (userId: string) => client.get<Role[]>(`/v1/rbac/users/${userId}/roles`),
+    userRoles: (userId: string) => client.get<UserRoleAssignment[]>(`/v1/rbac/users/${userId}/roles`),
     setRolePermissions: (roleId: string, permissionIds: string[]) => client.post<void>(`/v1/rbac/roles/${roleId}/permissions`, { permission_ids: permissionIds }),
     updateRolePermissions: (roleId: string, permissionIds: string[]) => client.post<void>(`/v1/rbac/roles/${roleId}/permissions`, { permission_ids: permissionIds }),
     seedRoles: () => client.post<void>("/v1/rbac/seed"),
