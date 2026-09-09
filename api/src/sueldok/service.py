@@ -266,5 +266,44 @@ async def sync_sales_to_payroll(db: AsyncSession, config: dict, company_id: str,
     return await sync_payroll_data(db, config, payroll_data)
 
 
+async def sync_cash_shortage_deduction(
+    db: AsyncSession,
+    company_id: str,
+    deduction_data: dict,
+) -> dict:
+    """Envía novedad formal de descuento salarial por faltante de arqueo a SueldOK."""
+    res = await db.execute(
+        text("SELECT * FROM sueldok_sync_config WHERE company_id = :cid OR enabled = true LIMIT 1"),
+        {"cid": company_id},
+    )
+    row = res.mappings().first()
+    config = dict(row) if row else {"url_base": SUELDOK_BASE_URL, "api_key": SUELDOK_SYSTEM_KEY, "enabled": True}
+
+    payload = {
+        "evento": "DESCUENTO_FALTANTE_CAJA",
+        "company_id": company_id,
+        "user_id": deduction_data.get("user_id"),
+        "cajero_nombre": deduction_data.get("cajero_nombre"),
+        "monto_total_gs": deduction_data.get("monto_faltante_gs"),
+        "cuotas": deduction_data.get("cuotas", 1),
+        "monto_cuota_gs": deduction_data.get("monto_cuota_gs"),
+        "periodo_nomina": deduction_data.get("periodo_nomina"),
+        "session_id": deduction_data.get("session_id"),
+        "caja_nombre": deduction_data.get("caja_nombre"),
+        "observaciones": deduction_data.get("observaciones"),
+        "aprobado_por": deduction_data.get("aprobado_por"),
+        "fecha_aprobacion": datetime.now(timezone.utc).isoformat(),
+    }
+
+    if config.get("url_base") and config.get("enabled"):
+        try:
+            return await sync_payroll_data(db, config, payload)
+        except Exception as e:
+            return {"status": "error", "message": str(e), "payload": payload}
+
+    return {"status": "success", "message": "Novedad registrada localmente para nómina SueldOK", "payload": payload}
+
+
 def get_available_events() -> list[str]:
     return SYNC_EVENTS
+

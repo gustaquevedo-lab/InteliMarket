@@ -2,6 +2,7 @@
 
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -17,7 +18,10 @@ from api.src.caja.schemas import (
     ConfirmHandoffRequest, DepositVaultEntriesRequest, RejectVaultDepositRequest,
     ConfirmCashDropRequest, RejectCashDropRequest, VoidCashDropRequest,
     CreateTreasuryRemittanceRequest, ReceiveTreasuryRemittanceRequest,
-    DepositVaultToBankRequest,
+    DepositVaultToBankRequest, SavePunteoAuditRequest,
+    PaymentMethodBankMappingUpdate, PaymentMethodBankMappingResponse,
+    CashShortageConfigUpdate, CashShortageConfigResponse,
+    ResolveCashShortageRequest, IncorporateSessionVaultAndBanksRequest,
 )
 from api.src.caja import service
 from api.src.caja import pdf_reports
@@ -304,6 +308,28 @@ async def export_punteo_sesion_pdf(
         generated_by,
     )
     return _pdf_response(pdf_bytes, f"planilla_punteo_{session_id[:8]}.pdf")
+
+
+@router.post("/cash-sessions/{session_id}/punteo/asentar")
+async def save_session_punteo_audit(
+    session_id: str,
+    body: SavePunteoAuditRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    auditor_nombre = user.get("user_nombre") or user.get("user_email") or "Auditoría de Salón"
+    try:
+        return await service.save_session_punteo_audit(
+            db,
+            session_id,
+            user["company_id"],
+            auditor_nombre,
+            [it.model_dump() for it in body.items],
+            body.observaciones_dictamen,
+            body.diferencia_vouchers_gs,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 
@@ -634,4 +660,112 @@ async def deposit_vault_to_bank(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Mapeo de Cuentas Bancarias para Medios de Pago Electrónicos ────────
+
+@router.get("/caja/config/bank-mappings", response_model=list[PaymentMethodBankMappingResponse])
+async def list_bank_mappings(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_payment_method_bank_mappings(db, user["company_id"])
+
+
+@router.put("/caja/config/bank-mappings/{canal_key}")
+async def update_bank_mapping(
+    canal_key: str,
+    body: PaymentMethodBankMappingUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.update_payment_method_bank_mapping(
+        db,
+        user["company_id"],
+        canal_key,
+        body.bank_account_id,
+        body.activo if body.activo is not None else True,
+    )
+
+
+# ── Configuración y Tratamiento de Faltantes hacia SueldOK ────────────
+
+@router.get("/caja/config/shortages", response_model=CashShortageConfigResponse)
+async def get_shortage_config(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_cash_shortage_config(db, user["company_id"])
+
+
+@router.put("/caja/config/shortages", response_model=CashShortageConfigResponse)
+async def update_shortage_config(
+    body: CashShortageConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.update_cash_shortage_config(
+        db,
+        user["company_id"],
+        body.model_dump(exclude_unset=True),
+    )
+
+
+# ── Incorporación Integral de Turno a Bóveda y Bancos ──────────────────
+
+@router.post("/cash-sessions/{session_id}/incorporar-boveda-bancos")
+async def incorporate_session_vault_banks(
+    session_id: str,
+    body: IncorporateSessionVaultAndBanksRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_nombre = user.get("user_nombre") or user.get("user_email") or "Auditoría de Turno"
+    user_id = user.get("id") or str(uuid.uuid4())
+    try:
+        return await service.incorporate_session_to_vault_and_banks(
+            db,
+            session_id,
+            user["company_id"],
+            user_id,
+            user_nombre,
+            body.observaciones,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Gestión de Faltantes y Sincronización con Nómina SueldOK ───────────
+
+@router.get("/caja/shortages")
+async def list_cash_shortages(
+    estado: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_cash_shortage_requests(db, user["company_id"], estado)
+
+
+@router.post("/caja/shortages/{request_id}/resolver")
+async def resolve_cash_shortage(
+    request_id: str,
+    body: ResolveCashShortageRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    aprobado_por = user.get("user_nombre") or user.get("user_email") or "Gerencia de Operaciones"
+    try:
+        return await service.resolve_cash_shortage_request(
+            db,
+            user["company_id"],
+            request_id,
+            body.accion,
+            body.cuotas or 1,
+            body.periodo_nomina,
+            body.observaciones,
+            aprobado_por,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 

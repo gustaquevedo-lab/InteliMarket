@@ -22,8 +22,10 @@ from api.src.caja.models import (
     CashRegister, CashSession, CashCount, CashRegisterMovement, CashHandoff,
     VaultEntry, VaultDepositApprovalRequest, CashDropRequest,
     TreasuryRemittance, TreasuryRemittanceItem,
+    PaymentMethodBankMapping, CashShortageDeductionRequest, CashShortageConfig,
 )
 from api.src.sales.models import Sale, SalePayment
+from api.src.pos_terminal_transactions.models import PosTerminalTransaction
 from api.src.financial.models import BankAccount, BankTransaction
 from api.src.auth.models import User
 
@@ -1923,6 +1925,19 @@ async def get_treasury_remittance(db: AsyncSession, company_id: str, remittance_
     )
     items = list(items_res.scalars().all())
 
+    # Mapear session_id para cada sobre si viene de CashHandoff o CashDrop
+    handoff_ids = [it.referencia_id for it in items if it.referencia_id and it.tipo_sobre == "cierre_turno"]
+    drop_ids = [it.referencia_id for it in items if it.referencia_id and it.tipo_sobre == "sangria"]
+    session_map: dict[uuid.UUID, str] = {}
+    if handoff_ids:
+        h_res = await db.execute(select(CashHandoff.id, CashHandoff.session_id).where(CashHandoff.id.in_(handoff_ids)))
+        for hid, sid in h_res.all():
+            session_map[hid] = str(sid)
+    if drop_ids:
+        d_res = await db.execute(select(CashDropRequest.id, CashDropRequest.session_id).where(CashDropRequest.id.in_(drop_ids)))
+        for did, sid in d_res.all():
+            session_map[did] = str(sid)
+
     return {
         "id": str(r.id),
         "company_id": str(r.company_id),
@@ -1947,6 +1962,7 @@ async def get_treasury_remittance(db: AsyncSession, company_id: str, remittance_
                 "remittance_id": str(it.remittance_id),
                 "tipo_sobre": it.tipo_sobre,
                 "referencia_id": str(it.referencia_id) if it.referencia_id else None,
+                "session_id": session_map.get(it.referencia_id) if it.referencia_id else None,
                 "vault_entry_id": str(it.vault_entry_id) if it.vault_entry_id else None,
                 "caja_codigo": it.caja_codigo,
                 "caja_nombre": it.caja_nombre,
@@ -2514,7 +2530,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     tasa_brl = Decimal(str(breakdown.get("tasa_brl") or 1400))
     tasa_usd = Decimal(str(breakdown.get("tasa_usd") or 7800))
 
-    # Obtener todas las transacciones de pago de la sesion
+    # Obtener todas las transacciones de pago de la sesion vinculadas con transacciones de terminal POS
     vouchers_res = await db.execute(
         select(
             SalePayment.id,
@@ -2522,12 +2538,20 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             SalePayment.moneda,
             SalePayment.monto,
             SalePayment.fecha,
+            Sale.id.label("sale_id"),
             Sale.numero.label("numero_venta"),
             Sale.numero_interno,
             Sale.tipo_comprobante,
+            Sale.observaciones.label("sale_obs"),
+            PosTerminalTransaction.codigo_autorizacion,
+            PosTerminalTransaction.nsu,
+            PosTerminalTransaction.nombre_tarjeta,
+            PosTerminalTransaction.pan,
+            PosTerminalTransaction.nombre_cliente,
         )
         .select_from(SalePayment)
         .join(Sale, Sale.id == SalePayment.sale_id)
+        .outerjoin(PosTerminalTransaction, PosTerminalTransaction.sale_id == Sale.id)
         .where(
             Sale.session_id == uuid.UUID(session_id),
             Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
@@ -2536,6 +2560,19 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     )
 
     vouchers = []
+    vouchers_by_channel: dict[str, dict] = {
+        "TARJETA_BANCARD": {"canal_key": "TARJETA_BANCARD", "canal_label": "Tarjetas Bancard POS", "icon": "credit-card", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
+        "TARJETA_DINELCO": {"canal_key": "TARJETA_DINELCO", "canal_label": "Tarjetas Dinelco POS", "icon": "credit-card", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
+        "BANCARD_QR": {"canal_key": "BANCARD_QR", "canal_label": "Bancard QR", "icon": "qr-code", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
+        "DINELCO_QR": {"canal_key": "DINELCO_QR", "canal_label": "Dinelco QR", "icon": "qr-code", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
+        "PIX": {"canal_key": "PIX", "canal_label": "PIX Brasil", "icon": "smartphone", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
+        "TRANSFERENCIA": {"canal_key": "TRANSFERENCIA", "canal_label": "Transferencias SIPAP", "icon": "landmark", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
+        "EXTRA_CLUB": {"canal_key": "EXTRA_CLUB", "canal_label": "Crédito Extra Club", "icon": "award", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
+        "VALES": {"canal_key": "VALES", "canal_label": "Vales & Cheques", "icon": "file-check", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
+        "EFECTIVO": {"canal_key": "EFECTIVO", "canal_label": "Efectivo Físico", "icon": "banknote", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
+        "OTROS": {"canal_key": "OTROS", "canal_label": "Otros Comprobantes", "icon": "file-text", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
+    }
+
     for row in vouchers_res.all():
         fp_raw = (row.forma_pago or "").upper()
         mon = (row.moneda or "PYG").upper()
@@ -2573,9 +2610,11 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             canal_key = "OTROS"
 
         m_gs = m_dec * tasa_brl if mon == "BRL" else (m_dec * tasa_usd if mon == "USD" else m_dec)
+        m_gs_float = float(m_gs)
 
-        vouchers.append({
+        voucher_item = {
             "id": str(row.id),
+            "sale_id": str(row.sale_id),
             "fecha": row.fecha.isoformat() if row.fecha else None,
             "numero_ticket": row.numero_interno or row.numero_venta or "—",
             "tipo_comprobante": row.tipo_comprobante,
@@ -2583,15 +2622,83 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             "canal_key": canal_key,
             "moneda": mon,
             "monto_original": float(m_dec),
-            "monto_gs": float(m_gs),
-        })
+            "monto_gs": m_gs_float,
+            "codigo_autorizacion": row.codigo_autorizacion or "—",
+            "nsu": row.nsu or "—",
+            "tarjeta_marca": row.nombre_tarjeta or ("Dinelco" if "DINELCO" in canal_key else ("Bancard" if "BANCARD" in canal_key else "—")),
+            "tarjeta_pan": f"•••• {row.pan}" if row.pan else "—",
+            "titular": row.nombre_cliente or "—",
+        }
+
+        vouchers.append(voucher_item)
+        if canal_key in vouchers_by_channel:
+            vouchers_by_channel[canal_key]["total_esperado_gs"] += m_gs_float
+            vouchers_by_channel[canal_key]["cantidad_esperada"] += 1
+            vouchers_by_channel[canal_key]["vouchers"].append(voucher_item)
+
+    # Filtrar solo canales que tengan transacciones
+    canales_activos = [c for c in vouchers_by_channel.values() if c["cantidad_esperada"] > 0]
 
     return {
         "session_data": session_data,
         "summary_by_method": medios_dict,
         "payments_breakdown": breakdown,
         "vouchers": vouchers,
+        "grupos_comprobantes": canales_activos,
         "total_vouchers": len(vouchers),
+    }
+
+
+async def save_session_punteo_audit(
+    db: AsyncSession,
+    session_id: str,
+    company_id: str,
+    auditor_nombre: str,
+    items: list[dict],
+    observaciones_dictamen: str | None,
+    diferencia_vouchers_gs: Decimal,
+) -> dict:
+    """Asienta formalmente el dictamen de auditoría y cotejo físico de comprobantes."""
+    cid = uuid.UUID(company_id)
+    sid = uuid.UUID(session_id)
+
+    res = await db.execute(
+        select(CashSession)
+        .join(CashRegister, CashRegister.id == CashSession.register_id)
+        .where(CashSession.id == sid, CashRegister.company_id == cid)
+    )
+    session_obj = res.scalar_one_or_none()
+    if not session_obj:
+        raise ValueError("Sesión de caja no encontrada")
+
+    now_py = datetime.now(TZ_ASUNCION).strftime("%d/%m/%Y %H:%M")
+    conformes = [it for it in items if it.get("estado") == "conforme"]
+    faltantes = [it for it in items if it.get("estado") == "faltante"]
+    discrepantes = [it for it in items if it.get("estado") == "discrepante"]
+
+    estado_dictamen = "CONFORME" if len(faltantes) == 0 and len(discrepantes) == 0 and abs(diferencia_vouchers_gs) == 0 else "OBSERVADO"
+    nota_audit = (
+        f"\n[COTEJO FÍSICO DE COMPROBANTES ({now_py}) por {auditor_nombre}]: "
+        f"Dictamen: {estado_dictamen} | Conformes: {len(conformes)}, Faltantes: {len(faltantes)}, Con Discrepancia: {len(discrepantes)}. "
+        f"Diferencia Comprobantes: ₲ {float(diferencia_vouchers_gs):,.0f}."
+    )
+    if observaciones_dictamen:
+        nota_audit += f" Detalle: {observaciones_dictamen.strip()}"
+
+    session_obj.observaciones = (session_obj.observaciones or "") + nota_audit
+
+    await db.commit()
+    await db.refresh(session_obj)
+
+    return {
+        "status": "ok",
+        "session_id": str(sid),
+        "estado_dictamen": estado_dictamen,
+        "conformes": len(conformes),
+        "faltantes": len(faltantes),
+        "discrepantes": len(discrepantes),
+        "diferencia_vouchers_gs": float(diferencia_vouchers_gs),
+        "observaciones_actualizadas": session_obj.observaciones,
     }
 
 
@@ -2867,6 +2974,467 @@ async def get_sales_by_payment_method_report(
         "efectivo_usd_recaudado": float(methods_dict["efectivo_usd"]["monto"]),
         "medios_pago": breakdown,
     }
+
+
+# ── Mapeo de Medios Electrónicos a Cuentas Bancarias Corrientes ────────
+
+DEFAULT_CANALES = [
+    ("TARJETA_BANCARD", "Tarjetas Bancard POS"),
+    ("TARJETA_DINELCO", "Tarjetas Dinelco POS"),
+    ("BANCARD_QR", "Cobros QR Bancard"),
+    ("DINELCO_QR", "Cobros QR Dinelco"),
+    ("PIX", "PIX Brasil (Plug Pay)"),
+    ("TRANSFERENCIA", "Transferencias SIPAP"),
+]
+
+
+async def list_payment_method_bank_mappings(db: AsyncSession, company_id: str) -> list[dict]:
+    """Lista todos los mapeos de medios de pago a cuentas bancarias corrientes.
+    Si no existen aún para la empresa, los inicializa con los canales predeterminados."""
+    cid = uuid.UUID(company_id)
+
+    query = (
+        select(PaymentMethodBankMapping, BankAccount)
+        .outerjoin(BankAccount, BankAccount.id == PaymentMethodBankMapping.bank_account_id)
+        .where(PaymentMethodBankMapping.company_id == cid)
+        .order_by(PaymentMethodBankMapping.canal_key.asc())
+    )
+    result = await db.execute(query)
+    rows = result.all()
+
+    if not rows:
+        for k, lbl in DEFAULT_CANALES:
+            db.add(PaymentMethodBankMapping(company_id=cid, canal_key=k, canal_label=lbl, activo=True))
+        await db.commit()
+
+        result = await db.execute(query)
+        rows = result.all()
+
+    out = []
+    for mapping, bank in rows:
+        out.append({
+            "id": str(mapping.id),
+            "canal_key": mapping.canal_key,
+            "canal_label": mapping.canal_label,
+            "bank_account_id": str(mapping.bank_account_id) if mapping.bank_account_id else None,
+            "banco_nombre": bank.banco if bank else None,
+            "numero_cuenta": bank.numero_cuenta if bank else None,
+            "moneda": bank.moneda if bank else None,
+            "activo": mapping.activo,
+        })
+    return out
+
+
+async def update_payment_method_bank_mapping(
+    db: AsyncSession,
+    company_id: str,
+    canal_key: str,
+    bank_account_id: str | None,
+    activo: bool = True,
+) -> dict:
+    """Actualiza o asocia la cuenta bancaria de destino para un medio de pago electrónico."""
+    cid = uuid.UUID(company_id)
+    bid = uuid.UUID(bank_account_id) if bank_account_id else None
+
+    res = await db.execute(
+        select(PaymentMethodBankMapping).where(
+            PaymentMethodBankMapping.company_id == cid,
+            PaymentMethodBankMapping.canal_key == canal_key,
+        )
+    )
+    mapping = res.scalar_one_or_none()
+    if not mapping:
+        lbl = dict(DEFAULT_CANALES).get(canal_key, canal_key)
+        mapping = PaymentMethodBankMapping(
+            company_id=cid,
+            canal_key=canal_key,
+            canal_label=lbl,
+            bank_account_id=bid,
+            activo=activo,
+        )
+        db.add(mapping)
+    else:
+        mapping.bank_account_id = bid
+        mapping.activo = activo
+        mapping.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(mapping)
+
+    banco_nombre, num_cuenta, moneda = None, None, None
+    if bid:
+        b_res = await db.execute(select(BankAccount).where(BankAccount.id == bid))
+        b_obj = b_res.scalar_one_or_none()
+        if b_obj:
+            banco_nombre = b_obj.banco
+            num_cuenta = b_obj.numero_cuenta
+            moneda = b_obj.moneda
+
+    return {
+        "id": str(mapping.id),
+        "canal_key": mapping.canal_key,
+        "canal_label": mapping.canal_label,
+        "bank_account_id": str(bid) if bid else None,
+        "banco_nombre": banco_nombre,
+        "numero_cuenta": num_cuenta,
+        "moneda": moneda,
+        "activo": mapping.activo,
+    }
+
+
+# ── Configuración y Tratamiento de Faltantes hacia SueldOK ────────────
+
+async def get_cash_shortage_config(db: AsyncSession, company_id: str) -> dict:
+    cid = uuid.UUID(company_id)
+    res = await db.execute(select(CashShortageConfig).where(CashShortageConfig.company_id == cid))
+    cfg = res.scalar_one_or_none()
+    if not cfg:
+        cfg = CashShortageConfig(
+            company_id=cid,
+            umbral_aprobacion_gs=Decimal("10000"),
+            requerir_aprobacion_siempre=True,
+            permitir_cuotas=True,
+            max_cuotas=3,
+        )
+        db.add(cfg)
+        await db.commit()
+        await db.refresh(cfg)
+
+    return {
+        "umbral_aprobacion_gs": float(cfg.umbral_aprobacion_gs),
+        "requerir_aprobacion_siempre": bool(cfg.requerir_aprobacion_siempre),
+        "permitir_cuotas": bool(cfg.permitir_cuotas),
+        "max_cuotas": int(cfg.max_cuotas),
+    }
+
+
+async def update_cash_shortage_config(db: AsyncSession, company_id: str, data: dict) -> dict:
+    cid = uuid.UUID(company_id)
+    res = await db.execute(select(CashShortageConfig).where(CashShortageConfig.company_id == cid))
+    cfg = res.scalar_one_or_none()
+    if not cfg:
+        cfg = CashShortageConfig(company_id=cid)
+        db.add(cfg)
+
+    if data.get("umbral_aprobacion_gs") is not None:
+        cfg.umbral_aprobacion_gs = Decimal(str(data["umbral_aprobacion_gs"]))
+    if data.get("requerir_aprobacion_siempre") is not None:
+        cfg.requerir_aprobacion_siempre = bool(data["requerir_aprobacion_siempre"])
+    if data.get("permitir_cuotas") is not None:
+        cfg.permitir_cuotas = bool(data["permitir_cuotas"])
+    if data.get("max_cuotas") is not None:
+        cfg.max_cuotas = int(data["max_cuotas"])
+
+    cfg.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(cfg)
+    return {
+        "umbral_aprobacion_gs": float(cfg.umbral_aprobacion_gs),
+        "requerir_aprobacion_siempre": bool(cfg.requerir_aprobacion_siempre),
+        "permitir_cuotas": bool(cfg.permitir_cuotas),
+        "max_cuotas": int(cfg.max_cuotas),
+    }
+
+
+# ── Incorporación Integral de Turno a Bóveda y Bancos ──────────────────
+
+async def incorporate_session_to_vault_and_banks(
+    db: AsyncSession,
+    session_id: str,
+    company_id: str,
+    user_id: str,
+    user_nombre: str,
+    observaciones: str | None = None,
+) -> dict:
+    """Ejecuta el ciclo de vida contable completo tras el cierre/punteo de caja:
+    1. Incorpora el efectivo físico contado (PYG, BRL, USD) y cheques a Bóveda Central (VaultEntry).
+    2. Registra las acreditaciones esperadas de medios de pago electrónicos en las cuentas corrientes
+       bancarias asignadas (BankTransaction en estado pendiente de conciliación).
+    3. Si hay faltante de caja, genera la solicitud de deducción en nómina sujeta a aprobación para SueldOK.
+    """
+    cid = uuid.UUID(company_id)
+    sid = uuid.UUID(session_id)
+
+    res = await db.execute(
+        select(CashSession, CashCount, CashRegister)
+        .join(CashCount, CashCount.session_id == CashSession.id)
+        .join(CashRegister, CashRegister.id == CashSession.register_id)
+        .where(CashSession.id == sid, CashRegister.company_id == cid)
+    )
+    row = res.first()
+    if not row:
+        raise ValueError("Sesión de caja o arqueo no encontrado")
+
+    session_obj, count_obj, reg = row
+
+    # 1. BÓVEDA CENTRAL: Incorporar efectivo físico contado
+    m_ef_pyg = Decimal(str(count_obj.monto_efectivo or 0))
+    m_ef_brl = Decimal(str(count_obj.monto_efectivo_brl or 0))
+    m_ef_usd = Decimal(str(count_obj.monto_efectivo_usd or 0))
+    m_cheque = Decimal(str(count_obj.monto_cheque or 0))
+
+    vault_entries_creados = []
+    # Verificar si ya existe VaultEntry directo para esta sesión
+    existing_ve = await db.execute(
+        select(VaultEntry).where(
+            VaultEntry.company_id == cid,
+            VaultEntry.session_id == sid if hasattr(VaultEntry, "session_id") else VaultEntry.observaciones.ilike(f"%{str(sid)[:8]}%"),
+        )
+    )
+    if not existing_ve.scalars().first():
+        if m_ef_pyg > 0 or m_ef_brl > 0 or m_ef_usd > 0:
+            ve_cash = VaultEntry(
+                company_id=cid,
+                branch_id=reg.branch_id,
+                origen="entrega_cajero",
+                monto_pyg=m_ef_pyg,
+                monto_usd=m_ef_usd,
+                monto_brl=m_ef_brl,
+                estado="en_boveda",
+                registrado_por=uuid.UUID(user_id),
+                observaciones=f"Incorporación automática arqueo [{str(sid)[:8]}] de {session_obj.cajero_nombre} ({reg.nombre}). {observaciones or ''}".strip(),
+            )
+            db.add(ve_cash)
+            vault_entries_creados.append({"tipo": "efectivo", "pyg": float(m_ef_pyg), "brl": float(m_ef_brl), "usd": float(m_ef_usd)})
+
+        if m_cheque > 0:
+            ve_chq = VaultEntry(
+                company_id=cid,
+                branch_id=reg.branch_id,
+                origen="cheque_caja",
+                monto_pyg=m_cheque,
+                monto_usd=Decimal("0"),
+                monto_brl=Decimal("0"),
+                estado="en_boveda",
+                registrado_por=uuid.UUID(user_id),
+                observaciones=f"Cheques en custodia arqueo [{str(sid)[:8]}] de {session_obj.cajero_nombre} ({reg.nombre})",
+            )
+            db.add(ve_chq)
+            vault_entries_creados.append({"tipo": "cheques", "pyg": float(m_cheque), "brl": 0.0, "usd": 0.0})
+
+    # 2. BANCOS: Pre-registro de cobranzas electrónicas en Cuentas Corrientes
+    punteo_data = await get_session_punteo_data(db, session_id, company_id)
+    summary_methods = punteo_data.get("summary_by_method", {}) if punteo_data else {}
+
+    mappings = await list_payment_method_bank_mappings(db, company_id)
+    mapping_by_key = {m["canal_key"]: m for m in mappings if m["activo"] and m["bank_account_id"]}
+
+    bank_transactions_creadas = []
+    fecha_trx = session_obj.fecha_cierre.date() if session_obj.fecha_cierre else date.today()
+
+    for canal_key, map_info in mapping_by_key.items():
+        v_info = summary_methods.get(canal_key, {})
+        m_gs = Decimal(str(v_info.get("monto_gs") or 0))
+        if m_gs > 0:
+            ref_code = f"ARQUEO-{str(sid)[:8]}-{canal_key}"
+            # Evitar duplicar BankTransaction si ya fue asentado
+            chk_bt = await db.execute(
+                select(BankTransaction).where(
+                    BankTransaction.company_id == cid,
+                    BankTransaction.referencia == ref_code,
+                )
+            )
+            if not chk_bt.scalar_one_or_none():
+                bt = BankTransaction(
+                    company_id=cid,
+                    bank_account_id=uuid.UUID(map_info["bank_account_id"]),
+                    fecha=fecha_trx,
+                    tipo="ingreso",
+                    monto=m_gs,
+                    moneda=map_info.get("moneda") or "PYG",
+                    descripcion=f"Recaudación {map_info['canal_label']} Turno {session_obj.cajero_nombre} ({reg.nombre})",
+                    referencia=ref_code,
+                    contraparte=map_info["canal_label"],
+                    conciliado=False,
+                    categoria="ventas_pos",
+                )
+                db.add(bt)
+                bank_transactions_creadas.append({
+                    "banco": map_info.get("banco_nombre"),
+                    "cuenta": map_info.get("numero_cuenta"),
+                    "canal": map_info["canal_label"],
+                    "monto_gs": float(m_gs),
+                    "referencia": ref_code,
+                })
+
+    # 3. FALTANTE DE CAJA: Generar solicitud de descuento para SueldOK
+    diferencia_gs = float(count_obj.diferencia or 0)
+    solicitud_faltante = None
+    if diferencia_gs < 0:
+        monto_faltante = abs(diferencia_gs)
+        cfg = await get_cash_shortage_config(db, company_id)
+        if cfg["requerir_aprobacion_siempre"] or monto_faltante >= cfg["umbral_aprobacion_gs"]:
+            # Verificar si ya existe solicitud para esta sesión
+            chk_req = await db.execute(
+                select(CashShortageDeductionRequest).where(
+                    CashShortageDeductionRequest.session_id == sid,
+                    CashShortageDeductionRequest.company_id == cid,
+                )
+            )
+            existing_req = chk_req.scalar_one_or_none()
+            if not existing_req:
+                periodo_str = (session_obj.fecha_cierre or datetime.now()).strftime("%Y-%m")
+                shortage_req = CashShortageDeductionRequest(
+                    company_id=cid,
+                    session_id=sid,
+                    caja_nombre=reg.nombre,
+                    user_id=session_obj.user_id,
+                    cajero_nombre=session_obj.cajero_nombre or "Cajero",
+                    monto_faltante_gs=Decimal(str(monto_faltante)),
+                    estado="pendiente",
+                    cuotas=1,
+                    monto_cuota_gs=Decimal(str(monto_faltante)),
+                    periodo_nomina=periodo_str,
+                    observaciones=f"Faltante detectado en arqueo de caja del {session_obj.fecha_cierre.strftime('%d/%m/%Y') if session_obj.fecha_cierre else 'turno'}.",
+                )
+                db.add(shortage_req)
+                solicitud_faltante = {
+                    "cajero": session_obj.cajero_nombre,
+                    "monto_faltante_gs": monto_faltante,
+                    "estado": "pendiente",
+                    "periodo": periodo_str,
+                }
+
+    now_py = datetime.now(TZ_ASUNCION).strftime("%d/%m/%Y %H:%M")
+    nota = f"\n[ASENTAMIENTO BÓVEDA & BANCOS ({now_py}) por {user_nombre}]: Bóveda ({len(vault_entries_creados)} entradas), Bancos ({len(bank_transactions_creadas)} transacciones)."
+    session_obj.observaciones = (session_obj.observaciones or "") + nota
+
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "session_id": str(sid),
+        "cajero_nombre": session_obj.cajero_nombre,
+        "register_nombre": reg.nombre,
+        "vault_entries": vault_entries_creados,
+        "bank_transactions": bank_transactions_creadas,
+        "shortage_request": solicitud_faltante,
+    }
+
+
+# ── Gestión de Faltantes y Sincronización con SueldOK ──────────────────
+
+async def list_cash_shortage_requests(db: AsyncSession, company_id: str, estado: str | None = None) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    query = select(CashShortageDeductionRequest).where(CashShortageDeductionRequest.company_id == cid)
+    if estado:
+        query = query.where(CashShortageDeductionRequest.estado == estado)
+    query = query.order_by(CashShortageDeductionRequest.created_at.desc())
+
+    res = await db.execute(query)
+    rows = list(res.scalars().all())
+    return [
+        {
+            "id": str(r.id),
+            "session_id": str(r.session_id),
+            "caja_nombre": r.caja_nombre or "Caja",
+            "user_id": str(r.user_id),
+            "cajero_nombre": r.cajero_nombre,
+            "monto_faltante_gs": float(r.monto_faltante_gs),
+            "estado": r.estado,
+            "resolucion": r.resolucion,
+            "cuotas": r.cuotas,
+            "monto_cuota_gs": float(r.monto_cuota_gs or r.monto_faltante_gs),
+            "periodo_nomina": r.periodo_nomina,
+            "sueldok_sync_status": r.sueldok_sync_status,
+            "sueldok_sync_id": r.sueldok_sync_id,
+            "observaciones": r.observaciones,
+            "aprobado_por": r.aprobado_por,
+            "aprobado_at": r.aprobado_at.isoformat() if r.aprobado_at else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+
+
+async def resolve_cash_shortage_request(
+    db: AsyncSession,
+    company_id: str,
+    request_id: str,
+    accion: str,  # aprobar_nomina | condonar | rechazar
+    cuotas: int = 1,
+    periodo_nomina: str | None = None,
+    observaciones: str | None = None,
+    aprobado_por: str = "Gerencia",
+) -> dict:
+    cid = uuid.UUID(company_id)
+    rid = uuid.UUID(request_id)
+
+    res = await db.execute(
+        select(CashShortageDeductionRequest).where(
+            CashShortageDeductionRequest.id == rid,
+            CashShortageDeductionRequest.company_id == cid,
+        )
+    )
+    req = res.scalar_one_or_none()
+    if not req:
+        raise ValueError("Solicitud de faltante no encontrada")
+
+    cuotas_validas = max(1, cuotas or 1)
+    monto_tot = req.monto_faltante_gs
+    monto_cuota = Decimal(str(round(float(monto_tot) / cuotas_validas)))
+
+    now_tz = datetime.now(timezone.utc)
+    req.aprobado_por = aprobado_por
+    req.aprobado_at = now_tz
+    if observaciones:
+        req.observaciones = f"{req.observaciones + ' | ' if req.observaciones else ''}{observaciones.strip()}"
+
+    sueldok_result = None
+
+    if accion == "aprobar_nomina":
+        req.estado = "aprobado_nomina"
+        req.resolucion = "descuento_cuotas" if cuotas_validas > 1 else "descuento_1_pago"
+        req.cuotas = cuotas_validas
+        req.monto_cuota_gs = monto_cuota
+        if periodo_nomina:
+            req.periodo_nomina = periodo_nomina
+
+        # Sincronizar automáticamente con SueldOK
+        from api.src.sueldok.service import sync_cash_shortage_deduction
+        payload = {
+            "user_id": str(req.user_id),
+            "cajero_nombre": req.cajero_nombre,
+            "monto_faltante_gs": float(req.monto_faltante_gs),
+            "cuotas": cuotas_validas,
+            "monto_cuota_gs": float(monto_cuota),
+            "periodo_nomina": req.periodo_nomina,
+            "session_id": str(req.session_id),
+            "caja_nombre": req.caja_nombre,
+            "observaciones": req.observaciones,
+            "aprobado_por": aprobado_por,
+        }
+        sueldok_result = await sync_cash_shortage_deduction(db, company_id, payload)
+        if sueldok_result.get("status") == "success":
+            req.sueldok_sync_status = "confirmado"
+            req.sueldok_sync_id = f"SUELDOK-{str(rid)[:8]}"
+        else:
+            req.sueldok_sync_status = "error"
+
+    elif accion == "condonar":
+        req.estado = "condonado"
+        req.resolucion = "perdida_empresa"
+        req.sueldok_sync_status = "no_aplica"
+
+    elif accion == "rechazar":
+        req.estado = "rechazado"
+        req.resolucion = "rechazado"
+        req.sueldok_sync_status = "no_aplica"
+
+    await db.commit()
+    await db.refresh(req)
+
+    return {
+        "status": "ok",
+        "request_id": str(req.id),
+        "estado": req.estado,
+        "resolucion": req.resolucion,
+        "cuotas": req.cuotas,
+        "monto_cuota_gs": float(req.monto_cuota_gs or 0),
+        "sueldok_status": req.sueldok_sync_status,
+        "sueldok_response": sueldok_result,
+    }
+
 
 
 

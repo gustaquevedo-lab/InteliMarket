@@ -866,7 +866,7 @@ export interface ExpenseDashboard {
 }
 export interface SupplierInvoice { id: string; company_id?: string; supplier_id?: string; supplier_nombre?: string; numero_factura?: string; timbrado?: string; cdc?: string; fecha_emision?: string; fecha_recepcion?: string; fecha_vencimiento?: string; subtotal?: number; descuento?: number; iva_10?: number; iva_5?: number; total?: number; saldo_pendiente?: number; moneda?: string; condicion?: string; tipo_comprobante?: string; estado?: string; concepto?: string; notas?: string; created_by?: string; approved_by?: string; purchase_order_id?: string; created_at?: string }
 export interface SupplierInvoicePayment { id: string; invoice_id?: string; payment_method?: string; monto?: number; moneda?: string; fecha_pago?: string; referencia?: string; estado?: string; created_at?: string }
-export interface BankAccount { id: string; company_id?: string; banco?: string; tipo?: string; numero_cuenta?: string; moneda?: string; saldo_inicial?: number; saldo_actual?: number; titular?: string; activo?: boolean; saldo_minimo_alerta?: number | null; saldo_verificado_manualmente?: boolean; saldo_verificado_at?: string | null; saldo_verificado_por?: string | null; created_at?: string }
+export interface BankAccount { id: string; company_id?: string; alias?: string | null; banco?: string; tipo?: string; numero_cuenta?: string; moneda?: string; saldo_inicial?: number; saldo_actual?: number; titular?: string; activo?: boolean; saldo_minimo_alerta?: number | null; saldo_verificado_manualmente?: boolean; saldo_verificado_at?: string | null; saldo_verificado_por?: string | null; created_at?: string }
 export interface BankBalanceCorrection { id: string; company_id?: string; bank_account_id: string; origen: string; saldo_actual: number; saldo_propuesto: number; motivo?: string; estado: string; solicitado_por?: string | null; aprobado_supervisor_id?: string | null; aprobado_supervisor_at?: string | null; aprobado_gerente_id?: string | null; aprobado_gerente_at?: string | null; rechazado_por?: string | null; rechazado_motivo?: string | null; created_at?: string }
 export interface BankTransaction { id: string; company_id?: string; bank_account_id?: string; fecha?: string; tipo?: string; monto?: number; moneda?: string; descripcion?: string; referencia?: string; contraparte?: string; conciliado?: boolean; categoria?: string; invoice_id?: string; created_at?: string }
 export interface CashFlowProjection { id: string; company_id?: string; fecha?: string; saldo_inicial?: number; ingresos_estimados?: number; egresos_estimados?: number; saldo_final_proyectado?: number; ingresos_reales?: number; egresos_reales?: number; saldo_final_real?: number; created_at?: string }
@@ -1143,6 +1143,28 @@ export const api = {
       downloadAuthenticated("/v1/caja/export/arqueo.pdf", { fecha_desde, fecha_hasta }, `acta_arqueo_consolidado_${fecha_desde}_${fecha_hasta}.pdf`),
     downloadCierrePdf: (sessionId: string) =>
       downloadAuthenticated(`/v1/cash-sessions/${sessionId}/export/cierre.pdf`, undefined, `cierre_caja_${sessionId.slice(0, 8)}.pdf`),
+    sessionPunteo: (sessionId: string) => client.get<any>(`/v1/cash-sessions/${sessionId}/punteo`),
+    savePunteoAudit: (sessionId: string, data: { items: any[]; observaciones_dictamen?: string; diferencia_vouchers_gs?: number }) =>
+      client.post<any>(`/v1/cash-sessions/${sessionId}/punteo/asentar`, data),
+    downloadSessionPunteoPdf: (sessionId: string) =>
+      downloadAuthenticated(`/v1/cash-sessions/${sessionId}/export/punteo.pdf`, undefined, `planilla_punteo_${sessionId.slice(0, 8)}.pdf`),
+    bankMappings: {
+      list: () => client.get<{ id: string; canal_key: string; canal_label: string; bank_account_id?: string | null; banco_nombre?: string | null; numero_cuenta?: string | null; moneda?: string | null; activo: boolean }[]>("/v1/caja/config/bank-mappings"),
+      update: (canalKey: string, data: { bank_account_id?: string | null; activo?: boolean }) =>
+        client.put<any>(`/v1/caja/config/bank-mappings/${canalKey}`, data),
+    },
+    shortageConfig: {
+      get: () => client.get<{ umbral_aprobacion_gs: number; requerir_aprobacion_siempre: boolean; permitir_cuotas: boolean; max_cuotas: number }>("/v1/caja/config/shortages"),
+      update: (data: { umbral_aprobacion_gs?: number; requerir_aprobacion_siempre?: boolean; permitir_cuotas?: boolean; max_cuotas?: number }) =>
+        client.put<any>("/v1/caja/config/shortages", data),
+    },
+    incorporateVaultAndBanks: (sessionId: string, data?: { observaciones?: string }) =>
+      client.post<any>(`/v1/cash-sessions/${sessionId}/incorporar-boveda-bancos`, data || {}),
+    shortages: {
+      list: (estado?: string) => client.get<any[]>("/v1/caja/shortages", estado ? { estado } : undefined),
+      resolve: (requestId: string, data: { accion: string; cuotas?: number; periodo_nomina?: string; observaciones?: string }) =>
+        client.post<any>(`/v1/caja/shortages/${requestId}/resolver`, data),
+    },
     reports: {
       salesByCashier: (params: { fecha_desde: string; fecha_hasta: string; cajero_nombre?: string }) =>
         client.get<{
@@ -1589,6 +1611,94 @@ export const api = {
     costComparison: () => client.get<CostComparisonReport[]>("/api/reports/inventory/cost-comparison"),
     fiscalBook: (params?: { tipo_libro?: string; fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/fiscal/book", params),
     financialSummary: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/financial/summary", params),
+    salesExecutiveProfitability: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
+      client.get<{
+        periodo: { fecha_desde: string | null; fecha_hasta: string | null };
+        resumen: {
+          total_vendido: number;
+          cmv: number;
+          utilidad_bruta: number;
+          margen_bruto_pct: number;
+          descuentos_pos: number;
+          devoluciones_nc: number;
+          resultado_neto: number;
+          resultado_neto_pct: number;
+          total_tickets: number;
+          ticket_promedio: number;
+          total_returns: number;
+        };
+        lineas_ejecutivas: Array<{
+          orden: number;
+          clave: string;
+          concepto: string;
+          monto: number;
+          tipo: string;
+          descripcion: string;
+        }>;
+        medios_pago: Array<{
+          forma_pago_raw: string;
+          moneda: string;
+          etiqueta: string;
+          cantidad: number;
+          monto: number;
+          porcentaje: number;
+        }>;
+        cajeras: Array<{
+          cajera: string;
+          turnos: number;
+          tickets: number;
+          total_ventas: number;
+          descuentos: number;
+          ticket_promedio: number;
+          porcentaje_ventas: number;
+        }>;
+      }>("/api/reports/sales/executive-profitability", params),
+    downloadSalesExecutivePdf: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-executive.pdf", params, `informe_ventas_utilidad_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.pdf`),
+    downloadSalesExecutiveXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-executive.xlsx", params, `informe_ventas_utilidad_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.xlsx`),
+    inventoryValuation: (params?: { warehouse_id?: string; supplier_id?: string; fecha_corte?: string }) =>
+      client.get<{
+        fecha_corte: string | null;
+        total_value: number;
+        total_products: number;
+        total_units: number;
+        by_warehouse: Array<{
+          warehouse_id: string;
+          warehouse_name: string;
+          total_products: number;
+          total_units: number;
+          total_value: number;
+          percentage: number;
+        }>;
+        by_supplier: Array<{
+          supplier_id: string | null;
+          supplier_name: string;
+          total_products: number;
+          total_units: number;
+          total_value: number;
+          percentage: number;
+        }>;
+        items: Array<{
+          product_id: string;
+          sku: string;
+          producto: string;
+          unidad_medida: string;
+          supplier_id: string | null;
+          supplier_name: string;
+          warehouse_id: string;
+          warehouse_name: string;
+          costo_unitario: number;
+          stock: number;
+          valor_total: number;
+        }>;
+      }>("/api/reports/inventory/valuation", params),
+    downloadInventoryValuationPdf: (params?: { warehouse_id?: string; supplier_id?: string; fecha_corte?: string }) =>
+      downloadAuthenticated("/api/reports/export/inventory-valuation.pdf", params, `stock_valorizado_${params?.fecha_corte || "actual"}.pdf`),
+    downloadInventoryValuationXlsx: (params?: { warehouse_id?: string; supplier_id?: string; fecha_corte?: string }) =>
+      downloadAuthenticated("/api/reports/export/inventory-valuation.xlsx", params, `stock_valorizado_${params?.fecha_corte || "actual"}.xlsx`),
+    inventoryRotationFiltered: (params?: { supplier_id?: string }) =>
+      client.get<any[]>("/api/reports/inventory/rotation", params),
     exportSalesByPeriod: (params?: { fecha_desde?: string; fecha_hasta?: string; agrupar_por?: string }) => client.get<Blob>("/api/reports/export/sales-by-period", params),
     exportInventory: () => client.get<Blob>("/api/reports/export/inventory"),
     exportFifo: () => client.get<Blob>("/api/reports/export/fifo"),
@@ -2258,7 +2368,35 @@ export const api = {
       approve: (id: string) => client.post<{ success: boolean; completo: boolean }>(`/v1/financial/ap/approvals/${id}/approve`),
       reject: (id: string, motivo?: string) => client.post<{ success: boolean }>(`/v1/financial/ap/approvals/${id}/reject`, { motivo }),
     },
-    creditNotes: (params?: { supplier_id?: string }) => client.get<{ id: string; supplier_id: string; supplier_nombre: string; numero: string; numero_factura_origen: string; fecha: string; motivo: string; monto: number; moneda: string; observaciones: string }[]>("/v1/financial/supplier-credit-notes", { company_id: COMPANY_ID, ...params } as any),
+    creditNotes: Object.assign(
+      (params?: { supplier_id?: string }) => client.get<any[]>("/v1/financial/supplier-credit-notes", { company_id: COMPANY_ID, ...params } as any),
+      {
+        list: (params?: { supplier_id?: string }) => client.get<any[]>("/v1/financial/supplier-credit-notes", { company_id: COMPANY_ID, ...params } as any),
+        create: (data: {
+          supplier_id: string;
+          numero: string;
+          numero_factura_origen?: string;
+          timbrado?: string;
+          fecha: string;
+          motivo: string;
+          motivo_categoria?: string;
+          impacto_contable?: string;
+          archivo_adjunto_path?: string;
+          monto: number;
+          moneda?: string;
+          observaciones?: string;
+        }) => client.post<any>(`/v1/financial/supplier-credit-notes?company_id=${COMPANY_ID}`, data),
+        uploadAttachment: (file: File) => {
+          const fd = new FormData();
+          fd.append("file", file);
+          return requestMultipart<{ url: string; filename: string }>("/v1/financial/supplier-credit-notes/upload-attachment", fd);
+        },
+        apply: (creditNoteId: string, data: { invoice_id: string; monto: number; observaciones?: string }) =>
+          client.post<any>(`/v1/financial/supplier-credit-notes/${creditNoteId}/apply?company_id=${COMPANY_ID}`, data),
+        applications: (creditNoteId?: string) =>
+          client.get<any[]>(creditNoteId ? `/v1/financial/supplier-credit-notes/${creditNoteId}/applications` : "/v1/financial/credit-note-applications", { company_id: COMPANY_ID } as any),
+      }
+    ),
     supplierReturns: (params?: { supplier_id?: string }) => client.get<{ id: string; supplier_id: string; supplier_nombre: string; numero_factura_origen: string; numero_nota_credito: string; fecha: string; monto: number; moneda: string; observaciones: string }[]>("/v1/financial/supplier-returns", { company_id: COMPANY_ID, ...params } as any),
     payrollByConcepto: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ concepto: string; es_credito: boolean; cantidad: number; monto: number; porcentaje: number | null }[]>("/v1/financial/payroll/by-concepto", { company_id: COMPANY_ID, ...params } as any),
     payrollMovements: (params?: { empleado_nombre?: string }) => client.get<{ id: string; empleado_nombre: string; concepto: string; es_credito: boolean; monto: number; fecha: string; cerrado: boolean; observaciones: string }[]>("/v1/financial/payroll-movements", { company_id: COMPANY_ID, ...params } as any),

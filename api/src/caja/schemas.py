@@ -189,3 +189,58 @@ class TreasuryRemittanceResponse(BaseModel):
 class TreasuryRemittanceDetailResponse(TreasuryRemittanceResponse):
     items: list[TreasuryRemittanceItemResponse]
 
+
+class PunteoItemVerification(BaseModel):
+    voucher_id: str
+    estado: str = "conforme"  # conforme | faltante | discrepante
+    monto_fisico: Optional[Decimal] = None
+    observacion: Optional[str] = None
+
+
+class SavePunteoAuditRequest(BaseModel):
+    items: list[PunteoItemVerification] = []
+    observaciones_dictamen: Optional[str] = None
+    diferencia_vouchers_gs: Decimal = Decimal("0")
+
+
+class PaymentMethodBankMappingUpdate(BaseModel):
+    bank_account_id: Optional[str] = None
+    activo: Optional[bool] = True
+
+
+class PaymentMethodBankMappingResponse(BaseModel):
+    id: str
+    canal_key: str
+    canal_label: str
+    bank_account_id: Optional[str] = None
+    banco_nombre: Optional[str] = None
+    numero_cuenta: Optional[str] = None
+    moneda: Optional[str] = None
+    activo: bool
+
+
+class CashShortageConfigUpdate(BaseModel):
+    umbral_aprobacion_gs: Optional[Decimal] = None
+    requerir_aprobacion_siempre: Optional[bool] = None
+    permitir_cuotas: Optional[bool] = None
+    max_cuotas: Optional[int] = None
+
+
+class CashShortageConfigResponse(BaseModel):
+    umbral_aprobacion_gs: float
+    requerir_aprobacion_siempre: bool
+    permitir_cuotas: bool
+    max_cuotas: int
+
+
+class ResolveCashShortageRequest(BaseModel):
+    accion: str  # aprobar_nomina | condonar | rechazar
+    cuotas: Optional[int] = 1
+    periodo_nomina: Optional[str] = None
+    observaciones: Optional[str] = None
+
+
+class IncorporateSessionVaultAndBanksRequest(BaseModel):
+    observaciones: Optional[str] = None
+
+

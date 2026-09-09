@@ -241,3 +241,57 @@ class TreasuryRemittanceItem(Base):
     observaciones = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+
+class PaymentMethodBankMapping(Base):
+    """Mapeo dinámico y cambiante de Medios de Pago Electrónicos a Cuentas Bancarias Corrientes."""
+    __tablename__ = "payment_method_bank_mappings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    canal_key = Column(String(50), nullable=False)  # TARJETA_BANCARD, TARJETA_DINELCO, BANCARD_QR, DINELCO_QR, PIX, TRANSFERENCIA
+    canal_label = Column(String(100), nullable=False)
+    bank_account_id = Column(UUID(as_uuid=True), ForeignKey("bank_accounts.id"), nullable=True)
+    activo = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CashShortageDeductionRequest(Base):
+    """Solicitud formal de deducción salarial por faltante de arqueo de caja hacia SueldOK."""
+    __tablename__ = "cash_shortage_deduction_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("cash_sessions.id"), nullable=False, index=True)
+    caja_nombre = Column(String(100))
+    user_id = Column(UUID(as_uuid=True), nullable=False)  # Cajero/a responsable
+    cajero_nombre = Column(String(100), nullable=False)
+    monto_faltante_gs = Column(Numeric(15, 0), nullable=False)
+    estado = Column(String(30), nullable=False, default="pendiente")  # pendiente | aprobado_nomina | condonado | rechazado
+    resolucion = Column(String(50))  # descuento_1_pago | descuento_cuotas | perdida_empresa
+    cuotas = Column(Integer, default=1)
+    monto_cuota_gs = Column(Numeric(15, 0))
+    periodo_nomina = Column(String(7))  # ej. 2026-09
+    sueldok_sync_status = Column(String(30), default="no_sincronizado")  # no_sincronizado | enviado | confirmado
+    sueldok_sync_id = Column(String(100))
+    observaciones = Column(Text)
+    aprobado_por = Column(String(100))
+    aprobado_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CashShortageConfig(Base):
+    """Configuración de umbrales y políticas de faltantes de caja por empresa."""
+    __tablename__ = "cash_shortage_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, unique=True)
+    umbral_aprobacion_gs = Column(Numeric(15, 0), default=10000)  # Faltantes mayores a este monto requieren aprobación
+    requerir_aprobacion_siempre = Column(Boolean, default=True)
+    permitir_cuotas = Column(Boolean, default=True)
+    max_cuotas = Column(Integer, default=3)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+

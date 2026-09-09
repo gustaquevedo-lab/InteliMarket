@@ -5,7 +5,7 @@ import {
   Settings, X, ShieldCheck, Clock, EyeOff, Calculator, FileText, Download,
   Layers, Users, RefreshCw, Printer, Check, ChevronRight, Activity, ShieldAlert,
   Coins, Sparkles, Building2, Store, Lock, KeyRound, Heart, FileSpreadsheet,
-  BarChart3, Calendar, Filter, PieChart, Receipt
+  BarChart3, Calendar, Filter, PieChart, Receipt, ClipboardCheck
 } from "lucide-react"
 import {
   api,
@@ -17,12 +17,50 @@ import {
   type DonationLiquidation,
   type DonationRecord,
   type CajeroSolidarioRankingItem,
+  type BankAccount,
 } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDateTime } from "../../utils/format"
 
 const downloadPdf = (endpoint: string, filename: string) => downloadAuthenticated(endpoint, undefined, filename)
+
+interface BankMappingItem {
+  id: string
+  canal_key: string
+  canal_label: string
+  bank_account_id?: string | null
+  banco_nombre?: string | null
+  numero_cuenta?: string | null
+  moneda?: string | null
+  activo: boolean
+}
+
+interface ShortageConfigData {
+  umbral_aprobacion_gs: number
+  requerir_aprobacion_siempre: boolean
+  permitir_cuotas: boolean
+  max_cuotas: number
+}
+
+interface ShortageRequestItem {
+  id: string
+  session_id: string
+  user_id: string
+  cajero_nombre: string
+  monto_faltante_gs: number
+  estado: "PENDIENTE" | "APROBADO_NOMINA" | "CONDONADO_EMPRESA" | "RECHAZADO"
+  resolucion: string | null
+  cuotas: number
+  monto_cuota_gs: number
+  periodo_nomina: string | null
+  sueldok_sync_status: string
+  sueldok_sync_id: string | null
+  observaciones: string | null
+  aprobado_por: string | null
+  aprobado_at: string | null
+  created_at: string
+}
 
 interface SessionSummary {
   id: string
@@ -97,7 +135,7 @@ const DENOMINACIONES_PYG = [
 
 export default function CajaPage() {
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState<"registers" | "sessions" | "entregas" | "historial" | "cajeros" | "donaciones" | "reportes">("registers")
+  const [activeTab, setActiveTab] = useState<"registers" | "sessions" | "entregas" | "historial" | "cajeros" | "donaciones" | "reportes" | "bancos_mapping" | "sueldok_faltantes">("registers")
   
   // ── CENTRO DE REPORTES DE CAJA (PARAGUAY TIMEZONE) ──
   const getInitialPyDate = () => {
@@ -185,6 +223,124 @@ export default function CajaPage() {
   const [escposModalOpen, setEscposModalOpen] = useState(false)
   const [escposLoading, setEscposLoading] = useState(false)
   const [escposTicketData, setEscposTicketData] = useState<{ session_id: string; ticket_text: string; ticket_escpos_b64: string; reconciliation: any } | null>(null)
+
+  // ── Planilla de Punteo de Arqueo Detallado (Fase 5) ──
+  const [punteoModalOpen, setPunteoModalOpen] = useState(false)
+  const [punteoLoading, setPunteoLoading] = useState(false)
+  const [punteoData, setPunteoData] = useState<any | null>(null)
+  const [punteoStatuses, setPunteoStatuses] = useState<Record<string, "conforme" | "faltante" | "discrepante">>({})
+  const [punteoDiscrepanciasMonto, setPunteoDiscrepanciasMonto] = useState<Record<string, number>>({})
+  const [punteoFilterCanal, setPunteoFilterCanal] = useState("todos")
+  const [punteoSearch, setPunteoSearch] = useState("")
+  const [punteoObsDictamen, setPunteoObsDictamen] = useState("")
+  const [savingPunteoAudit, setSavingPunteoAudit] = useState(false)
+
+  // ── Mapeos de Medios de Pago a Cuentas Bancarias ──
+  const [bankMappings, setBankMappings] = useState<BankMappingItem[]>([])
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
+  const [bankMappingsLoading, setBankMappingsLoading] = useState(false)
+  const [savingMappingKey, setSavingMappingKey] = useState<string | null>(null)
+
+  // ── Faltantes & SueldOK ──
+  const [shortageConfig, setShortageConfig] = useState<ShortageConfigData | null>(null)
+  const [shortageConfigLoading, setShortageConfigLoading] = useState(false)
+  const [savingShortageConfig, setSavingShortageConfig] = useState(false)
+  const [shortageRequests, setShortageRequests] = useState<ShortageRequestItem[]>([])
+  const [shortagesLoading, setShortagesLoading] = useState(false)
+  const [shortageFilterEstado, setShortageFilterEstado] = useState("TODOS")
+  const [resolvingShortageModal, setResolvingShortageModal] = useState<ShortageRequestItem | null>(null)
+  const [shortageResolutionAction, setShortageResolutionAction] = useState<"APROBAR_NOMINA" | "CONDONAR" | "RECHAZAR">("APROBAR_NOMINA")
+  const [shortageCuotas, setShortageCuotas] = useState(1)
+  const [shortagePeriodoNomina, setShortagePeriodoNomina] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [shortageObs, setShortageObs] = useState("")
+  const [resolvingShortageLoading, setResolvingShortageLoading] = useState(false)
+
+  // Asentamiento Bóveda y Bancos
+  const [incorporatingSessionId, setIncorporatingSessionId] = useState<string | null>(null)
+
+  const handleOpenPunteoModal = async (sessionId: string) => {
+    try {
+      setPunteoLoading(true)
+      setPunteoModalOpen(true)
+      setPunteoStatuses({})
+      setPunteoDiscrepanciasMonto({})
+      setPunteoFilterCanal("todos")
+      setPunteoSearch("")
+      setPunteoObsDictamen("")
+      const data = await api.caja.sessionPunteo(sessionId)
+      setPunteoData(data)
+      const initStatuses: Record<string, "conforme" | "faltante" | "discrepante"> = {}
+      if (data?.vouchers) {
+        data.vouchers.forEach((v: any) => {
+          initStatuses[v.id] = "conforme"
+        })
+      }
+      setPunteoStatuses(initStatuses)
+    } catch (err: any) {
+      toast.error("Error al cargar planilla", err?.message || "No se pudo obtener el detalle de vouchers de la sesión.")
+      setPunteoModalOpen(false)
+    } finally {
+      setPunteoLoading(false)
+    }
+  }
+
+  const handleSetVoucherStatus = (voucherId: string, status: "conforme" | "faltante" | "discrepante") => {
+    setPunteoStatuses(prev => ({
+      ...prev,
+      [voucherId]: status
+    }))
+  }
+
+  const handleSetAllVoucherStatus = (status: "conforme" | "faltante") => {
+    if (!punteoData?.vouchers) return
+    const next: Record<string, "conforme" | "faltante" | "discrepante"> = {}
+    punteoData.vouchers.forEach((v: any) => {
+      next[v.id] = status
+    })
+    setPunteoStatuses(next)
+  }
+
+  const handleSavePunteoAudit = async () => {
+    if (!punteoData?.session_data?.id) return
+    setSavingPunteoAudit(true)
+    try {
+      const vouchers = punteoData.vouchers || []
+      let difVouchers = 0
+      const itemsPayload = vouchers.map((v: any) => {
+        const st = punteoStatuses[v.id] || "conforme"
+        let montoFisico = v.monto_gs
+        if (st === "faltante") {
+          montoFisico = 0
+          difVouchers -= v.monto_gs
+        } else if (st === "discrepante") {
+          montoFisico = punteoDiscrepanciasMonto[v.id] !== undefined ? punteoDiscrepanciasMonto[v.id] : v.monto_gs
+          difVouchers += (montoFisico - v.monto_gs)
+        }
+        return {
+          voucher_id: v.id,
+          estado: st,
+          monto_fisico: montoFisico,
+        }
+      })
+
+      await api.caja.savePunteoAudit(punteoData.session_data.id, {
+        items: itemsPayload,
+        observaciones_dictamen: punteoObsDictamen.trim() || undefined,
+        diferencia_vouchers_gs: difVouchers,
+      })
+
+      toast.success("Auditoría Asentada", "Dictamen de control de comprobantes guardado correctamente en la sesión.")
+      fetchData()
+      fetchHistorial()
+    } catch (err: any) {
+      toast.error("Error al asentar auditoría", err?.message || "No se pudo registrar el dictamen.")
+    } finally {
+      setSavingPunteoAudit(false)
+    }
+  }
 
   const handleOpenEscposTicket = async (sessionId: string) => {
     try {
@@ -364,9 +520,124 @@ export default function CajaPage() {
     }
   }
 
+  // ── Mapeos Bancarios Handlers ──
+  const fetchBankMappings = async () => {
+    setBankMappingsLoading(true)
+    try {
+      const [maps, bks] = await Promise.all([
+        api.caja.bankMappings.list(),
+        api.financial.banks.list(),
+      ])
+      setBankMappings(maps)
+      setBankAccounts(bks)
+    } catch (err: any) {
+      toast.error("Error", err?.message || "No se pudieron cargar los mapeos bancarios")
+    } finally {
+      setBankMappingsLoading(false)
+    }
+  }
+
+  const handleUpdateBankMapping = async (canalKey: string, bankAccountId: string | null, activo: boolean) => {
+    setSavingMappingKey(canalKey)
+    try {
+      await api.caja.bankMappings.update(canalKey, {
+        bank_account_id: bankAccountId || null,
+        activo,
+      })
+      toast.success("Mapeo Bancario Actualizado", `Canal ${canalKey} vinculado exitosamente.`)
+      fetchBankMappings()
+    } catch (err: any) {
+      toast.error("Error al actualizar mapeo", err?.message)
+    } finally {
+      setSavingMappingKey(null)
+    }
+  }
+
+  // ── Faltantes & SueldOK Handlers ──
+  const fetchShortageData = async () => {
+    setShortageConfigLoading(true)
+    setShortagesLoading(true)
+    try {
+      const [cfg, reqs] = await Promise.all([
+        api.caja.shortageConfig.get(),
+        api.caja.shortages.list(),
+      ])
+      setShortageConfig(cfg)
+      setShortageRequests(reqs)
+    } catch (err: any) {
+      toast.error("Error", err?.message || "No se pudieron cargar las solicitudes de faltantes")
+    } finally {
+      setShortageConfigLoading(false)
+      setShortagesLoading(false)
+    }
+  }
+
+  const handleSaveShortageConfig = async () => {
+    if (!shortageConfig) return
+    setSavingShortageConfig(true)
+    try {
+      await api.caja.shortageConfig.update(shortageConfig)
+      toast.success("Configuración Guardada", "Políticas y umbrales de faltantes actualizados.")
+    } catch (err: any) {
+      toast.error("Error al guardar políticas", err?.message)
+    } finally {
+      setSavingShortageConfig(false)
+    }
+  }
+
+  const handleResolveShortage = async () => {
+    if (!resolvingShortageModal) return
+    setResolvingShortageLoading(true)
+    try {
+      const res = await api.caja.shortages.resolve(resolvingShortageModal.id, {
+        accion: shortageResolutionAction,
+        cuotas: shortageResolutionAction === "APROBAR_NOMINA" ? shortageCuotas : 1,
+        periodo_nomina: shortagePeriodoNomina,
+        observaciones: shortageObs.trim() || undefined,
+      })
+      toast.success("Resolución Aplicada", res.mensaje || "La solicitud ha sido procesada.")
+      setResolvingShortageModal(null)
+      setShortageObs("")
+      fetchShortageData()
+    } catch (err: any) {
+      toast.error("Error al resolver faltante", err?.message)
+    } finally {
+      setResolvingShortageLoading(false)
+    }
+  }
+
+  // ── Asentar en Bóveda & Bancos ──
+  const handleIncorporateVaultAndBanks = async (sessionId: string) => {
+    setIncorporatingSessionId(sessionId)
+    try {
+      const res = await api.caja.incorporateVaultAndBanks(sessionId)
+      toast.success(
+        "Asentamiento Exitoso",
+        `Sesión asentada. Bóveda: ${res.vault_entries_created} ingresos físicos. Bancos: ${res.bank_transactions_created} transacciones enviadas a conciliación.`
+      )
+      if (res.shortage_request_created) {
+        toast.warning(
+          "Faltante Detectado",
+          `Se abrió un expediente de deducción por ₲ ${formatPYG(res.shortage_monto_gs)} para aprobación de Nómina (SueldOK).`
+        )
+      }
+      fetchData()
+      fetchHistorial()
+      if (activeTab === "sueldok_faltantes") {
+        fetchShortageData()
+      }
+    } catch (err: any) {
+      toast.error("Error al asentar en bóveda/bancos", err?.message)
+    } finally {
+      setIncorporatingSessionId(null)
+    }
+  }
+
   useEffect(() => {
     if (activeTab === "donaciones") fetchDonationsData()
     if (activeTab === "reportes" && !salesByCashierData) fetchReportesCaja()
+    if (activeTab === "bancos_mapping") fetchBankMappings()
+    if (activeTab === "sueldok_faltantes") fetchShortageData()
   }, [activeTab])
 
   const handleLiquidarDonaciones = async () => {
@@ -796,6 +1067,8 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
           { key: "cajeros", label: "Scorecard de Cajeros", icon: Users },
           { key: "donaciones", label: "❤️ Donaciones & RSE", icon: Heart, count: donationStats?.cantidad_donaciones },
           { key: "reportes", label: "📊 Centro de Reportes", icon: FileSpreadsheet },
+          { key: "bancos_mapping", label: "🏦 Linkeo Bancario", icon: Building2 },
+          { key: "sueldok_faltantes", label: "⚖️ Faltantes & SueldOK", icon: ShieldAlert, count: shortageRequests.filter(r => r.estado === 'PENDIENTE').length },
         ].map((t) => {
           const Icon = t.icon
           const active = activeTab === t.key
@@ -1207,6 +1480,29 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             >
                               <FileText className="w-3.5 h-3.5" />
                               PDF
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPunteoModal(s.id)}
+                              title="Planilla de Punteo y Cotejo de Vouchers"
+                              className="p-1.5 rounded-lg border border-purple-300 dark:border-purple-800 text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/30 hover:bg-purple-100 dark:hover:bg-purple-900/50 inline-flex items-center gap-1 font-bold text-[11px] transition-colors"
+                            >
+                              <ClipboardCheck className="w-3.5 h-3.5" />
+                              Punteo
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleIncorporateVaultAndBanks(s.id)}
+                              disabled={incorporatingSessionId === s.id}
+                              title="Asentar sesión en Bóveda Central y registrar transacciones en Cuentas Bancarias"
+                              className="p-1.5 rounded-lg border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 inline-flex items-center gap-1 font-bold text-[11px] transition-colors"
+                            >
+                              {incorporatingSessionId === s.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+                              ) : (
+                                <Building2 className="w-3.5 h-3.5" />
+                              )}
+                              Bóveda & Bancos
                             </button>
                           </div>
                         </td>
@@ -2029,6 +2325,660 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* TAB 8: VINCULACIÓN DE MEDIOS DE PAGO CON CUENTAS BANCARIAS */}
+      {activeTab === "bancos_mapping" && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Header Card */}
+          <div className="card p-6 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/20 shadow-xl rounded-2xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                  <Building2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black text-white flex items-center gap-2">
+                    Linkeo Bancario de Medios de Pago Electrónico
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                      Dinámico & Configurable
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-300">
+                    Asociá cada canal digital de cobro (POS Bancard, QR, POS Dinelco, PIX, Transferencias) a su cuenta bancaria correspondiente para conciliación automática inmediata.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={fetchBankMappings}
+                disabled={bankMappingsLoading}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition flex items-center gap-2 border border-slate-700 w-fit"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${bankMappingsLoading ? "animate-spin" : ""}`} />
+                <span>Actualizar Mapeos</span>
+              </button>
+            </div>
+
+            {/* Aviso informativo de Extra Club */}
+            <div className="mt-4 p-3 rounded-xl bg-indigo-900/40 border border-indigo-500/30 text-xs text-indigo-200 flex items-start gap-2.5">
+              <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+              <div>
+                <b className="font-semibold text-white">Extra Club Mayorista:</b> Las ventas y vales de crédito de clientes fidelizados ya se registran automáticamente en el módulo de Cuentas Corrientes de Clientes (<code className="text-amber-300">credit_accounts</code>), sin requerir cuenta bancaria intermediaria.
+              </div>
+            </div>
+          </div>
+
+          {/* Grid de Canales Electrónicos */}
+          {bankMappingsLoading ? (
+            <div className="card p-12 text-center text-slate-400 text-xs flex flex-col items-center justify-center gap-2">
+              <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
+              <span>Cargando canales y cuentas bancarias...</span>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {bankMappings.map((m) => {
+                const currentAcc = bankAccounts.find(b => b.id === m.bank_account_id)
+                const isSaving = savingMappingKey === m.canal_key
+
+                return (
+                  <div
+                    key={m.canal_key}
+                    className="card p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm hover:border-indigo-500/40 transition-all flex flex-col justify-between space-y-4"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-indigo-500">
+                            <CreditCard className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-black text-slate-900 dark:text-white">
+                              {m.canal_label}
+                            </h4>
+                            <span className="text-[10px] font-mono text-slate-400">
+                              {m.canal_key}
+                            </span>
+                          </div>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                          m.activo
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                            : "bg-slate-500/10 text-slate-500 border border-slate-500/20"
+                        }`}>
+                          {m.activo ? "Activo" : "Inactivo"}
+                        </span>
+                      </div>
+
+                      <div className="space-y-3 pt-3">
+                        <div>
+                          <label className="input-label text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                            Cuenta Bancaria Destino:
+                          </label>
+                          <select
+                            value={m.bank_account_id || ""}
+                            onChange={(e) => {
+                              const newId = e.target.value || null
+                              handleUpdateBankMapping(m.canal_key, newId, m.activo)
+                            }}
+                            disabled={isSaving}
+                            className="input-field text-xs bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700"
+                          >
+                            <option value="">-- Sin vincular (No genera asiento bancario) --</option>
+                            {bankAccounts.map((b) => (
+                              <option key={b.id} value={b.id}>
+                                {b.banco} — Cta: {b.numero_cuenta} ({b.moneda})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Detalle visual de la cuenta */}
+                        {currentAcc ? (
+                          <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 text-[11px] text-emerald-800 dark:text-emerald-300 space-y-1">
+                            <div className="flex items-center justify-between font-bold">
+                              <span>{currentAcc.banco}</span>
+                              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-emerald-200/50 dark:bg-emerald-900/50">
+                                {currentAcc.moneda}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                              Nº {currentAcc.numero_cuenta} {currentAcc.alias ? `(${currentAcc.alias})` : ""}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 text-[11px] text-amber-700 dark:text-amber-400 flex items-center gap-2">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span>Sin cuenta asignada: Las ventas en este canal no generarán transacciones bancarias automáticas.</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={m.activo}
+                          onChange={(e) => handleUpdateBankMapping(m.canal_key, m.bank_account_id || null, e.target.checked)}
+                          disabled={isSaving}
+                          className="rounded border-slate-600 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          Habilitar Canal
+                        </span>
+                      </label>
+                      {isSaving && (
+                        <div className="flex items-center gap-1 text-[11px] text-indigo-400 font-bold">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <span>Guardando...</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 9: GOBERNANZA DE FALTANTES & INTEGRACIÓN SUELDOK */}
+      {activeTab === "sueldok_faltantes" && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Configuración de Políticas y Umbrales */}
+          <div className="card p-6 bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border border-slate-800 shadow-xl rounded-2xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                  <ShieldAlert className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black text-white flex items-center gap-2">
+                    Gobernanza de Faltantes & Nómina SueldOK
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      Paraguay Retail Laboral
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-300">
+                    Definición de umbrales, dictamen de gerencia y deducción formal en recibos salariales de Extra Supermercado.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={handleSaveShortageConfig}
+                disabled={savingShortageConfig || !shortageConfig}
+                className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-amber-600/25 w-fit"
+              >
+                {savingShortageConfig ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                <span>Guardar Políticas</span>
+              </button>
+            </div>
+
+            {shortageConfig && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+                <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/60 space-y-1">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Umbral de Aprobación Gerencial (₲)
+                  </label>
+                  <input
+                    type="number"
+                    value={shortageConfig.umbral_aprobacion_gs}
+                    onChange={(e) => setShortageConfig({ ...shortageConfig, umbral_aprobacion_gs: Number(e.target.value) })}
+                    className="input-field text-sm font-mono font-bold bg-slate-900 border-slate-700 text-white"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Faltantes mayores a este monto generan solicitud de revisión gerencial.
+                  </p>
+                </div>
+
+                <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/60 space-y-2">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Requerir Aprobación Siempre
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer pt-1">
+                    <input
+                      type="checkbox"
+                      checked={shortageConfig.requerir_aprobacion_siempre}
+                      onChange={(e) => setShortageConfig({ ...shortageConfig, requerir_aprobacion_siempre: e.target.checked })}
+                      className="rounded border-slate-600 text-amber-500 focus:ring-amber-400 w-4 h-4"
+                    />
+                    <span className="text-xs font-bold text-slate-200">
+                      Cero deducciones automáticas
+                    </span>
+                  </label>
+                  <p className="text-[10px] text-slate-400">
+                    Todo faltante debe ser validado por el auditor o gerente antes de ir a nómina.
+                  </p>
+                </div>
+
+                <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/60 space-y-2">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Fraccionamiento en Cuotas
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer pt-1">
+                    <input
+                      type="checkbox"
+                      checked={shortageConfig.permitir_cuotas}
+                      onChange={(e) => setShortageConfig({ ...shortageConfig, permitir_cuotas: e.target.checked })}
+                      className="rounded border-slate-600 text-amber-500 focus:ring-amber-400 w-4 h-4"
+                    />
+                    <span className="text-xs font-bold text-slate-200">
+                      Permitir pago diferido
+                    </span>
+                  </label>
+                  <p className="text-[10px] text-slate-400">
+                    Habilita dividir el faltante en 1 a N cuotas salariales.
+                  </p>
+                </div>
+
+                <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/60 space-y-1">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Máximo de Cuotas
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="12"
+                    value={shortageConfig.max_cuotas}
+                    onChange={(e) => setShortageConfig({ ...shortageConfig, max_cuotas: Number(e.target.value) })}
+                    className="input-field text-sm font-mono font-bold bg-slate-900 border-slate-700 text-white"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Límite máximo de meses de descuento.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Tabla de Expedientes de Faltantes */}
+          <div className="card overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                  Expedientes de Faltantes Registrados
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Control de arqueos cerrados con diferencias de caja pendientes de dictamen o ya sincronizados con SueldOK
+                </p>
+              </div>
+
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {["TODOS", "PENDIENTE", "APROBADO_NOMINA", "CONDONADO_EMPRESA", "RECHAZADO"].map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => setShortageFilterEstado(st)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                      shortageFilterEstado === st
+                        ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-sm"
+                        : "text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    {st === "TODOS" ? "Todos" : st === "PENDIENTE" ? "Pendientes" : st === "APROBADO_NOMINA" ? "Aprobados Nómina" : st === "CONDONADO_EMPRESA" ? "Condonados" : "Rechazados"}
+                  </button>
+                ))}
+                <button
+                  onClick={fetchShortageData}
+                  disabled={shortagesLoading}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition ml-2"
+                  title="Actualizar"
+                >
+                  <RefreshCw className={`w-4 h-4 ${shortagesLoading ? "animate-spin" : ""}`} />
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 dark:bg-slate-850 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-100 dark:border-slate-800">
+                  <tr>
+                    <th className="px-4 py-3">Fecha & Sesión</th>
+                    <th className="px-4 py-3">Cajero / Operador</th>
+                    <th className="px-4 py-3 text-right">Faltante (₲)</th>
+                    <th className="px-4 py-3 text-center">Estado</th>
+                    <th className="px-4 py-3">Resolución & Cuotas</th>
+                    <th className="px-4 py-3 text-center">Sincronización SueldOK</th>
+                    <th className="px-4 py-3">Dictamen / Observaciones</th>
+                    <th className="px-4 py-3 text-right">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {(() => {
+                    const filtered = shortageRequests.filter((r) => {
+                      if (shortageFilterEstado === "TODOS") return true
+                      return r.estado === shortageFilterEstado
+                    })
+
+                    if (shortagesLoading) {
+                      return (
+                        <tr>
+                          <td colSpan={8} className="py-12 text-center text-slate-400">
+                            <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-amber-500" />
+                            Cargando expedientes de faltantes...
+                          </td>
+                        </tr>
+                      )
+                    }
+
+                    if (filtered.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={8} className="py-12 text-center text-slate-400">
+                            No se encontraron expedientes de faltantes en este estado.
+                          </td>
+                        </tr>
+                      )
+                    }
+
+                    return filtered.map((req) => (
+                      <tr key={req.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
+                        <td className="px-4 py-3 font-mono">
+                          <div className="font-bold text-slate-900 dark:text-white">
+                            {formatDateTime(req.created_at)}
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            ID: {req.session_id.slice(0, 8)}...
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">
+                          {req.cajero_nombre}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono font-black text-rose-500 text-sm">
+                          -₲ {formatPYG(req.monto_faltante_gs)}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                            req.estado === "PENDIENTE"
+                              ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                              : req.estado === "APROBADO_NOMINA"
+                              ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                              : req.estado === "CONDONADO_EMPRESA"
+                              ? "bg-blue-500/10 text-blue-500 border border-blue-500/20"
+                              : "bg-slate-500/10 text-slate-400 border border-slate-500/20"
+                          }`}>
+                            {req.estado === "PENDIENTE" ? "Pendiente" : req.estado === "APROBADO_NOMINA" ? "Aprobado Nómina" : req.estado === "CONDONADO_EMPRESA" ? "Condonado" : "Rechazado"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs">
+                          {req.resolucion ? (
+                            <div>
+                              <span className="font-bold text-slate-900 dark:text-white">{req.resolucion}</span>
+                              {req.cuotas > 1 && (
+                                <span className="block text-[11px] text-slate-400">
+                                  {req.cuotas} cuotas de ₲ {formatPYG(req.monto_cuota_gs)}
+                                </span>
+                              )}
+                              {req.periodo_nomina && (
+                                <span className="block text-[10px] text-slate-400 font-mono">
+                                  Periodo: {req.periodo_nomina}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 italic">Sin dictaminar</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                            req.sueldok_sync_status === "SINCRONIZADO" || req.sueldok_sync_status === "ENVIADO"
+                              ? "bg-emerald-500/10 text-emerald-400"
+                              : req.sueldok_sync_status === "NO_APLICA"
+                              ? "bg-slate-500/10 text-slate-400"
+                              : "bg-amber-500/10 text-amber-400"
+                          }`}>
+                            {req.sueldok_sync_status}
+                          </span>
+                          {req.sueldok_sync_id && (
+                            <div className="text-[9px] text-slate-500 font-mono mt-0.5">
+                              {req.sueldok_sync_id}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-300 max-w-xs truncate">
+                          {req.observaciones || "—"}
+                          {req.aprobado_por && (
+                            <div className="text-[10px] text-slate-400">
+                              Por: {req.aprobado_por} ({formatDateTime(req.aprobado_at || "")})
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {req.estado === "PENDIENTE" ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setResolvingShortageModal(req)
+                                setShortageResolutionAction("APROBAR_NOMINA")
+                                setShortageCuotas(1)
+                                setShortageObs("")
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition shadow-sm"
+                            >
+                              Dictaminar
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setResolvingShortageModal(req)
+                                setShortageResolutionAction("APROBAR_NOMINA")
+                                setShortageCuotas(req.cuotas)
+                                setShortageObs(req.observaciones || "")
+                              }}
+                              className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-white text-[11px] font-bold transition"
+                            >
+                              Ver Detalle
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DICTAMEN DE FALTANTE DE CAJA (SUELDOK) */}
+      {resolvingShortageModal && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-white">
+                    Dictamen de Faltante de Caja
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Expediente ID: {resolvingShortageModal.id.slice(0, 8)}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setResolvingShortageModal(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Ficha Resumen */}
+            <div className="p-4 rounded-xl bg-slate-850 border border-slate-800 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Cajero / Funcionario:</span>
+                <span className="font-bold text-white text-sm">{resolvingShortageModal.cajero_nombre}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Monto Faltante Arqueado:</span>
+                <span className="font-mono font-black text-rose-400 text-base">
+                  -₲ {formatPYG(resolvingShortageModal.monto_faltante_gs)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-400">Sesión de Caja:</span>
+                <span className="font-mono text-slate-300">{resolvingShortageModal.session_id}</span>
+              </div>
+            </div>
+
+            {resolvingShortageModal.estado === "PENDIENTE" ? (
+              <div className="space-y-4 text-xs">
+                <div>
+                  <label className="input-label text-slate-300 font-bold block mb-2">
+                    Resolución / Decisión de la Empresa:
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShortageResolutionAction("APROBAR_NOMINA")}
+                      className={`p-3 rounded-xl border text-left flex flex-col justify-between gap-1 transition ${
+                        shortageResolutionAction === "APROBAR_NOMINA"
+                          ? "bg-emerald-950/40 border-emerald-500 text-white ring-1 ring-emerald-500"
+                          : "bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600"
+                      }`}
+                    >
+                      <span className="font-bold text-xs text-emerald-400">Descuento en Nómina</span>
+                      <span className="text-[10px] text-slate-400">Envía deducción formal a SueldOK</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShortageResolutionAction("CONDONAR")}
+                      className={`p-3 rounded-xl border text-left flex flex-col justify-between gap-1 transition ${
+                        shortageResolutionAction === "CONDONAR"
+                          ? "bg-blue-950/40 border-blue-500 text-white ring-1 ring-blue-500"
+                          : "bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600"
+                      }`}
+                    >
+                      <span className="font-bold text-xs text-blue-400">Condonar (Pérdida)</span>
+                      <span className="text-[10px] text-slate-400">La empresa absorbe la diferencia</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShortageResolutionAction("RECHAZAR")}
+                      className={`p-3 rounded-xl border text-left flex flex-col justify-between gap-1 transition ${
+                        shortageResolutionAction === "RECHAZAR"
+                          ? "bg-slate-800 border-slate-400 text-white ring-1 ring-slate-400"
+                          : "bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600"
+                      }`}
+                    >
+                      <span className="font-bold text-xs text-slate-300">Rechazar Reclamo</span>
+                      <span className="text-[10px] text-slate-400">Rectificación o error de arqueo</span>
+                    </button>
+                  </div>
+                </div>
+
+                {shortageResolutionAction === "APROBAR_NOMINA" && (
+                  <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700 space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="input-label text-slate-300 font-bold block mb-1">
+                          Cantidad de Cuotas:
+                        </label>
+                        <select
+                          value={shortageCuotas}
+                          onChange={(e) => setShortageCuotas(Number(e.target.value))}
+                          className="input-field bg-slate-900 border-slate-700 text-white text-xs font-bold"
+                        >
+                          {[1, 2, 3, 4, 5, 6].map((q) => (
+                            <option key={q} value={q}>
+                              {q} {q === 1 ? "cuota (100%)" : "cuotas mensuales"}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="input-label text-slate-300 font-bold block mb-1">
+                          Periodo Inicio Nómina:
+                        </label>
+                        <input
+                          type="month"
+                          value={shortagePeriodoNomina}
+                          onChange={(e) => setShortagePeriodoNomina(e.target.value)}
+                          className="input-field bg-slate-900 border-slate-700 text-white text-xs font-bold"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-700/80 text-[11px] text-slate-300 flex items-center justify-between">
+                      <span className="text-slate-400">Monto a descontar por cuota:</span>
+                      <span className="font-mono font-bold text-emerald-400">
+                        ₲ {formatPYG(Math.round(resolvingShortageModal.monto_faltante_gs / shortageCuotas))} / mes
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="input-label text-slate-300 font-bold block mb-1">
+                    Justificación / Observaciones del Dictamen:
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={shortageObs}
+                    onChange={(e) => setShortageObs(e.target.value)}
+                    placeholder="Detalle la justificación de la decisión tomada (ej: 'Revisión de cámaras confirmó diferencia en gaveta; se acuerda descuento en 2 cuotas')..."
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setResolvingShortageModal(null)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResolveShortage}
+                    disabled={resolvingShortageLoading}
+                    className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black transition flex items-center gap-2 shadow-lg shadow-amber-500/25"
+                  >
+                    {resolvingShortageLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Procesando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Confirmar Dictamen</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3 text-xs">
+                <div className="p-3 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 space-y-1">
+                  <div className="font-bold text-white">Dictamen Asentado: {resolvingShortageModal.resolucion}</div>
+                  <div className="text-slate-400">{resolvingShortageModal.observaciones || "Sin observaciones."}</div>
+                  <div className="text-[10px] text-slate-500 pt-1">
+                    Dictaminado por: {resolvingShortageModal.aprobado_por || "Supervisor"} ({formatDateTime(resolvingShortageModal.aprobado_at || "")})
+                  </div>
+                </div>
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setResolvingShortageModal(null)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -3071,7 +4021,467 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
         </div>
       )}
 
-      {/* MODAL: EXPORTAR ACTA DE ARQUEO CONSOLIDADA A4 */}
+      {/* 📋 MODAL: PLANILLA DE PUNTEO DE ARQUEO DETALLADO (FASE 5) */}
+      {punteoModalOpen && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-4xl w-full p-6 shadow-2xl space-y-5 my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center border border-purple-500/30">
+                  <ClipboardCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white">Planilla de Punteo de Arqueo y Control de Vouchers</h3>
+                  <p className="text-xs text-slate-400">
+                    {punteoData?.session_data ? (
+                      `Caja: ${punteoData.session_data.register_nombre || "Caja"} · Cajero/a: ${punteoData.session_data.cajero_nombre || "—"} · Turno: ${punteoData.session_data.id.slice(0, 8).toUpperCase()}`
+                    ) : "Cotejo físico comprobante por comprobante"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {punteoData?.session_data && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await api.caja.downloadSessionPunteoPdf(punteoData.session_data.id)
+                        toast.success("Planilla Descargada", "PDF oficial de punteo generado con éxito.")
+                      } catch {
+                        toast.error("Error", "No se pudo generar el PDF de punteo.")
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-purple-600/30"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    Descargar Planilla PDF
+                  </button>
+                )}
+                <button
+                  onClick={() => setPunteoModalOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {punteoLoading ? (
+              <div className="py-20 text-center space-y-3">
+                <Loader2 className="w-8 h-8 animate-spin mx-auto text-purple-400" />
+                <p className="text-xs text-slate-400">Cargando transacciones y vouchers de la sesión...</p>
+              </div>
+            ) : punteoData ? (
+              <div className="space-y-4">
+                {/* 1. Resumen de Comprobantes por Medio de Pago */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+                  {Object.entries(punteoData.summary_by_method || {}).map(([key, val]: [string, any]) => {
+                    const cant = val.cantidad || 0
+                    const monto = Number(val.monto_gs || 0)
+                    if (cant === 0 && monto === 0) return null
+
+                    // Calcular comprobantes presentes y faltantes de este medio
+                    const vouchersDelCanal = (punteoData.vouchers || []).filter((v: any) => v.canal_key === key || val.label?.includes(v.medio_pago))
+                    const conformes = vouchersDelCanal.filter((v: any) => (punteoStatuses[v.id] || "conforme") === "conforme").length
+                    const faltantes = vouchersDelCanal.filter((v: any) => punteoStatuses[v.id] === "faltante").length
+
+                    return (
+                      <div
+                        key={key}
+                        onClick={() => setPunteoFilterCanal(punteoFilterCanal === key ? "todos" : key)}
+                        className={`p-2.5 rounded-xl border text-xs space-y-1 cursor-pointer transition-all ${
+                          punteoFilterCanal === key
+                            ? "bg-purple-950/40 border-purple-500 ring-1 ring-purple-500"
+                            : "bg-slate-800/70 border-slate-700/60 hover:border-slate-600"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-purple-300 truncate" title={val.label || key}>
+                            {val.label || key}
+                          </span>
+                          {faltantes > 0 && (
+                            <span className="px-1.5 py-0.2 bg-rose-500/20 text-rose-300 text-[9px] font-bold rounded">
+                              {faltantes} faltante{faltantes !== 1 ? "s" : ""}
+                            </span>
+                          )}
+                        </div>
+                        <div className="font-mono font-black text-white text-xs">
+                          {formatPYG(monto)}
+                        </div>
+                        <div className="text-[10px] text-slate-400 flex items-center justify-between">
+                          <span>{cant} voucher{cant !== 1 ? "s" : ""}</span>
+                          <span className="text-emerald-400 font-mono">{conformes} ✓</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* 2. Balance Global y Cuadre de Comprobantes Físicos */}
+                {(() => {
+                  const allV = punteoData.vouchers || []
+                  let totEsperado = 0
+                  let totFisico = 0
+                  let countConformes = 0
+                  let countFaltantes = 0
+                  let countDiscrepantes = 0
+
+                  allV.forEach((v: any) => {
+                    totEsperado += v.monto_gs
+                    const st = punteoStatuses[v.id] || "conforme"
+                    if (st === "conforme") {
+                      totFisico += v.monto_gs
+                      countConformes++
+                    } else if (st === "faltante") {
+                      countFaltantes++
+                    } else if (st === "discrepante") {
+                      const m = punteoDiscrepanciasMonto[v.id] !== undefined ? punteoDiscrepanciasMonto[v.id] : v.monto_gs
+                      totFisico += m
+                      countDiscrepantes++
+                    }
+                  })
+
+                  const difVouchers = totFisico - totEsperado
+                  const isCuadrado = difVouchers === 0 && countFaltantes === 0 && countDiscrepantes === 0
+
+                  return (
+                    <div className="p-3.5 rounded-2xl bg-gradient-to-r from-slate-850 via-slate-800 to-indigo-950/40 border border-slate-700/80 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                            Arqueo de Comprobantes Físicos en Gaveta / Sobre
+                          </span>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-xs text-slate-300">
+                              Esperado: <strong className="font-mono text-white">{formatPYG(totEsperado)}</strong>
+                            </span>
+                            <span className="text-slate-500">·</span>
+                            <span className="text-xs text-slate-300">
+                              Físico Cotejado: <strong className="font-mono text-emerald-400">{formatPYG(totFisico)}</strong>
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-3 py-1 rounded-xl text-xs font-black font-mono border ${
+                              isCuadrado
+                                ? "bg-emerald-950/60 text-emerald-300 border-emerald-700"
+                                : difVouchers < 0
+                                ? "bg-rose-950/60 text-rose-300 border-rose-700"
+                                : "bg-amber-950/60 text-amber-300 border-amber-700"
+                            }`}
+                          >
+                            {isCuadrado
+                              ? "✓ VOUCHERS CUADRADOS"
+                              : `DIFERENCIA: ${difVouchers >= 0 ? "+" : ""}${formatPYG(difVouchers)}`}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-700/60 text-slate-400">
+                        <div className="flex items-center gap-3">
+                          <span className="text-emerald-400 font-semibold">✓ {countConformes} Conformes</span>
+                          <span className={countFaltantes > 0 ? "text-rose-400 font-bold" : "text-slate-500"}>
+                            ✕ {countFaltantes} Faltantes
+                          </span>
+                          <span className={countDiscrepantes > 0 ? "text-amber-400 font-bold" : "text-slate-500"}>
+                            ≠ {countDiscrepantes} Con Discrepancia
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleSetAllVoucherStatus("conforme")}
+                            className="text-purple-400 hover:text-purple-300 font-bold"
+                          >
+                            Marcar Todos Conformes
+                          </button>
+                          <span className="text-slate-600">·</span>
+                          <button
+                            type="button"
+                            onClick={() => handleSetAllVoucherStatus("faltante")}
+                            className="text-slate-400 hover:text-rose-300"
+                          >
+                            Marcar Todos Faltantes
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* 3. Filtros y Búsqueda */}
+                {(() => {
+                  const allV = punteoData.vouchers || []
+                  const filtered = allV.filter((v: any) => {
+                    const matchSearch =
+                      !punteoSearch ||
+                      v.numero_ticket?.toLowerCase().includes(punteoSearch.toLowerCase()) ||
+                      v.medio_pago?.toLowerCase().includes(punteoSearch.toLowerCase()) ||
+                      v.codigo_autorizacion?.toLowerCase().includes(punteoSearch.toLowerCase()) ||
+                      v.tarjeta_marca?.toLowerCase().includes(punteoSearch.toLowerCase()) ||
+                      v.nsu?.toLowerCase().includes(punteoSearch.toLowerCase())
+                    const matchCanal = punteoFilterCanal === "todos" || v.canal_key === punteoFilterCanal
+                    return matchSearch && matchCanal
+                  })
+
+                  return (
+                    <>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <div className="relative flex-1">
+                          <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+                          <input
+                            type="text"
+                            placeholder="Buscar por N° ticket, tarjeta, autorización, NSU..."
+                            value={punteoSearch}
+                            onChange={e => setPunteoSearch(e.target.value)}
+                            className="w-full pl-8 pr-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                        </div>
+                        <select
+                          value={punteoFilterCanal}
+                          onChange={e => setPunteoFilterCanal(e.target.value)}
+                          className="bg-slate-800 border border-slate-700 rounded-xl text-xs text-white px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        >
+                          <option value="todos">Todos los Canales ({allV.length})</option>
+                          <option value="TARJETA_BANCARD">Bancard Tarjeta</option>
+                          <option value="TARJETA_DINELCO">Dinelco Tarjeta</option>
+                          <option value="BANCARD_QR">Bancard QR</option>
+                          <option value="DINELCO_QR">Dinelco QR</option>
+                          <option value="PIX">PIX Brasil</option>
+                          <option value="TRANSFERENCIA">Transferencias SIPAP</option>
+                          <option value="EXTRA_CLUB">Extra Club</option>
+                          <option value="VALES">Vales / Cheques</option>
+                          <option value="EFECTIVO">Efectivo</option>
+                        </select>
+                      </div>
+
+                      {/* 4. Tabla Detallada con Detalles de Transacción y Cotejo de Pertinencia */}
+                      <div className="border border-slate-700/80 rounded-xl overflow-hidden max-h-[360px] overflow-y-auto">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead className="bg-slate-800 text-slate-400 font-bold uppercase tracking-wider sticky top-0 text-[10px] z-10">
+                            <tr>
+                              <th className="p-2.5">Hora</th>
+                              <th className="p-2.5">Ticket / Factura</th>
+                              <th className="p-2.5">Instrumento / Canal</th>
+                              <th className="p-2.5">Autoriz. / NSU</th>
+                              <th className="p-2.5">Tarjeta / Titular</th>
+                              <th className="p-2.5 text-right">Monto Gs.</th>
+                              <th className="p-2.5 text-center">Cotejo Físico & Pertinencia</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800">
+                            {filtered.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="p-8 text-center text-slate-500">
+                                  No hay comprobantes con el filtro aplicado.
+                                </td>
+                              </tr>
+                            ) : (
+                              filtered.map((v: any) => {
+                                const st = punteoStatuses[v.id] || "conforme"
+                                const isFaltante = st === "faltante"
+                                const isDiscrepante = st === "discrepante"
+                                const isConforme = st === "conforme"
+
+                                return (
+                                  <tr
+                                    key={v.id}
+                                    className={`transition-colors ${
+                                      isFaltante
+                                        ? "bg-rose-950/30 text-rose-200"
+                                        : isDiscrepante
+                                        ? "bg-amber-950/30 text-amber-200"
+                                        : "hover:bg-slate-800/40 text-slate-300"
+                                    }`}
+                                  >
+                                    <td className="p-2.5 font-mono text-[11px] text-slate-400">
+                                      {v.fecha ? new Date(v.fecha).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}
+                                    </td>
+                                    <td className="p-2.5 font-mono font-bold text-white">
+                                      {v.numero_ticket}
+                                    </td>
+                                    <td className="p-2.5">
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                        v.canal_key?.includes("BANCARD")
+                                          ? "bg-blue-950/80 text-blue-300 border border-blue-800"
+                                          : v.canal_key?.includes("DINELCO")
+                                          ? "bg-rose-950/80 text-rose-300 border border-rose-800"
+                                          : v.canal_key === "PIX"
+                                          ? "bg-teal-950/80 text-teal-300 border border-teal-800"
+                                          : v.canal_key === "TRANSFERENCIA"
+                                          ? "bg-indigo-950/80 text-indigo-300 border border-indigo-800"
+                                          : v.canal_key === "EXTRA_CLUB"
+                                          ? "bg-amber-950/80 text-amber-300 border border-amber-800"
+                                          : "bg-slate-800 text-slate-300 border border-slate-700"
+                                      }`}>
+                                        {v.medio_pago}
+                                      </span>
+                                    </td>
+                                    <td className="p-2.5 font-mono text-[11px] text-slate-300">
+                                      {v.codigo_autorizacion !== "—" ? (
+                                        <span className="text-white font-bold">{v.codigo_autorizacion}</span>
+                                      ) : (
+                                        <span className="text-slate-500">—</span>
+                                      )}
+                                      {v.nsu !== "—" && (
+                                        <span className="text-slate-500 text-[10px] ml-1">({v.nsu})</span>
+                                      )}
+                                    </td>
+                                    <td className="p-2.5 text-xs text-slate-300">
+                                      {v.tarjeta_marca !== "—" ? (
+                                        <div className="font-semibold text-slate-200">
+                                          {v.tarjeta_marca} <span className="font-mono text-slate-400 text-[10px]">{v.tarjeta_pan}</span>
+                                        </div>
+                                      ) : v.titular !== "—" ? (
+                                        <span className="text-slate-300">{v.titular}</span>
+                                      ) : (
+                                        <span className="text-slate-500">—</span>
+                                      )}
+                                    </td>
+                                    <td className="p-2.5 font-mono font-bold text-right text-white">
+                                      {formatPYG(v.monto_gs)}
+                                      {v.moneda !== "PYG" && (
+                                        <div className="text-[10px] text-slate-400 font-normal">
+                                          {v.moneda} {v.monto_original?.toFixed(2)}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="p-2 text-center">
+                                      <div className="inline-flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-700/80">
+                                        <button
+                                          type="button"
+                                          title="Comprobante presente y conforme"
+                                          onClick={() => handleSetVoucherStatus(v.id, "conforme")}
+                                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                                            isConforme
+                                              ? "bg-emerald-600 text-white shadow-sm"
+                                              : "text-slate-400 hover:text-white"
+                                          }`}
+                                        >
+                                          ✓ Conforme
+                                        </button>
+                                        <button
+                                          type="button"
+                                          title="Comprobante físico no encontrado / faltante"
+                                          onClick={() => handleSetVoucherStatus(v.id, "faltante")}
+                                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                                            isFaltante
+                                              ? "bg-rose-600 text-white shadow-sm"
+                                              : "text-slate-400 hover:text-rose-300"
+                                          }`}
+                                        >
+                                          ✕ Faltante
+                                        </button>
+                                        <button
+                                          type="button"
+                                          title="Monto del voucher discrepa con el sistema"
+                                          onClick={() => {
+                                            handleSetVoucherStatus(v.id, "discrepante")
+                                            const nuevoMonto = window.prompt(`Monto físico real que figura en el papel del comprobante (Gs.):`, String(v.monto_gs))
+                                            if (nuevoMonto !== null && !isNaN(Number(nuevoMonto))) {
+                                              setPunteoDiscrepanciasMonto(prev => ({
+                                                ...prev,
+                                                [v.id]: Number(nuevoMonto)
+                                              }))
+                                            }
+                                          }}
+                                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                                            isDiscrepante
+                                              ? "bg-amber-600 text-white shadow-sm"
+                                              : "text-slate-400 hover:text-amber-300"
+                                          }`}
+                                        >
+                                          ≠ Discrepancia
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )
+                })()}
+
+                {/* 5. Dictamen y Asiento de Auditoría de Comprobantes */}
+                <div className="space-y-2 pt-2 border-t border-slate-800">
+                  <label className="input-label text-slate-300 font-bold block text-xs">
+                    Dictamen y Observaciones del Control de Comprobantes Físicos:
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={punteoObsDictamen}
+                    onChange={e => setPunteoObsDictamen(e.target.value)}
+                    placeholder="Asiente cualquier discrepancia o faltante detectado en los comprobantes (ej: 'Voucher Bancard #1048 ausente en sobre; se corroboró cierre de lote POS digital exitoso')..."
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs text-white placeholder-slate-500 outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                {/* 6. Footer de Acciones */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-800 text-xs">
+                  <span className="text-slate-400">
+                    Total auditado: <b className="text-white">{punteoData.total_vouchers || 0}</b> comprobantes registrados.
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPunteoModalOpen(false)}
+                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold transition"
+                    >
+                      Cerrar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSavePunteoAudit}
+                      disabled={savingPunteoAudit}
+                      className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold transition flex items-center gap-1.5 shadow-md"
+                    >
+                      {savingPunteoAudit ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Asentando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Guardar Auditoría</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleIncorporateVaultAndBanks(punteoData.session_data.id)}
+                      disabled={incorporatingSessionId === punteoData.session_data.id}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition flex items-center gap-1.5 shadow-md shadow-emerald-600/30"
+                    >
+                      {incorporatingSessionId === punteoData.session_data.id ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Incorporando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Building2 className="w-3.5 h-3.5" />
+                          <span>Asentar en Bóveda & Bancos</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="py-12 text-center text-slate-400 text-xs">
+                No se encontraron datos para la planilla de punteo.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {showExportArqueoModal && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
           <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 my-8">
