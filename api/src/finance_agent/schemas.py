@@ -9,20 +9,20 @@ class TriggerRunRequest(BaseModel):
 
 
 class FinanceRecommendationResponse(BaseModel):
-    id: UUID
-    company_id: UUID
-    run_id: UUID
+    id: str
+    company_id: Optional[str] = None
+    run_id: Optional[str] = None
     tipo: str
     titulo: str
     descripcion: str
     entidad_relacionada: Optional[str] = None
     monto_relacionado: Optional[str] = None
-    requested_by: str
-    approved_by: Optional[UUID] = None
+    requested_by: Optional[str] = None
+    approved_by: Optional[str] = None
     status: str
     comments: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

@@ -24,6 +24,7 @@ from api.src.financial.schemas import (
     PaymentRunCreate, PaymentRunResponse, PaymentRunWithItems, PaymentRunItemResponse,
     APPaymentRejectRequest,
     CashFlowAlertConfig,
+    SupplierCreditNoteCreate, SupplierCreditNoteApply,
 )
 from api.src.financial import service
 
@@ -51,7 +52,7 @@ async def list_invoices(
     vencidas: bool | None = Query(None),
     desde: date | None = Query(None),
     hasta: date | None = Query(None),
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
@@ -608,6 +609,60 @@ async def get_financial_ratios(company_id: str = Query(), db: AsyncSession = Dep
 @router.get("/supplier-credit-notes")
 async def list_supplier_credit_notes(company_id: str = Query(), supplier_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
     return await service.list_supplier_credit_notes(db, company_id, supplier_id)
+
+
+@router.post("/supplier-credit-notes/upload-attachment")
+async def upload_credit_note_attachment(
+    file: UploadFile = File(...),
+):
+    try:
+        content = await file.read()
+        saved_path = service.save_credit_note_attachment(content, file.filename or "comprobante.pdf")
+        return {"url": saved_path, "filename": file.filename}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/supplier-credit-notes", status_code=status.HTTP_201_CREATED)
+async def create_supplier_credit_note(
+    body: SupplierCreditNoteCreate,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        return await service.create_supplier_credit_note(db, company_id, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/supplier-credit-notes/{credit_note_id}/apply")
+async def apply_supplier_credit_note(
+    credit_note_id: str,
+    body: SupplierCreditNoteApply,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        return await service.apply_supplier_credit_note(db, company_id, credit_note_id, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/supplier-credit-notes/{credit_note_id}/applications")
+async def list_credit_note_applications(
+    credit_note_id: str,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.list_credit_note_applications(db, company_id, credit_note_id)
+
+
+@router.get("/credit-note-applications")
+async def list_all_credit_note_applications(
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.list_credit_note_applications(db, company_id)
 
 
 # ── Supplier Returns (devoluciones a proveedor) ─────────────────────────────

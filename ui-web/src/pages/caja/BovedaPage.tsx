@@ -91,7 +91,7 @@ export default function BovedaPage() {
       const [bankList, deps, recs, ap, ar, movs, vaultData, entriesData, approvals, remList] = await Promise.all([
         api.financial.banks.list(),
         api.financial.banks.allTransactions({ categoria: "deposito_caja", limit: 100 }),
-        api.financeAgent.recommendations("pending"),
+        api.financeAgent.recommendations("pending").catch(() => []),
         api.financial.aging(),
         api.accountsReceivable.aging(),
         api.caja.registerMovements(),
@@ -121,18 +121,70 @@ export default function BovedaPage() {
     }
   }
 
-  const handleReceiveRemittance = async (remId: string, numero: string) => {
-    const obs = window.prompt(`Confirmar recepción del Remito ${numero} en Bóveda.\nObservaciones de recepción (opcional):`)
-    if (obs === null) return
-    setReceivingRemittanceId(remId)
+  // Estados para el Modal de Punteo y Verificación de Remesas en Tesorería
+  const [selectedRemittanceForPunteo, setSelectedRemittanceForPunteo] = useState<any | null>(null)
+  const [loadingRemittanceDetail, setLoadingRemittanceDetail] = useState(false)
+  const [punteoChecks, setPunteoChecks] = useState<Record<string, boolean>>({})
+  const [punteoObservaciones, setPunteoObservaciones] = useState("")
+  const [confirmingReceipt, setConfirmingReceipt] = useState(false)
+
+  const handleOpenPunteoModal = async (remId: string) => {
+    setLoadingRemittanceDetail(true)
     try {
-      await api.caja.treasuryRemittances.receive(remId, { observaciones: obs.trim() || undefined })
-      toast.success("Remesa Recibida", `Remito ${numero} ingresado formalmente a Bóveda.`)
+      const fullRem = await api.caja.treasuryRemittances.get(remId)
+      setSelectedRemittanceForPunteo(fullRem)
+      setPunteoObservaciones(fullRem.observaciones || "")
+      const initialChecks: Record<string, boolean> = {}
+      if (fullRem.items) {
+        fullRem.items.forEach((it: any) => {
+          initialChecks[it.id] = it.verificado_tesoreria || fullRem.estado === "recibido_en_boveda"
+        })
+      }
+      setPunteoChecks(initialChecks)
+    } catch (e: any) {
+      toast.error("Error al abrir remesa", e?.message || "No se pudo cargar el detalle del remito.")
+    } finally {
+      setLoadingRemittanceDetail(false)
+    }
+  }
+
+  const handleTogglePunteoCheck = (itemId: string) => {
+    setPunteoChecks(prev => ({
+      ...prev,
+      [itemId]: !prev[itemId]
+    }))
+  }
+
+  const handleToggleAllPunteo = (checkAll: boolean) => {
+    if (!selectedRemittanceForPunteo?.items) return
+    const nextChecks: Record<string, boolean> = {}
+    selectedRemittanceForPunteo.items.forEach((it: any) => {
+      nextChecks[it.id] = checkAll
+    })
+    setPunteoChecks(nextChecks)
+  }
+
+  const handleConfirmPunteoAndReceive = async () => {
+    if (!selectedRemittanceForPunteo) return
+    const remId = selectedRemittanceForPunteo.id
+    const numero = selectedRemittanceForPunteo.numero
+    const items = selectedRemittanceForPunteo.items || []
+    const allChecked = items.length > 0 && items.every((it: any) => punteoChecks[it.id])
+
+    if (!allChecked && !window.confirm("Hay sobres sin tildar/verificar. ¿Desea confirmar la recepción de todas formas y asentar las observaciones?")) {
+      return
+    }
+
+    setConfirmingReceipt(true)
+    try {
+      await api.caja.treasuryRemittances.receive(remId, { observaciones: punteoObservaciones.trim() || undefined })
+      toast.success("Remesa Verificada y Recibida", `Remito ${numero} ingresado a Bóveda Central.`)
+      setSelectedRemittanceForPunteo(null)
       load()
     } catch (e: any) {
       toast.error("Error al recibir", e?.message || "No se pudo confirmar la recepción.")
     } finally {
-      setReceivingRemittanceId(null)
+      setConfirmingReceipt(false)
     }
   }
 
@@ -673,19 +725,25 @@ export default function BovedaPage() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          {isPending && (
+                          {isPending ? (
                             <button
                               type="button"
-                              onClick={() => handleReceiveRemittance(r.id, r.numero)}
-                              disabled={receivingRemittanceId === r.id}
+                              onClick={() => handleOpenPunteoModal(r.id)}
+                              disabled={loadingRemittanceDetail}
                               className="btn-primary !bg-emerald-600 hover:!bg-emerald-500 text-xs flex items-center gap-1.5 shadow-sm"
                             >
-                              {receivingRemittanceId === r.id ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <Check className="w-3.5 h-3.5" />
-                              )}
-                              <span>Recibir en Bóveda</span>
+                              <PackageCheck className="w-3.5 h-3.5" />
+                              <span>Puntear y Recibir en Bóveda</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPunteoModal(r.id)}
+                              disabled={loadingRemittanceDetail}
+                              className="btn-outline !text-emerald-700 dark:!text-emerald-400 !border-emerald-300 dark:!border-emerald-800 text-xs flex items-center gap-1.5"
+                            >
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              <span>Ver Punteo y Detalle</span>
                             </button>
                           )}
                           <button
@@ -1290,6 +1348,296 @@ export default function BovedaPage() {
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: PUNTEO Y CONTROL DE RECEPCIÓN DE REMESAS EN BÓVEDA (TESORERÍA) */}
+      {selectedRemittanceForPunteo && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5 animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Header del Modal */}
+            <div className="p-5 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-slate-900 via-slate-850 to-indigo-950 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300">
+                  <PackageCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono font-black text-base text-white">
+                      {selectedRemittanceForPunteo.numero}
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        selectedRemittanceForPunteo.estado === "en_transito"
+                          ? "bg-amber-400/20 text-amber-300 border border-amber-400/30 animate-pulse"
+                          : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                      }`}
+                    >
+                      {selectedRemittanceForPunteo.estado === "en_transito" ? "⏳ Por Puntear y Recibir" : "✓ Recibido en Bóveda"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Supervisor/a Remitente: <strong className="text-white">{selectedRemittanceForPunteo.supervisor_nombre || "—"}</strong> · Envío: {formatDateTime(selectedRemittanceForPunteo.fecha_envio || selectedRemittanceForPunteo.created_at)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedRemittanceForPunteo(null)}
+                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Cuerpo con Scroll */}
+            <div className="p-5 space-y-4 overflow-y-auto flex-1 text-slate-800 dark:text-slate-200">
+              {/* Tarjetas de Resumen de la Remesa */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Total Efectivo Declarado</span>
+                  <span className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">
+                    {formatPYG(selectedRemittanceForPunteo.total_pyg)}
+                  </span>
+                  {(selectedRemittanceForPunteo.total_usd > 0 || selectedRemittanceForPunteo.total_brl > 0) && (
+                    <div className="text-[11px] font-mono text-slate-500 pt-0.5">
+                      {selectedRemittanceForPunteo.total_usd > 0 ? `US$ ${selectedRemittanceForPunteo.total_usd.toFixed(2)} ` : ""}
+                      {selectedRemittanceForPunteo.total_brl > 0 ? `· R$ ${selectedRemittanceForPunteo.total_brl.toFixed(2)}` : ""}
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Sobres Declarados</span>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-lg font-black font-mono text-slate-900 dark:text-white">
+                      {selectedRemittanceForPunteo.items?.length || 0}
+                    </span>
+                    <span className="text-xs text-slate-400">sobres físicos</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 pt-0.5">
+                    {selectedRemittanceForPunteo.items?.filter((i: any) => i.tipo_sobre === "sangria").length || 0} sangrías · {selectedRemittanceForPunteo.items?.filter((i: any) => i.tipo_sobre !== "sangria").length || 0} cierres
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/50">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-500 block">Punteo Físico en Tesorería</span>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-lg font-black font-mono text-indigo-600 dark:text-indigo-400">
+                      {Object.values(punteoChecks).filter(Boolean).length}
+                    </span>
+                    <span className="text-xs text-indigo-400">de {selectedRemittanceForPunteo.items?.length || 0} verificados</span>
+                  </div>
+                  <span className="text-[11px] text-indigo-500/80 font-medium">
+                    {Object.values(punteoChecks).filter(Boolean).length === (selectedRemittanceForPunteo.items?.length || 0)
+                      ? "✓ Lote completo punteado"
+                      : "Verificando sobres uno a uno..."}
+                  </span>
+                </div>
+              </div>
+
+              {/* Botones de acción rápida de punteo */}
+              {selectedRemittanceForPunteo.estado === "en_transito" && (
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Abra cada sobre físico, coteje el importe contra la carátula y tilde la casilla de verificación:
+                  </p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleAllPunteo(true)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-200"
+                    >
+                      Tildar Todos
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleAllPunteo(false)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-200"
+                    >
+                      Desmarcar
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Tabla de Sobres */}
+              <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
+                      <th className="p-3 w-10 text-center">Punteo</th>
+                      <th className="p-3">Tipo Sobre</th>
+                      <th className="p-3">Caja / Terminal</th>
+                      <th className="p-3">Cajero/a Emisor/a</th>
+                      <th className="p-3 text-right">Monto PYG (Gs.)</th>
+                      <th className="p-3 text-right">Divisas (R$ / US$)</th>
+                      <th className="p-3 text-center">Comprobantes / Vouchers</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {(!selectedRemittanceForPunteo.items || selectedRemittanceForPunteo.items.length === 0) ? (
+                      <tr>
+                        <td colSpan={7} className="p-6 text-center text-slate-400">
+                          No hay sobres detallados en este remito.
+                        </td>
+                      </tr>
+                    ) : (
+                      selectedRemittanceForPunteo.items.map((it: any, idx: number) => {
+                        const isChecked = Boolean(punteoChecks[it.id])
+                        const isSangria = it.tipo_sobre === "sangria"
+                        return (
+                          <tr
+                            key={it.id || idx}
+                            onClick={() => {
+                              if (selectedRemittanceForPunteo.estado === "en_transito") {
+                                handleTogglePunteoCheck(it.id)
+                              }
+                            }}
+                            className={`cursor-pointer transition-colors ${
+                              isChecked
+                                ? "bg-emerald-50/50 dark:bg-emerald-950/20"
+                                : "hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                            }`}
+                          >
+                            <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                              {selectedRemittanceForPunteo.estado === "en_transito" ? (
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => handleTogglePunteoCheck(it.id)}
+                                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                />
+                              ) : (
+                                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600">
+                                  ✓
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3">
+                              <span
+                                className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                                  isSangria
+                                    ? "bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300"
+                                    : "bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300"
+                                }`}
+                              >
+                                {isSangria ? "SANGRÍA (DROP)" : "CIERRE DE TURNO"}
+                              </span>
+                            </td>
+                            <td className="p-3 font-semibold text-slate-800 dark:text-slate-100">
+                              {it.caja_nombre || it.caja_codigo || "Caja Central"}
+                            </td>
+                            <td className="p-3 text-slate-600 dark:text-slate-300">
+                              {it.cajero_nombre || "—"}
+                            </td>
+                            <td className="p-3 text-right font-mono font-bold text-slate-900 dark:text-white">
+                              {formatPYG(it.monto_pyg)}
+                            </td>
+                            <td className="p-3 text-right font-mono text-slate-500">
+                              {(it.monto_usd > 0 || it.monto_brl > 0) ? (
+                                <>
+                                  {it.monto_usd > 0 ? `US$ ${it.monto_usd.toFixed(2)} ` : ""}
+                                  {it.monto_brl > 0 ? `· R$ ${it.monto_brl.toFixed(2)}` : ""}
+                                </>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                              {it.session_id ? (
+                                <button
+                                  type="button"
+                                  onClick={() => api.caja.downloadSessionPunteoPdf(it.session_id)}
+                                  className="px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 text-[10px] font-bold flex items-center gap-1 mx-auto shadow-sm"
+                                  title="Descargar planilla de vouchers y comprobantes físicos para punteo"
+                                >
+                                  <FileText className="w-3 h-3" />
+                                  <span>Planilla Vouchers</span>
+                                </button>
+                              ) : (
+                                <span className="text-slate-400 text-[10px]">Solo Efectivo</span>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Observaciones de Tesorería */}
+              <div className="space-y-1.5 pt-1">
+                <label className="input-label font-bold text-slate-700 dark:text-slate-300 block text-xs">
+                  Observaciones y Dictamen de Recepción en Tesorería
+                </label>
+                {selectedRemittanceForPunteo.estado === "en_transito" ? (
+                  <textarea
+                    rows={2}
+                    value={punteoObservaciones}
+                    onChange={(e) => setPunteoObservaciones(e.target.value)}
+                    placeholder="Indique si el lote fue recibido conforme, estado de los precintos o si hubo alguna discrepancia física..."
+                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white outline-none focus:border-indigo-500"
+                  />
+                ) : (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 text-xs text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                    <p className="font-semibold text-slate-700 dark:text-slate-200">
+                      Recibido por: <strong>{selectedRemittanceForPunteo.tesorero_nombre || "Tesorería"}</strong> el {formatDateTime(selectedRemittanceForPunteo.fecha_recepcion)}
+                    </p>
+                    {selectedRemittanceForPunteo.observaciones && (
+                      <p className="italic mt-1 text-slate-500">
+                        "{selectedRemittanceForPunteo.observaciones}"
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer de Acciones */}
+            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex items-center justify-between gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleDownloadRemitoPdf(selectedRemittanceForPunteo.id, selectedRemittanceForPunteo.numero)}
+                className="btn-outline !text-blue-600 dark:!text-blue-400 text-xs flex items-center gap-1.5"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Imprimir Remito PDF</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedRemittanceForPunteo(null)}
+                  className="btn-outline text-xs"
+                >
+                  Cerrar
+                </button>
+
+                {selectedRemittanceForPunteo.estado === "en_transito" && (
+                  <button
+                    type="button"
+                    onClick={handleConfirmPunteoAndReceive}
+                    disabled={confirmingReceipt}
+                    className="btn-primary !bg-emerald-600 hover:!bg-emerald-500 text-xs flex items-center gap-1.5 shadow-md"
+                  >
+                    {confirmingReceipt ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Consolidando en Bóveda...</span>
+                      </>
+                    ) : (
+                      <>
+                        <PackageCheck className="w-4 h-4" />
+                        <span>Confirmar Recepción y Asentar en Bóveda</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
