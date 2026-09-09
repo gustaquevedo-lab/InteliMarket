@@ -2590,9 +2590,9 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
 
     # 3. Transacciones POS huérfanas de la sesión (ej. Dinelco o caídas temporales de red antes de vincular sale_id)
     unlinked_pos_txns: list[PosTerminalTransaction] = []
-    if session_obj and session_obj.opened_at:
-        dt_start = session_obj.opened_at - timedelta(minutes=60)
-        dt_end = (session_obj.closed_at or datetime.now(timezone.utc)) + timedelta(minutes=60)
+    if session_obj and session_obj.fecha_apertura:
+        dt_start = session_obj.fecha_apertura - timedelta(minutes=60)
+        dt_end = (session_obj.fecha_cierre or datetime.now(timezone.utc)) + timedelta(minutes=60)
         res_unlinked = await db.execute(
             select(PosTerminalTransaction).where(
                 PosTerminalTransaction.company_id == cid,
@@ -2608,9 +2608,9 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     qr_txns = []
     try:
         from api.src.bancard_qr.models import BancardQrTransaction
-        if session_obj and session_obj.opened_at:
-            dt_start = session_obj.opened_at - timedelta(minutes=60)
-            dt_end = (session_obj.closed_at or datetime.now(timezone.utc)) + timedelta(minutes=60)
+        if session_obj and session_obj.fecha_apertura:
+            dt_start = session_obj.fecha_apertura - timedelta(minutes=60)
+            dt_end = (session_obj.fecha_cierre or datetime.now(timezone.utc)) + timedelta(minutes=60)
             res_qr = await db.execute(
                 select(BancardQrTransaction).where(
                     BancardQrTransaction.company_id == cid,
