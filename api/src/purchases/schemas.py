@@ -1,7 +1,7 @@
 """Purchase schemas — suppliers, orders, receipts, requisitions, contracts, forecasting, suggestions, budgets"""
 
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, date
 from uuid import UUID
 from decimal import Decimal
@@ -1219,3 +1219,8 @@ class SupplierReturnRejectInput(BaseModel):
 class SupplierReturnCompleteInput(BaseModel):
     nota_credito_numero: Optional[str] = None
 
+
+SupplierReturnItemInput.model_rebuild()
+SupplierReturnCreateInput.model_rebuild()
+SupplierReturnRejectInput.model_rebuild()
+SupplierReturnCompleteInput.model_rebuild()
