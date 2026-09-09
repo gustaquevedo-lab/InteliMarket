@@ -972,15 +972,40 @@ async def list_sessions_with_totals(
     result = await db.execute(query)
     sessions = list(result.scalars().all())
 
+    if not sessions:
+        return []
+
+    session_ids = [s.id for s in sessions]
+
+    # Batch 1: Total cobrado por sesión (1 sola query agregada para todo el listado)
+    cobrado_query = (
+        select(Sale.session_id, func.coalesce(func.sum(Sale.total), 0))
+        .where(
+            Sale.session_id.in_(session_ids),
+            Sale.estado == "confirmado",
+        )
+        .group_by(Sale.session_id)
+    )
+    cobrado_res = await db.execute(cobrado_query)
+    cobrado_map = {row[0]: float(row[1]) for row in cobrado_res.all()}
+
+    # Batch 2: Último CashCount de cada sesión cerrada (1 sola query con DISTINCT ON)
+    closed_session_ids = [s.id for s in sessions if s.estado == "cerrada"]
+    counts_map = {}
+    if closed_session_ids:
+        counts_query = (
+            select(CashCount)
+            .where(CashCount.session_id.in_(closed_session_ids))
+            .distinct(CashCount.session_id)
+            .order_by(CashCount.session_id, CashCount.created_at.desc())
+        )
+        counts_res = await db.execute(counts_query)
+        for c in counts_res.scalars().all():
+            counts_map[c.session_id] = c
+
     out = []
     for s in sessions:
-        cobrado_result = await db.execute(
-            select(func.coalesce(func.sum(Sale.total), 0)).where(
-                Sale.session_id == s.id,
-                Sale.estado == "confirmado",
-            )
-        )
-        monto_cobrado = float(cobrado_result.scalar() or 0)
+        monto_cobrado = cobrado_map.get(s.id, 0.0)
 
         cash_drop_alert = False
         cash_drop_warning = False
@@ -1023,19 +1048,13 @@ async def list_sessions_with_totals(
                     # cajero se organice antes de que sea urgente.
                     cash_drop_warning = (not cash_drop_alert) and efectivo_acumulado >= cash_drop_threshold_val * 0.8
 
-        # Arqueo real (CashCount) — antes el historial calculaba una
-        # "diferencia" en el frontend como monto_cierre - monto_apertura (eso
-        # es la recaudacion del turno, no un descuadre de caja) y nunca
-        # mostraba el diferencia real ya sincronizado del legado.
+        # Arqueo real (CashCount)
         diferencia = None
         diferencia_usd = None
         diferencia_brl = None
         monto_cierre_esperado = None
         if s.estado == "cerrada":
-            count_result = await db.execute(
-                select(CashCount).where(CashCount.session_id == s.id).order_by(CashCount.created_at.desc()).limit(1)
-            )
-            count = count_result.scalar_one_or_none()
+            count = counts_map.get(s.id)
             if count:
                 diferencia = float(count.diferencia) if count.diferencia is not None else None
                 diferencia_usd = float(count.diferencia_usd) if count.diferencia_usd is not None else None

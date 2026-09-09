@@ -1249,54 +1249,102 @@ def generate_punteo_vouchers_pdf(
     elements.append(Spacer(1, 8))
 
     # 3. Lista detallada voucher por voucher para punteo físico
-    elements.append(Paragraph("<b>2. LISTA DETALLADA DE TRANSACCIONES / VOUCHERS PARA PUNTEO FÍSICO</b>", styles["Normal"]))
-    elements.append(Spacer(1, 3))
+    elements.append(Paragraph("<b>2. LISTA DETALLADA DE TRANSACCIONES / VOUCHERS PARA PUNTEO FÍSICO Y PERTINENCIA</b>", styles["Normal"]))
+    elements.append(Paragraph("<font color='#64748B' size=6.5>Coteje cada comprobante físico contra el reporte: verifique número de ticket, código de autorización del POS y monto exacto.</font>", styles["Small"]))
+    elements.append(Spacer(1, 4))
 
-    v_headers = ["[  ]", "Hora", "N° Comprobante", "Medio de Pago", "Moneda", "Monto Orig.", "Monto Equivalente (Gs.)"]
+    v_headers = ["[  ]", "Hora", "Ticket / Factura", "Medio / Tarjeta", "Boleta / Aut. / NSU", "Moneda", "Monto Orig.", "Monto Gs.", "Dictamen"]
     v_rows = [v_headers]
 
     for v in vouchers:
         dt = v.get("fecha")
         local_dt = _to_asuncion_tz(dt) if dt else None
         hora_str = local_dt.strftime("%H:%M:%S") if local_dt else "—"
+        
+        tarjeta_info = str(v.get("medio_pago") or v.get("forma_pago") or "—")
+        if v.get("tarjeta_marca") and v.get("tarjeta_marca") != "—":
+            tarjeta_info += f" ({v['tarjeta_marca']})"
+
+        aut_parts = []
+        if v.get("nro_boleta") and v.get("nro_boleta") != "—":
+            aut_parts.append(f"Bol: {v['nro_boleta']}")
+        if v.get("codigo_autorizacion") and v.get("codigo_autorizacion") != "—":
+            aut_parts.append(f"Aut: {v['codigo_autorizacion']}")
+        if v.get("nsu") and v.get("nsu") != "—":
+            aut_parts.append(f"NSU: {v['nsu']}")
+        aut_info = " | ".join(aut_parts) if aut_parts else "—"
+
         v_rows.append([
             "[   ]",
             hora_str,
             str(v.get("numero_ticket") or v.get("numero_venta") or "—"),
-            str(v.get("medio_pago") or v.get("forma_pago") or "—"),
+            tarjeta_info,
+            aut_info,
             str(v.get("moneda") or "PYG"),
             _fmt_val(v.get("monto_original", v.get("monto", 0)), is_divisa=v.get("moneda") != "PYG"),
             _fmt_gs(v.get("monto_gs", v.get("monto", 0))),
+            "CONFORME [ ]  FALTANTE [ ]",
         ])
 
     if len(vouchers) == 0:
-        v_rows.append(["—", "—", "Sin comprobantes registrados", "—", "—", "—", "—"])
+        v_rows.append(["—", "—", "Sin comprobantes registrados", "—", "—", "—", "—", "—", "—"])
 
-    t_v = Table(v_rows, colWidths=[12 * mm, 18 * mm, 38 * mm, 45 * mm, 17 * mm, 25 * mm, 25 * mm], repeatRows=1)
+    # Anchos milimétricos (A4 horizontal o vertical: total ~195mm)
+    t_v = Table(v_rows, colWidths=[9 * mm, 14 * mm, 26 * mm, 34 * mm, 33 * mm, 12 * mm, 20 * mm, 22 * mm, 25 * mm], repeatRows=1)
     t_v.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), HexColor("#334155")),
         ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
         ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
-        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("FONTSIZE", (0, 0), (-1, -1), 6.5),
         ("ALIGN", (0, 0), (0, -1), "CENTER"),
         ("ALIGN", (1, 0), (1, -1), "CENTER"),
-        ("ALIGN", (4, 0), (4, -1), "CENTER"),
-        ("ALIGN", (5, 0), (6, -1), "RIGHT"),
+        ("ALIGN", (4, 0), (5, -1), "CENTER"),
+        ("ALIGN", (6, 0), (7, -1), "RIGHT"),
+        ("ALIGN", (8, 0), (8, -1), "CENTER"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, GRAY_LIGHT]),
         ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
         ("TOPPADDING", (0, 0), (-1, -1), 2),
     ]))
     elements.append(t_v)
-    elements.append(Spacer(1, 14))
+    elements.append(Spacer(1, 10))
 
-    # 4. Firmas institucionales
+    # 4. Cuadro de Arqueo y Control de Diferencias de Comprobantes
+    tot_vouchers_count = len(vouchers)
+    tot_vouchers_gs = sum(v.get("monto_gs", v.get("monto", 0)) for v in vouchers)
+    resumen_control = [
+        ["CONTROL DE COMPROBANTES FÍSICOS", "TOTAL EN SISTEMA", "TOTAL RENDIDO EN SOBRE", "DIFERENCIA (FALTANTE / SOBRANTE)"],
+        [
+            f"Vouchers y Comprobantes Auditados ({tot_vouchers_count} operaciones)",
+            _fmt_gs(tot_vouchers_gs),
+            "Gs. ________________________",
+            "Gs. ________________________ [  ] CONFORME   [  ] DESCUADRE",
+        ]
+    ]
+    t_ctrl = Table(resumen_control, colWidths=[65 * mm, 35 * mm, 45 * mm, 57 * mm])
+    t_ctrl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
+        ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#94A3B8")),
+        ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(KeepTogether([
+        Paragraph("<b>3. DICTAMEN DE ARQUEO Y CONTROL DE DIFERENCIAS</b>", styles["Normal"]),
+        Spacer(1, 3),
+        t_ctrl,
+        Spacer(1, 10),
+    ]))
+
+    # 5. Firmas institucionales
     firmas = [
         ["_________________________________________", "_________________________________________", "_________________________________________"],
         ["FIRMA CAJERO/A", "FIRMA SUPERVISOR DE CAJA", "FIRMA AUDITORÍA / TESORERÍA"],
         [s.get("cajero_nombre") or "Cajero/a", "Supervisor de Turno", "GRUPO SANTA TERESA E.A.S."],
     ]
-    t_firmas = Table(firmas, colWidths=[60 * mm, 60 * mm, 60 * mm])
+    t_firmas = Table(firmas, colWidths=[67 * mm, 67 * mm, 68 * mm])
     t_firmas.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("FONTSIZE", (0, 0), (-1, -1), 7.5),

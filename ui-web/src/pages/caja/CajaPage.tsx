@@ -182,6 +182,7 @@ export default function CajaPage() {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [historial, setHistorial] = useState<SessionSummary[]>([])
   const [historialLoading, setHistorialLoading] = useState(false)
+  const [historialLimit, setHistorialLimit] = useState(250)
   const [handoffs, setHandoffs] = useState<CashHandoff[]>([])
   const [handoffsLoading, setHandoffsLoading] = useState(false)
   const [showConfirmHandoffModal, setShowConfirmHandoffModal] = useState<CashHandoff | null>(null)
@@ -445,10 +446,11 @@ export default function CajaPage() {
 
   const pendingHandoffs = handoffs.filter(h => h.estado === "pendiente")
 
-  const fetchHistorial = async () => {
+  const fetchHistorial = async (lim?: number) => {
     setHistorialLoading(true)
+    const effectiveLimit = lim ?? historialLimit
     try {
-      const data = await api.caja.sessionsSummary({ estado: "cerrada", limit: 2500 })
+      const data = await api.caja.sessionsSummary({ estado: "cerrada", limit: effectiveLimit })
       setHistorial(data)
     } catch {
       toast.error("Error", "No se pudo cargar el historial de cierres")
@@ -1386,11 +1388,32 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
       {/* TAB 4: HISTORIAL DE ARQUEOS & CIERRES */}
       {activeTab === "historial" && (
         <div className="card overflow-hidden">
-          <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-            <span className="text-xs font-bold text-gray-600 dark:text-gray-300">
-              Mostrando {filteredHistorial.length} arqueos históricos
-            </span>
-            <button onClick={fetchHistorial} disabled={historialLoading} className="btn-ghost text-xs flex items-center gap-1">
+          <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-xs font-bold text-gray-600 dark:text-gray-300">
+                Mostrando {filteredHistorial.length} arqueos históricos
+              </span>
+              <div className="inline-flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px]">
+                {[100, 250, 500, 1500].map(lim => (
+                  <button
+                    key={lim}
+                    type="button"
+                    onClick={() => {
+                      setHistorialLimit(lim)
+                      fetchHistorial(lim)
+                    }}
+                    className={`px-2 py-0.5 rounded font-medium transition ${
+                      historialLimit === lim
+                        ? "bg-white dark:bg-slate-700 text-purple-700 dark:text-purple-300 font-bold shadow-sm"
+                        : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                    }`}
+                  >
+                    {lim}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button onClick={() => fetchHistorial()} disabled={historialLoading} className="btn-ghost text-xs flex items-center gap-1">
               <RefreshCw className={`w-3.5 h-3.5 ${historialLoading ? "animate-spin" : ""}`} /> Refrescar
             </button>
           </div>
