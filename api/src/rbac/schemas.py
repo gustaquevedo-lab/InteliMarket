@@ -312,7 +312,14 @@ class UserRoleResponse(BaseModel):
     tenant_id: str
     role_id: str
     role_name: str
-    created_at: datetime
+    # get_user_roles() en service.py ahora tambien sintetiza roles "system-*"
+    # derivados de users.rol (admin/gerente/supervisor/cajero/...) para las
+    # aprobaciones financieras de caja/cuentas por cobrar/caja chica -- esas
+    # entradas no tienen fila real en rbac_user_roles, asi que no tienen
+    # created_at real. Antes esto era datetime obligatorio y rompia con 422
+    # cualquier consulta de roles de un usuario que tuviera al menos un rol
+    # simple (o sea, todos).
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

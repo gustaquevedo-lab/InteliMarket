@@ -993,22 +993,39 @@ export default function RbacPage() {
                     {selectedUserRoles.length === 0 && (
                       <span className="text-[11px] text-amber-600 dark:text-amber-400 font-bold">Sin roles RBAC asignados todavía</span>
                     )}
-                    {selectedUserRoles.map(ur => (
-                      <span
-                        key={ur.role_id}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
-                      >
-                        {ur.role_name}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveRoleFromUser(ur.role_id)}
-                          className="hover:text-rose-600 cursor-pointer"
-                          title="Quitar este rol"
+                    {selectedUserRoles.map(ur => {
+                      // Los roles "system-*" los sintetiza el backend a partir del
+                      // rol simple (admin/gerente/supervisor/...) para las
+                      // aprobaciones financieras de caja/AR/caja chica -- no son
+                      // una fila real en rbac_user_roles, asi que no se pueden
+                      // quitar desde aca (se quitarian cambiando el rol simple).
+                      const esSintetico = ur.role_id.startsWith("system-")
+                      return (
+                        <span
+                          key={ur.role_id}
+                          title={esSintetico ? "Derivado automáticamente del rol simple, no se puede quitar acá" : undefined}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
+                            esSintetico
+                              ? "bg-slate-100 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700"
+                              : "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                          }`}
                         >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </span>
-                    ))}
+                          {ur.role_name}
+                          {esSintetico ? (
+                            <span className="text-[9px] font-normal opacity-70">(automático)</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveRoleFromUser(ur.role_id)}
+                              className="hover:text-rose-600 cursor-pointer"
+                              title="Quitar este rol"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </span>
+                      )
+                    })}
                   </div>
                 )}
 
