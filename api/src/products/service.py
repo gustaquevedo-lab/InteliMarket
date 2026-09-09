@@ -685,10 +685,15 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
         text("""
             SELECT sa.id, sa.numero, sa.fecha, sa.total as venta_total,
                    si.cantidad, si.precio_unitario, si.total as subtotal,
-                   c.razon_social as customer_nombre
+                   c.razon_social as customer_nombre,
+                   COALESCE(cs.cajero_nombre, u.nombre, '—') as cajero_nombre,
+                   cr.nombre as caja_nombre
             FROM sale_items si
             JOIN sales sa ON sa.id = si.sale_id
             LEFT JOIN customers c ON c.id = sa.customer_id
+            LEFT JOIN cash_sessions cs ON cs.id = sa.session_id
+            LEFT JOIN cash_registers cr ON cr.id = cs.register_id
+            LEFT JOIN users u ON u.id = sa.user_id
             WHERE si.product_id = :p_id
             ORDER BY sa.fecha DESC
             LIMIT 15

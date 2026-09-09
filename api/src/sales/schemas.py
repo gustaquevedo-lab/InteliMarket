@@ -86,6 +86,8 @@ class SaleResponse(BaseModel):
     customer_nombre: Optional[str] = None
     customer_doc: Optional[str] = None
     customer_extra_club: Optional[str] = None
+    cajero_nombre: Optional[str] = None
+    caja_nombre: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

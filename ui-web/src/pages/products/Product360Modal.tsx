@@ -1112,12 +1112,30 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
               <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-100 dark:bg-slate-800 text-slate-500 font-bold uppercase text-[10px]">
-                    <tr><th className="p-3 text-left">N° Factura</th><th className="p-3 text-left">Cliente</th><th className="p-3 text-left">Fecha / Hora</th><th className="p-3 text-right">Cant.</th><th className="p-3 text-right">Precio Unit.</th><th className="p-3 text-right">Subtotal</th></tr>
+                    <tr>
+                      <th className="p-3 text-left">N° Factura</th>
+                      <th className="p-3 text-left">Cajera</th>
+                      <th className="p-3 text-left">Cliente</th>
+                      <th className="p-3 text-left">Fecha / Hora</th>
+                      <th className="p-3 text-right">Cant.</th>
+                      <th className="p-3 text-right">Precio Unit.</th>
+                      <th className="p-3 text-right">Subtotal</th>
+                    </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {(data.ultimas_ventas || []).map((v: any) => (
                       <tr key={v.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/60">
                         <td className="p-3 font-mono font-bold text-emerald-600">{v.numero}</td>
+                        <td className="p-3 font-medium text-slate-800 dark:text-slate-200">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-xs">{v.cajero_nombre || "—"}</span>
+                            {v.caja_nombre && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-mono">
+                                {v.caja_nombre}
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="p-3 font-semibold text-slate-800 dark:text-slate-200">{v.customer_nombre || "Cliente Ocasional"}</td>
                         <td className="p-3 text-slate-500 font-mono text-[10px]">{formatDateTimePY(v.fecha)}</td>
                         <td className="p-3 text-right font-mono font-bold">{v.cantidad}</td>
@@ -1125,7 +1143,7 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                         <td className="p-3 text-right font-mono font-bold text-slate-900 dark:text-white">{formatPYG(v.subtotal)}</td>
                       </tr>
                     ))}
-                    {!(data.ultimas_ventas?.length) && <tr><td colSpan={6} className="p-8 text-center text-slate-400">Sin ventas registradas</td></tr>}
+                    {!(data.ultimas_ventas?.length) && <tr><td colSpan={7} className="p-8 text-center text-slate-400">Sin ventas registradas</td></tr>}
                   </tbody>
                 </table>
               </div>

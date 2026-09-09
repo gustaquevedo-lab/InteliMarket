@@ -761,24 +761,33 @@ async def finalize_approved_credit_sale(db: AsyncSession, request) -> Sale:
 
 async def get_sale(db: AsyncSession, sale_id: str) -> Sale | None:
     from api.src.customers.models import Customer
+    from api.src.caja.models import CashSession, CashRegister
+    from api.src.auth.models import User
     result = await db.execute(
-        select(Sale, Customer, SalePayment)
+        select(Sale, Customer, SalePayment, CashSession, CashRegister, User)
         .outerjoin(Customer, Customer.id == Sale.customer_id)
         .outerjoin(SalePayment, SalePayment.sale_id == Sale.id)
+        .outerjoin(CashSession, CashSession.id == Sale.session_id)
+        .outerjoin(CashRegister, CashRegister.id == CashSession.register_id)
+        .outerjoin(User, User.id == Sale.user_id)
         .where(Sale.id == uuid.UUID(sale_id))
     )
     row = result.first()
     if not row:
         return None
-    sale, cust, payment = row
+    sale, cust, payment, cs, cr, u = row
     fp = payment.forma_pago if payment else ("EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO")
     c_name = cust.razon_social or cust.nombre_fantasia if cust else "Consumidor Final"
     c_doc = cust.ruc or cust.ci or cust.telefono if cust else None
     c_ec = cust.extra_club_numero if cust else None
+    c_cajero = (cs.cajero_nombre if cs and cs.cajero_nombre else (u.nombre if u and u.nombre else None))
+    c_caja = cr.nombre if cr else None
     setattr(sale, "forma_pago", fp)
     setattr(sale, "customer_nombre", c_name)
     setattr(sale, "customer_doc", c_doc)
     setattr(sale, "customer_extra_club", c_ec)
+    setattr(sale, "cajero_nombre", c_cajero)
+    setattr(sale, "caja_nombre", c_caja)
     return sale
 
 
@@ -1250,12 +1259,17 @@ async def list_sales(
     offset: int = 0,
 ) -> list[Sale]:
     from api.src.customers.models import Customer
+    from api.src.caja.models import CashSession, CashRegister
+    from api.src.auth.models import User
     from zoneinfo import ZoneInfo
     asuncion_tz = ZoneInfo("America/Asuncion")
 
     query = (
-        select(Sale, Customer)
+        select(Sale, Customer, CashSession, CashRegister, User)
         .outerjoin(Customer, Customer.id == Sale.customer_id)
+        .outerjoin(CashSession, CashSession.id == Sale.session_id)
+        .outerjoin(CashRegister, CashRegister.id == CashSession.register_id)
+        .outerjoin(User, User.id == Sale.user_id)
         .where(Sale.company_id == company_id)
     )
     if customer_id:
@@ -1321,7 +1335,7 @@ async def list_sales(
     if not rows:
         return []
 
-    sale_ids = [s.id for s, _ in rows]
+    sale_ids = [s.id for s, _, _, _, _ in rows]
     payments_res = await db.execute(
         select(SalePayment).where(SalePayment.sale_id.in_(sale_ids))
     )
@@ -1331,7 +1345,7 @@ async def list_sales(
             payments_by_sale[p.sale_id] = p.forma_pago
 
     sales_list = []
-    for sale, cust in rows:
+    for sale, cust, cs, cr, u in rows:
         fp = payments_by_sale.get(
             sale.id,
             "EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO"
@@ -1339,10 +1353,14 @@ async def list_sales(
         c_name = cust.razon_social or cust.nombre_fantasia if cust else "Consumidor Final"
         c_doc = cust.ruc or cust.ci or cust.telefono if cust else None
         c_ec = cust.extra_club_numero if cust else None
+        c_cajero = (cs.cajero_nombre if cs and cs.cajero_nombre else (u.nombre if u and u.nombre else None))
+        c_caja = cr.nombre if cr else None
         setattr(sale, "forma_pago", fp)
         setattr(sale, "customer_nombre", c_name)
         setattr(sale, "customer_doc", c_doc)
         setattr(sale, "customer_extra_club", c_ec)
+        setattr(sale, "cajero_nombre", c_cajero)
+        setattr(sale, "caja_nombre", c_caja)
         sales_list.append(sale)
 
     return sales_list

@@ -536,6 +536,7 @@ export default function SalesPage() {
               <tr>
                 <th className="p-4">Nº Comprobante</th>
                 <th className="p-4">Fecha / Hora</th>
+                <th className="p-4">Cajera</th>
                 <th className="p-4">Cliente</th>
                 <th className="p-4">RUC / C.I.</th>
                 <th className="p-4 text-center">Condición</th>
@@ -548,14 +549,14 @@ export default function SalesPage() {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="p-12 text-center text-slate-400">
+                  <td colSpan={10} className="p-12 text-center text-slate-400">
                     <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-500" />
                     <span>Cargando comprobantes fiscales...</span>
                   </td>
                 </tr>
               ) : filteredSales.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-12 text-center text-slate-400">
+                  <td colSpan={10} className="p-12 text-center text-slate-400">
                     No se encontraron comprobantes coincidentes con los filtros.
                   </td>
                 </tr>
@@ -582,6 +583,18 @@ export default function SalesPage() {
                       </td>
                       <td className="p-4 text-slate-500 font-mono text-[11px]">
                         {s.fecha ? new Date(s.fecha).toLocaleString("es-PY") : formatDate(s.created_at)}
+                      </td>
+                      <td className="p-4 text-xs">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-slate-800 dark:text-slate-200 truncate max-w-[150px]" title={s.cajero_nombre || "—"}>
+                            {s.cajero_nombre || "—"}
+                          </span>
+                          {s.caja_nombre && (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono font-semibold">
+                              {s.caja_nombre}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="p-4 font-bold text-slate-800 dark:text-slate-200 max-w-[200px] truncate">
                         {custName}
