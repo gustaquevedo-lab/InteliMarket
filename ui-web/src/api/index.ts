@@ -105,7 +105,11 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: "Error desconocido" }))
+    let fallbackDetail = `Error en el servidor (HTTP ${response.status})`
+    if (response.status === 502 || response.status === 503 || response.status === 504) {
+      fallbackDetail = `El servidor se está reiniciando o no está disponible temporalmente (HTTP ${response.status}). Por favor reintente en unos segundos.`
+    }
+    const error = await response.json().catch(() => ({ detail: fallbackDetail }))
     const detailMsg = Array.isArray(error.detail)
       ? error.detail.map((d: any) => d.msg || `${d.loc?.join(".")}: ${d.type}`).join(", ")
       : typeof error.detail === "string"
