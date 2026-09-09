@@ -1168,3 +1168,54 @@ class ResolveSupplierNcRequest(BaseModel):
     observaciones: Optional[str] = None
     user_id: Optional[UUID] = None
 
+
+# ── Devoluciones a Proveedor en Compras ────────────────────────────────────────
+
+class SupplierProductItemResponse(BaseModel):
+    id: str
+    nombre: str
+    sku: Optional[str] = None
+    codigo_barra: Optional[str] = None
+    costo_promedio: float = 0.0
+    unidad_medida: str = "UN"
+
+
+class ProductInvoiceOptionResponse(BaseModel):
+    invoice_id: str
+    numero_factura: str
+    timbrado: Optional[str] = None
+    fecha_emision: Optional[str] = None
+    cantidad_comprada: float = 0.0
+    precio_unitario: float = 0.0
+    item_total: float = 0.0
+    saldo_pendiente_factura: float = 0.0
+
+
+class SupplierReturnItemInput(BaseModel):
+    producto_id: UUID
+    factura_id: Optional[UUID] = None
+    factura_numero: Optional[str] = None
+    cantidad: Decimal = Field(..., gt=0)
+    valor_unitario: Decimal = Field(..., ge=0)
+    motivo: str = "vencido"  # vencido, danado, sobrestock, acuerdo_comercial, orden_incorrecta, calidad_insuficiente, otro
+    lote: Optional[str] = None
+    fecha_vencimiento: Optional[date] = None
+    detalle: Optional[str] = None
+
+
+class SupplierReturnCreateInput(BaseModel):
+    proveedor_id: UUID
+    warehouse_id: Optional[UUID] = None
+    tipo: str = "devolucion"  # devolucion, recall
+    fecha_estimada_retiro: Optional[date] = None
+    observaciones: Optional[str] = None
+    items: List[SupplierReturnItemInput]
+
+
+class SupplierReturnRejectInput(BaseModel):
+    motivo_rechazo: str
+
+
+class SupplierReturnCompleteInput(BaseModel):
+    nota_credito_numero: Optional[str] = None
+

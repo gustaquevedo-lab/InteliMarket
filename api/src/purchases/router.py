@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 from api.src.db import get_db
-from api.src.auth.middleware import require_auth
+from api.src.auth.middleware import require_auth, get_current_user
 from api.src.rbac.deps import require_permission
 from api.src.purchases import pdf_reports as purchases_pdf_reports
 from api.src.purchases.schemas import (
@@ -33,11 +33,14 @@ from api.src.purchases.schemas import (
     SyncInboxResponse, UploadXmlResponse,
     Perform3WayMatchRequest, Perform3WayMatchResponse,
     SupplierNcRequestResponse, ResolveSupplierNcRequest,
+    SupplierProductItemResponse, ProductInvoiceOptionResponse,
+    SupplierReturnCreateInput, SupplierReturnRejectInput, SupplierReturnCompleteInput,
 )
 from api.src.purchases import service
 from api.src.purchases import imap_service
 from api.src.purchases import matching_service
 from api.src.purchases import sifen_xml_parser
+from api.src.purchases import returns_service
 
 
 router = APIRouter(prefix="/api/v1", tags=["purchases"], dependencies=[Depends(require_auth)])
@@ -828,4 +831,108 @@ async def resolve_supplier_nc_request(
     except Exception as e:
         logger.error(f"Error al registrar NC del proveedor: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Devoluciones a Proveedores en Compras ──────────────────────────────────────
+
+@router.get("/purchases/suppliers/{supplier_id}/products", response_model=list[SupplierProductItemResponse])
+async def get_supplier_products(
+    supplier_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Retorna el catálogo de productos que vende el proveedor (directo e historial de facturas)."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    sid = uuid.UUID(supplier_id)
+    return await returns_service.list_supplier_products(db, cid, sid)
+
+
+@router.get("/purchases/suppliers/{supplier_id}/products/{product_id}/invoices", response_model=list[ProductInvoiceOptionResponse])
+async def get_product_invoices(
+    supplier_id: str,
+    product_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Retorna las facturas de compra del proveedor donde figura un producto determinado."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    sid = uuid.UUID(supplier_id)
+    pid = uuid.UUID(product_id)
+    return await returns_service.list_product_invoices(db, cid, sid, pid)
+
+
+@router.post("/purchases/returns", status_code=201)
+async def create_purchase_supplier_return(
+    body: SupplierReturnCreateInput,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Crea una devolución a proveedor en estado inicial 'pendiente'."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    uid = uuid.UUID(str(user.get("id")))
+    return await returns_service.create_supplier_return(db, cid, uid, body)
+
+
+@router.get("/purchases/returns")
+async def list_purchase_supplier_returns(
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    estado: Optional[str] = Query(None),
+    supplier_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Lista las devoluciones a proveedores enriquecidas con detalle de ítems, productos y facturas."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    sid = uuid.UUID(supplier_id) if supplier_id else None
+    return await returns_service.list_supplier_returns(db, cid, estado=estado, supplier_id=sid)
+
+
+@router.post("/purchases/returns/{return_id}/approve")
+async def approve_purchase_supplier_return(
+    return_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Aprueba la devolución para autorizar el retiro por el proveedor."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    uid = uuid.UUID(str(user.get("id")))
+    return await returns_service.approve_supplier_return(db, cid, uuid.UUID(return_id), uid)
+
+
+@router.post("/purchases/returns/{return_id}/reject")
+async def reject_purchase_supplier_return(
+    return_id: str,
+    body: SupplierReturnRejectInput,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Rechaza la solicitud de devolución."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    uid = uuid.UUID(str(user.get("id")))
+    return await returns_service.reject_supplier_return(db, cid, uuid.UUID(return_id), uid, body.motivo_rechazo)
+
+
+@router.post("/purchases/returns/{return_id}/complete")
+async def complete_purchase_supplier_return(
+    return_id: str,
+    body: SupplierReturnCompleteInput = None,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """
+    Completa la devolución:
+    - Descuenta existencias en stock de inventario (genera movimiento negativo).
+    - Descuenta saldo de la factura afectada en cuentas por pagar (si aplica).
+    - Genera crédito a favor en cuenta corriente del proveedor.
+    """
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    uid = uuid.UUID(str(user.get("id")))
+    nc_num = body.nota_credito_numero if body else None
+    return await returns_service.complete_supplier_return(db, cid, uuid.UUID(return_id), uid, nc_num)
 

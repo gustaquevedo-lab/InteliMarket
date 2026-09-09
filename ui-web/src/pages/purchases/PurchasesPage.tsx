@@ -99,12 +99,42 @@ export default function PurchasesPage() {
   const [spendByCategory, setSpendByCategory] = useState<any[]>([])
   const [priceVariance, setPriceVariance] = useState<any[]>([])
 
-  // Devoluciones y Notas de Crédito de Proveedor (Nemuha Legacy)
+  // Devoluciones y Notas de Crédito de Proveedor (Nemuha Legacy & Circuito Compras)
   const [supplierReturns, setSupplierReturns] = useState<any[]>([])
   const [supplierCreditNotes, setSupplierCreditNotes] = useState<any[]>([])
+  const [managedReturns, setManagedReturns] = useState<any[]>([])
+  const [warehousesList, setWarehousesList] = useState<any[]>([])
   const [searchReturns, setSearchReturns] = useState("")
   const [pageReturns, setPageReturns] = useState(1)
   const pageSizeReturns = 15
+
+  // Modal y Flujo de Nueva Devolución a Proveedor
+  const [showCreateReturnModal, setShowCreateReturnModal] = useState(false)
+  const [selectedSupplierForReturn, setSelectedSupplierForReturn] = useState("")
+  const [selectedWarehouseForReturn, setSelectedWarehouseForReturn] = useState("")
+  const [supplierProducts, setSupplierProducts] = useState<any[]>([])
+  const [loadingSupplierProducts, setLoadingSupplierProducts] = useState(false)
+  const [selectedProductForReturn, setSelectedProductForReturn] = useState("")
+  const [productInvoices, setProductInvoices] = useState<any[]>([])
+  const [loadingProductInvoices, setLoadingProductInvoices] = useState(false)
+  const [selectedInvoiceForReturn, setSelectedInvoiceForReturn] = useState("")
+  const [returnQuantity, setReturnQuantity] = useState<string>("1")
+  const [returnUnitPrice, setReturnUnitPrice] = useState<string>("0")
+  const [returnReason, setReturnReason] = useState<string>("vencido")
+  const [returnLot, setReturnLot] = useState<string>("")
+  const [returnExpiryDate, setReturnExpiryDate] = useState<string>("")
+  const [returnDetailNotes, setReturnDetailNotes] = useState<string>("")
+  const [returnItemsList, setReturnItemsList] = useState<any[]>([])
+  const [generalReturnNotes, setGeneralReturnNotes] = useState<string>("")
+  const [savingReturn, setSavingReturn] = useState(false)
+
+  // Modales de Acción sobre Devoluciones (Detalle, Rechazo, Completado)
+  const [viewingReturnDetail, setViewingReturnDetail] = useState<any | null>(null)
+  const [rejectingReturnId, setRejectingReturnId] = useState<string | null>(null)
+  const [rejectReasonInput, setRejectReasonInput] = useState("")
+  const [completingReturnId, setCompletingReturnId] = useState<string | null>(null)
+  const [ncNumberInput, setNcNumberInput] = useState("")
+  const [processingReturnAction, setProcessingReturnAction] = useState(false)
 
   // Facturas de Proveedores (Procure-to-Pay)
   const [allSupplierInvoices, setAllSupplierInvoices] = useState<SupplierInvoice[]>([])
@@ -346,6 +376,8 @@ export default function PurchasesPage() {
         spendSuppRes,
         spendCatRes,
         varianceRes,
+        managedReturnsRes,
+        warehousesRes,
         returnsRes,
         creditNotesRes,
         ncRequestsRes,
@@ -364,8 +396,10 @@ export default function PurchasesPage() {
         api.purchases.reports.spendBySupplier(),
         api.purchases.reports.spendByCategory(),
         api.purchases.reports.priceVariance(),
-        api.financial.supplierReturns(),
-        api.financial.creditNotes(),
+        api.purchases.returns.list().catch(() => []),
+        api.warehouses.list().catch(() => []),
+        api.financial.supplierReturns().catch(() => []),
+        api.financial.creditNotes().catch(() => []),
         api.purchases.listSupplierNcRequests(),
         api.purchases.getInboxConfig(),
       ])
@@ -386,19 +420,22 @@ export default function PurchasesPage() {
       if (spendSuppRes.status === "fulfilled") setSpendBySupplier(spendSuppRes.value || [])
       if (spendCatRes.status === "fulfilled") setSpendByCategory(spendCatRes.value || [])
       if (varianceRes.status === "fulfilled") setPriceVariance(varianceRes.value || [])
+      if (managedReturnsRes.status === "fulfilled") setManagedReturns(managedReturnsRes.value || [])
+      if (warehousesRes.status === "fulfilled") setWarehousesList(warehousesRes.value || [])
       if (returnsRes.status === "fulfilled") setSupplierReturns(returnsRes.value || [])
       if (creditNotesRes.status === "fulfilled") setSupplierCreditNotes(creditNotesRes.value || [])
       if (ncRequestsRes.status === "fulfilled") setSupplierNcRequests(ncRequestsRes.value || [])
       if (inboxConfigRes.status === "fulfilled" && inboxConfigRes.value) {
-        setInboxConfig(inboxConfigRes.value)
+        const conf: any = inboxConfigRes.value
+        setInboxConfig(conf)
         setInboxConfigForm({
-          imap_host: inboxConfigRes.value.imap_host || "mail.superextra.com.py",
-          imap_port: inboxConfigRes.value.imap_port || 993,
-          imap_user: inboxConfigRes.value.imap_user || "facturaelectronica@superextra.com.py",
+          imap_host: conf.imap_host || "mail.superextra.com.py",
+          imap_port: conf.imap_port || 993,
+          imap_user: conf.imap_user || "facturaelectronica@superextra.com.py",
           imap_password: "",
-          imap_ssl: inboxConfigRes.value.imap_ssl ?? true,
-          imap_folder: inboxConfigRes.value.imap_folder || "INBOX",
-          activo: inboxConfigRes.value.activo ?? true,
+          imap_ssl: conf.imap_ssl ?? true,
+          imap_folder: conf.imap_folder || "INBOX",
+          activo: conf.activo ?? true,
         })
       }
     } catch (e: any) {
@@ -1565,12 +1602,47 @@ export default function PurchasesPage() {
     return filteredInvoicesP2P.slice(start, start + pageSizeInvoices)
   }, [filteredInvoicesP2P, pageInvoices, pageSizeInvoices])
 
-  // Filtrado y Paginación de Devoluciones y Notas de Crédito (Nemuha Legacy)
+  // Filtrado y Paginación de Devoluciones y Notas de Crédito (Gestionadas + Legacy)
   const filteredReturnsAndNC = useMemo(() => {
-    const combined = [
-      ...supplierReturns.map(r => ({ ...r, tipo_registro: "devolucion" })),
-      ...supplierCreditNotes.map(nc => ({ ...nc, tipo_registro: "nota_credito", numero_nota_credito: nc.numero }))
-    ]
+    // 1. Devoluciones gestionadas (con circuito de aprobación e impacto stock/finanzas)
+    const managed = managedReturns.map(r => ({
+      id: r.id,
+      codigo: r.codigo,
+      numero_nota_credito: r.nota_credito_numero || r.codigo,
+      tipo_registro: "devolucion_gestionada",
+      supplier_id: r.proveedor_id,
+      supplier_nombre: r.proveedor_nombre,
+      fecha: r.fecha_creacion,
+      created_at: r.fecha_creacion,
+      monto: r.valor_total_estimado,
+      numero_factura_origen: r.items?.map((it: any) => it.factura_numero).filter(Boolean).join(", ") || "—",
+      observaciones: r.observaciones || "Devolución física a proveedor",
+      estado: r.estado || "pendiente",
+      almacen_nombre: r.almacen_nombre,
+      total_items: r.total_items,
+      motivo_rechazo: r.motivo_rechazo,
+      raw: r,
+    }))
+
+    // 2. Devoluciones Legacy (evitar duplicar si ya figura por código o id)
+    const managedCodes = new Set(managed.map(m => m.codigo))
+    const legacy = supplierReturns
+      .filter(sr => !managedCodes.has(sr.numero_nota_credito))
+      .map(r => ({
+        ...r,
+        tipo_registro: "devolucion",
+        estado: "completado",
+      }))
+
+    // 3. Notas de Crédito
+    const ncs = supplierCreditNotes.map(nc => ({
+      ...nc,
+      tipo_registro: "nota_credito",
+      numero_nota_credito: nc.numero,
+      estado: "completado",
+    }))
+
+    const combined = [...managed, ...legacy, ...ncs]
     return combined.filter(item => {
       const matchSearch = !searchReturns ||
         (item.numero_nota_credito?.toLowerCase().includes(searchReturns.toLowerCase())) ||
@@ -1579,13 +1651,216 @@ export default function PurchasesPage() {
         (item.observaciones?.toLowerCase().includes(searchReturns.toLowerCase()))
       return matchSearch
     }).sort((a, b) => new Date(b.fecha || b.created_at || "").getTime() - new Date(a.fecha || a.created_at || "").getTime())
-  }, [supplierReturns, supplierCreditNotes, searchReturns])
+  }, [managedReturns, supplierReturns, supplierCreditNotes, searchReturns])
 
   const totalPagesReturns = Math.max(1, Math.ceil(filteredReturnsAndNC.length / pageSizeReturns))
   const paginatedReturns = useMemo(() => {
     const start = (pageReturns - 1) * pageSizeReturns
     return filteredReturnsAndNC.slice(start, start + pageSizeReturns)
   }, [filteredReturnsAndNC, pageReturns, pageSizeReturns])
+
+  // Handlers para Circuito de Devoluciones a Proveedor
+  const handleSelectSupplierForReturn = async (supplierId: string) => {
+    setSelectedSupplierForReturn(supplierId)
+    setSelectedProductForReturn("")
+    setProductInvoices([])
+    setSelectedInvoiceForReturn("")
+    setSupplierProducts([])
+    if (!supplierId) return
+
+    setLoadingSupplierProducts(true)
+    try {
+      const res = await api.purchases.supplierProducts(supplierId)
+      setSupplierProducts(res || [])
+    } catch (err: any) {
+      toast.error("Error al cargar productos del proveedor", err.message)
+    } finally {
+      setLoadingSupplierProducts(false)
+    }
+  }
+
+  const handleSelectProductForReturn = async (productId: string) => {
+    setSelectedProductForReturn(productId)
+    setSelectedInvoiceForReturn("")
+    setProductInvoices([])
+    if (!productId || !selectedSupplierForReturn) return
+
+    const prod = supplierProducts.find(p => p.id === productId)
+    if (prod) {
+      setReturnUnitPrice(String(prod.costo_promedio || 0))
+    }
+
+    setLoadingProductInvoices(true)
+    try {
+      const invoices = await api.purchases.productInvoices(selectedSupplierForReturn, productId)
+      setProductInvoices(invoices || [])
+    } catch (err: any) {
+      toast.error("Error al buscar facturas del producto", err.message)
+    } finally {
+      setLoadingProductInvoices(false)
+    }
+  }
+
+  const handleSelectInvoiceForReturn = (invoiceId: string) => {
+    setSelectedInvoiceForReturn(invoiceId)
+    if (!invoiceId) {
+      const prod = supplierProducts.find(p => p.id === selectedProductForReturn)
+      if (prod) setReturnUnitPrice(String(prod.costo_promedio || 0))
+      return
+    }
+    const inv = productInvoices.find(i => i.invoice_id === invoiceId)
+    if (inv && inv.precio_unitario) {
+      setReturnUnitPrice(String(inv.precio_unitario))
+    }
+  }
+
+  const handleAddReturnItem = () => {
+    if (!selectedProductForReturn) {
+      toast.error("Seleccione un producto a devolver")
+      return
+    }
+    const qty = parseFloat(returnQuantity)
+    if (isNaN(qty) || qty <= 0) {
+      toast.error("Ingrese una cantidad válida mayor a 0")
+      return
+    }
+    const price = parseFloat(returnUnitPrice)
+    if (isNaN(price) || price < 0) {
+      toast.error("Ingrese un valor unitario válido")
+      return
+    }
+
+    const prod = supplierProducts.find(p => p.id === selectedProductForReturn)
+    const inv = productInvoices.find(i => i.invoice_id === selectedInvoiceForReturn)
+
+    const newItem = {
+      producto_id: selectedProductForReturn,
+      producto_nombre: prod?.nombre || "Producto",
+      sku: prod?.sku,
+      codigo_barra: prod?.codigo_barra,
+      factura_id: inv ? inv.invoice_id : undefined,
+      factura_numero: inv ? inv.numero_factura : undefined,
+      cantidad: qty,
+      valor_unitario: price,
+      valor_total: qty * price,
+      motivo: returnReason,
+      lote: returnLot || undefined,
+      fecha_vencimiento: returnExpiryDate || undefined,
+      detalle: returnDetailNotes || undefined,
+    }
+
+    setReturnItemsList(prev => [...prev, newItem])
+    setSelectedProductForReturn("")
+    setSelectedInvoiceForReturn("")
+    setProductInvoices([])
+    setReturnQuantity("1")
+    setReturnLot("")
+    setReturnExpiryDate("")
+    setReturnDetailNotes("")
+    toast.success("Producto agregado a la lista de devolución")
+  }
+
+  const handleRemoveReturnItem = (index: number) => {
+    setReturnItemsList(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleSaveSupplierReturn = async () => {
+    if (!selectedSupplierForReturn) {
+      toast.error("Seleccione un proveedor")
+      return
+    }
+    if (returnItemsList.length === 0) {
+      toast.error("Debe agregar al menos un producto a la devolución")
+      return
+    }
+
+    setSavingReturn(true)
+    try {
+      const payload = {
+        proveedor_id: selectedSupplierForReturn,
+        warehouse_id: selectedWarehouseForReturn || (warehousesList[0]?.id || undefined),
+        observaciones: generalReturnNotes || undefined,
+        items: returnItemsList.map(it => ({
+          producto_id: it.producto_id,
+          factura_id: it.factura_id,
+          factura_numero: it.factura_numero,
+          cantidad: it.cantidad,
+          valor_unitario: it.valor_unitario,
+          motivo: it.motivo,
+          lote: it.lote,
+          fecha_vencimiento: it.fecha_vencimiento,
+          detalle: it.detalle,
+        })),
+      }
+
+      await api.purchases.returns.create(payload)
+      toast.success("Devolución creada", "La solicitud fue registrada en estado Pendiente de Aprobación")
+      setShowCreateReturnModal(false)
+      const updated = await api.purchases.returns.list()
+      setManagedReturns(updated || [])
+    } catch (err: any) {
+      toast.error("Error al registrar devolución", err.message)
+    } finally {
+      setSavingReturn(false)
+    }
+  }
+
+  const handleApproveReturn = async (returnId: string) => {
+    setProcessingReturnAction(true)
+    try {
+      await api.purchases.returns.approve(returnId)
+      toast.success("Devolución Aprobada", "La solicitud fue aprobada. Ahora está lista para salida física.")
+      const updated = await api.purchases.returns.list()
+      setManagedReturns(updated || [])
+    } catch (err: any) {
+      toast.error("Error al aprobar devolución", err.message)
+    } finally {
+      setProcessingReturnAction(false)
+    }
+  }
+
+  const handleRejectReturn = async (returnId: string) => {
+    if (!rejectReasonInput.trim()) {
+      toast.error("Debe ingresar el motivo del rechazo")
+      return
+    }
+    setProcessingReturnAction(true)
+    try {
+      await api.purchases.returns.reject(returnId, rejectReasonInput)
+      toast.success("Devolución Rechazada", "La solicitud fue marcada como rechazada.")
+      setRejectingReturnId(null)
+      setRejectReasonInput("")
+      const updated = await api.purchases.returns.list()
+      setManagedReturns(updated || [])
+    } catch (err: any) {
+      toast.error("Error al rechazar devolución", err.message)
+    } finally {
+      setProcessingReturnAction(false)
+    }
+  }
+
+  const handleCompleteReturn = async (returnId: string) => {
+    setProcessingReturnAction(true)
+    try {
+      await api.purchases.returns.complete(returnId, ncNumberInput || undefined)
+      toast.success("Devolución Completada", "Se descontó la existencia de inventario y se actualizó la cuenta del proveedor.")
+      setCompletingReturnId(null)
+      setNcNumberInput("")
+      const [updatedReturns, updatedInvoices] = await Promise.all([
+        api.purchases.returns.list(),
+        api.financial.invoices.list({ limit: 300 }),
+      ])
+      setManagedReturns(updatedReturns || [])
+      if (updatedInvoices) {
+        setInvoices(updatedInvoices)
+        setAllSupplierInvoices(updatedInvoices)
+      }
+    } catch (err: any) {
+      toast.error("Error al completar devolución", err.message)
+    } finally {
+      setProcessingReturnAction(false)
+    }
+  }
 
   return (
     <div className="space-y-6 animate-fade-in-up pb-16 max-w-full overflow-hidden">
@@ -3235,7 +3510,7 @@ export default function PurchasesPage() {
       )}
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          TAB: DEVOLUCIONES Y NOTAS DE CRÉDITO (NEMUHA LEGACY)
+          TAB: DEVOLUCIONES Y NOTAS DE CRÉDITO A PROVEEDORES
       ────────────────────────────────────────────────────────────────────────── */}
       {tab === "devoluciones" && (
         <div className="space-y-5">
@@ -3243,22 +3518,41 @@ export default function PurchasesPage() {
             <div>
               <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
                 <Undo2 className="w-5 h-5 text-indigo-500" />
-                Devoluciones a Proveedor & Notas de Crédito ({supplierReturns.length + supplierCreditNotes.length} Registros)
+                Devoluciones a Proveedor & Notas de Crédito ({filteredReturnsAndNC.length} Registros)
               </h3>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Historial de mercaderías devueltas por vencimiento, rotura o reclamos comerciales, y notas de crédito emitidas.
+                Circuito de devoluciones comerciales por vencimiento, avería o sobrante, con aprobación e impacto en stock y cuentas por pagar.
               </p>
             </div>
 
-            <div className="relative w-full sm:w-72">
-              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Buscar por comprobante, proveedor o motivo..."
-                value={searchReturns}
-                onChange={(e) => { setSearchReturns(e.target.value); setPageReturns(1); }}
-                className="input-field pl-9 w-full text-xs"
-              />
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => {
+                  setSelectedSupplierForReturn("")
+                  setSupplierProducts([])
+                  setSelectedProductForReturn("")
+                  setProductInvoices([])
+                  setSelectedInvoiceForReturn("")
+                  setReturnItemsList([])
+                  setGeneralReturnNotes("")
+                  setShowCreateReturnModal(true)
+                }}
+                className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-500/20 flex items-center gap-2 transition"
+              >
+                <Plus className="w-4 h-4" />
+                Nueva Devolución a Proveedor
+              </button>
+
+              <div className="relative w-full sm:w-72">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por comprobante, proveedor o motivo..."
+                  value={searchReturns}
+                  onChange={(e) => { setSearchReturns(e.target.value); setPageReturns(1); }}
+                  className="input-field pl-9 w-full text-xs"
+                />
+              </div>
             </div>
           </div>
 
@@ -3270,50 +3564,144 @@ export default function PurchasesPage() {
               </div>
             ) : (
               <div className="overflow-x-auto w-full">
-                <table className="w-full text-left text-xs min-w-[850px]">
+                <table className="w-full text-left text-xs min-w-[950px]">
                   <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700/60">
                     <tr>
-                      <th className="p-3">Tipo Registro</th>
-                      <th className="p-3">N° Comprobante / NC</th>
+                      <th className="p-3">Tipo / N° Comprobante</th>
                       <th className="p-3">Proveedor</th>
                       <th className="p-3">Fecha</th>
+                      <th className="p-3">Factura Afectada</th>
                       <th className="p-3 text-right">Monto (Gs.)</th>
-                      <th className="p-3">Factura Origen</th>
+                      <th className="p-3 text-center">Estado Aprobación</th>
                       <th className="p-3">Motivo / Observaciones</th>
+                      <th className="p-3 text-center">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                    {paginatedReturns.map((item, idx) => (
-                      <tr key={item.id || idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            item.tipo_registro === "devolucion"
-                              ? "bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
-                              : "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
-                          }`}>
-                            {item.tipo_registro === "devolucion" ? "Devolución" : "Nota de Crédito"}
-                          </span>
-                        </td>
-                        <td className="p-3 font-mono font-bold text-gray-900 dark:text-white">
-                          {item.numero_nota_credito || item.numero || "S/N"}
-                        </td>
-                        <td className="p-3 font-medium text-gray-700 dark:text-gray-300">
-                          {item.supplier_nombre || "Proveedor"}
-                        </td>
-                        <td className="p-3 text-gray-500 font-mono">
-                          {item.fecha ? formatDate(item.fecha) : formatDate(item.created_at || "")}
-                        </td>
-                        <td className="p-3 text-right font-mono font-extrabold text-indigo-600 dark:text-indigo-400">
-                          {formatPYG(item.monto || 0)}
-                        </td>
-                        <td className="p-3 font-mono text-gray-500 text-[11px]">
-                          {item.numero_factura_origen || "—"}
-                        </td>
-                        <td className="p-3 text-gray-600 dark:text-gray-400 text-[11px] max-w-[250px] truncate" title={item.observaciones || item.motivo}>
-                          {item.observaciones || item.motivo || "Ajuste comercial / devolución"}
-                        </td>
-                      </tr>
-                    ))}
+                    {paginatedReturns.map((item, idx) => {
+                      const isManaged = item.tipo_registro === "devolucion_gestionada"
+                      const estado = item.estado || "completado"
+
+                      return (
+                        <tr key={item.id || idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                isManaged
+                                  ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
+                                  : item.tipo_registro === "devolucion"
+                                  ? "bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+                                  : "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                              }`}>
+                                {isManaged ? "Devolución Compras" : item.tipo_registro === "devolucion" ? "Devolución" : "Nota de Crédito"}
+                              </span>
+                            </div>
+                            <div className="font-mono font-bold text-gray-900 dark:text-white mt-1">
+                              {item.numero_nota_credito || item.codigo || item.numero || "S/N"}
+                            </div>
+                          </td>
+
+                          <td className="p-3 font-medium text-gray-800 dark:text-gray-200 max-w-[180px] truncate">
+                            {item.supplier_nombre || "Proveedor"}
+                          </td>
+
+                          <td className="p-3 text-gray-500 font-mono text-[11px]">
+                            {item.fecha ? formatDate(item.fecha) : formatDate(item.created_at || "")}
+                          </td>
+
+                          <td className="p-3 font-mono text-gray-600 dark:text-gray-400 text-[11px] max-w-[160px] truncate" title={item.numero_factura_origen}>
+                            {item.numero_factura_origen && item.numero_factura_origen !== "—"
+                              ? `Fact. ${item.numero_factura_origen}`
+                              : "Sin factura directa"}
+                          </td>
+
+                          <td className="p-3 text-right font-mono font-extrabold text-indigo-600 dark:text-indigo-400">
+                            {formatPYG(item.monto || 0)}
+                          </td>
+
+                          <td className="p-3 text-center">
+                            {estado === "pendiente" && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                <Clock className="w-3 h-3" /> Pendiente
+                              </span>
+                            )}
+                            {estado === "autorizado" && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                <CheckCircle className="w-3 h-3" /> Aprobada
+                              </span>
+                            )}
+                            {estado === "completado" && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                                <CheckCircle2 className="w-3 h-3" /> Completada
+                              </span>
+                            )}
+                            {estado === "rechazado" && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300 border border-rose-200 dark:border-rose-800" title={item.motivo_rechazo}>
+                                <Ban className="w-3 h-3" /> Rechazada
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="p-3 text-gray-600 dark:text-gray-400 text-[11px] max-w-[200px] truncate" title={item.observaciones || item.motivo}>
+                            {item.observaciones || item.motivo || "—"}
+                          </td>
+
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              {isManaged && (
+                                <button
+                                  onClick={() => setViewingReturnDetail(item.raw)}
+                                  className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg transition"
+                                  title="Ver detalle de productos devueltos"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                              )}
+
+                              {isManaged && estado === "pendiente" && (
+                                <>
+                                  <button
+                                    onClick={() => handleApproveReturn(item.id)}
+                                    disabled={processingReturnAction}
+                                    className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg transition"
+                                    title="Aprobar Devolución Comercial"
+                                  >
+                                    <Check className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => setRejectingReturnId(item.id)}
+                                    disabled={processingReturnAction}
+                                    className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition"
+                                    title="Rechazar Devolución"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </>
+                              )}
+
+                              {isManaged && (estado === "autorizado" || estado === "pendiente") && (
+                                <button
+                                  onClick={() => {
+                                    setCompletingReturnId(item.id)
+                                    setNcNumberInput("")
+                                  }}
+                                  disabled={processingReturnAction}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition"
+                                  title="Registrar Salida Física e Impactar Stock/Cuentas"
+                                >
+                                  <Truck className="w-3 h-3" />
+                                  <span>Salida</span>
+                                </button>
+                              )}
+
+                              {!isManaged && (
+                                <span className="text-gray-400 text-[10px] font-mono">Legacy</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -5952,6 +6340,639 @@ export default function PurchasesPage() {
           </div>
         </div>
       )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: NUEVA DEVOLUCIÓN A PROVEEDOR (CIRCUITO CON APROBACIÓN, STOCK Y FINANZAS)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showCreateReturnModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-4xl w-full max-h-[92vh] overflow-hidden flex flex-col shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-4 bg-slate-50/70 dark:bg-slate-800/40">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                    Circuito de Devolución
+                  </span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">Paso 1: Solicitud e imputación de productos</span>
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Truck className="w-6 h-6 text-amber-600 dark:text-amber-400" />
+                  Nueva Devolución a Proveedor
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Seleccione el proveedor para consultar su catálogo de productos y vincular las facturas correspondientes.
+                </p>
+              </div>
+
+              <button
+                onClick={() => {
+                  setShowCreateReturnModal(false)
+                  setReturnItemsList([])
+                  setSelectedSupplierForReturn("")
+                  setSupplierProducts([])
+                  setProductInvoices([])
+                }}
+                className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Contenido Scrollable */}
+            <div className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
+              {/* Sección Proveedor y Depósito */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
+                <div>
+                  <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    Proveedor Destinatario <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={selectedSupplierForReturn}
+                    onChange={(e) => handleSelectSupplierForReturn(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  >
+                    <option value="">-- Seleccionar Proveedor --</option>
+                    {suppliers.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.razon_social} {s.ruc ? `(${s.ruc})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    Depósito de Salida Físico
+                  </label>
+                  <select
+                    value={selectedWarehouseForReturn}
+                    onChange={(e) => setSelectedWarehouseForReturn(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  >
+                    <option value="">Depósito Principal (Por defecto)</option>
+                    {warehousesList.map(w => (
+                      <option key={w.id} value={w.id}>{w.nombre || w.codigo}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Selector Dinámico de Producto y Factura */}
+              {selectedSupplierForReturn && (
+                <div className="p-4 rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-950/20 space-y-4">
+                  <div className="flex items-center justify-between border-b border-amber-200/60 dark:border-amber-800/40 pb-2">
+                    <span className="font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5 text-sm">
+                      <Box className="w-4 h-4 text-amber-600" />
+                      Agregar Mercadería a Devolver
+                    </span>
+                    {loadingSupplierProducts && (
+                      <span className="text-[11px] text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando catálogo del proveedor...
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Producto */}
+                    <div>
+                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                        Producto del Proveedor <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={selectedProductForReturn}
+                        onChange={(e) => handleSelectProductForReturn(e.target.value)}
+                        disabled={loadingSupplierProducts || supplierProducts.length === 0}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none disabled:opacity-50"
+                      >
+                        <option value="">
+                          {supplierProducts.length === 0 && !loadingSupplierProducts
+                            ? "-- No se encontraron productos para este proveedor --"
+                            : "-- Seleccionar Producto --"}
+                        </option>
+                        {supplierProducts.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.nombre} {p.sku ? `[${p.sku}]` : ""} {p.costo_unitario ? `(Costo: ${formatPYG(p.costo_unitario)})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Factura Afectada */}
+                    <div>
+                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                        Factura de Compra Afectada (P2P)
+                      </label>
+                      <select
+                        value={selectedInvoiceForReturn}
+                        onChange={(e) => handleSelectInvoiceForReturn(e.target.value)}
+                        disabled={!selectedProductForReturn || loadingProductInvoices}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none disabled:opacity-50"
+                      >
+                        <option value="">Sin factura específica (Ajuste directo)</option>
+                        {productInvoices.map(inv => (
+                          <option key={inv.invoice_id} value={inv.invoice_id}>
+                            {inv.numero_factura} — {formatDate(inv.fecha_emision)} — Costo: {formatPYG(inv.precio_unitario)} (Comprado: {inv.cantidad_facturada})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Detalle del ítem */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                        Motivo <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={returnReason}
+                        onChange={(e) => setReturnReason(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                      >
+                        <option value="vencido">Vencido / Próximo a vencer</option>
+                        <option value="danado">Dañado / Defectuoso</option>
+                        <option value="sobrestock">Exceso de stock / Acordado</option>
+                        <option value="error_envio">Error en envío de mercadería</option>
+                        <option value="otro">Otro motivo</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                        Cantidad a Devolver <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0.001"
+                        value={returnQuantity}
+                        onChange={(e) => setReturnQuantity(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                        Valor Unitario (Gs.) <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={returnUnitPrice}
+                        onChange={(e) => setReturnUnitPrice(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                        Lote (Opcional)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ej: L-9821"
+                        value={returnLot}
+                        onChange={(e) => setReturnLot(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                        Fecha Vencimiento (Opcional)
+                      </label>
+                      <input
+                        type="date"
+                        value={returnExpiryDate}
+                        onChange={(e) => setReturnExpiryDate(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                        Detalle / Observación del ítem
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ej: Empaque roto al desembalar"
+                        value={returnDetailNotes}
+                        onChange={(e) => setReturnDetailNotes(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={handleAddReturnItem}
+                      disabled={!selectedProductForReturn}
+                      className="px-4 py-2 rounded-xl font-bold bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" /> Agregar a la Devolución
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Tabla de Ítems Cargados */}
+              <div>
+                <h4 className="font-bold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+                  <Package className="w-4 h-4 text-amber-600" />
+                  Productos en la Solicitud ({returnItemsList.length})
+                </h4>
+
+                {returnItemsList.length === 0 ? (
+                  <div className="p-6 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-gray-400">
+                    No hay productos agregados a la devolución todavía.
+                  </div>
+                ) : (
+                  <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 font-bold">
+                        <tr>
+                          <th className="py-2.5 px-3">Producto</th>
+                          <th className="py-2.5 px-3">Factura Afectada</th>
+                          <th className="py-2.5 px-3">Motivo</th>
+                          <th className="py-2.5 px-3 text-right">Cant.</th>
+                          <th className="py-2.5 px-3 text-right">Valor Unit.</th>
+                          <th className="py-2.5 px-3 text-right">Subtotal</th>
+                          <th className="py-2.5 px-3 text-center">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {returnItemsList.map((it, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                            <td className="py-2.5 px-3">
+                              <span className="font-semibold text-gray-900 dark:text-white">{it.producto_nombre}</span>
+                              {it.sku && <span className="block text-[10px] text-gray-400 font-mono">SKU: {it.sku}</span>}
+                              {it.lote && <span className="block text-[10px] text-amber-600">Lote: {it.lote}</span>}
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-gray-600 dark:text-gray-300">
+                              {it.factura_numero || "Ajuste directo"}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300">
+                                {it.motivo}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-bold text-gray-900 dark:text-white">
+                              {it.cantidad}
+                            </td>
+                            <td className="py-2.5 px-3 text-right text-gray-700 dark:text-gray-300">
+                              {formatPYG(it.valor_unitario)}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-bold text-amber-600 dark:text-amber-400">
+                              {formatPYG(it.valor_total)}
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveReturnItem(idx)}
+                                className="p-1 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-slate-50 dark:bg-slate-800/80 font-bold border-t border-slate-200 dark:border-slate-700">
+                        <tr>
+                          <td colSpan={5} className="py-2.5 px-3 text-right text-gray-700 dark:text-gray-300">
+                            Total Estimado Devolución:
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-sm text-amber-600 dark:text-amber-400">
+                            {formatPYG(returnItemsList.reduce((acc, curr) => acc + curr.valor_total, 0))}
+                          </td>
+                          <td></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Observaciones generales */}
+              <div>
+                <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Observaciones Generales de la Solicitud
+                </label>
+                <textarea
+                  rows={2}
+                  value={generalReturnNotes}
+                  onChange={(e) => setGeneralReturnNotes(e.target.value)}
+                  placeholder="Instrucciones especiales para logística o compras..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Nota de circuito */}
+              <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 rounded-xl p-3 text-xs text-blue-800 dark:text-blue-300 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400 mt-0.5" />
+                <div>
+                  <strong className="font-semibold">Circuito de Aprobación e Impacto:</strong>
+                  <p className="mt-0.5 text-[11px] leading-relaxed">
+                    Al guardar, la solicitud queda en estado <strong>Pendiente</strong>. Una vez revisada y aprobada por el área responsable, al ejecutarse la salida física se descontará el stock en el depósito asignado y se registrará la Nota de Crédito/impacto en la cuenta a pagar del proveedor.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2 bg-slate-50/50 dark:bg-slate-800/40">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateReturnModal(false)
+                  setReturnItemsList([])
+                  setSelectedSupplierForReturn("")
+                  setSupplierProducts([])
+                  setProductInvoices([])
+                }}
+                disabled={savingReturn}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveSupplierReturn}
+                disabled={savingReturn || returnItemsList.length === 0 || !selectedSupplierForReturn}
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-colors"
+              >
+                {savingReturn ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Registrando...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" /> Guardar Solicitud de Devolución
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: DETALLE DE DEVOLUCIÓN GESTIONADA
+      ────────────────────────────────────────────────────────────────────────── */}
+      {viewingReturnDetail && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-4 bg-slate-50/70 dark:bg-slate-800/40">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                    {viewingReturnDetail.estado?.toUpperCase()}
+                  </span>
+                  <span className="text-xs text-gray-400 font-mono">Código: {viewingReturnDetail.codigo}</span>
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Truck className="w-5 h-5 text-amber-600" />
+                  Devolución a {viewingReturnDetail.raw?.proveedor_nombre || viewingReturnDetail.supplier_nombre}
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Fecha: {formatDate(viewingReturnDetail.fecha)} | Depósito: {viewingReturnDetail.almacen_nombre || "Principal"}
+                </p>
+              </div>
+
+              <button
+                onClick={() => setViewingReturnDetail(null)}
+                className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Contenido */}
+            <div className="p-6 overflow-y-auto space-y-4 flex-1 text-xs">
+              {viewingReturnDetail.motivo_rechazo && (
+                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/50 text-red-800 dark:text-red-300">
+                  <strong className="block font-bold mb-0.5">Motivo del Rechazo:</strong>
+                  <span>{viewingReturnDetail.motivo_rechazo}</span>
+                </div>
+              )}
+
+              {viewingReturnDetail.observaciones && (
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 text-gray-700 dark:text-gray-300">
+                  <strong className="block font-semibold mb-0.5">Observaciones:</strong>
+                  <span>{viewingReturnDetail.observaciones}</span>
+                </div>
+              )}
+
+              {/* Items */}
+              <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 font-bold">
+                    <tr>
+                      <th className="py-2.5 px-3">Producto</th>
+                      <th className="py-2.5 px-3">Factura</th>
+                      <th className="py-2.5 px-3">Motivo</th>
+                      <th className="py-2.5 px-3 text-right">Cant.</th>
+                      <th className="py-2.5 px-3 text-right">Unitario</th>
+                      <th className="py-2.5 px-3 text-right">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {(viewingReturnDetail.raw?.items || []).map((it: any, idx: number) => (
+                      <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                        <td className="py-2.5 px-3">
+                          <span className="font-semibold text-gray-900 dark:text-white">{it.producto_nombre}</span>
+                          {it.lote && <span className="block text-[10px] text-gray-400">Lote: {it.lote}</span>}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-gray-600 dark:text-gray-300">
+                          {it.factura_numero || "Ajuste directo"}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300">
+                            {it.motivo}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-bold text-gray-900 dark:text-white">
+                          {it.cantidad}
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-gray-700 dark:text-gray-300">
+                          {formatPYG(it.valor_unitario)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-bold text-amber-600 dark:text-amber-400">
+                          {formatPYG(it.valor_total)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-slate-50 dark:bg-slate-800/80 font-bold border-t border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <td colSpan={5} className="py-2.5 px-3 text-right text-gray-700 dark:text-gray-300">
+                        Total Devolución:
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-sm text-amber-600 dark:text-amber-400">
+                        {formatPYG(viewingReturnDetail.monto || 0)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2 bg-slate-50/50 dark:bg-slate-800/40">
+              <button
+                type="button"
+                onClick={() => setViewingReturnDetail(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: RECHAZAR DEVOLUCIÓN A PROVEEDOR
+      ────────────────────────────────────────────────────────────────────────── */}
+      {rejectingReturnId && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-red-50 dark:bg-red-950/40 text-red-600 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                  Rechazar Solicitud de Devolución
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Indique el motivo o justificación por la cual se desestima esta devolución de mercadería.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                Motivo del Rechazo <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                rows={3}
+                value={rejectReasonInput}
+                onChange={(e) => setRejectReasonInput(e.target.value)}
+                placeholder="Ej: El proveedor no aceptó el reclamo por estar fuera de plazo contractual..."
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-red-500 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => { setRejectingReturnId(null); setRejectReasonInput("") }}
+                disabled={processingReturnAction}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleRejectReturn(rejectingReturnId)}
+                disabled={processingReturnAction || !rejectReasonInput.trim()}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-colors"
+              >
+                {processingReturnAction ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Procesando...
+                  </>
+                ) : (
+                  <>
+                    <Ban className="w-4 h-4" /> Confirmar Rechazo
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: CONFIRMAR SALIDA FÍSICA E IMPACTO DE DEVOLUCIÓN
+      ────────────────────────────────────────────────────────────────────────── */}
+      {completingReturnId && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 shrink-0">
+                <Truck className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                  Confirmar Salida Física e Impactos
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Se completará la devolución, efectuando el egreso de inventario y el ajuste financiero con el proveedor.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 rounded-xl p-3 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+              <strong className="block font-semibold">Impactos inmediatos que se ejecutarán:</strong>
+              <p className="text-[11px] leading-relaxed">
+                1. <strong>Inventario:</strong> Descuento físico de stock en depósito y asiento de movimiento <code className="font-mono text-[10px]">devolucion_proveedor</code>.
+              </p>
+              <p className="text-[11px] leading-relaxed">
+                2. <strong>Financiero:</strong> Amortización automática del saldo pendiente en la factura del proveedor vinculada y registro en cuenta corriente.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                Número de Nota de Crédito / Recibo Proveedor (Opcional)
+              </label>
+              <input
+                type="text"
+                value={ncNumberInput}
+                onChange={(e) => setNcNumberInput(e.target.value)}
+                placeholder="Ej: NC-001-002-0098124"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-purple-500 focus:outline-none font-mono"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => { setCompletingReturnId(null); setNcNumberInput("") }}
+                disabled={processingReturnAction}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCompleteReturn(completingReturnId)}
+                disabled={processingReturnAction}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-colors"
+              >
+                {processingReturnAction ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Procesando Impactos...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="w-4 h-4" /> Confirmar y Ejecutar
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+

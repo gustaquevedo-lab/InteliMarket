@@ -1333,6 +1333,7 @@ export const api = {
     setRolePermissions: (roleId: string, permissionIds: string[]) => client.post<void>(`/v1/rbac/roles/${roleId}/permissions`, { permission_ids: permissionIds }),
     updateRolePermissions: (roleId: string, permissionIds: string[]) => client.post<void>(`/v1/rbac/roles/${roleId}/permissions`, { permission_ids: permissionIds }),
     seedRoles: () => client.post<void>("/v1/rbac/seed"),
+    myPermissions: () => client.get<{ is_administrador: boolean; permissions: string[] }>("/v1/rbac/me/permissions"),
     seed: () => client.post<void>("/v1/rbac/seed"),
   },
   purchases: {
@@ -1479,6 +1480,49 @@ export const api = {
       client.get<any[]>(`/v1/companies/${companyId || COMPANY_ID}/supplier-nc-requests`, params),
     resolveSupplierNcRequest: (requestId: string, data: any) =>
       client.post<any>(`/v1/purchases/supplier-nc-requests/${requestId}/resolve`, data),
+    supplierProducts: (supplierId: string) =>
+      client.get<{ id: string; nombre: string; sku?: string; codigo_barra?: string; costo_promedio: number; unidad_medida: string }[]>(
+        `/v1/purchases/suppliers/${supplierId}/products`
+      ),
+    productInvoices: (supplierId: string, productId: string) =>
+      client.get<{
+        invoice_id: string
+        numero_factura: string
+        timbrado?: string
+        fecha_emision?: string
+        cantidad_comprada: number
+        precio_unitario: number
+        item_total: number
+        saldo_pendiente_factura: number
+      }[]>(`/v1/purchases/suppliers/${supplierId}/products/${productId}/invoices`),
+    returns: {
+      list: (params?: { estado?: string; supplier_id?: string }) =>
+        client.get<any[]>("/v1/purchases/returns", params as any),
+      create: (data: {
+        proveedor_id: string
+        warehouse_id?: string
+        tipo?: string
+        fecha_estimada_retiro?: string
+        observaciones?: string
+        items: {
+          producto_id: string
+          factura_id?: string
+          factura_numero?: string
+          cantidad: number
+          valor_unitario: number
+          motivo: string
+          lote?: string
+          fecha_vencimiento?: string
+          detalle?: string
+        }[]
+      }) => client.post<any>("/v1/purchases/returns", data),
+      approve: (returnId: string) =>
+        client.post<any>(`/v1/purchases/returns/${returnId}/approve`),
+      reject: (returnId: string, motivo_rechazo: string) =>
+        client.post<any>(`/v1/purchases/returns/${returnId}/reject`, { motivo_rechazo }),
+      complete: (returnId: string, nota_credito_numero?: string) =>
+        client.post<any>(`/v1/purchases/returns/${returnId}/complete`, { nota_credito_numero }),
+    },
   },
   sifen: {
     timbrados: {
