@@ -111,6 +111,22 @@ DEFAULT_PERMISSIONS = [
     # Verticals
     ("verticals:view", "Ver verticales", "verticals"),
     ("verticals:configure", "Configurar verticales", "verticals"),
+    # Fiscal (config, secuencias, timbrados, notas manuales -- distinto de sifen:*
+    # que es la emision automatica del dia a dia)
+    ("fiscal:configure", "Configurar timbrados, secuencias y notas fiscales", "fiscal"),
+    # CRM / Atención al Cliente
+    ("crm:view", "Ver clientes y fichas CRM", "crm"),
+    ("crm:create", "Crear clientes en CRM", "crm"),
+    ("crm:update", "Editar clientes en CRM", "crm"),
+    ("crm:campaigns", "Gestionar campañas de fidelización", "crm"),
+    # Depósito / recepción (distinto de purchases:create, que es generar la orden de compra)
+    ("purchases:receive", "Registrar recepción de mercadería en muelle", "purchases"),
+    ("inventory:cycle_count", "Realizar conteo cíclico de inventario", "inventory"),
+    ("pack_barcodes:manage", "Gestionar códigos de barra de pack/caja", "inventory"),
+    # Salón / exhibición (monitoreo de precios y promos en góndola, no las define)
+    ("salon:view_prices", "Ver precios de góndola y verificador", "salon"),
+    ("salon:view_promotions", "Ver estado de promociones y alertas de vencimiento", "salon"),
+    ("label_printing:manage", "Imprimir y gestionar etiquetas de góndola", "label_printing"),
 ]
 
 DEFAULT_ROLES = [
@@ -121,13 +137,62 @@ DEFAULT_ROLES = [
         "is_default": False,
     },
     {
-        "name": "Vendedor",
-        "description": "Acceso a ventas, POS, clientes y caja",
+        # Reemplaza al antiguo "Vendedor", que nunca se uso -- el rol real que
+        # opera el POS en User.rol es "cajero", nunca "vendedor". El descuento
+        # (pos:discount) se saca de aca: en la practica siempre requiere PIN
+        # de supervisor (verify-supervisor), no es algo que el cajero autorice
+        # por su cuenta.
+        "name": "Cajero/a",
+        "description": "Acceso a punto de venta, caja y clientes en salón de ventas",
         "is_system": True,
         "is_default": True,
         "permissions": [
             "sales:view", "sales:create", "customers:view", "customers:create",
-            "pos:view", "pos:sell", "pos:discount", "caja:view",
+            "pos:view", "pos:sell", "caja:view", "caja:open", "caja:close",
+        ],
+    },
+    {
+        "name": "Supervisor",
+        "description": "Autorizaciones sobre la operación de caja y salón: descuentos, anulaciones, devoluciones, excepciones de crédito",
+        "is_system": True,
+        "is_default": False,
+        "permissions": [
+            "sales:view", "sales:create", "sales:cancel", "sales:refund",
+            "pos:view", "pos:sell", "pos:discount",
+            "caja:view", "caja:open", "caja:close", "caja:retiro",
+            "customers:view", "customers:create",
+            "credit:view", "credit:manage",
+        ],
+    },
+    {
+        "name": "Atención al Cliente",
+        "description": "Gestión de clientes, fidelización y campañas de CRM",
+        "is_system": True,
+        "is_default": False,
+        "permissions": [
+            "crm:view", "crm:create", "crm:update", "crm:campaigns",
+            "customers:view", "customers:create", "customers:update",
+        ],
+    },
+    {
+        "name": "Encargado de Salón",
+        "description": "Monitoreo de precios de góndola, exhibición y estado de promociones",
+        "is_system": True,
+        "is_default": False,
+        "permissions": [
+            "salon:view_prices", "salon:view_promotions", "label_printing:manage",
+            "products:view", "price_lists:view", "inventory:view",
+        ],
+    },
+    {
+        "name": "Encargado de Depósito",
+        "description": "Recepción de mercadería, ajustes de inventario y transferencias entre sucursales",
+        "is_system": True,
+        "is_default": False,
+        "permissions": [
+            "inventory:view", "inventory:transfer", "inventory:adjust", "inventory:cycle_count",
+            "purchases:view", "purchases:receive", "pack_barcodes:manage",
+            "suppliers:view",
         ],
     },
     {
