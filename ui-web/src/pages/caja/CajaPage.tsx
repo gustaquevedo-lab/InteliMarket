@@ -4046,8 +4046,8 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
 
       {/* 📋 MODAL: PLANILLA DE PUNTEO DE ARQUEO DETALLADO (FASE 5) */}
       {punteoModalOpen && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-[96vw] max-w-6xl xl:max-w-7xl max-h-[92vh] flex flex-col p-5 sm:p-6 shadow-2xl my-auto">
+        <div className="fixed inset-0 lg:left-64 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-[96vw] lg:w-[calc(96vw-16rem)] max-w-6xl xl:max-w-7xl max-h-[92vh] flex flex-col p-5 sm:p-6 shadow-2xl my-auto">
             {/* Header fijo */}
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 shrink-0">
               <div className="flex items-center gap-2.5">
