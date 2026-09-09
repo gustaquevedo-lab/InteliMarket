@@ -497,34 +497,48 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
                 monto_credito, check["limite_credito"], check["saldo_disponible"],
             )
             # Notificar a Supervisores y Administradores / Gerentes
+            # Nota: va en un savepoint propio -- si la notificacion falla (ej.
+            # tenant_id inconsistente), un INSERT fallido dentro de la misma
+            # transaccion deja TODA la transaccion abortada en Postgres, y
+            # tumbaba la venta entera (que ya estaba flush()ada) mas abajo.
             try:
-                from api.src.customers.models import Customer
-                cust_res = await db.execute(select(Customer.razon_social).where(Customer.id == data.customer_id))
-                cust_nom = cust_res.scalar() or "Cliente"
-                exceso = max(Decimal("0"), monto_credito - (check.get("saldo_disponible") or Decimal("0")))
+                async with db.begin_nested():
+                    from api.src.customers.models import Customer
+                    cust_res = await db.execute(select(Customer.razon_social).where(Customer.id == data.customer_id))
+                    cust_nom = cust_res.scalar() or "Cliente"
+                    exceso = max(Decimal("0"), monto_credito - (check.get("saldo_disponible") or Decimal("0")))
 
-                from api.src.notifications import service as notif_service
-                from api.src.auth.models import User
-                target_users = await db.execute(
-                    select(User.id).where(
-                        User.rol.in_(["admin", "administrador", "gerente", "supervisor"]),
-                        User.activo == True,
+                    from api.src.companies.models import Company
+                    company_res = await db.execute(select(Company.tenant_id).where(Company.id == data.company_id))
+                    tenant_id = company_res.scalar_one_or_none()
+
+                    from api.src.notifications import service as notif_service
+                    target_users = await db.execute(
+                        select(User.id).where(
+                            User.rol.in_(["admin", "administrador", "gerente", "supervisor"]),
+                            User.activo == True,
+                        )
                     )
-                )
-                notif_body = (
-                    f"Cliente: {cust_nom} | Compra: {monto_credito:,.0f} Gs. "
-                    f"| Límite: {check.get('limite_credito', 0):,.0f} Gs. | Exceso: {exceso:,.0f} Gs."
-                )
-                for (t_uid,) in target_users.all():
-                    await notif_service.create_notification(
-                        db,
-                        uuid.UUID(str(data.company_id)),
-                        t_uid,
-                        "Solicitud de Crédito Retenida en Caja",
-                        notif_body,
-                        "credito",
-                        "/supervisor",
+                    notif_body = (
+                        f"Cliente: {cust_nom} | Compra: {monto_credito:,.0f} Gs. "
+                        f"| Límite: {check.get('limite_credito', 0):,.0f} Gs. | Exceso: {exceso:,.0f} Gs."
                     )
+                    if tenant_id:
+                        for (t_uid,) in target_users.all():
+                            await notif_service.create_notification(
+                                db,
+                                tenant_id,
+                                t_uid,
+                                "Solicitud de Crédito Retenida en Caja",
+                                notif_body,
+                                "credito",
+                                "/supervisor",
+                            )
+                    else:
+                        logger.warning(
+                            "Company %s sin tenant_id asociado, no se notifica el credito retenido",
+                            data.company_id,
+                        )
                 # Broadcast en tiempo real (SSE) a supervisores
                 try:
                     from api.src.events.manager import manager
