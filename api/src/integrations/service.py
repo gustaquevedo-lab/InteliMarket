@@ -26,14 +26,15 @@ ECOSYSTEM_ENDPOINTS = {
 }
 
 
-def get_configs(db) -> list[dict]:
+async def get_configs(db) -> list[dict]:
     """Get all integration configs."""
-    query = """
+    query = sa_text("""
         SELECT id, destino, url, activo, eventos, creado, actualizado
         FROM integration_configs
         ORDER BY destino
-    """
-    results = db.execute(query).mappings().all()
+    """)
+    result = await db.execute(query)
+    results = result.mappings().all()
     return [
         {
             "id": r["id"],
@@ -48,10 +49,11 @@ def get_configs(db) -> list[dict]:
     ]
 
 
-def get_config(db, config_id: int) -> Optional[dict]:
+async def get_config(db, config_id: int) -> Optional[dict]:
     """Get integration config by ID."""
-    query = "SELECT * FROM integration_configs WHERE id = :id"
-    result = db.execute(query, {"id": config_id}).mappings().first()
+    query = sa_text("SELECT * FROM integration_configs WHERE id = :id")
+    r = await db.execute(query, {"id": config_id})
+    result = r.mappings().first()
     if not result:
         return None
     return {
@@ -65,21 +67,22 @@ def get_config(db, config_id: int) -> Optional[dict]:
     }
 
 
-def create_config(db, config_data: dict) -> dict:
+async def create_config(db, config_data: dict) -> dict:
     """Create new integration config."""
-    query = """
+    query = sa_text("""
         INSERT INTO integration_configs (destino, url, secret, eventos, activo)
         VALUES (:destino, :url, :secret, :eventos, :activo)
         RETURNING id, destino, url, activo, eventos, creado, actualizado
-    """
-    result = db.execute(query, {
+    """)
+    r = await db.execute(query, {
         "destino": config_data["destino"],
         "url": config_data["url"],
         "secret": config_data.get("secret"),
         "eventos": json.dumps(config_data.get("eventos", [])),
         "activo": config_data.get("activo", True),
-    }).mappings().first()
-    db.commit()
+    })
+    result = r.mappings().first()
+    await db.commit()
     return {
         "id": result["id"],
         "destino": result["destino"],
@@ -91,7 +94,7 @@ def create_config(db, config_data: dict) -> dict:
     }
 
 
-def update_config(db, config_id: int, updates: dict) -> Optional[dict]:
+async def update_config(db, config_id: int, updates: dict) -> Optional[dict]:
     """Update integration config."""
     fields = []
     params = {"id": config_id}
@@ -105,14 +108,15 @@ def update_config(db, config_id: int, updates: dict) -> Optional[dict]:
     if not fields:
         return None
     fields.append("actualizado = CURRENT_TIMESTAMP")
-    query = f"""
+    query = sa_text(f"""
         UPDATE integration_configs
         SET {', '.join(fields)}
         WHERE id = :id
         RETURNING id, destino, url, activo, eventos, creado, actualizado
-    """
-    result = db.execute(query, params).mappings().first()
-    db.commit()
+    """)
+    r = await db.execute(query, params)
+    result = r.mappings().first()
+    await db.commit()
     if not result:
         return None
     return {
@@ -126,20 +130,21 @@ def update_config(db, config_id: int, updates: dict) -> Optional[dict]:
     }
 
 
-def delete_config(db, config_id: int) -> bool:
+async def delete_config(db, config_id: int) -> bool:
     """Delete integration config."""
-    query = "DELETE FROM integration_configs WHERE id = :id"
-    result = db.execute(query, {"id": config_id})
-    db.commit()
+    query = sa_text("DELETE FROM integration_configs WHERE id = :id")
+    result = await db.execute(query, {"id": config_id})
+    await db.commit()
     return result.rowcount > 0
 
 
-def send_webhook(db, evento: str, payload: dict, tenant_id: Optional[int] = None) -> list[dict]:
+async def send_webhook(db, evento: str, payload: dict, tenant_id: Optional[int] = None) -> list[dict]:
     """Send webhook event to all matching integration configs."""
     query = "SELECT * FROM integration_configs WHERE activo = true"
     if tenant_id:
         query += " AND tenant_id = :tenant_id"
-    configs = db.execute(query, {"tenant_id": tenant_id} if tenant_id else {}).mappings().all()
+    r = await db.execute(sa_text(query), {"tenant_id": tenant_id} if tenant_id else {})
+    configs = r.mappings().all()
 
     deliveries = []
     for config in configs:
@@ -147,7 +152,7 @@ def send_webhook(db, evento: str, payload: dict, tenant_id: Optional[int] = None
         if eventos and evento not in eventos:
             continue
 
-        delivery = _send_to_url(
+        delivery = await _send_to_url(
             url=config["url"],
             evento=evento,
             payload=payload,
@@ -160,7 +165,7 @@ def send_webhook(db, evento: str, payload: dict, tenant_id: Optional[int] = None
     return deliveries
 
 
-def _send_to_url(url: str, evento: str, payload: dict, secret: Optional[str], config_id: int, db) -> dict:
+async def _send_to_url(url: str, evento: str, payload: dict, secret: Optional[str], config_id: int, db) -> dict:
     """Send webhook to a specific URL."""
     headers = {
         "Content-Type": "application/json",
@@ -177,19 +182,19 @@ def _send_to_url(url: str, evento: str, payload: dict, secret: Optional[str], co
     status_code = 0
     intento = 1
     try:
-        with httpx.Client(timeout=10) as client:
-            response = client.post(url, headers=headers, content=body)
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(url, headers=headers, content=body)
             status_code = response.status_code
     except Exception as e:
         logger.error(f"Webhook delivery failed to {url}: {e}")
 
     # Log delivery
     try:
-        log_query = """
+        log_query = sa_text("""
             INSERT INTO webhook_deliveries (config_id, evento, url, status, payload_size, intento)
             VALUES (:config_id, :evento, :url, :status, :payload_size, :intento)
-        """
-        db.execute(log_query, {
+        """)
+        await db.execute(log_query, {
             "config_id": config_id,
             "evento": evento,
             "url": url,
@@ -197,7 +202,7 @@ def _send_to_url(url: str, evento: str, payload: dict, secret: Optional[str], co
             "payload_size": len(body),
             "intento": intento,
         })
-        db.commit()
+        await db.commit()
     except Exception:
         pass
 
@@ -211,7 +216,7 @@ def _send_to_url(url: str, evento: str, payload: dict, secret: Optional[str], co
     }
 
 
-def get_deliveries(db, config_id: Optional[int] = None, limit: int = 50) -> list[dict]:
+async def get_deliveries(db, config_id: Optional[int] = None, limit: int = 50) -> list[dict]:
     """Get webhook delivery history."""
     query = "SELECT * FROM webhook_deliveries"
     params = {}
@@ -221,7 +226,8 @@ def get_deliveries(db, config_id: Optional[int] = None, limit: int = 50) -> list
     query += " ORDER BY creado DESC LIMIT :limit"
     params["limit"] = limit
 
-    results = db.execute(query, params).mappings().all()
+    r = await db.execute(sa_text(query), params)
+    results = r.mappings().all()
     return [
         {
             "id": r["id"],
