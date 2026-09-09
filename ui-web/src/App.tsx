@@ -191,10 +191,11 @@ function FeatureRoute({ feature, children }: { feature: string; children: React.
   return <>{children}</>
 }
 
-function PermissionRoute({ permission, children }: { permission: string; children: React.ReactNode }) {
-  const { hasPermission, loading } = usePermissions()
+function PermissionRoute({ permission, anyPermission, children }: { permission?: string; anyPermission?: string[]; children: React.ReactNode }) {
+  const { hasPermission, hasAnyPermission, loading } = usePermissions()
   if (loading) return <PageLoader />
-  if (!hasPermission(permission)) {
+  const allowed = permission ? hasPermission(permission) : anyPermission ? hasAnyPermission(...anyPermission) : true
+  if (!allowed) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-body-light dark:bg-body-dark">
         <div className="text-center p-8 animate-fade-in">
@@ -259,7 +260,6 @@ function AppRoutes() {
           ["edge-agent", <EdgeAgentPage />],
           ["sales", <SalesPage />],
           ["products", <ProductsPage />],
-          ["inventory", <InventoryPage />],
           ["purchases", <PurchasesPage />],
           ["etiquetas", <LabelsPage />],
           ["customers", <CustomersPage />],
@@ -288,7 +288,6 @@ function AppRoutes() {
           ["promociones", <PromotionsPage />],
           ["cupones", <CapturaCuponesPage />],
           ["marketing/cupones", <CapturaCuponesPage />],
-          ["crm", <CrmPage />],
           ["intellizapp", <IntelliZappPage />],
           ["whatsapp", <IntelliZappPage />],
           ["gastos", <ExpensesPage />],
@@ -309,6 +308,8 @@ function AppRoutes() {
         ].map(([path, el]) => (
           <Route key={path as string} path={path as string} element={<Suspense fallback={<PageLoader />}>{el as React.ReactNode}</Suspense>} />
         ))}
+        <Route path="inventory" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="inventory:adjust"><InventoryPage /></PermissionRoute></Suspense>} />
+        <Route path="crm" element={<Suspense fallback={<PageLoader />}><PermissionRoute anyPermission={["crm:update", "crm:campaigns"]}><CrmPage /></PermissionRoute></Suspense>} />
         {/* <Route path="pagopar" .../> DESACTIVADO: sin credenciales reales, un typo en enabled_features podia exponer un checkout que parece real y no lo es. Ver auditoria 2026-09-02 */}
         {/* <Route path="kuapay" .../> DESACTIVADO: sin credenciales reales. Ver auditoria 2026-09-02 */}
         <Route path="spi" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="spi"><SpiPage /></FeatureRoute></Suspense>} />

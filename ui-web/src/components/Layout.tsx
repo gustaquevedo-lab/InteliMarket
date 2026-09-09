@@ -26,6 +26,11 @@ interface NavItem {
   path: string
   feature?: string
   permission?: string
+  // Alternativa a `permission` cuando la pantalla mezcla mas de una accion
+  // gateada (ej. /crm tiene ajuste manual de puntos con crm:update y
+  // configuracion del programa con crm:campaigns) -- alcanza con tener
+  // cualquiera de los dos.
+  anyPermission?: string[]
   superadminOnly?: boolean
 }
 
@@ -72,7 +77,7 @@ const navGroups: NavGroup[] = [
       { icon: Tags, label: "Catálogo de Productos", path: "/products" },
       { icon: Copy, label: "Variantes & Empaques", path: "/variants" },
       { icon: Package, label: "Kits & Combos", path: "/kits" },
-      { icon: Warehouse, label: "Depósitos & Stock", path: "/inventory" },
+      { icon: Warehouse, label: "Depósitos & Stock", path: "/inventory", permission: "inventory:adjust" },
       { icon: AlertTriangle, label: "Mermas (Shrinkage)", path: "/shrinkage" },
     ]
   },
@@ -124,7 +129,7 @@ const navGroups: NavGroup[] = [
   {
     title: "CRM & Marketing",
     items: [
-      { icon: Users, label: "Fidelidad ExtraClub", path: "/crm" },
+      { icon: Users, label: "Fidelidad ExtraClub", path: "/crm", anyPermission: ["crm:update", "crm:campaigns"] },
       { icon: Ticket, label: "Cupones de Sorteo", path: "/cupones" },
       { icon: PieChart, label: "Customer 360", path: "/customer360" },
       // DESACTIVADO 2026-09-04: conversaciones/campanas 100% hardcodeadas en el
@@ -190,7 +195,7 @@ export default function Layout() {
   const { user, logout } = useAuth()
   const { theme, setTheme } = useTheme()
   const { hasFeature } = useFeatures()
-  const { hasPermission } = usePermissions()
+  const { hasPermission, hasAnyPermission } = usePermissions()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -241,6 +246,7 @@ export default function Layout() {
         item.label.toLowerCase().includes(searchQuery.toLowerCase()) &&
         (!item.feature || hasFeature(item.feature)) &&
         (!item.permission || hasPermission(item.permission)) &&
+        (!item.anyPermission || hasAnyPermission(...item.anyPermission)) &&
         (!item.superadminOnly || user?.is_superadmin)
       ).slice(0, 8)
     : []
@@ -288,6 +294,7 @@ export default function Layout() {
             const visibleItems = group.items.filter((item) => {
               if (item.superadminOnly && !user?.is_superadmin) return false
               if (item.permission && !hasPermission(item.permission)) return false
+              if (item.anyPermission && !hasAnyPermission(...item.anyPermission)) return false
               return !item.feature || hasFeature(item.feature)
             })
             if (visibleItems.length === 0) return null
