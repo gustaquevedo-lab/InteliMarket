@@ -6,7 +6,7 @@ import {
 } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
-import { formatDate } from "../../utils/format"
+import { formatDate, cleanOptionalPayload } from "../../utils/format"
 
 const CATEGORIAS = ["Refrigeración", "Producción", "Cocción", "Lavado & Limpieza", "Pesaje", "Elevación & Transporte", "HVAC", "Eléctrico"]
 const AREAS = ["Carnicería", "Verdulería", "Panadería", "Rotisería", "Cámara Frigorífica", "Salón", "Almacén", "Farmacia"]
@@ -67,7 +67,7 @@ export default function EquipmentPage() {
     e.preventDefault()
     setSaving(true)
     try {
-      await api.equipment.create({ ...form, activo: true, alerta_habilitada: true })
+      await api.equipment.create({ ...cleanOptionalPayload(form), activo: true, alerta_habilitada: true })
       toast.success("Equipo registrado", `${form.nombre} agregado al inventario de mantenimiento.`)
       setShowForm(false)
       setForm({ nombre: "", categoria: "Refrigeración", marca: "", modelo: "", area: "Carnicería", numero_serie: "", codigo_inventario: "", fecha_instalacion: "", prioridad: "media", temp_min_operacion: "", temp_max_operacion: "", proveedor_mantenimiento: "", notas: "" })
@@ -84,7 +84,7 @@ export default function EquipmentPage() {
     if (!woForm.equipo_id) { toast.error("Seleccioná un equipo", ""); return }
     setSavingWO(true)
     try {
-      await api.equipment.workOrders.create(woForm)
+      await api.equipment.workOrders.create(cleanOptionalPayload(woForm))
       toast.success("Orden creada", "La orden de trabajo fue registrada correctamente.")
       setShowWOForm(false)
       loadData()

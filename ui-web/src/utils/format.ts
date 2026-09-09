@@ -1,3 +1,20 @@
+// Los formularios de Operaciones de Salón (equipos, HACCP, rotisería, etc.)
+// inicializan sus campos opcionales de fecha/número como "" (el valor por
+// defecto de un <input> controlado en React) -- pero el backend (Pydantic)
+// espera Optional[date]/Optional[Decimal] y rechaza "" con un 422 real
+// ("Input should be a valid date", "Input should be a valid decimal"),
+// distinto de omitir el campo. Se usa antes de mandar cualquier payload de
+// creación/edición de esos módulos, para que un campo opcional vacío se
+// omita de verdad en vez de viajar como string vacío.
+export function cleanOptionalPayload<T extends Record<string, any>>(obj: T): Partial<T> {
+  const cleaned: Record<string, any> = {}
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === "" || value === undefined) continue
+    cleaned[key] = value
+  }
+  return cleaned as Partial<T>
+}
+
 export function formatPYG(value: number | string | null | undefined): string {
   if (value == null) return "₲ 0"
   let num: number
