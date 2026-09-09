@@ -1,6 +1,7 @@
 """Purchases API router — suppliers, orders, receipts, requisitions, contracts, forecasting, suggestions, budgets, reports"""
 
 import logging
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
