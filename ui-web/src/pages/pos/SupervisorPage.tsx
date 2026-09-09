@@ -6,7 +6,7 @@ import {
   User as UserIcon, ArrowLeft, Volume2, VolumeX,
   ArrowUpRight, Flame, Bell, Download, PackageSearch, ListChecks,
   CreditCard, ClipboardCheck, Boxes, Radio, PackageCheck, Send, FileText, Inbox,
-  Pencil
+  Pencil, Settings, MoreVertical
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -693,6 +693,7 @@ export default function SupervisorPage() {
   const [notes, setNotes] = useState<SystemNotification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [notifOpen, setNotifOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [creditApprovals, setCreditApprovals] = useState<CreditApprovalRequest[]>([])
   const [lowStock, setLowStock] = useState<LowStockItem[]>([])
   const [now, setNow] = useState(new Date())
@@ -1528,39 +1529,53 @@ try {
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white pb-36 transition-colors">
       
-      {/* ── HEADER SUPERVISOR PREMIUM ── */}
-      <div className="sticky top-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800/80 px-3 sm:px-4 pt-[max(env(safe-area-inset-top),32px)] shadow-xs">
-        <div className="flex items-center justify-between py-2.5 sm:py-3 gap-2">
+      {/* ── HEADER SUPERVISOR ERGONÓMICO Y LIMPIO ── */}
+      <div className="sticky top-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800/80 px-3 sm:px-4 pt-[max(env(safe-area-inset-top),12px)] shadow-xs">
+        <div className="flex items-center justify-between py-2 sm:py-2.5 gap-2">
+          {/* Lado izquierdo: Supervisor y estado */}
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-slate-950 font-black shrink-0 shadow-md shadow-amber-500/25">
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="font-black text-sm truncate" style={displayFont}>
+                <span className="font-black text-sm truncate text-slate-900 dark:text-white" style={displayFont}>
                   {firstName}
                 </span>
-                <span className="text-[8.5px] font-black uppercase px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">
+                <span className="text-[8.5px] font-black uppercase px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">
                   Supervisor
                 </span>
                 {keepScreenOn && (
-                  <span className="text-[8.5px] font-black uppercase px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0 flex items-center gap-0.5">
-                    ⚡ Despierto
+                  <span className="text-[9px] font-black text-amber-500 shrink-0" title="Pantalla siempre activa">
+                    ⚡
                   </span>
                 )}
               </div>
               <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 truncate">
                 <span className={`w-2 h-2 rounded-full shrink-0 ${syncError ? "bg-rose-500" : isSseConnected ? "bg-emerald-500 shadow-xs shadow-emerald-500" : "bg-amber-400"} animate-pulse`} />
-                <span className="truncate font-semibold">{syncError ? "Sin Conexión" : isSseConnected ? "En Vivo (Reactivo)" : "Reconectando..."}</span>
-                <span className="text-slate-400 dark:text-slate-500 font-mono hidden sm:inline shrink-0">
+                <span className="truncate font-semibold">{syncError ? "Sin Conexión" : isSseConnected ? "En Vivo" : "Reconectando..."}</span>
+                <span className="text-slate-400 dark:text-slate-500 font-mono hidden xs:inline shrink-0">
                   · {now.toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })}
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-1 shrink-0">
-            {/* Botón sincronizar manual */}
+          {/* Lado derecho: Acciones directas prioritarias (sin saturación) */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Silenciar alarma si está activa */}
+            {totalPendientes > 0 && !alarmMuted && (
+              <button
+                onClick={muteCurrentAlarm}
+                title="Silenciar alarma de pedidos actual"
+                className="px-2.5 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-black text-[11px] flex items-center gap-1 animate-pulse shadow-md shadow-rose-500/30 cursor-pointer"
+              >
+                <VolumeX className="w-3.5 h-3.5" />
+                <span className="text-[10px]">Silenciar</span>
+              </button>
+            )}
+
+            {/* Sincronizar manual */}
             <button
               onClick={() => syncAllNow()}
               disabled={isSyncing}
@@ -1570,58 +1585,7 @@ try {
               <RefreshCcw className={`w-4 h-4 ${isSyncing ? "animate-spin text-amber-500" : ""}`} />
             </button>
 
-            {/* Toggle de pantalla despierta */}
-            <button
-              onClick={toggleKeepScreenOn}
-              title={keepScreenOn ? "Pantalla siempre activa (Sin reposo)" : "Pantalla normal"}
-              className={`p-2 rounded-xl border transition cursor-pointer ${
-                keepScreenOn
-                  ? "bg-amber-500/20 text-amber-500 border-amber-500/40 shadow-xs shadow-amber-500/20"
-                  : "bg-slate-100 dark:bg-slate-900 text-slate-400 border-slate-200 dark:border-slate-800"
-              }`}
-            >
-              <span className="text-xs font-black">⚡</span>
-            </button>
-
-            {/* Botón de prueba o silenciar alarma */}
-            {totalPendientes > 0 && !alarmMuted ? (
-              <button
-                onClick={muteCurrentAlarm}
-                title="Silenciar alarma de pedidos actual"
-                className="px-2 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-black text-[10px] flex items-center gap-1 animate-pulse shadow-md shadow-rose-500/30 cursor-pointer"
-              >
-                <VolumeX className="w-3.5 h-3.5" />
-                <span>Silenciar</span>
-              </button>
-            ) : (
-              <button
-                onClick={testAlarmSound}
-                title="Probar Alarma PedidosYa (Volumen y Vibración)"
-                className="p-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-amber-500 hover:bg-amber-500/10 transition cursor-pointer"
-              >
-                <Volume2 className="w-4 h-4" />
-              </button>
-            )}
-
-            <a
-              href={`http://${typeof window !== "undefined" ? window.location.hostname : "192.168.0.10"}:8080/extra-supervisor.apk`}
-              download="extra-supervisor.apk"
-              title="Descargar APK Nativo Android"
-              className="px-2 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 transition cursor-pointer flex items-center gap-1 text-[10px] font-black"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>APK</span>
-            </a>
-
-            {installPrompt && !isInstalled && (
-              <button
-                onClick={installApp}
-                title="Instalar la PWA en este dispositivo"
-                className="p-2 rounded-xl bg-slate-900 dark:bg-amber-500 text-white dark:text-slate-950 border border-slate-800 dark:border-amber-400 hover:opacity-90 transition cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-              </button>
-            )}
+            {/* Notificaciones */}
             <button
               onClick={() => { setNotifOpen(true); askNotificationPermission() }}
               title="Notificaciones"
@@ -1629,35 +1593,19 @@ try {
             >
               <Bell className="w-4 h-4" />
               {unreadCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 text-[9px] font-black bg-rose-500 text-white min-w-4 h-4 px-1 rounded-full flex items-center justify-center animate-pulse">
+                <span className="absolute -top-1 -right-1 text-[9px] font-black bg-rose-500 text-white min-w-4 h-4 px-1 rounded-full flex items-center justify-center animate-pulse">
                   {unreadCount > 9 ? "9+" : unreadCount}
                 </span>
               )}
             </button>
+
+            {/* Menú de Ajustes de Turno & Dispositivo */}
             <button
-              onClick={toggleSound}
-              title={soundEnabled ? "Silenciar todas las alertas" : "Activar alertas sonoras"}
-              className={`p-2 rounded-xl border transition cursor-pointer ${
-                soundEnabled
-                  ? "bg-amber-500/10 text-amber-500 border-amber-500/30"
-                  : "bg-slate-100 dark:bg-slate-900 text-slate-400 border-slate-200 dark:border-slate-800"
-              }`}
+              onClick={() => setSettingsOpen(true)}
+              title="Ajustes de Turno y Dispositivo"
+              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-amber-500 transition cursor-pointer"
             >
-              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-            </button>
-            <button
-              onClick={toggleTheme}
-              title="Cambiar tema"
-              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 cursor-pointer"
-            >
-              {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-            <button
-              onClick={handleLogout}
-              title="Cerrar sesión"
-              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-rose-500 cursor-pointer"
-            >
-              <LogOut className="w-4 h-4" />
+              <Settings className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -2978,6 +2926,164 @@ try {
               <p className="text-[10px] text-center text-slate-400">
                 Se sincronizan cada 15 segundos. Las alertas sonoras varían según el evento.
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL DE AJUSTES DE TURNO Y DISPOSITIVO ── */}
+      {settingsOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+            {/* Header del modal */}
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950/60">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-2xl bg-amber-500/20 text-amber-500 flex items-center justify-center font-black">
+                  <Settings className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
+                    Ajustes de Supervisión
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {user?.nombre || "Supervisor"} · Extra Supermercado
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setSettingsOpen(false)}
+                className="p-1.5 rounded-xl bg-slate-200/60 dark:bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Opciones táctiles */}
+            <div className="p-4 overflow-y-auto space-y-3">
+              {/* Pantalla despierta */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${keepScreenOn ? "bg-amber-500/20 text-amber-500" : "bg-slate-200 dark:bg-slate-800 text-slate-400"}`}>
+                    <span className="text-base font-black">⚡</span>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-900 dark:text-white">
+                      Pantalla Siempre Activa
+                    </div>
+                    <div className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight">
+                      Evita que el celular entre en reposo para no perder llamados.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={toggleKeepScreenOn}
+                  className={`w-12 h-7 rounded-full transition-colors relative cursor-pointer shrink-0 p-0.5 ${keepScreenOn ? "bg-amber-500" : "bg-slate-300 dark:bg-slate-700"}`}
+                >
+                  <span className={`block w-6 h-6 rounded-full bg-white shadow-md transform transition-transform ${keepScreenOn ? "translate-x-5" : "translate-x-0"}`} />
+                </button>
+              </div>
+
+              {/* Alertas sonoras */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${soundEnabled ? "bg-amber-500/20 text-amber-500" : "bg-slate-200 dark:bg-slate-800 text-slate-400"}`}>
+                    {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-900 dark:text-white">
+                      Alertas Sonoras y Vibración
+                    </div>
+                    <div className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight">
+                      Reproduce timbres estridentes y vibra ante autorizaciones.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={toggleSound}
+                  className={`w-12 h-7 rounded-full transition-colors relative cursor-pointer shrink-0 p-0.5 ${soundEnabled ? "bg-amber-500" : "bg-slate-300 dark:bg-slate-700"}`}
+                >
+                  <span className={`block w-6 h-6 rounded-full bg-white shadow-md transform transition-transform ${soundEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                </button>
+              </div>
+
+              {/* Botón probar alarma PedidosYa */}
+              <button
+                onClick={() => {
+                  testAlarmSound()
+                  setSettingsOpen(false)
+                }}
+                className="w-full p-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-amber-500/20 hover:brightness-105 active:scale-98 transition cursor-pointer"
+              >
+                <Volume2 className="w-4 h-4" />
+                Probar Alarma Fuerte PedidosYa
+              </button>
+
+              {/* Modo oscuro / claro */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center">
+                    {dark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-white">
+                      Tema Visual
+                    </div>
+                    <div className="text-[10.5px] text-slate-500 dark:text-slate-400">
+                      {dark ? "Modo oscuro activado" : "Modo claro activado"}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={toggleTheme}
+                  className="px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-700 cursor-pointer"
+                >
+                  {dark ? "Cambiar a Claro" : "Cambiar a Oscuro"}
+                </button>
+              </div>
+
+              {/* Descargar APK */}
+              <a
+                href={`http://${typeof window !== "undefined" ? window.location.hostname : "192.168.0.10"}:8080/extra-supervisor.apk`}
+                download="extra-supervisor.apk"
+                className="w-full p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 flex items-center justify-between hover:border-amber-500/50 transition cursor-pointer group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                    <Download className="w-5 h-5" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-amber-500 transition">
+                      Descargar APK Android
+                    </div>
+                    <div className="text-[10.5px] text-slate-500 dark:text-slate-400">
+                      Instalador nativo para teléfonos del supermercado.
+                    </div>
+                  </div>
+                </div>
+                <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-amber-500 transition" />
+              </a>
+
+              {/* Instalar PWA si soportado */}
+              {installPrompt && !isInstalled && (
+                <button
+                  onClick={() => {
+                    installApp()
+                    setSettingsOpen(false)
+                  }}
+                  className="w-full p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Download className="w-4 h-4" /> Instalar Aplicación PWA
+                </button>
+              )}
+
+              {/* Botón Cerrar Turno / Salir */}
+              <button
+                onClick={handleLogout}
+                className="w-full p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center justify-center gap-2 hover:bg-rose-500/20 active:scale-98 transition cursor-pointer mt-2"
+              >
+                <LogOut className="w-4 h-4" />
+                Cerrar Turno de Supervisión
+              </button>
             </div>
           </div>
         </div>
