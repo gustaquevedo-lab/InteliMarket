@@ -143,6 +143,7 @@ class APDashboard(BaseModel):
 class BankAccountCreate(BaseModel):
     company_id: UUID
     banco: str = Field(min_length=1, max_length=100)
+    alias: Optional[str] = Field(None, max_length=100)
     tipo: str = Field(min_length=1, max_length=20)
     numero_cuenta: str = Field(min_length=1, max_length=50)
     moneda: str = "PYG"
@@ -152,6 +153,7 @@ class BankAccountCreate(BaseModel):
 
 class BankAccountUpdate(BaseModel):
     banco: Optional[str] = None
+    alias: Optional[str] = None
     tipo: Optional[str] = None
     numero_cuenta: Optional[str] = None
     titular: Optional[str] = None
@@ -163,6 +165,7 @@ class BankAccountResponse(BaseModel):
     id: UUID
     company_id: UUID
     banco: str
+    alias: Optional[str] = None
     tipo: str
     numero_cuenta: str
     moneda: str
@@ -466,3 +469,25 @@ class CashFlowAlertConfig(BaseModel):
     activo: bool = False
     dias_horizonte: int = 30
     telefono: Optional[str] = None
+
+
+class SupplierCreditNoteCreate(BaseModel):
+    supplier_id: str
+    numero: str
+    numero_factura_origen: Optional[str] = None
+    timbrado: Optional[str] = None
+    fecha: date
+    motivo: str
+    motivo_categoria: Optional[str] = "devolucion_rotura"
+    impacto_contable: Optional[str] = "otros_ingresos"
+    archivo_adjunto_path: Optional[str] = None
+    monto: float
+    moneda: Optional[str] = "PYG"
+    observaciones: Optional[str] = None
+
+
+class SupplierCreditNoteApply(BaseModel):
+    invoice_id: str
+    monto: float
+    observaciones: Optional[str] = None
+
