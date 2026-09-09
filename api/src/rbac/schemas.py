@@ -126,6 +126,13 @@ DEFAULT_PERMISSIONS = [
     # Salón / exhibición (monitoreo de precios y promos en góndola, no las define)
     ("salon:view_prices", "Ver precios de góndola y verificador", "salon"),
     ("salon:view_promotions", "Ver estado de promociones y alertas de vencimiento", "salon"),
+    # Operativa real del bloque "Operaciones de Salón" del menu: carniceria/
+    # desposte, verduleria/frescos, panaderia/rotiseria, HACCP, mantenimiento
+    # de equipos, etiquetas electronicas (ESL) y registro de mermas. Es un
+    # solo permiso amplio a proposito -- todo ese bloque es el area de
+    # trabajo real del Encargado de Salón, no tiene sentido subdividirlo en
+    # 6-7 permisos finos para un solo rol que necesita las 6-7 cosas.
+    ("salon:manage", "Gestionar carnicería, frescos, panadería, HACCP, equipos y ESL", "salon"),
     ("label_printing:manage", "Imprimir y gestionar etiquetas de góndola", "label_printing"),
 ]
 
@@ -180,7 +187,7 @@ DEFAULT_ROLES = [
         "is_system": True,
         "is_default": False,
         "permissions": [
-            "salon:view_prices", "salon:view_promotions", "label_printing:manage",
+            "salon:view_prices", "salon:view_promotions", "salon:manage", "label_printing:manage",
             "products:view", "price_lists:view", "inventory:view",
         ],
     },

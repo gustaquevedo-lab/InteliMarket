@@ -10,6 +10,7 @@ from uuid import UUID
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
 from api.src.features import require_feature
+from api.src.rbac.deps import require_permission
 from api.src.supermer import service
 from api.src.supermer.schemas import (
     RecipeCreate, RecipeUpdate, RecipeResponse,
@@ -309,6 +310,7 @@ async def create_waste(
     data: WasteLogCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service.create_waste(db, user["company_id"], data, user["user_id"])
 
@@ -504,6 +506,7 @@ async def create_butchery_template(
     data: ButcheryTemplateCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service.create_butchery_template(db, user["company_id"], data)
 
@@ -513,6 +516,7 @@ async def execute_desposte(
     data: DesposteInput,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     try:
         return await service.execute_desposte(db, user["company_id"], data)
@@ -642,6 +646,7 @@ async def create_receive_batch(
     data: ReceiveBatchCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service.create_receive_batch(db, user["company_id"], data, user.get("id"))
 
@@ -666,6 +671,7 @@ async def create_freshness_audit(
     data: FreshnessAuditCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     try:
         return await service.create_freshness_audit(db, user["company_id"], data, user.get("id"))
@@ -692,6 +698,7 @@ async def list_scorecards(
 async def generate_scorecards(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service.generate_supplier_scorecards(db, user["company_id"])
 
@@ -705,6 +712,7 @@ async def auto_markdown_by_batch(
     data: AutoApplyMarkdownByBatchInput = AutoApplyMarkdownByBatchInput(),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service.auto_apply_markdown_by_batch(db, user["company_id"], data)
 
@@ -718,6 +726,7 @@ async def enhanced_forecast(
     data: ForecastEnhanceInput = ForecastEnhanceInput(),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service.generate_enhanced_forecast(db, user["company_id"], data)
 
@@ -761,6 +770,7 @@ async def rotiseria_create_recipe(
     data: RotiseriaRecipeCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.create_recipe(user["company_id"], data, db)
 
@@ -771,6 +781,7 @@ async def rotiseria_update_recipe(
     data: RotiseriaRecipeUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.update_recipe(recipe_id, data, db)
 
@@ -780,6 +791,7 @@ async def rotiseria_delete_recipe(
     recipe_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     await service_rotiseria.delete_recipe(recipe_id, db)
 
@@ -808,6 +820,7 @@ async def rotiseria_create_plan(
     data: RotiseriaPlanCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.create_plan(user["company_id"], data, db)
 
@@ -818,6 +831,7 @@ async def rotiseria_update_plan(
     data: RotiseriaPlanUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.update_plan(plan_id, data, db)
 
@@ -828,6 +842,7 @@ async def rotiseria_complete_plan(
     data: dict,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.complete_plan(plan_id, data, db)
 
@@ -838,6 +853,7 @@ async def rotiseria_add_temp_log(
     data: RotiseriaTemperatureLogCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.add_temp_log(plan_id, user["id"], data, db)
 
@@ -857,6 +873,7 @@ async def rotiseria_generate_labels(
     data: list[RotiseriaLabelCreate],
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.generate_labels(plan_id, user["company_id"], {"labels": [l.model_dump() for l in data]}, db)
 
@@ -875,6 +892,7 @@ async def rotiseria_auto_markdown(
     data: AutoMarkdownRotiseriaInput = AutoMarkdownRotiseriaInput(),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.suggest_markdowns(user["company_id"], data.model_dump(exclude_none=True), db)
 
@@ -914,6 +932,7 @@ async def haccp_create_plan(
     data: HaccpPlanCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_haccp.create_haccp_plan(user["company_id"], data, db)
 
@@ -924,6 +943,7 @@ async def haccp_update_plan(
     data: HaccpPlanUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_haccp.update_haccp_plan(plan_id, data, db)
 
@@ -943,6 +963,7 @@ async def haccp_create_critical_point(
     data: HaccpCriticalPointCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_haccp.create_critical_point(plan_id, data, db)
 
@@ -953,6 +974,7 @@ async def haccp_update_critical_point(
     data: HaccpCriticalPointUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_haccp.update_critical_point(cp_id, data, db)
 
@@ -962,6 +984,7 @@ async def haccp_delete_critical_point(
     cp_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     await service_haccp.delete_critical_point(cp_id, db)
 
@@ -981,6 +1004,7 @@ async def haccp_create_monitoring_log(
     data: HaccpMonitoringLogCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_haccp.create_monitoring_log(cp_id, user["id"], data, db)
 
@@ -999,6 +1023,7 @@ async def haccp_create_corrective_action(
     data: HaccpCorrectiveActionCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_haccp.create_corrective_action(data, db)
 
@@ -1008,6 +1033,7 @@ async def haccp_resolve_corrective_action(
     ca_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_haccp.resolve_corrective_action(ca_id, db)
 
@@ -1184,6 +1210,7 @@ async def equipment_create(
     data: EquipmentCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.create_equipment(user["company_id"], data, db)
 
@@ -1194,6 +1221,7 @@ async def equipment_update(
     data: EquipmentUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.update_equipment(equipment_id, data, db)
 
@@ -1203,6 +1231,7 @@ async def equipment_delete(
     equipment_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     await service_equipment.delete_equipment(equipment_id, db)
 
@@ -1221,6 +1250,7 @@ async def equipment_create_schedule(
     data: EquipmentScheduleCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.create_schedule(user["company_id"], data, db)
 
@@ -1231,6 +1261,7 @@ async def equipment_update_schedule(
     data: EquipmentScheduleUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.update_schedule(schedule_id, data, db)
 
@@ -1240,6 +1271,7 @@ async def equipment_delete_schedule(
     schedule_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     await service_equipment.delete_schedule(schedule_id, db)
 
@@ -1268,6 +1300,7 @@ async def equipment_create_work_order(
     data: WorkOrderCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.create_work_order(user["company_id"], data, db)
 
@@ -1278,6 +1311,7 @@ async def equipment_update_work_order(
     data: WorkOrderUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.update_work_order(wo_id, data, db)
 
@@ -1287,6 +1321,7 @@ async def equipment_start_work_order(
     wo_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.start_work_order(wo_id, db)
 
@@ -1297,6 +1332,7 @@ async def equipment_complete_work_order(
     data: WorkOrderComplete,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.complete_work_order(wo_id, data, db)
 
@@ -1315,6 +1351,7 @@ async def equipment_resolve_alert(
     alert_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.resolve_alert(alert_id, db)
 
@@ -1323,6 +1360,7 @@ async def equipment_resolve_alert(
 async def equipment_check_alerts(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.check_equipment_alerts(user["company_id"], db)
 
@@ -1985,6 +2023,7 @@ async def esl_create_zone(
     data: EslZoneCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_esl.create_esl_zone(user["company_id"], data, db)
 
@@ -2002,6 +2041,7 @@ async def esl_create_device(
     data: EslDeviceCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_esl.create_esl_device(user["company_id"], data, db)
 
@@ -2011,6 +2051,7 @@ async def esl_update_device(
     data: EslDeviceUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_esl.update_esl_device(device_id, data, db)
 
@@ -2019,6 +2060,7 @@ async def esl_sync_price(
     data: EslSyncCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_esl.sync_esl_price(user["company_id"], data, db)
 
@@ -2027,6 +2069,7 @@ async def esl_confirm_sync(
     sync_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_esl.confirm_esl_sync(sync_id, db)
 
