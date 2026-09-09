@@ -192,7 +192,21 @@ async def get_promotion(db: AsyncSession, promo_id: str) -> Promotion | None:
     except ValueError:
         return None
     result = await db.execute(select(Promotion).where(Promotion.id == pid))
-    return result.scalar_one_or_none()
+    promo = result.scalar_one_or_none()
+    if promo:
+        if promo.producto_ids:
+            prods_res = await db.execute(
+                select(Product.id, Product.nombre, Product.sku, Product.codigo_barra).where(
+                    Product.id.in_(promo.producto_ids)
+                )
+            )
+            promo.productos_detalle = [
+                {"id": str(row[0]), "nombre": row[1], "sku": row[2], "codigo_barra": row[3]}
+                for row in prods_res.all()
+            ]
+        else:
+            promo.productos_detalle = []
+    return promo
 
 
 async def list_promotions(
@@ -222,7 +236,42 @@ async def list_promotions(
 
     query = query.order_by(Promotion.valido_desde.desc(), Promotion.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
-    return list(result.scalars().all())
+    promos = list(result.scalars().all())
+    if not promos:
+        return []
+
+    # Recolectar todos los producto_ids de las promociones de forma única
+    all_pids = set()
+    for p in promos:
+        if p.producto_ids:
+            for pid in p.producto_ids:
+                if pid:
+                    all_pids.add(pid)
+
+    prods_map: dict[str, dict] = {}
+    if all_pids:
+        prods_res = await db.execute(
+            select(Product.id, Product.nombre, Product.sku, Product.codigo_barra).where(
+                Product.id.in_(list(all_pids))
+            )
+        )
+        for row in prods_res.all():
+            prods_map[str(row[0])] = {
+                "id": str(row[0]),
+                "nombre": row[1],
+                "sku": row[2],
+                "codigo_barra": row[3],
+            }
+
+    for p in promos:
+        if p.producto_ids:
+            p.productos_detalle = [
+                prods_map[str(pid)] for pid in p.producto_ids if str(pid) in prods_map
+            ]
+        else:
+            p.productos_detalle = []
+
+    return promos
 
 
 async def update_promotion(db: AsyncSession, promo_id: str, data: PromotionUpdate) -> Promotion | None:
@@ -1171,8 +1220,81 @@ async def get_promotion_analytics_360(
     )
     usages = usages_res.scalars().all()
 
-    # 5. Obtener ventas involucradas
+    # 5. Obtener ventas involucradas y clientes
     sale_ids = list(set([u.sale_id for u in usages if u.sale_id]))
+    customers_map = {}
+
+    customer_ids_to_fetch = {u.customer_id for u in usages if u.customer_id}
+    if customer_ids_to_fetch:
+        cust_res = await db.execute(
+            select(Customer).where(Customer.id.in_(list(customer_ids_to_fetch)))
+        )
+        for c in cust_res.scalars().all():
+            customers_map[c.id] = c
+
+    # ── FALLBACK A sale_items ────────────────────────────────────────────────
+    # El POS registra precio fijo sin escribir en promotion_usages.
+    # Cuando esa tabla está vacía y hay producto_ids, leemos directamente
+    # de sale_items + sales dentro del rango de vigencia de la promo.
+    _using_fallback = False
+    _fallback_items: list[dict] = []
+    if not usages and producto_ids:
+        from datetime import datetime as _dt
+        from sqlalchemy import text as _sa_text
+
+        # Construir rango respetando zona horaria de Paraguay (America/Asuncion)
+        _desde = datetime.combine(p.valido_desde, time.min, tzinfo=PY_TZ)
+        _hasta = datetime.combine(p.valido_hasta, time(23, 59, 59, 999999), tzinfo=PY_TZ)
+
+        _prod_ids_str = ",".join(f"'{str(pid)}'" for pid in producto_ids)
+        _si_q = await db.execute(_sa_text(f"""
+            SELECT
+                si.id        AS si_id,
+                si.sale_id,
+                si.product_id,
+                s.customer_id,
+                si.cantidad,
+                si.precio_unitario,
+                si.descuento_monto,
+                si.costo_unitario,
+                s.created_at AS sale_at,
+                s.estado     AS sale_estado
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            WHERE si.product_id IN ({_prod_ids_str})
+              AND s.created_at BETWEEN :desde AND :hasta
+              AND s.estado NOT IN ('cancelada', 'anulada')
+            ORDER BY s.created_at DESC
+        """), {"desde": _desde, "hasta": _hasta})
+        _fallback_rows = _si_q.fetchall()
+
+        if _fallback_rows:
+            _using_fallback = True
+            _fallback_items = [
+                {
+                    "si_id":          row[0],
+                    "sale_id":        row[1],
+                    "product_id":     row[2],
+                    "customer_id":    row[3],
+                    "cantidad":       float(row[4] or 0),
+                    "precio_unitario": float(row[5] or 0),
+                    "descuento_monto": float(row[6] or 0),
+                    "costo_unitario":  float(row[7] or 0) if row[7] else None,
+                    "sale_at":        row[8],
+                    "sale_estado":    row[9],
+                }
+                for row in _fallback_rows
+            ]
+            sale_ids = list(set(str(r["sale_id"]) for r in _fallback_items))
+
+            # Cargar clientes únicos del fallback
+            _fb_customer_ids = {r["customer_id"] for r in _fallback_items if r["customer_id"]}
+            if _fb_customer_ids:
+                cust_res_fb = await db.execute(
+                    select(Customer).where(Customer.id.in_(list(_fb_customer_ids)))
+                )
+                for c in cust_res_fb.scalars().all():
+                    customers_map[c.id] = c
 
     daily_stats = {}
     product_stats = {}
@@ -1206,22 +1328,11 @@ async def get_promotion_analytics_360(
             "es_bajo_costo": promo_p < costo if costo > 0 else False
         }
 
-    customer_ids_to_fetch = set()
-    for u in usages:
-        if u.customer_id:
-            customer_ids_to_fetch.add(u.customer_id)
-
-    customers_map = {}
-    if customer_ids_to_fetch:
-        cust_res = await db.execute(
-            select(Customer).where(Customer.id.in_(list(customer_ids_to_fetch)))
-        )
-        for c in cust_res.scalars().all():
-            customers_map[c.id] = c
-
+    # Pagos: sale_ids ya actualizado por el fallback si aplica
     if sale_ids:
+        _sale_id_objs = [uuid.UUID(s) if isinstance(s, str) else s for s in sale_ids]
         payments_res = await db.execute(
-            select(SalePayment).where(SalePayment.sale_id.in_(sale_ids))
+            select(SalePayment).where(SalePayment.sale_id.in_(_sale_id_objs))
         )
         for pay in payments_res.scalars().all():
             fp = (pay.forma_pago or "EFECTIVO").upper()
@@ -1235,21 +1346,29 @@ async def get_promotion_analytics_360(
     total_costo = 0.0
     total_unidades = 0.0
 
-    for u in usages:
-        dt_local = u.created_at.astimezone(PY_TZ) if u.created_at else datetime.now(PY_TZ)
+    def _process_item(
+        dt_at, pid_str_val, cid_val,
+        qty: float, precio_u: float, desc: float, costo_u: float,
+        sale_id_val
+    ):
+        """Acumula métricas para un ítem de venta (usado por usages y fallback)."""
+        nonlocal total_ventas_promo, total_ventas_reg, total_descuento, total_costo, total_unidades
+
+        dt_local = dt_at.astimezone(PY_TZ) if dt_at else datetime.now(PY_TZ)
         f_str = dt_local.strftime("%Y-%m-%d")
         dia_nom = DIAS_SEMANA[dt_local.weekday()]
 
-        qty = float(u.cantidad_items or 0)
-        desc = float(u.descuento_aplicado or 0)
-
-        pid_str = str(u.product_id) if u.product_id else None
-        p_info = product_stats.get(pid_str) if pid_str else None
+        p_info = product_stats.get(pid_str_val) if pid_str_val else None
         reg_price = p_info["precio_regular"] if p_info else 0.0
-        costo_u = p_info["costo_promedio"] if p_info else 0.0
+        if costo_u == 0.0 and p_info:
+            costo_u = p_info["costo_promedio"]
 
-        vt_reg = reg_price * qty
-        vt_promo = max(0.0, vt_reg - desc)
+        # Para precio_fijo_oferta sin descuento_monto: inferir descuento como reg - precio_u
+        if desc == 0.0 and reg_price > 0 and 0 < precio_u < reg_price:
+            desc = (reg_price - precio_u) * qty
+
+        vt_promo = precio_u * qty
+        vt_reg = reg_price * qty if reg_price > 0 else vt_promo
         ct_prod = costo_u * qty
 
         total_ventas_promo += vt_promo
@@ -1273,19 +1392,19 @@ async def get_promotion_analytics_360(
         daily_stats[f_str]["total_regular_pyg"] += vt_reg
         daily_stats[f_str]["descuento_otorgado_pyg"] += desc
         daily_stats[f_str]["unidades_vendidas"] += qty
-        if u.sale_id:
-            daily_stats[f_str]["_sales_set"].add(u.sale_id)
+        if sale_id_val:
+            daily_stats[f_str]["_sales_set"].add(sale_id_val)
 
-        if pid_str and pid_str in product_stats:
-            product_stats[pid_str]["unidades_vendidas"] += qty
-            product_stats[pid_str]["total_ventas_pyg"] += vt_promo
-            product_stats[pid_str]["descuento_total_pyg"] += desc
+        if pid_str_val and pid_str_val in product_stats:
+            product_stats[pid_str_val]["unidades_vendidas"] += qty
+            product_stats[pid_str_val]["total_ventas_pyg"] += vt_promo
+            product_stats[pid_str_val]["descuento_total_pyg"] += desc
 
-        cid_str = str(u.customer_id) if u.customer_id else "ocasional"
-        c_obj = customers_map.get(u.customer_id) if u.customer_id else None
+        cid_str = str(cid_val) if cid_val else "ocasional"
+        c_obj = customers_map.get(cid_val) if cid_val else None
         c_nombre = c_obj.razon_social if c_obj else "Consumidor Final / Mostrador"
-        c_ruc = c_obj.ruc or c_obj.ci if c_obj else "44444401-7"
-        c_tel = c_obj.telefono if c_obj else ""
+        c_ruc = (getattr(c_obj, 'ruc', None) or getattr(c_obj, 'ci', None)) if c_obj else "44444401-7"
+        c_tel = getattr(c_obj, 'telefono', "") if c_obj else ""
 
         if cid_str not in customer_stats:
             customer_stats[cid_str] = {
@@ -1303,8 +1422,43 @@ async def get_promotion_analytics_360(
         customer_stats[cid_str]["unidades_compradas"] += qty
         customer_stats[cid_str]["total_gastado_pyg"] += vt_promo
         customer_stats[cid_str]["descuento_obtenido_pyg"] += desc
-        if u.sale_id:
-            customer_stats[cid_str]["_sales_set"].add(u.sale_id)
+        if sale_id_val:
+            customer_stats[cid_str]["_sales_set"].add(sale_id_val)
+
+    # ── Iterar promotion_usages (fuente primaria) ────────────────────────────
+    for u in usages:
+        pid_str = str(u.product_id) if u.product_id else None
+        p_info = product_stats.get(pid_str) if pid_str else None
+        reg_price = p_info["precio_regular"] if p_info else 0.0
+        costo_u = p_info["costo_promedio"] if p_info else 0.0
+        qty = float(u.cantidad_items or 0)
+        desc = float(u.descuento_aplicado or 0)
+        vt_reg = reg_price * qty
+        promo_price_u = (max(0.0, vt_reg - desc) / qty) if qty > 0 else 0.0
+        _process_item(
+            dt_at=u.created_at,
+            pid_str_val=pid_str,
+            cid_val=u.customer_id,
+            qty=qty,
+            precio_u=promo_price_u,
+            desc=desc,
+            costo_u=costo_u,
+            sale_id_val=u.sale_id,
+        )
+
+    # ── Fallback: iterar sale_items directos ─────────────────────────────────
+    if _using_fallback:
+        for fb in _fallback_items:
+            _process_item(
+                dt_at=fb["sale_at"],
+                pid_str_val=str(fb["product_id"]) if fb["product_id"] else None,
+                cid_val=fb["customer_id"],
+                qty=fb["cantidad"],
+                precio_u=fb["precio_unitario"],
+                desc=fb["descuento_monto"],
+                costo_u=fb["costo_unitario"] or 0.0,
+                sale_id_val=fb["sale_id"],
+            )
 
     evolucion_diaria = []
     for f_str in sorted(daily_stats.keys()):

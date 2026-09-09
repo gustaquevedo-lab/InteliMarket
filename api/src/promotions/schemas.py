@@ -210,6 +210,7 @@ class PromotionResponse(BaseModel):
     usos_actuales: int = 0
     activo: bool = True
     created_at: Optional[datetime] = None
+    productos_detalle: Optional[list[dict]] = None
 
 
 class ExpiringPromotionAlert(BaseModel):

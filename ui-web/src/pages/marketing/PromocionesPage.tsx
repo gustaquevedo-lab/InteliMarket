@@ -384,7 +384,15 @@ export default function PromocionesPage() {
       const matchesSearch = !s ||
         (p.nombre || "").toLowerCase().includes(s) ||
         (p.descripcion || "").toLowerCase().includes(s) ||
-        String(p.legacy_id || "").includes(s)
+        String(p.legacy_id || "").includes(s) ||
+        Boolean(
+          (p as any).productos_detalle &&
+          ((p as any).productos_detalle as any[]).some((pr: any) =>
+            (pr.nombre || "").toLowerCase().includes(s) ||
+            (pr.sku || "").toLowerCase().includes(s) ||
+            String(pr.codigo_barra || "").includes(s)
+          )
+        )
 
       const origen = p.origen || "iniciativa_propia"
       const matchesOrigen = filterOrigen === "all" || origen === filterOrigen
@@ -1043,6 +1051,38 @@ export default function PromocionesPage() {
                               </span>
                             )}
                           </div>
+
+                          {/* Productos Vinculados: SKU y Código de Barra */}
+                          {Boolean((promo as any).productos_detalle && ((promo as any).productos_detalle as any[]).length > 0) && (
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                              {((promo as any).productos_detalle as any[]).slice(0, 3).map((prod: any) => (
+                                <span
+                                  key={prod.id}
+                                  className="inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 shadow-2xs"
+                                  title={prod.nombre}
+                                >
+                                  <span className="font-semibold text-slate-900 dark:text-slate-100 truncate max-w-[140px]">
+                                    {prod.nombre}
+                                  </span>
+                                  {prod.sku && (
+                                    <span className="font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-1 py-0.2 rounded border border-indigo-200 dark:border-indigo-900/50">
+                                      SKU: {prod.sku}
+                                    </span>
+                                  )}
+                                  {prod.codigo_barra && (
+                                    <span className="text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 px-1 py-0.2 rounded border border-slate-200 dark:border-slate-700">
+                                      CB: {prod.codigo_barra}
+                                    </span>
+                                  )}
+                                </span>
+                              ))}
+                              {((promo as any).productos_detalle as any[]).length > 3 && (
+                                <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                                  +{((promo as any).productos_detalle as any[]).length - 3} prod.
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </td>
 
                         {/* Origen y Financiador */}
@@ -1274,19 +1314,22 @@ export default function PromocionesPage() {
                   </div>
                   <div className="max-h-36 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-700/60 bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700">
                     {viewingPromo.producto_ids.map(pid => {
-                      const prod = allCatalogProducts.find(p => p.id === pid)
+                      const prodDetail = ((viewingPromo as any).productos_detalle as any[])?.find(p => p.id === pid)
+                      const prod = prodDetail || allCatalogProducts.find(p => p.id === pid)
                       return (
                         <div key={pid} className="p-2 flex items-center justify-between gap-2 text-xs">
                           <div className="truncate min-w-0">
                             <span className="font-bold text-gray-900 dark:text-white truncate block">
                               {prod ? prod.nombre : `Producto ID: ${pid.slice(0, 8)}...`}
                             </span>
-                            <span className="text-[10px] text-gray-400 font-mono">
-                              Cód: {prod?.codigo_barra || prod?.sku || "S/C"} · Costo: {formatPYG(Number(prod?.costo_promedio || 0))}
+                            <span className="text-[10px] text-gray-500 dark:text-gray-400 font-mono flex items-center gap-2 mt-0.5">
+                              {prod?.sku && <span className="text-indigo-600 dark:text-indigo-400 font-semibold">SKU: {prod.sku}</span>}
+                              {prod?.codigo_barra && <span>CB: {prod.codigo_barra}</span>}
+                              {prod?.costo_promedio ? <span>Costo: {formatPYG(Number(prod.costo_promedio))}</span> : null}
                             </span>
                           </div>
                           <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
-                            {formatPYG(Number(prod?.precio_venta || 0))}
+                            {prod?.precio_venta ? formatPYG(Number(prod.precio_venta)) : ""}
                           </span>
                         </div>
                       )
