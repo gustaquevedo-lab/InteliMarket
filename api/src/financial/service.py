@@ -5,6 +5,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal
+from pathlib import Path
 import json
 import uuid
 
@@ -15,7 +16,7 @@ from api.src.financial.models import (
     APPaymentApprovalRequest,
     CashFlowProjection, Budget,
     PaymentRun, PaymentRunItem,
-    SupplierCreditNote, SupplierReturn, PayrollMovement,
+    SupplierCreditNote, SupplierCreditNoteApplication, SupplierReturn, PayrollMovement,
 )
 from api.src.financial.schemas import (
     SupplierInvoiceCreate, SupplierInvoicePaymentCreate,
@@ -24,6 +25,7 @@ from api.src.financial.schemas import (
     BudgetCreate, BudgetUpdate,
     PaymentRunCreate,
     CashFlowAlertConfig,
+    SupplierCreditNoteCreate, SupplierCreditNoteApply,
 )
 from api.src.purchases.models import Supplier
 
@@ -705,6 +707,7 @@ async def create_bank_account(db: AsyncSession, data: BankAccountCreate) -> Bank
     account = BankAccount(
         company_id=data.company_id,
         banco=data.banco,
+        alias=data.alias,
         tipo=data.tipo,
         numero_cuenta=data.numero_cuenta,
         moneda=data.moneda,
@@ -2320,6 +2323,26 @@ async def get_financial_ratios(db: AsyncSession, company_id: str) -> dict:
     }
 
 
+_CREDIT_NOTE_UPLOAD_DIR = Path(__file__).resolve().parents[3] / "uploads" / "credit_notes"
+_CREDIT_NOTE_ALLOWED_EXTS = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
+_CREDIT_NOTE_MAX_SIZE = 15 * 1024 * 1024  # 15MB
+
+
+def save_credit_note_attachment(content: bytes, filename: str) -> str:
+    ext = Path(filename).suffix.lower()
+    if ext not in _CREDIT_NOTE_ALLOWED_EXTS:
+        raise ValueError(f"Extensión no permitida: '{ext}'. Se aceptan PDF e imágenes (.pdf, .jpg, .png, .webp)")
+    if len(content) > _CREDIT_NOTE_MAX_SIZE:
+        raise ValueError("El archivo supera el tamaño máximo permitido (15MB)")
+    if len(content) == 0:
+        raise ValueError("El archivo está vacío")
+
+    _CREDIT_NOTE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    unique_name = f"nc_{uuid.uuid4()}{ext}"
+    (_CREDIT_NOTE_UPLOAD_DIR / unique_name).write_bytes(content)
+    return f"/uploads/credit_notes/{unique_name}"
+
+
 async def list_supplier_credit_notes(db: AsyncSession, company_id: str, supplier_id: str | None = None, limit: int = 100) -> list[dict]:
     cid = uuid.UUID(company_id)
     query = select(SupplierCreditNote, Supplier.razon_social).join(
@@ -2336,13 +2359,177 @@ async def list_supplier_credit_notes(db: AsyncSession, company_id: str, supplier
             "supplier_nombre": razon_social,
             "numero": note.numero,
             "numero_factura_origen": note.numero_factura_origen,
+            "timbrado": note.timbrado,
             "fecha": note.fecha.isoformat(),
             "motivo": note.motivo,
+            "motivo_categoria": note.motivo_categoria or "devolucion_rotura",
+            "impacto_contable": note.impacto_contable or "otros_ingresos",
+            "archivo_adjunto_path": note.archivo_adjunto_path,
             "monto": float(note.monto),
+            "saldo_disponible": float(note.saldo_disponible if note.saldo_disponible is not None else note.monto),
             "moneda": note.moneda,
             "observaciones": note.observaciones,
         }
         for note, razon_social in result.all()
+    ]
+
+
+async def create_supplier_credit_note(db: AsyncSession, company_id: str, data: SupplierCreditNoteCreate) -> dict:
+    cid = uuid.UUID(company_id)
+    sid = uuid.UUID(data.supplier_id)
+    
+    # Verificar proveedor
+    res_sup = await db.execute(select(Supplier).where(Supplier.id == sid, Supplier.company_id == cid))
+    supplier = res_sup.scalar_one_or_none()
+    if not supplier:
+        raise ValueError("Proveedor no encontrado o no pertenece a la empresa")
+
+    monto_dec = Decimal(str(data.monto))
+    if monto_dec <= 0:
+        raise ValueError("El monto de la Nota de Crédito debe ser mayor a 0")
+
+    note = SupplierCreditNote(
+        company_id=cid,
+        supplier_id=sid,
+        numero=data.numero.strip(),
+        numero_factura_origen=data.numero_factura_origen.strip() if data.numero_factura_origen else None,
+        timbrado=data.timbrado.strip() if data.timbrado else None,
+        fecha=data.fecha,
+        motivo=data.motivo.strip(),
+        motivo_categoria=data.motivo_categoria or "devolucion_rotura",
+        impacto_contable=data.impacto_contable or "otros_ingresos",
+        archivo_adjunto_path=data.archivo_adjunto_path,
+        monto=monto_dec,
+        saldo_disponible=monto_dec,
+        moneda=data.moneda or "PYG",
+        observaciones=data.observaciones,
+        cancelado=False,
+    )
+    db.add(note)
+    await db.commit()
+    await db.refresh(note)
+
+    return {
+        "id": str(note.id),
+        "supplier_id": str(note.supplier_id),
+        "supplier_nombre": supplier.razon_social,
+        "numero": note.numero,
+        "numero_factura_origen": note.numero_factura_origen,
+        "timbrado": note.timbrado,
+        "fecha": note.fecha.isoformat(),
+        "motivo": note.motivo,
+        "motivo_categoria": note.motivo_categoria,
+        "impacto_contable": note.impacto_contable,
+        "archivo_adjunto_path": note.archivo_adjunto_path,
+        "monto": float(note.monto),
+        "saldo_disponible": float(note.saldo_disponible),
+        "moneda": note.moneda,
+        "observaciones": note.observaciones,
+    }
+
+
+async def apply_supplier_credit_note(db: AsyncSession, company_id: str, credit_note_id: str, data: SupplierCreditNoteApply) -> dict:
+    cid = uuid.UUID(company_id)
+    cn_id = uuid.UUID(credit_note_id)
+    inv_id = uuid.UUID(data.invoice_id)
+    monto_aplicar = Decimal(str(data.monto))
+
+    if monto_aplicar <= 0:
+        raise ValueError("El monto a aplicar debe ser mayor a 0")
+
+    # Obtener Nota de Credito
+    res_cn = await db.execute(select(SupplierCreditNote).where(SupplierCreditNote.id == cn_id, SupplierCreditNote.company_id == cid))
+    credit_note = res_cn.scalar_one_or_none()
+    if not credit_note:
+        raise ValueError("Nota de Crédito no encontrada")
+    if credit_note.cancelado:
+        raise ValueError("La Nota de Crédito está cancelada")
+
+    saldo_nc = Decimal(str(credit_note.saldo_disponible if credit_note.saldo_disponible is not None else credit_note.monto))
+    if monto_aplicar > saldo_nc:
+        raise ValueError(f"El monto a aplicar ({monto_aplicar:,.0f}) supera el saldo disponible de la Nota de Crédito ({saldo_nc:,.0f})")
+
+    # Obtener Factura
+    res_inv = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == inv_id, SupplierInvoice.company_id == cid))
+    invoice = res_inv.scalar_one_or_none()
+    if not invoice:
+        raise ValueError("Factura de proveedor no encontrada")
+
+    saldo_factura = Decimal(str(invoice.saldo_pendiente or 0))
+    if saldo_factura <= 0:
+        raise ValueError("La factura seleccionada ya no tiene saldo pendiente")
+    if monto_aplicar > saldo_factura:
+        raise ValueError(f"El monto a aplicar ({monto_aplicar:,.0f}) supera el saldo pendiente de la Factura ({saldo_factura:,.0f})")
+
+    # Actualizar saldos
+    nuevo_saldo_nc = saldo_nc - monto_aplicar
+    nuevo_saldo_inv = saldo_factura - monto_aplicar
+
+    credit_note.saldo_disponible = nuevo_saldo_nc
+    invoice.saldo_pendiente = nuevo_saldo_inv
+    if nuevo_saldo_inv <= 0:
+        invoice.estado = "pagado"
+    else:
+        invoice.estado = "parcial"
+
+    # Registrar aplicacion
+    app_record = SupplierCreditNoteApplication(
+        company_id=cid,
+        credit_note_id=cn_id,
+        invoice_id=inv_id,
+        monto_aplicado=monto_aplicar,
+        observaciones=data.observaciones,
+    )
+    db.add(app_record)
+
+    await db.commit()
+    await db.refresh(credit_note)
+    await db.refresh(invoice)
+
+    return {
+        "success": True,
+        "application_id": str(app_record.id),
+        "credit_note_id": str(credit_note.id),
+        "saldo_disponible_nc": float(nuevo_saldo_nc),
+        "invoice_id": str(invoice.id),
+        "numero_factura": invoice.numero_factura,
+        "saldo_pendiente_factura": float(nuevo_saldo_inv),
+        "estado_factura": invoice.estado,
+    }
+
+
+async def list_credit_note_applications(db: AsyncSession, company_id: str, credit_note_id: str | None = None) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    query = (
+        select(
+            SupplierCreditNoteApplication,
+            SupplierCreditNote.numero.label("numero_nc"),
+            SupplierInvoice.numero_factura,
+            Supplier.razon_social.label("supplier_nombre"),
+        )
+        .join(SupplierCreditNote, SupplierCreditNote.id == SupplierCreditNoteApplication.credit_note_id)
+        .join(SupplierInvoice, SupplierInvoice.id == SupplierCreditNoteApplication.invoice_id)
+        .join(Supplier, Supplier.id == SupplierCreditNote.supplier_id, isouter=True)
+        .where(SupplierCreditNoteApplication.company_id == cid)
+    )
+    if credit_note_id:
+        query = query.where(SupplierCreditNoteApplication.credit_note_id == uuid.UUID(credit_note_id))
+    query = query.order_by(SupplierCreditNoteApplication.created_at.desc())
+    result = await db.execute(query)
+
+    return [
+        {
+            "id": str(app.id),
+            "credit_note_id": str(app.credit_note_id),
+            "numero_nc": num_nc,
+            "invoice_id": str(app.invoice_id),
+            "numero_factura": num_fac,
+            "supplier_nombre": sup_nom,
+            "monto_aplicado": float(app.monto_aplicado),
+            "fecha": app.fecha.isoformat() if app.fecha else None,
+            "observaciones": app.observaciones,
+        }
+        for app, num_nc, num_fac, sup_nom in result.all()
     ]
 
 

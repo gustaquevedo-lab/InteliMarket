@@ -216,16 +216,62 @@ async def list_sessions_summary(
     company_id: str = Query(),
     register_id: str | None = Query(None),
     estado: str | None = Query(None),
+    user_id: str | None = Query(None),
+    cajero_nombre: str | None = Query(None),
+    search: str | None = Query(None),
     limit: int = Query(50, le=5000),
     offset: int = Query(0, ge=0),
     fecha_desde: str | None = Query(None),
+    fecha_hasta: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    parsed_fecha = None
+    parsed_fecha_desde = None
     if fecha_desde:
         from datetime import datetime as _dt
-        parsed_fecha = _dt.fromisoformat(fecha_desde)
-    return await service.list_sessions_with_totals(db, company_id, register_id, estado, limit=limit, offset=offset, fecha_desde=parsed_fecha)
+        try:
+            if "T" in fecha_desde:
+                parsed_fecha_desde = _dt.fromisoformat(fecha_desde)
+            else:
+                parsed_fecha_desde = datetime.strptime(fecha_desde, "%Y-%m-%d").replace(tzinfo=PY_TZ)
+        except Exception:
+            parsed_fecha_desde = None
+
+    parsed_fecha_hasta = None
+    if fecha_hasta:
+        from datetime import datetime as _dt
+        try:
+            if "T" in fecha_hasta:
+                parsed_fecha_hasta = _dt.fromisoformat(fecha_hasta)
+            else:
+                parsed_fecha_hasta = datetime.strptime(fecha_hasta, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=PY_TZ)
+        except Exception:
+            parsed_fecha_hasta = None
+
+    return await service.list_sessions_with_totals(
+        db,
+        company_id,
+        register_id=register_id,
+        estado=estado,
+        limit=limit,
+        offset=offset,
+        fecha_desde=parsed_fecha_desde,
+        fecha_hasta=parsed_fecha_hasta,
+        cajero_nombre=cajero_nombre,
+        user_id=user_id,
+        search=search,
+    )
+
+
+@router.get("/cash-sessions/{session_id}/sales")
+async def get_cash_session_sales(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    result = await service.get_session_sales_detail(db, session_id, user["company_id"])
+    if not result:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada o no pertenece a su empresa")
+    return result
 
 
 @router.get("/cash-sessions/{session_id}/payment-breakdown")

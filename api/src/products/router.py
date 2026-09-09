@@ -110,11 +110,16 @@ async def list_products_direct(
     supplier_id: str | None = Query(None),
     search: str | None = Query(None),
     activo: bool | None = Query(None),
+    tipo_producto: str | None = Query(None),
+    include_inactive: bool = Query(False),
     limit: int = Query(100, le=20000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    products = await service.list_products(db, company_id, categoria_id, search, activo, limit, offset, supplier_id=supplier_id)
+    products = await service.list_products(
+        db, company_id, categoria_id, search, activo, limit, offset,
+        supplier_id=supplier_id, tipo_producto=tipo_producto, include_inactive=include_inactive,
+    )
     await annotate_products_with_promos(db, company_id, products)
     return products
 
@@ -126,11 +131,16 @@ async def list_products(
     supplier_id: str | None = Query(None),
     search: str | None = Query(None),
     activo: bool | None = Query(None),
+    tipo_producto: str | None = Query(None),
+    include_inactive: bool = Query(False),
     limit: int = Query(100, le=20000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    products = await service.list_products(db, company_id, categoria_id, search, activo, limit, offset, supplier_id=supplier_id)
+    products = await service.list_products(
+        db, company_id, categoria_id, search, activo, limit, offset,
+        supplier_id=supplier_id, tipo_producto=tipo_producto, include_inactive=include_inactive,
+    )
     await annotate_products_with_promos(db, company_id, products)
     return products
 

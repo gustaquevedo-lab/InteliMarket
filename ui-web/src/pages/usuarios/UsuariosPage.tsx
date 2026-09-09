@@ -619,8 +619,36 @@ function UserModal({ user, roles, onClose, onSubmit, submitting }: UserModalProp
   const [nombre, setNombre] = useState(user?.nombre || "")
   const [telefono, setTelefono] = useState(user?.telefono || "")
   const [rol, setRol] = useState(user?.tenant_rol || user?.rol || "cajero")
-  const [roleId, setRoleId] = useState("")
+  const [roleId, setRoleId] = useState(() => {
+    // Pre-seleccionar el role_id si existe en la BD con ese nombre
+    if (roles.length > 0) {
+      const match = roles.find(r => r.name?.toLowerCase().includes(user?.tenant_rol?.toLowerCase() || "") ||
+        r.name?.toLowerCase().includes(user?.rol?.toLowerCase() || ""))
+      return match?.id || roles[0]?.id || ""
+    }
+    return ""
+  })
   const [password, setPassword] = useState("")
+
+  // Usar roles de BD si están disponibles, sino el array estático como fallback
+  const roleOptions = roles.length > 0
+    ? roles.map(r => ({ id: r.id, name: r.name, label: r.name, description: r.description }))
+    : ROL_OPTIONS.map(r => ({ id: r.id, name: r.id, label: r.label, description: "" }))
+
+  const handleRoleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selected = roleOptions.find(r => r.id === e.target.value)
+    if (roles.length > 0) {
+      // Usando roles de BD: id es UUID, guardamos también un rol legible
+      setRoleId(e.target.value)
+      setRol(selected?.name || e.target.value)
+    } else {
+      // Usando fallback estático: id es el slug del rol
+      setRol(e.target.value)
+      setRoleId("")
+    }
+  }
+
+  const selectValue = roles.length > 0 ? (roleId || roleOptions[0]?.id || "") : rol
 
   return (
     <Modal open onClose={onClose} title={user ? "Editar Colaborador" : "Registrar Nuevo Colaborador"} size="md">
@@ -667,18 +695,24 @@ function UserModal({ user, roles, onClose, onSubmit, submitting }: UserModalProp
         <div>
           <label className="text-[11px] font-black uppercase text-slate-500 block mb-1">
             Rol de Supermercado
+            {roles.length === 0 && (
+              <span className="ml-1 text-amber-500 normal-case font-normal">(cargando roles...)</span>
+            )}
           </label>
           <select
             className="w-full p-2.5 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:border-blue-500"
-            value={rol}
-            onChange={(e) => setRol(e.target.value)}
+            value={selectValue}
+            onChange={handleRoleChange}
           >
-            {ROL_OPTIONS.map((r) => (
+            {roleOptions.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.label}
               </option>
             ))}
           </select>
+          {roles.length > 0 && (
+            <p className="text-[10px] text-slate-400 mt-1">{roleOptions.find(r => r.id === selectValue)?.description}</p>
+          )}
         </div>
 
         {!user && (

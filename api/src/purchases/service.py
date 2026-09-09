@@ -35,6 +35,7 @@ from api.src.purchases.schemas import (
     RfqCreate, RfqResponseSubmit,
 )
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
+from api.src.financial.models import SupplierInvoice
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -763,6 +764,45 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
     if review_reasons:
         receipt.requiere_revision = True
         receipt.motivo_revision = "; ".join(review_reasons)
+
+    # Auto-vincular recepción a Cuentas por Pagar (SupplierInvoice)
+    try:
+        sup_res = await db.execute(select(Supplier).where(Supplier.id == data.supplier_id))
+        sup = sup_res.scalar_one_or_none()
+        plazo_dias = sup.plazo_pago_dias if (sup and sup.plazo_pago_dias) else 30
+        fecha_emision = date.today()
+        fecha_vencimiento = fecha_emision + timedelta(days=plazo_dias)
+
+        invoice_num = (data.proveedor_ref or receipt.numero).strip()
+        iva_10 = (receipt.total / Decimal("11")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+        inv = SupplierInvoice(
+            company_id=data.company_id,
+            supplier_id=data.supplier_id,
+            numero_factura=invoice_num,
+            fecha_emision=fecha_emision,
+            fecha_recepcion=fecha_emision,
+            fecha_vencimiento=fecha_vencimiento,
+            subtotal=receipt.total - iva_10,
+            descuento=Decimal("0"),
+            iva_10=iva_10,
+            iva_5=Decimal("0"),
+            total=receipt.total,
+            saldo_pendiente=receipt.total,
+            moneda="PYG",
+            tipo_cambio=Decimal("1"),
+            purchase_order_id=data.purchase_order_id,
+            receipt_id=receipt.id,
+            condicion="credito" if plazo_dias > 0 else "contado",
+            tipo_comprobante="factura",
+            estado="pendiente",
+            concepto=f"Recepción de mercadería {receipt.numero}" + (f" - Ref: {data.proveedor_ref}" if data.proveedor_ref else ""),
+            notas=data.observaciones,
+            created_by=data.user_id,
+        )
+        db.add(inv)
+    except Exception as e:
+        logger.warning("No se pudo crear automáticamente la factura en Cuentas por Pagar: %s", e)
 
     await db.flush()
     await db.refresh(receipt)

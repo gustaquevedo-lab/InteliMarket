@@ -262,6 +262,37 @@ export default function CajaPage() {
   // Asentamiento Bóveda y Bancos
   const [incorporatingSessionId, setIncorporatingSessionId] = useState<string | null>(null)
 
+  // ── Resumen y Detalle de Ventas de la Caja ──
+  const [sessionSalesModalOpen, setSessionSalesModalOpen] = useState(false)
+  const [selectedSalesSessionId, setSelectedSalesSessionId] = useState<string | null>(null)
+  const [sessionSalesData, setSessionSalesData] = useState<any>(null)
+  const [sessionSalesLoading, setSessionSalesLoading] = useState(false)
+  const [sessionSalesSearch, setSessionSalesSearch] = useState("")
+  const [sessionSalesStatusFilter, setSessionSalesStatusFilter] = useState<"todas" | "confirmadas" | "anuladas">("todas")
+
+  // ── Filtros Avanzados para Historial de Cierres ──
+  const [historialCajeroFilter, setHistorialCajeroFilter] = useState("")
+  const [historialFechaDesde, setHistorialFechaDesde] = useState("")
+  const [historialFechaHasta, setHistorialFechaHasta] = useState("")
+
+  const handleOpenSessionSalesModal = async (sessionId: string) => {
+    setSelectedSalesSessionId(sessionId)
+    setSessionSalesModalOpen(true)
+    setSessionSalesLoading(true)
+    setSessionSalesData(null)
+    setSessionSalesSearch("")
+    setSessionSalesStatusFilter("todas")
+    try {
+      const data = await api.caja.sessionSales(sessionId)
+      setSessionSalesData(data)
+    } catch (err: any) {
+      toast.error("Error al cargar ventas", err?.message || "No se pudo obtener el detalle de ventas de la caja.")
+      setSessionSalesModalOpen(false)
+    } finally {
+      setSessionSalesLoading(false)
+    }
+  }
+
   const handleOpenPunteoModal = async (sessionId: string) => {
     try {
       setPunteoLoading(true)
@@ -446,11 +477,20 @@ export default function CajaPage() {
 
   const pendingHandoffs = handoffs.filter(h => h.estado === "pendiente")
 
-  const fetchHistorial = async (lim?: number) => {
+  const fetchHistorial = async (lim?: number, overrideFilters?: { fecha_desde?: string; fecha_hasta?: string; cajero?: string }) => {
     setHistorialLoading(true)
     const effectiveLimit = lim ?? historialLimit
+    const fDesde = overrideFilters && "fecha_desde" in overrideFilters ? overrideFilters.fecha_desde : historialFechaDesde
+    const fHasta = overrideFilters && "fecha_hasta" in overrideFilters ? overrideFilters.fecha_hasta : historialFechaHasta
+    const cNom = overrideFilters && "cajero" in overrideFilters ? overrideFilters.cajero : historialCajeroFilter
     try {
-      const data = await api.caja.sessionsSummary({ estado: "cerrada", limit: effectiveLimit })
+      const data = await api.caja.sessionsSummary({
+        estado: "cerrada",
+        limit: effectiveLimit,
+        fecha_desde: fDesde || undefined,
+        fecha_hasta: fHasta || undefined,
+        cajero_nombre: cNom || undefined,
+      })
       setHistorial(data)
     } catch {
       toast.error("Error", "No se pudo cargar el historial de cierres")
@@ -708,9 +748,47 @@ export default function CajaPage() {
     !search || (s.cajero_nombre || "").toLowerCase().includes(search.toLowerCase()) || (s.estado || "").toLowerCase().includes(search.toLowerCase())
   )
 
-  const filteredHistorial = historial.filter(s =>
-    !search || getCajero(s).toLowerCase().includes(search.toLowerCase()) || (s.fecha_cierre || "").includes(search)
-  )
+  const cajerosDisponibles = Array.from(
+    new Set(
+      [
+        ...historial.map(s => getCajero(s)),
+        ...sessions.map(s => s.cajero_nombre || ""),
+        ...cajeroPerformance.map(c => c.cajero_nombre),
+      ].filter(n => n && n !== "Cajero Asignado" && n !== "—")
+    )
+  ).sort()
+
+  const filteredHistorial = historial.filter(s => {
+    const cajeroStr = getCajero(s).toLowerCase()
+    const fechaStr = (s.fecha_cierre || s.fecha_apertura || "")
+    const searchLower = search.toLowerCase()
+
+    const matchesSearch =
+      !search ||
+      cajeroStr.includes(searchLower) ||
+      fechaStr.includes(search) ||
+      (s.id || "").toLowerCase().includes(searchLower)
+
+    const matchesCajero = !historialCajeroFilter || getCajero(s) === historialCajeroFilter
+
+    let matchesFechaDesde = true
+    if (historialFechaDesde) {
+      const fechaBase = s.fecha_cierre || s.fecha_apertura
+      if (fechaBase) {
+        matchesFechaDesde = fechaBase.slice(0, 10) >= historialFechaDesde
+      }
+    }
+
+    let matchesFechaHasta = true
+    if (historialFechaHasta) {
+      const fechaBase = s.fecha_cierre || s.fecha_apertura
+      if (fechaBase) {
+        matchesFechaHasta = fechaBase.slice(0, 10) <= historialFechaHasta
+      }
+    }
+
+    return matchesSearch && matchesCajero && matchesFechaDesde && matchesFechaHasta
+  })
 
   // Totales en vivo
   const totalRegisters = registers.length
@@ -1387,35 +1465,147 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
 
       {/* TAB 4: HISTORIAL DE ARQUEOS & CIERRES */}
       {activeTab === "historial" && (
-        <div className="card overflow-hidden">
-          <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-xs font-bold text-gray-600 dark:text-gray-300">
-                Mostrando {filteredHistorial.length} arqueos históricos
-              </span>
-              <div className="inline-flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px]">
-                {[100, 250, 500, 1500].map(lim => (
+        <div className="card overflow-hidden space-y-0">
+          {/* Header y Filtros */}
+          <div className="p-4 border-b border-gray-100 dark:border-gray-700 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-xs font-bold text-gray-700 dark:text-gray-200">
+                  Mostrando {filteredHistorial.length} arqueos históricos
+                </span>
+                <div className="inline-flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px]">
+                  {[100, 250, 500, 1500].map(lim => (
+                    <button
+                      key={lim}
+                      type="button"
+                      onClick={() => {
+                        setHistorialLimit(lim)
+                        fetchHistorial(lim)
+                      }}
+                      className={`px-2 py-0.5 rounded font-medium transition ${
+                        historialLimit === lim
+                          ? "bg-white dark:bg-slate-700 text-purple-700 dark:text-purple-300 font-bold shadow-sm"
+                          : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                      }`}
+                    >
+                      {lim}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button
+                onClick={() => fetchHistorial()}
+                disabled={historialLoading}
+                className="btn-ghost text-xs flex items-center gap-1 self-start sm:self-auto"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${historialLoading ? "animate-spin" : ""}`} /> Refrescar
+              </button>
+            </div>
+
+            {/* Barra de Filtros: Cajera y Rango de Fechas */}
+            <div className="flex flex-wrap items-center gap-2.5 pt-1">
+              {/* Filtro por Cajero */}
+              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/80 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                <Users className="w-3.5 h-3.5 text-slate-400" />
+                <select
+                  value={historialCajeroFilter}
+                  onChange={(e) => {
+                    setHistorialCajeroFilter(e.target.value)
+                    fetchHistorial(undefined, { cajero: e.target.value })
+                  }}
+                  className="text-xs font-semibold bg-transparent text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+                >
+                  <option value="" className="dark:bg-slate-800">Todas las cajeras ({cajerosDisponibles.length})</option>
+                  {cajerosDisponibles.map(c => (
+                    <option key={c} value={c} className="dark:bg-slate-800">{c}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Rango de Fechas */}
+              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/80 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
+                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                <span className="text-[11px] font-bold text-slate-500">Desde:</span>
+                <input
+                  type="date"
+                  value={historialFechaDesde}
+                  onChange={(e) => {
+                    setHistorialFechaDesde(e.target.value)
+                    fetchHistorial(undefined, { fecha_desde: e.target.value })
+                  }}
+                  className="bg-transparent text-xs font-mono text-slate-800 dark:text-slate-200 outline-none"
+                />
+                <span className="text-[11px] font-bold text-slate-500">Hasta:</span>
+                <input
+                  type="date"
+                  value={historialFechaHasta}
+                  onChange={(e) => {
+                    setHistorialFechaHasta(e.target.value)
+                    fetchHistorial(undefined, { fecha_hasta: e.target.value })
+                  }}
+                  className="bg-transparent text-xs font-mono text-slate-800 dark:text-slate-200 outline-none"
+                />
+              </div>
+
+              {/* Botones rápidos de fecha */}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const hoy = new Date().toISOString().slice(0, 10)
+                    setHistorialFechaDesde(hoy)
+                    setHistorialFechaHasta(hoy)
+                    fetchHistorial(undefined, { fecha_desde: hoy, fecha_hasta: hoy })
+                  }}
+                  className="px-2 py-1 rounded-lg text-[11px] font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
+                >
+                  Hoy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = new Date()
+                    d.setDate(d.getDate() - 1)
+                    const ayer = d.toISOString().slice(0, 10)
+                    setHistorialFechaDesde(ayer)
+                    setHistorialFechaHasta(ayer)
+                    fetchHistorial(undefined, { fecha_desde: ayer, fecha_hasta: ayer })
+                  }}
+                  className="px-2 py-1 rounded-lg text-[11px] font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
+                >
+                  Ayer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const hoy = new Date().toISOString().slice(0, 10)
+                    const d = new Date()
+                    d.setDate(d.getDate() - 7)
+                    const sem = d.toISOString().slice(0, 10)
+                    setHistorialFechaDesde(sem)
+                    setHistorialFechaHasta(hoy)
+                    fetchHistorial(undefined, { fecha_desde: sem, fecha_hasta: hoy })
+                  }}
+                  className="px-2 py-1 rounded-lg text-[11px] font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
+                >
+                  Últimos 7d
+                </button>
+                {(historialCajeroFilter || historialFechaDesde || historialFechaHasta) && (
                   <button
-                    key={lim}
                     type="button"
                     onClick={() => {
-                      setHistorialLimit(lim)
-                      fetchHistorial(lim)
+                      setHistorialCajeroFilter("")
+                      setHistorialFechaDesde("")
+                      setHistorialFechaHasta("")
+                      fetchHistorial(undefined, { fecha_desde: "", fecha_hasta: "", cajero: "" })
                     }}
-                    className={`px-2 py-0.5 rounded font-medium transition ${
-                      historialLimit === lim
-                        ? "bg-white dark:bg-slate-700 text-purple-700 dark:text-purple-300 font-bold shadow-sm"
-                        : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
-                    }`}
+                    className="px-2 py-1 rounded-lg text-[11px] font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
                   >
-                    {lim}
+                    ✕ Limpiar
                   </button>
-                ))}
+                )}
               </div>
             </div>
-            <button onClick={() => fetchHistorial()} disabled={historialLoading} className="btn-ghost text-xs flex items-center gap-1">
-              <RefreshCw className={`w-3.5 h-3.5 ${historialLoading ? "animate-spin" : ""}`} /> Refrescar
-            </button>
           </div>
 
           <div className="overflow-x-auto max-h-[550px]">
@@ -1428,7 +1618,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   <th className="p-3.5 text-right">Esperado (POS)</th>
                   <th className="p-3.5 text-right">Descuadre</th>
                   <th className="p-3.5 text-center">Estado Cuadre</th>
-                  <th className="p-3.5 text-center">Acta</th>
+                  <th className="p-3.5 text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
@@ -1438,7 +1628,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   </tr>
                 ) : filteredHistorial.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="p-8 text-center text-gray-400">No se encontraron cierres históricos.</td>
+                    <td colSpan={7} className="p-8 text-center text-gray-400">No se encontraron cierres históricos con los filtros seleccionados.</td>
                   </tr>
                 ) : (
                   filteredHistorial.map(s => {
@@ -1479,6 +1669,15 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                         </td>
                         <td className="p-3.5 text-center">
                           <div className="inline-flex items-center gap-1.5 justify-center">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenSessionSalesModal(s.id)}
+                              title="Ver resumen y detalle de todas las ventas que componen esta caja"
+                              className="p-1.5 rounded-lg border border-indigo-300 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 inline-flex items-center gap-1 font-bold text-[11px] transition-colors shadow-sm"
+                            >
+                              <Receipt className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                              Ventas
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleOpenEscposTicket(s.id)}
@@ -4522,6 +4721,310 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
           </div>
         </div>
       )}
+
+      {/* 🧾 MODAL: RESUMEN Y DETALLE DE TODAS LAS VENTAS QUE COMPONEN LA CAJA */}
+      {sessionSalesModalOpen && (
+        <div className="fixed inset-0 lg:left-64 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-[96vw] lg:w-[calc(96vw-16rem)] max-w-6xl xl:max-w-7xl max-h-[92vh] flex flex-col p-5 sm:p-6 shadow-2xl my-auto">
+            {/* Header fijo */}
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-200 dark:border-indigo-500/30 shrink-0">
+                  <Receipt className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base sm:text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                    Resumen y Composición de Ventas de la Caja
+                    {sessionSalesData?.session?.estado && (
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                        sessionSalesData.session.estado === "cerrada"
+                          ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                          : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 animate-pulse"
+                      }`}>
+                        {sessionSalesData.session.estado}
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {sessionSalesData?.session ? (
+                      <>
+                        <strong className="text-slate-700 dark:text-slate-200">{sessionSalesData.session.register_nombre}</strong> · Cajero/a: <strong className="text-slate-700 dark:text-slate-200">{sessionSalesData.session.cajero_nombre}</strong> · Apertura: <span className="font-mono">{sessionSalesData.session.fecha_apertura_local}</span> · Cierre: <span className="font-mono">{sessionSalesData.session.fecha_cierre_local}</span>
+                      </>
+                    ) : "Detalle comprobante a comprobante"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setSessionSalesModalOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {sessionSalesLoading ? (
+              <div className="py-24 text-center space-y-3">
+                <Loader2 className="w-8 h-8 animate-spin mx-auto text-indigo-600 dark:text-indigo-400" />
+                <p className="text-xs text-slate-500 dark:text-slate-400">Cargando ventas y medios de pago de la sesión...</p>
+              </div>
+            ) : sessionSalesData ? (
+              <div className="flex-1 overflow-y-auto space-y-4 py-3 pr-1">
+                {/* 1. KPI Cards de la Sesión */}
+                <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                  {/* KPI 1: Ventas Totales */}
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-br from-indigo-500/10 to-indigo-600/5 dark:from-indigo-950/40 dark:to-indigo-900/20 border border-indigo-200 dark:border-indigo-800/60 space-y-1">
+                    <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wide">
+                      Total Facturado (PYG)
+                    </span>
+                    <div className="text-lg sm:text-xl font-black font-mono text-indigo-950 dark:text-indigo-100">
+                      {formatPYG(sessionSalesData.totales.total_ventas_gs)}
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                      <span>{sessionSalesData.totales.cantidad_ventas} tickets emitidos</span>
+                      <span>Prom: {formatPYG(sessionSalesData.totales.ticket_promedio_gs)}</span>
+                    </div>
+                  </div>
+
+                  {/* KPI 2: Ventas en Efectivo */}
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 dark:from-emerald-950/40 dark:to-emerald-900/20 border border-emerald-200 dark:border-emerald-800/60 space-y-1">
+                    <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
+                      Recaudación Efectivo
+                    </span>
+                    <div className="text-lg sm:text-xl font-black font-mono text-emerald-950 dark:text-emerald-100">
+                      {formatPYG(sessionSalesData.totales.ventas_efectivo_gs)}
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                      <span>Fondo Gs: {formatPYG(sessionSalesData.totales.fondo_apertura_gs)}</span>
+                      {sessionSalesData.totales.total_drops_gs > 0 && (
+                        <span className="text-amber-600">Drops: -{formatPYG(sessionSalesData.totales.total_drops_gs)}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* KPI 3: Medios No Efectivo (Tarjetas, QR, PIX) */}
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-br from-purple-500/10 to-purple-600/5 dark:from-purple-950/40 dark:to-purple-900/20 border border-purple-200 dark:border-purple-800/60 space-y-1">
+                    <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 uppercase tracking-wide">
+                      Medios Electrónicos / QR / Tarjetas
+                    </span>
+                    <div className="text-lg sm:text-xl font-black font-mono text-purple-950 dark:text-purple-100">
+                      {formatPYG(sessionSalesData.totales.ventas_no_efectivo_gs)}
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {sessionSalesData.totales.total_ventas_gs > 0
+                        ? `${((sessionSalesData.totales.ventas_no_efectivo_gs / sessionSalesData.totales.total_ventas_gs) * 100).toFixed(1)}% del total facturado`
+                        : "0%"}
+                    </div>
+                  </div>
+
+                  {/* KPI 4: Cuadre y Descuadre */}
+                  {(() => {
+                    const dif = Number(sessionSalesData.totales.diferencia_gs || 0)
+                    const isPerfect = dif === 0
+                    const isSobrante = dif > 0
+                    return (
+                      <div className={`p-3.5 rounded-2xl border space-y-1 ${
+                        isPerfect
+                          ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/60"
+                          : isSobrante
+                          ? "bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800/60"
+                          : "bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800/60"
+                      }`}>
+                        <span className={`text-[11px] font-bold uppercase tracking-wide ${
+                          isPerfect ? "text-emerald-700 dark:text-emerald-300" : isSobrante ? "text-blue-700 dark:text-blue-300" : "text-rose-700 dark:text-rose-300"
+                        }`}>
+                          {isPerfect ? "✓ Cuadre Exacto" : isSobrante ? "↑ Sobrante en Caja" : "↓ Faltante en Caja"}
+                        </span>
+                        <div className={`text-lg sm:text-xl font-black font-mono ${
+                          isPerfect ? "text-emerald-700 dark:text-emerald-300" : isSobrante ? "text-blue-700 dark:text-blue-300" : "text-rose-700 dark:text-rose-300"
+                        }`}>
+                          {dif !== 0 ? (dif > 0 ? `+${formatPYG(dif)}` : formatPYG(dif)) : "₲ 0 (Sin Descuadre)"}
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                          <span>Esp: {formatPYG(sessionSalesData.totales.esperado_gaveta_gs)}</span>
+                          <span>Rendido: {formatPYG(sessionSalesData.totales.declarado_gaveta_gs)}</span>
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </div>
+
+                {/* 2. Chips de desglose por medios de pago */}
+                {sessionSalesData.desglose_medios && sessionSalesData.desglose_medios.length > 0 && (
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-2">
+                    <div className="text-[11px] font-black uppercase text-slate-600 dark:text-slate-300 tracking-wider">
+                      Desglose Consolidado por Medio de Pago (100% en Guaraníes)
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {sessionSalesData.desglose_medios.map((m: any, idx: number) => (
+                        <div key={idx} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs">
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">{m.label}:</span>
+                          <span className="font-mono font-bold text-slate-900 dark:text-white">{m.monto_formateado}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. Buscador y Filtros de la Tabla de Ventas */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1">
+                  <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => setSessionSalesStatusFilter("todas")}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                        sessionSalesStatusFilter === "todas"
+                          ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                          : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
+                      }`}
+                    >
+                      Todas ({sessionSalesData.sales.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSessionSalesStatusFilter("confirmadas")}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                        sessionSalesStatusFilter === "confirmadas"
+                          ? "bg-emerald-600 text-white shadow-sm"
+                          : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
+                      }`}
+                    >
+                      Confirmadas ({sessionSalesData.totales.cantidad_ventas})
+                    </button>
+                    {sessionSalesData.totales.cantidad_anuladas > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSessionSalesStatusFilter("anuladas")}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                          sessionSalesStatusFilter === "anuladas"
+                            ? "bg-rose-600 text-white shadow-sm"
+                            : "text-rose-600 dark:text-rose-400"
+                        }`}
+                      >
+                        Anuladas ({sessionSalesData.totales.cantidad_anuladas})
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="relative flex-1 sm:max-w-xs">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={sessionSalesSearch}
+                      onChange={(e) => setSessionSalesSearch(e.target.value)}
+                      placeholder="Buscar ticket, cliente, RUC o medio..."
+                      className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                {/* 4. Tabla de Ventas */}
+                {(() => {
+                  const searchLower = sessionSalesSearch.toLowerCase()
+                  const filteredSales = (sessionSalesData.sales || []).filter((s: any) => {
+                    const matchesStatus =
+                      sessionSalesStatusFilter === "todas"
+                        ? true
+                        : sessionSalesStatusFilter === "confirmadas"
+                        ? ["confirmado", "completada", "completado", "pagado"].includes((s.estado || "").toLowerCase())
+                        : ["cancelado", "anulado", "anulada", "devuelto"].includes((s.estado || "").toLowerCase())
+
+                    const matchesText =
+                      !sessionSalesSearch ||
+                      (s.numero || "").toLowerCase().includes(searchLower) ||
+                      (s.numero_interno || "").toLowerCase().includes(searchLower) ||
+                      (s.cliente_nombre || "").toLowerCase().includes(searchLower) ||
+                      (s.cliente_ruc || "").toLowerCase().includes(searchLower) ||
+                      (s.forma_pago_resumen || "").toLowerCase().includes(searchLower)
+
+                    return matchesStatus && matchesText
+                  })
+
+                  return (
+                    <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                      <div className="overflow-x-auto max-h-[420px]">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-slate-100 dark:bg-slate-800/90 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider sticky top-0 z-10">
+                            <tr>
+                              <th className="p-2.5">Hora</th>
+                              <th className="p-2.5">N° Comprobante</th>
+                              <th className="p-2.5">Tipo</th>
+                              <th className="p-2.5">Cliente</th>
+                              <th className="p-2.5">Medio(s) de Pago</th>
+                              <th className="p-2.5 text-center">Ítems</th>
+                              <th className="p-2.5 text-right">Total (PYG)</th>
+                              <th className="p-2.5 text-center">Estado</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {filteredSales.length === 0 ? (
+                              <tr>
+                                <td colSpan={8} className="p-8 text-center text-slate-400">
+                                  No se encontraron ventas para este filtro.
+                                </td>
+                              </tr>
+                            ) : (
+                              filteredSales.map((s: any) => {
+                                const isConfirmed = ["confirmado", "completada", "completado", "pagado"].includes((s.estado || "").toLowerCase())
+                                return (
+                                  <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
+                                    <td className="p-2.5 font-mono text-slate-500 whitespace-nowrap">
+                                      {s.hora_local || "-"}
+                                    </td>
+                                    <td className="p-2.5 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                                      {s.numero}
+                                      {s.numero_interno && s.numero_interno !== s.numero && (
+                                        <span className="text-[10px] text-slate-400 block font-normal">#{s.numero_interno}</span>
+                                      )}
+                                    </td>
+                                    <td className="p-2.5 capitalize text-slate-600 dark:text-slate-300">
+                                      {s.tipo_comprobante || "Ticket"}
+                                    </td>
+                                    <td className="p-2.5">
+                                      <div className="font-semibold text-slate-900 dark:text-white truncate max-w-[200px]" title={s.cliente_nombre}>
+                                        {s.cliente_nombre}
+                                      </div>
+                                      <span className="text-[10px] text-slate-400 font-mono">
+                                        {s.cliente_ruc !== "X" ? `RUC: ${s.cliente_ruc}` : "Consumidor Final"}
+                                      </span>
+                                    </td>
+                                    <td className="p-2.5">
+                                      <span className="inline-block px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium text-[11px]">
+                                        {s.forma_pago_resumen}
+                                      </span>
+                                    </td>
+                                    <td className="p-2.5 text-center font-mono text-slate-500">
+                                      {s.items_count}
+                                    </td>
+                                    <td className="p-2.5 text-right font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                                      {formatPYG(s.total)}
+                                    </td>
+                                    <td className="p-2.5 text-center whitespace-nowrap">
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                        isConfirmed
+                                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                          : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
+                                      }`}>
+                                        {s.estado}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                )
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
       {showExportArqueoModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 my-8">

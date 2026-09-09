@@ -75,7 +75,7 @@ export default function BancosPage() {
 
   // Modales y formularios
   const [showBankForm, setShowBankForm] = useState(false)
-  const [bankForm, setBankForm] = useState({ banco: "", tipo: "corriente", numero_cuenta: "", moneda: "PYG", saldo_inicial: "", titular: "" })
+  const [bankForm, setBankForm] = useState({ banco: "", alias: "", tipo: "corriente", numero_cuenta: "", moneda: "PYG", saldo_inicial: "", titular: "" })
   const [showImportBank, setShowImportBank] = useState(false)
   const now = new Date()
   const [importForm, setImportForm] = useState<{ mes: number; anio: number; file: File | null }>({ mes: now.getMonth() + 1, anio: now.getFullYear(), file: null })
@@ -91,27 +91,36 @@ export default function BancosPage() {
   const { user } = useAuth()
 
   const formatGs = (n?: number | string | null) => n != null ? formatPYG(Number(n)) : "-"
+  const formatBankLabel = (b: BankAccount) => b.alias ? `[${b.alias}] ${b.banco} — ${b.numero_cuenta} (${b.moneda})` : `${b.banco} — ${b.numero_cuenta} (${b.moneda})`
 
   const fetchAll = async () => {
     setLoading(true)
     try {
-      const [b, d, cp, oi, recs, corr] = await Promise.all([
+      const [b, d, cp, oi, recs, corr] = await Promise.allSettled([
         api.financial.banks.list(),
         api.financial.banksDashboard(),
         api.financial.cashPosition(),
         api.financial.outstandingItems(),
-        api.financeAgent.recommendations("pending"),
-        api.financial.balanceCorrections.list("pendiente"),
+        api.financeAgent.recommendations("pending").catch(() => []),
+        api.financial.balanceCorrections.list("pendiente").catch(() => []),
       ])
-      setBanks(b)
-      setBankDashboard(d)
-      setCashPosition(cp)
-      setOutstandingItems(oi)
-      setAlerts(recs.filter((r: any) => r.tipo === "saldo_bajo" || r.tipo === "divergencia_saldo"))
-      setCorrections(corr)
-      if (b.length > 0 && !selectedBank) {
-        setSelectedBank(b[0].id)
-        loadBankTxns(b[0].id)
+
+      const rawBanks = b.status === "fulfilled" && Array.isArray(b.value) ? b.value : []
+      // Directiva de Gusta: Eliminar/ocultar cuentas en R$, bancos operan en PYG / USD
+      const validBanks = rawBanks.filter((acc: BankAccount) => acc.moneda !== "BRL")
+      setBanks(validBanks)
+
+      if (d.status === "fulfilled") setBankDashboard(d.value)
+      if (cp.status === "fulfilled") setCashPosition(cp.value)
+      if (oi.status === "fulfilled") setOutstandingItems(oi.value)
+      if (recs.status === "fulfilled" && Array.isArray(recs.value)) {
+        setAlerts(recs.value.filter((r: any) => r.tipo === "saldo_bajo" || r.tipo === "divergencia_saldo"))
+      }
+      if (corr.status === "fulfilled") setCorrections(corr.value || [])
+
+      if (validBanks.length > 0 && !selectedBank) {
+        setSelectedBank(validBanks[0].id)
+        loadBankTxns(validBanks[0].id)
       }
     } catch (e: any) {
       if (e.status !== 401 && e.response?.status !== 401) toast.error("Error", e.message)
@@ -169,7 +178,7 @@ export default function BancosPage() {
       await api.financial.banks.create({ ...bankForm, saldo_inicial: Number(bankForm.saldo_inicial) })
       toast.success("Cuenta creada", "Cuenta bancaria registrada exitosamente")
       setShowBankForm(false)
-      setBankForm({ banco: "", tipo: "corriente", numero_cuenta: "", moneda: "PYG", saldo_inicial: "", titular: "" })
+      setBankForm({ banco: "", alias: "", tipo: "corriente", numero_cuenta: "", moneda: "PYG", saldo_inicial: "", titular: "" })
       fetchAll()
     } catch (e: any) { toast.error("Error", e.message) }
   }
@@ -714,7 +723,16 @@ export default function BancosPage() {
                         <div className="flex items-start justify-between">
                           <div>
                             <span className="text-xs font-bold uppercase tracking-wider text-gray-400">{b.tipo} · {b.moneda}</span>
-                            <h4 className="text-base font-bold text-gray-900 dark:text-white mt-0.5">{b.banco}</h4>
+                            <h4 className="text-base font-bold text-gray-900 dark:text-white mt-0.5">
+                              {b.alias ? (
+                                <span className="flex items-center gap-1.5 flex-wrap">
+                                  <span>{b.alias}</span>
+                                  <span className="text-xs font-normal text-gray-400">({b.banco})</span>
+                                </span>
+                              ) : (
+                                b.banco
+                              )}
+                            </h4>
                             <div className="text-xs text-gray-500 font-mono mt-0.5">{b.numero_cuenta}</div>
                           </div>
                           <div className="flex items-center gap-1">
@@ -864,7 +882,7 @@ export default function BancosPage() {
                       onChange={e => { setSelectedBank(e.target.value); loadBankTxns(e.target.value); }}
                     >
                       {banks.map(b => (
-                        <option key={b.id} value={b.id}>{b.banco} — {b.numero_cuenta} ({b.moneda})</option>
+                        <option key={b.id} value={b.id}>{formatBankLabel(b)}</option>
                       ))}
                     </select>
                   </div>
@@ -1060,7 +1078,7 @@ export default function BancosPage() {
                     onChange={e => { setSelectedBank(e.target.value); loadBankTxns(e.target.value); }}
                   >
                     {banks.map(b => (
-                      <option key={b.id} value={b.id}>{b.banco} — {b.numero_cuenta}</option>
+                      <option key={b.id} value={b.id}>{formatBankLabel(b)}</option>
                     ))}
                   </select>
                 </div>
@@ -1165,7 +1183,7 @@ export default function BancosPage() {
                     <select className="input-field w-full text-xs" value={chequeFilterBank} onChange={e => setChequeFilterBank(e.target.value)}>
                       <option value="">Todas las cuentas</option>
                       {banks.map(b => (
-                        <option key={b.id} value={b.id}>{b.banco} ({b.numero_cuenta})</option>
+                        <option key={b.id} value={b.id}>{formatBankLabel(b)}</option>
                       ))}
                     </select>
                   </div>
@@ -1517,11 +1535,14 @@ export default function BancosPage() {
               <h3 className="text-lg font-bold text-gray-900 dark:text-white">Nueva Cuenta Bancaria</h3>
             </div>
             <div className="p-6 space-y-4">
-              <div><label className="label-field">Nombre del Banco *</label><input className="input-field" placeholder="Ej: Banco Itaú" value={bankForm.banco} onChange={e => setBankForm({ ...bankForm, banco: e.target.value })} /></div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div><label className="label-field">Nombre del Banco *</label><input className="input-field" placeholder="Ej: Banco Itaú" value={bankForm.banco} onChange={e => setBankForm({ ...bankForm, banco: e.target.value })} /></div>
+                <div><label className="label-field">Alias / Nickname (Opcional)</label><input className="input-field" placeholder="Ej: Itaú Recaudación, Sudameris Proveedores" value={bankForm.alias} onChange={e => setBankForm({ ...bankForm, alias: e.target.value })} /></div>
+              </div>
               <div><label className="label-field">N° de Cuenta *</label><input className="input-field font-mono" placeholder="Ej: 123456789" value={bankForm.numero_cuenta} onChange={e => setBankForm({ ...bankForm, numero_cuenta: e.target.value })} /></div>
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="label-field">Tipo de Cuenta</label><select className="input-field" value={bankForm.tipo} onChange={e => setBankForm({ ...bankForm, tipo: e.target.value })}><option value="corriente">Cuenta Corriente</option><option value="ahorro">Caja de Ahorro</option></select></div>
-                <div><label className="label-field">Moneda</label><select className="input-field" value={bankForm.moneda} onChange={e => setBankForm({ ...bankForm, moneda: e.target.value })}><option value="PYG">PYG (Guaraní)</option><option value="USD">USD (Dólar)</option><option value="BRL">BRL (Real)</option></select></div>
+                <div><label className="label-field">Moneda</label><select className="input-field" value={bankForm.moneda} onChange={e => setBankForm({ ...bankForm, moneda: e.target.value })}><option value="PYG">PYG (Guaraní)</option><option value="USD">USD (Dólar)</option></select></div>
               </div>
               <div><label className="label-field">Saldo Inicial</label><input className="input-field font-mono" type="number" value={bankForm.saldo_inicial} onChange={e => setBankForm({ ...bankForm, saldo_inicial: e.target.value })} /></div>
               <div><label className="label-field">Titular de la Cuenta</label><input className="input-field" placeholder="Ej: Extra Supermercado S.A." value={bankForm.titular} onChange={e => setBankForm({ ...bankForm, titular: e.target.value })} /></div>
@@ -1554,7 +1575,7 @@ export default function BancosPage() {
                 <label className="label-field">Cuenta Bancaria Destino *</label>
                 <select className="input-field" value={selectedBank} onChange={e => { setSelectedBank(e.target.value); setImportPreview(null); }}>
                   <option value="">Seleccionar cuenta...</option>
-                  {banks.map(b => <option key={b.id} value={b.id}>{b.banco} — {b.numero_cuenta} ({b.moneda})</option>)}
+                  {banks.map(b => <option key={b.id} value={b.id}>{formatBankLabel(b)}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -1629,7 +1650,7 @@ export default function BancosPage() {
                   }}
                 >
                   <option value="">Seleccionar cuenta...</option>
-                  {banks.map(b => <option key={b.id} value={b.id}>{b.banco} — {b.numero_cuenta} ({b.moneda})</option>)}
+                  {banks.map(b => <option key={b.id} value={b.id}>{formatBankLabel(b)}</option>)}
                 </select>
               </div>
               <div><label className="label-field">Beneficiario / Proveedor *</label><input className="input-field" placeholder="Razón social o nombre" value={chequeForm.beneficiario} onChange={e => setChequeForm({ ...chequeForm, beneficiario: e.target.value })} /></div>

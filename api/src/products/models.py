@@ -35,6 +35,7 @@ class Product(Base):
     nombre = Column(String(200), nullable=False)
     descripcion = Column(Text)
     tipo = Column(String(20), nullable=False, default="producto")
+    tipo_producto = Column(String(20), nullable=False, default="producto", server_default="producto", comment="Clasificación de negocio: producto (final para venta), materia_prima, insumo (uso interno), servicio (mano de obra)")
     unidad_medida = Column(String(10), default="UN")
     iva_tasa = Column(Numeric(5, 2), default=10)
     metodo_costeo = Column(String(10), default="promedio", server_default="promedio")

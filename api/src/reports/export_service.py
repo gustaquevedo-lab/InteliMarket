@@ -386,3 +386,143 @@ def export_cost_comparison(data: list) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def export_sales_executive_xlsx(data: dict, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> bytes:
+    """Genera archivo Excel (.xlsx) multihistorial con las 7 líneas ejecutivas,
+    medios de pago y productividad por cajera."""
+    wb = Workbook()
+
+    # Hoja 1: 7 Líneas Ejecutivas
+    ws1 = wb.active
+    ws1.title = "Ventas y Rentabilidad"
+    _write_title(ws1, "Informe Ejecutivo de Ventas y Margen Comercial — Extra Supermercado", fecha_desde, fecha_hasta)
+
+    h1 = ["Línea", "Concepto Económico", "Monto (Gs.)", "Descripción Operativa"]
+    res = data.get("resumen", {})
+    r1 = [
+        (1, "Facturación Bruta (Total Vendido)", res.get("total_vendido", 0), "Ventas brutas registradas en cajas POS"),
+        (2, "Costo Mercadería Vendida (CMV)", res.get("cmv", 0), "Costo promedio ponderado de reposición"),
+        (3, "Margen / Utilidad Comercial Bruta", res.get("utilidad_bruta", 0), "Margen comercial antes de devoluciones (L1 - L2)"),
+        (4, "% Margen Comercial Bruto", f"{res.get('margen_bruto_pct', 0):.2f}%", "Porcentaje de utilidad bruta sobre ventas"),
+        (5, "Descuentos Otorgados en Cajas", res.get("descuentos_pos", 0), "Promociones y descuentos directos aplicados"),
+        (6, "Devoluciones & Notas de Crédito", res.get("devoluciones_nc", 0), "Mercadería devuelta y compensaciones"),
+        (7, "Resultado Comercial Neto", res.get("resultado_neto", 0), "Utilidad neta comercial final (L3 - L6)"),
+    ]
+    _write_data(ws1, h1, r1)
+
+    # Indicadores auxiliares
+    next_row = len(r1) + 6
+    ws1.cell(row=next_row, column=1, value="Tickets Procesados:").font = BOLD_FONT
+    ws1.cell(row=next_row, column=2, value=res.get("total_tickets", 0)).font = DATA_FONT
+    ws1.cell(row=next_row + 1, column=1, value="Ticket Promedio (Gs.):").font = BOLD_FONT
+    t_cell = ws1.cell(row=next_row + 1, column=2, value=res.get("ticket_promedio", 0))
+    t_cell.font = DATA_FONT
+    t_cell.number_format = CURRENCY_FMT
+
+    # Hoja 2: Medios de Pago
+    ws2 = wb.create_sheet("Medios de Pago")
+    _write_title(ws2, "Recaudación por Medios de Pago — Extra Supermercado", fecha_desde, fecha_hasta)
+    h2 = ["Medio de Pago / Canal", "Moneda", "Operaciones", "Monto Recaudado (Gs.)", "% Participación"]
+    r2 = []
+    for m in data.get("medios_pago", []):
+        r2.append((
+            m.get("etiqueta", m.get("forma_pago_raw", "")),
+            m.get("moneda", "PYG"),
+            m.get("cantidad", 0),
+            m.get("monto", 0),
+            f"{m.get('porcentaje', 0):.2f}%",
+        ))
+    _write_data(ws2, h2, r2)
+
+    # Hoja 3: Rendimiento por Cajera
+    ws3 = wb.create_sheet("Desempeño Cajeras")
+    _write_title(ws3, "Rendimiento y Productividad por Cajera — Extra Supermercado", fecha_desde, fecha_hasta)
+    h3 = ["Cajera / Operador", "Turnos de Caja", "Tickets", "Total Ventas (Gs.)", "Descuentos (Gs.)", "Ticket Medio (Gs.)", "% Total"]
+    r3 = []
+    for c in data.get("cajeras", []):
+        r3.append((
+            c.get("cajera", ""),
+            c.get("turnos", 1),
+            c.get("tickets", 0),
+            c.get("total_ventas", 0),
+            c.get("descuentos", 0),
+            c.get("ticket_promedio", 0),
+            f"{c.get('porcentaje_ventas', 0):.2f}%",
+        ))
+    _write_data(ws3, h3, r3)
+
+    _auto_width(ws1)
+    _auto_width(ws2)
+    _auto_width(ws3)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def export_inventory_valuation_xlsx(data: dict, fecha_corte: Optional[date] = None) -> bytes:
+    """Genera archivo Excel (.xlsx) con inventario valorizado por producto,
+    depósito y proveedor a fecha de corte."""
+    wb = Workbook()
+
+    # Hoja 1: Detalle de Productos
+    ws1 = wb.active
+    ws1.title = "Stock Valorizado"
+    periodo_str = f"A fecha de corte: {fecha_corte.strftime('%d/%m/%Y')}" if fecha_corte else "Stock Físico al Día"
+    _write_title(ws1, f"Informe de Inventario Valorizado — {periodo_str}", None, None)
+
+    h1 = ["SKU", "Producto", "Unidad", "Proveedor", "Depósito", "Stock", "Costo Unit. (Gs.)", "Valor Total (Gs.)"]
+    r1 = []
+    for it in data.get("items", []):
+        r1.append((
+            it.get("sku", ""),
+            it.get("producto", ""),
+            it.get("unidad_medida", "UN"),
+            it.get("supplier_name", "Sin Proveedor"),
+            it.get("warehouse_name", ""),
+            it.get("stock", 0),
+            it.get("costo_unitario", 0),
+            it.get("valor_total", 0),
+        ))
+    _write_data(ws1, h1, r1)
+
+    # Hoja 2: Resumen por Proveedor
+    ws2 = wb.create_sheet("Por Proveedor")
+    _write_title(ws2, "Distribución de Capital Inmovilizado por Proveedor", None, None)
+    h2 = ["Proveedor", "SKUs Activos", "Unidades en Stock", "Capital Valorizado (Gs.)", "% del Inventario"]
+    r2 = []
+    for s in data.get("by_supplier", []):
+        r2.append((
+            s.get("supplier_name", "Sin Proveedor"),
+            s.get("total_products", 0),
+            s.get("total_units", 0),
+            s.get("total_value", 0),
+            f"{s.get('percentage', 0):.2f}%",
+        ))
+    _write_data(ws2, h2, r2)
+
+    # Hoja 3: Resumen por Depósito
+    ws3 = wb.create_sheet("Por Depósito")
+    _write_title(ws3, "Distribución de Stock por Depósito / Salón", None, None)
+    h3 = ["Depósito", "SKUs", "Unidades", "Capital Valorizado (Gs.)", "% Participación"]
+    r3 = []
+    for w in data.get("by_warehouse", []):
+        r3.append((
+            w.get("warehouse_name", ""),
+            w.get("total_products", 0),
+            w.get("total_units", 0),
+            w.get("total_value", 0),
+            f"{w.get('percentage', 0):.2f}%",
+        ))
+    _write_data(ws3, h3, r3)
+
+    _auto_width(ws1)
+    _auto_width(ws2)
+    _auto_width(ws3)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+

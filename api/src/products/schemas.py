@@ -36,6 +36,7 @@ class ProductCreate(BaseModel):
     nombre: str = Field(min_length=1, max_length=200)
     descripcion: Optional[str] = None
     tipo: str = "producto"
+    tipo_producto: str = "producto"  # producto | materia_prima | insumo | servicio
     tipo_venta: str = "unidad"
     unidad_medida: str = "UN"
     iva_tasa: Decimal = Decimal("10")
@@ -62,6 +63,7 @@ class ProductUpdate(BaseModel):
     nombre: Optional[str] = None
     descripcion: Optional[str] = None
     tipo: Optional[str] = None
+    tipo_producto: Optional[str] = None  # producto | materia_prima | insumo | servicio
     tipo_venta: Optional[str] = None
     unidad_medida: Optional[str] = None
     iva_tasa: Optional[Decimal] = None
@@ -92,6 +94,7 @@ class ProductResponse(BaseModel):
     nombre: str
     descripcion: Optional[str] = None
     tipo: str
+    tipo_producto: str = "producto"  # producto | materia_prima | insumo | servicio
     tipo_venta: str = "unidad"
     unidad_medida: str
     iva_tasa: Decimal

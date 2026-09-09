@@ -252,6 +252,8 @@ async def list_products(
     limit: int = 100,
     offset: int = 0,
     supplier_id: Optional[str] = None,
+    tipo_producto: Optional[str] = None,
+    include_inactive: bool = False,
 ) -> list[Product]:
     try:
         c_uuid = UUID(company_id)
@@ -296,9 +298,13 @@ async def list_products(
 
     if activo is not None:
         query = query.where(Product.activo == activo)
-    else:
+    elif not include_inactive:
         # Por defecto, servir únicamente productos activos para POS, catálogo y ventas
         query = query.where(Product.activo == True)
+
+    # Filtro opcional por tipo de producto (materia_prima, insumo, servicio, producto)
+    if tipo_producto and tipo_producto.strip():
+        query = query.where(Product.tipo_producto == tipo_producto.strip())
 
     if search and search.strip():
         tokens = [t.strip() for t in search.split() if t.strip()]

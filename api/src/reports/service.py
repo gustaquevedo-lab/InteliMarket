@@ -354,20 +354,28 @@ async def get_inventory_detail(db: AsyncSession, company_id: str, warehouse_id: 
     ]
 
 
-async def get_inventory_rotation(db: AsyncSession, company_id: str) -> list:
-    query = """
+async def get_inventory_rotation(db: AsyncSession, company_id: str, supplier_id: Optional[str] = None) -> list:
+    params = {"company_id": company_id}
+    where_extra = ""
+    if supplier_id:
+        where_extra = " AND p.supplier_id = :supplier_id"
+        params["supplier_id"] = supplier_id
+
+    query = f"""
         SELECT
             p.nombre as producto,
             p.sku,
+            COALESCE(sup.razon_social, sup.nombre_fantasia, 'Sin Proveedor') as supplier_name,
             COALESCE(SUM(vi.cantidad) FILTER (WHERE v.fecha >= CURRENT_DATE - INTERVAL '30 days'), 0) as ventas_30d,
             COALESCE((SELECT SUM(s.cantidad) FROM stock s WHERE s.product_id = p.id), 0) as stock_actual
         FROM products p
+        LEFT JOIN suppliers sup ON sup.id = p.supplier_id
         LEFT JOIN sale_items vi ON vi.product_id = p.id
         LEFT JOIN sales v ON v.id = vi.sale_id AND v.estado <> 'cancelado' AND v.company_id = :company_id
-        WHERE p.company_id = :company_id
-        GROUP BY p.id, p.nombre, p.sku
+        WHERE p.company_id = :company_id{where_extra}
+        GROUP BY p.id, p.nombre, p.sku, sup.razon_social, sup.nombre_fantasia
     """
-    results = (await _exec(db, query, {"company_id": company_id})).all()
+    results = (await _exec(db, query, params)).all()
     items = []
     for r in results:
         ventas_30d = int(r["ventas_30d"] or 0)
@@ -802,47 +810,177 @@ async def get_cost_comparison(db: AsyncSession, company_id: str, product_id=None
     return comparison
 
 
-async def get_inventory_valuation(db: AsyncSession, company_id: str, warehouse_id: Optional[str] = None) -> dict:
+async def get_inventory_valuation(
+    db: AsyncSession,
+    company_id: str,
+    warehouse_id: Optional[str] = None,
+    supplier_id: Optional[str] = None,
+    fecha_corte: Optional[date] = None,
+) -> dict:
+    """Stock valorizado con soporte para filtro de proveedor y reconstrucción
+    histórica hacia atrás a fecha de corte por delta de inventory_movements."""
     params = {"company_id": company_id}
-    where = "s.cantidad > 0 AND w.company_id = :company_id"
+    where_prod = "p.company_id = :company_id AND w.company_id = :company_id"
     if warehouse_id:
-        where += " AND s.warehouse_id = :warehouse_id"
+        where_prod += " AND s.warehouse_id = :warehouse_id"
         params["warehouse_id"] = warehouse_id
+    if supplier_id:
+        where_prod += " AND p.supplier_id = :supplier_id"
+        params["supplier_id"] = supplier_id
 
-    query = f"""
-        SELECT
-            w.id as warehouse_id,
-            w.nombre as warehouse_name,
-            COUNT(DISTINCT s.product_id) as total_products,
-            SUM(s.cantidad) as total_units,
-            COALESCE(SUM(s.cantidad * COALESCE(s.costo_unitario, 0)), 0) as total_value
-        FROM stock s
-        JOIN warehouses w ON w.id = s.warehouse_id
-        WHERE {where}
-        GROUP BY w.id, w.nombre
-        ORDER BY total_value DESC
-    """
+    if fecha_corte:
+        # Reconstrucción hacia atrás: Stock(fecha_corte) = Stock(actual) - Movimientos(posteriores)
+        params["fecha_corte"] = fecha_corte
+        query = f"""
+            WITH post_movs AS (
+                SELECT
+                    im.product_id,
+                    im.warehouse_id,
+                    SUM(im.cantidad) as delta_post
+                FROM inventory_movements im
+                WHERE im.company_id = :company_id
+                  AND im.created_at >= (CAST(:fecha_corte AS DATE) + interval '1 day') AT TIME ZONE 'America/Asuncion'
+                GROUP BY im.product_id, im.warehouse_id
+            )
+            SELECT
+                p.id as product_id,
+                p.sku,
+                p.nombre as producto,
+                p.unidad_medida,
+                p.supplier_id,
+                COALESCE(sup.razon_social, sup.nombre_fantasia, 'Sin Proveedor Asignado') as supplier_name,
+                w.id as warehouse_id,
+                w.nombre as warehouse_name,
+                COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0) as costo_unitario,
+                GREATEST(0, s.cantidad - COALESCE(pm.delta_post, 0)) as stock,
+                (GREATEST(0, s.cantidad - COALESCE(pm.delta_post, 0)) * COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0)) as valor_total
+            FROM stock s
+            JOIN products p ON p.id = s.product_id
+            JOIN warehouses w ON w.id = s.warehouse_id
+            LEFT JOIN suppliers sup ON sup.id = p.supplier_id
+            LEFT JOIN post_movs pm ON pm.product_id = s.product_id AND pm.warehouse_id = s.warehouse_id
+            WHERE {where_prod}
+            HAVING (s.cantidad - COALESCE(pm.delta_post, 0)) > 0
+            ORDER BY valor_total DESC
+        """
+    else:
+        query = f"""
+            SELECT
+                p.id as product_id,
+                p.sku,
+                p.nombre as producto,
+                p.unidad_medida,
+                p.supplier_id,
+                COALESCE(sup.razon_social, sup.nombre_fantasia, 'Sin Proveedor Asignado') as supplier_name,
+                w.id as warehouse_id,
+                w.nombre as warehouse_name,
+                COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0) as costo_unitario,
+                s.cantidad as stock,
+                (s.cantidad * COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0)) as valor_total
+            FROM stock s
+            JOIN products p ON p.id = s.product_id
+            JOIN warehouses w ON w.id = s.warehouse_id
+            LEFT JOIN suppliers sup ON sup.id = p.supplier_id
+            WHERE {where_prod} AND s.cantidad > 0
+            ORDER BY valor_total DESC
+        """
+
     rows = list(await _exec(db, query, params))
 
-    total_value = sum(float(r["total_value"]) for r in rows)
-    total_products = sum(int(r["total_products"]) for r in rows)
-    total_units = sum(int(r["total_units"]) for r in rows)
+    items = []
+    by_warehouse_dict: dict[str, dict] = {}
+    by_supplier_dict: dict[str, dict] = {}
+
+    total_value = 0.0
+    total_units = 0.0
+    unique_products = set()
+
+    for r in rows:
+        val = float(r["valor_total"] or 0)
+        stk = float(r["stock"] or 0)
+        p_id = str(r["product_id"])
+        w_id = str(r["warehouse_id"])
+        w_name = str(r["warehouse_name"])
+        s_id = str(r["supplier_id"] or "none")
+        s_name = str(r["supplier_name"])
+
+        total_value += val
+        total_units += stk
+        unique_products.add(p_id)
+
+        items.append({
+            "product_id": p_id,
+            "sku": r["sku"] or "",
+            "producto": r["producto"] or "",
+            "unidad_medida": r["unidad_medida"] or "UN",
+            "supplier_id": str(r["supplier_id"]) if r["supplier_id"] else None,
+            "supplier_name": s_name,
+            "warehouse_id": w_id,
+            "warehouse_name": w_name,
+            "costo_unitario": float(r["costo_unitario"] or 0),
+            "stock": stk,
+            "valor_total": val,
+        })
+
+        # Agrupación por depósito
+        if w_id not in by_warehouse_dict:
+            by_warehouse_dict[w_id] = {
+                "warehouse_id": w_id,
+                "warehouse_name": w_name,
+                "total_products": 0,
+                "total_units": 0.0,
+                "total_value": 0.0,
+                "_prods": set(),
+            }
+        by_warehouse_dict[w_id]["total_value"] += val
+        by_warehouse_dict[w_id]["total_units"] += stk
+        by_warehouse_dict[w_id]["_prods"].add(p_id)
+
+        # Agrupación por proveedor
+        if s_id not in by_supplier_dict:
+            by_supplier_dict[s_id] = {
+                "supplier_id": s_id if s_id != "none" else None,
+                "supplier_name": s_name,
+                "total_products": 0,
+                "total_units": 0.0,
+                "total_value": 0.0,
+                "_prods": set(),
+            }
+        by_supplier_dict[s_id]["total_value"] += val
+        by_supplier_dict[s_id]["total_units"] += stk
+        by_supplier_dict[s_id]["_prods"].add(p_id)
+
+    by_warehouse = []
+    for w in by_warehouse_dict.values():
+        by_warehouse.append({
+            "warehouse_id": w["warehouse_id"],
+            "warehouse_name": w["warehouse_name"],
+            "total_products": len(w["_prods"]),
+            "total_units": w["total_units"],
+            "total_value": w["total_value"],
+            "percentage": round((w["total_value"] / max(total_value, 1)) * 100, 1),
+        })
+
+    by_supplier = []
+    for s in by_supplier_dict.values():
+        by_supplier.append({
+            "supplier_id": s["supplier_id"],
+            "supplier_name": s["supplier_name"],
+            "total_products": len(s["_prods"]),
+            "total_units": s["total_units"],
+            "total_value": s["total_value"],
+            "percentage": round((s["total_value"] / max(total_value, 1)) * 100, 1),
+        })
+    by_supplier.sort(key=lambda x: x["total_value"], reverse=True)
 
     return {
+        "fecha_corte": str(fecha_corte) if fecha_corte else None,
         "total_value": total_value,
-        "total_products": total_products,
+        "total_products": len(unique_products),
         "total_units": total_units,
-        "by_warehouse": [
-            {
-                "warehouse_id": str(r["warehouse_id"]),
-                "warehouse_name": r["warehouse_name"],
-                "total_products": int(r["total_products"]),
-                "total_units": int(r["total_units"]),
-                "total_value": float(r["total_value"]),
-                "percentage": round((float(r["total_value"]) / max(total_value, 1)) * 100, 1),
-            }
-            for r in rows
-        ],
+        "by_warehouse": by_warehouse,
+        "by_supplier": by_supplier,
+        "items": items,
     }
 
 
@@ -1086,3 +1224,198 @@ async def get_chart_comparison(
                 "rentabilidad_meta": sum(s["rentabilidad_meta"] for s in series),
             }
         }
+
+
+async def get_executive_sales_profitability(
+    db: AsyncSession,
+    company_id: str,
+    fecha_desde: Optional[date] = None,
+    fecha_hasta: Optional[date] = None,
+    branch_id: Optional[str] = None,
+) -> dict:
+    """Informe ejecutivo de ventas, costos, descuentos y rentabilidad (7 líneas)
+    + desglose de medios de pago (incluyendo divisas en gaveta)
+    + rendimiento por cajera y turnos de caja.
+    """
+    params = {"company_id": company_id}
+    where_sales = "v.estado <> 'cancelado' AND v.company_id = :company_id"
+    where_sales += _build_tz_filter(fecha_desde, fecha_hasta, params, "v.fecha")
+    if branch_id:
+        where_sales += " AND v.branch_id = :branch_id"
+        params["branch_id"] = branch_id
+
+    # 1. Total ventas, subtotal, descuentos POS y tickets
+    q_sales = f"""
+        SELECT
+            COUNT(v.id) as total_tickets,
+            COALESCE(SUM(v.total), 0) as total_vendido,
+            COALESCE(SUM(v.subtotal), 0) as subtotal,
+            COALESCE(SUM(v.descuento_total), 0) as descuentos_pos
+        FROM sales v
+        WHERE {where_sales}
+    """
+    res_sales = (await _exec(db, q_sales, params)).first()
+    total_tickets = int(res_sales["total_tickets"] or 0)
+    total_vendido = float(res_sales["total_vendido"] or 0)
+    subtotal = float(res_sales["subtotal"] or 0)
+    descuentos_pos = float(res_sales["descuentos_pos"] or 0)
+
+    # 2. CMV (Costo de Mercadería Vendida)
+    q_cmv = f"""
+        SELECT
+            COALESCE(SUM(vi.cantidad * COALESCE(vi.costo_unitario, p.costo_promedio, p.ultimo_costo, 0)), 0) as cmv,
+            COALESCE(SUM(vi.descuento_monto), 0) as descuentos_items
+        FROM sale_items vi
+        JOIN sales v ON v.id = vi.sale_id
+        LEFT JOIN products p ON p.id = vi.product_id
+        WHERE {where_sales}
+    """
+    res_cmv = (await _exec(db, q_cmv, params)).first()
+    cmv = float(res_cmv["cmv"] or 0)
+    descuentos_items = float(res_cmv["descuentos_items"] or 0)
+    if descuentos_pos == 0 and descuentos_items > 0:
+        descuentos_pos = descuentos_items
+
+    # 3. Devoluciones & Notas de Crédito
+    params_ret = {"company_id": company_id}
+    where_ret = "r.company_id = :company_id AND r.estado NOT IN ('cancelado', 'rechazado')"
+    where_ret += _build_tz_filter(fecha_desde, fecha_hasta, params_ret, "r.fecha")
+    q_ret = f"""
+        SELECT COALESCE(SUM(r.total), 0) as devoluciones_nc, COUNT(r.id) as total_returns
+        FROM returns r
+        WHERE {where_ret}
+    """
+    try:
+        res_ret = (await _exec(db, q_ret, params_ret)).first()
+        devoluciones_nc = float(res_ret["devoluciones_nc"] or 0)
+        total_returns = int(res_ret["total_returns"] or 0)
+    except Exception:
+        devoluciones_nc = 0.0
+        total_returns = 0
+
+    # 4. Cálculo de las 7 líneas ejecutivas
+    utilidad_bruta = max(0.0, total_vendido - cmv)
+    margen_bruto_pct = round((utilidad_bruta / total_vendido * 100), 2) if total_vendido > 0 else 0.0
+    resultado_neto = utilidad_bruta - devoluciones_nc
+    resultado_neto_pct = round((resultado_neto / total_vendido * 100), 2) if total_vendido > 0 else 0.0
+    ticket_promedio = round(total_vendido / max(total_tickets, 1), 0)
+
+    lineas_ejecutivas = [
+        {"orden": 1, "clave": "total_vendido", "concepto": "1. Facturación Bruta (Total Vendido)", "monto": total_vendido, "tipo": "ingreso", "descripcion": "Ventas brutas acumuladas registradas en cajas POS"},
+        {"orden": 2, "clave": "cmv", "concepto": "2. Costo Mercadería Vendida (CMV)", "monto": cmv, "tipo": "costo", "descripcion": "Costo promedio ponderado de reposición de artículos vendidos"},
+        {"orden": 3, "clave": "utilidad_bruta", "concepto": "3. Margen / Utilidad Comercial Bruta", "monto": utilidad_bruta, "tipo": "resultado", "descripcion": "Margen comercial antes de devoluciones (Línea 1 - Línea 2)"},
+        {"orden": 4, "clave": "margen_bruto_pct", "concepto": "4. % Margen Comercial Bruto", "monto": margen_bruto_pct, "tipo": "porcentaje", "descripcion": "Porcentaje de utilidad bruta sobre el total vendido"},
+        {"orden": 5, "clave": "descuentos_pos", "concepto": "5. Descuentos Otorgados en POS", "monto": descuentos_pos, "tipo": "descuento", "descripcion": "Bonificaciones y descuentos promocionales aplicados en ticket"},
+        {"orden": 6, "clave": "devoluciones_nc", "concepto": "6. Devoluciones & Notas de Crédito", "monto": devoluciones_nc, "tipo": "devolucion", "descripcion": "Devolución de mercadería por clientes y notas de crédito"},
+        {"orden": 7, "clave": "resultado_neto", "concepto": "7. Resultado Comercial Neto", "monto": resultado_neto, "tipo": "resultado_final", "descripcion": "Utilidad neta comercial del período (Línea 3 - Línea 6)"},
+    ]
+
+    # 5. Desglose por Medios de Pago (incluyendo divisas en gaveta)
+    q_payments = f"""
+        SELECT
+            sp.forma_pago,
+            COALESCE(sp.moneda, 'PYG') as moneda,
+            COUNT(*) as cantidad,
+            COALESCE(SUM(sp.monto), 0) as monto
+        FROM sale_payments sp
+        JOIN sales v ON v.id = sp.sale_id
+        WHERE {where_sales}
+        GROUP BY sp.forma_pago, COALESCE(sp.moneda, 'PYG')
+        ORDER BY monto DESC
+    """
+    res_payments = (await _exec(db, q_payments, params)).all()
+    medios_pago = []
+    total_recaudado = sum(float(r["monto"]) for r in res_payments) or 1.0
+
+    ETIQUETAS_PAGO = {
+        ("EFECTIVO", "BRL"): "💵 Efectivo Reales (R$ cobrado en gaveta)",
+        ("EFECTIVO", "USD"): "💵 Efectivo Dólares (US$ cobrado en gaveta)",
+        ("EFECTIVO", "PYG"): "🇵🇾 Efectivo Guaraníes (PYG)",
+        ("TARJETA_BANCARD", "PYG"): "💳 Tarjetas Bancard (POS)",
+        ("TARJETA CREDITO", "PYG"): "💳 Tarjetas Bancard Crédito",
+        ("TARJETA DEBITO", "PYG"): "💳 Tarjetas Bancard Débito",
+        ("TARJETA_DINELCO", "PYG"): "💳 Tarjetas Dinelco (POS)",
+        ("QR", "PYG"): "📱 QR Bancard / Zimple",
+        ("QR CODE", "PYG"): "📱 QR Code",
+        ("PIX", "BRL"): "🇧🇷 Pix Brasil (Cuentas Cambistas / BRL)",
+        ("PIX", "PYG"): "🇧🇷 Pix Brasil (Acreditación Directa)",
+        ("EXTRA_CLUB", "PYG"): "⭐ Extra Club (Crédito Interno Fidelidad)",
+        ("TRANF. BANCARIA", "PYG"): "🏦 Transferencia Bancaria Directa",
+        ("CHEQUES", "PYG"): "🧾 Cheques en Cartera",
+        ("VALE COMPRA", "PYG"): "🎟️ Vale de Compra / Gift Card",
+    }
+
+    for r in res_payments:
+        fp = str(r["forma_pago"] or "").strip().upper()
+        mon = str(r["moneda"] or "PYG").strip().upper()
+        nombre = ETIQUETAS_PAGO.get((fp, mon)) or f"{fp} ({mon})"
+        monto_val = float(r["monto"])
+        pct = round((monto_val / total_recaudado) * 100, 2)
+        medios_pago.append({
+            "forma_pago_raw": fp,
+            "moneda": mon,
+            "etiqueta": nombre,
+            "cantidad": int(r["cantidad"]),
+            "monto": monto_val,
+            "porcentaje": pct,
+        })
+
+    # Si no hay registros en sale_payments, derivar del total vendido
+    if not medios_pago and total_vendido > 0:
+        medios_pago = [
+            {"forma_pago_raw": "EFECTIVO", "moneda": "PYG", "etiqueta": "🇵🇾 Efectivo Guaraníes (PYG)", "cantidad": total_tickets, "monto": total_vendido, "porcentaje": 100.0}
+        ]
+
+    # 6. Desempeño y Productividad por Cajera / Turno
+    q_cajeras = f"""
+        SELECT
+            COALESCE(u.nombre, cs.cajero_nombre, 'Caja Salón Central') as cajera,
+            COUNT(DISTINCT v.session_id) as turnos,
+            COUNT(v.id) as tickets,
+            COALESCE(SUM(v.total), 0) as total_ventas,
+            COALESCE(SUM(v.descuento_total), 0) as descuentos
+        FROM sales v
+        LEFT JOIN users u ON u.id = v.user_id
+        LEFT JOIN cash_sessions cs ON cs.id = v.session_id
+        WHERE {where_sales}
+        GROUP BY COALESCE(u.nombre, cs.cajero_nombre, 'Caja Salón Central')
+        ORDER BY total_ventas DESC
+    """
+    res_cajeras = (await _exec(db, q_cajeras, params)).all()
+    cajeras = []
+    for r in res_cajeras:
+        tot_caj = float(r["total_ventas"] or 0)
+        tix_caj = int(r["tickets"] or 0)
+        cajeras.append({
+            "cajera": r["cajera"],
+            "turnos": int(r["turnos"] or 1),
+            "tickets": tix_caj,
+            "total_ventas": tot_caj,
+            "descuentos": float(r["descuentos"] or 0),
+            "ticket_promedio": round(tot_caj / max(tix_caj, 1), 0),
+            "porcentaje_ventas": round((tot_caj / total_vendido * 100), 2) if total_vendido > 0 else 0.0,
+        })
+
+    return {
+        "periodo": {
+            "fecha_desde": str(fecha_desde) if fecha_desde else None,
+            "fecha_hasta": str(fecha_hasta) if fecha_hasta else None,
+        },
+        "resumen": {
+            "total_vendido": total_vendido,
+            "cmv": cmv,
+            "utilidad_bruta": utilidad_bruta,
+            "margen_bruto_pct": margen_bruto_pct,
+            "descuentos_pos": descuentos_pos,
+            "devoluciones_nc": devoluciones_nc,
+            "resultado_neto": resultado_neto,
+            "resultado_neto_pct": resultado_neto_pct,
+            "total_tickets": total_tickets,
+            "ticket_promedio": ticket_promedio,
+            "total_returns": total_returns,
+        },
+        "lineas_ejecutivas": lineas_ejecutivas,
+        "medios_pago": medios_pago,
+        "cajeras": cajeras,
+    }
+

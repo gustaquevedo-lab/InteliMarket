@@ -182,7 +182,7 @@ export async function downloadAuthenticated(path: string, params: Record<string,
 }
 
 // ========== TYPE STUBS ==========
-export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; supplier_id?: string; supplier_nombre?: string; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; plu_balanza?: number | null; es_pesable?: boolean; tiene_vencimiento?: boolean; tiene_lotes?: boolean; imagen_url?: string | null; precio_venta?: number; precio_regular?: number; precio_promo?: number; en_promocion?: boolean; precio_mayorista?: number | null; precio_mayorista_min_qty?: number | null; precio_promedio_real?: number | null; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; costo_unitario?: number; precio_costo?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
+export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; supplier_id?: string; supplier_nombre?: string; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_producto?: "producto" | "materia_prima" | "insumo" | "servicio"; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; plu_balanza?: number | null; es_pesable?: boolean; tiene_vencimiento?: boolean; tiene_lotes?: boolean; imagen_url?: string | null; precio_venta?: number; precio_regular?: number; precio_promo?: number; en_promocion?: boolean; precio_mayorista?: number | null; precio_mayorista_min_qty?: number | null; precio_promedio_real?: number | null; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; costo_unitario?: number; precio_costo?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
 export interface Category { id: string; nombre: string; codigo?: string; parent_id?: string; company_id?: string; activo?: boolean; created_at?: string }
 export interface Customer { id: string; nombre: string; email?: string; telefono?: string; ruc?: string; extra_club_numero?: string | null; empresa_vinculada_nombre?: string | null; empresa_vinculada_ruc?: string | null; razon_social?: string; ci?: string; direccion?: string; ciudad?: string; tipo?: string; tipo_persona?: string; activo?: boolean; saldo_pendiente?: number; limite_credito?: number; credito_limite?: number; credito_usado?: number; created_at?: string; updated_at?: string }
 export interface Sale { id: string; company_id?: string; customer_id?: string; customer?: Customer; customer_nombre?: string; customer_doc?: string; customer_extra_club?: string; cajero_nombre?: string; caja_nombre?: string; items?: SaleItem[]; total?: number; subtotal?: number; total_iva?: number; estado?: string; condicion?: string; forma_pago?: string; tipo_comprobante?: string; fecha?: string; caja_session_id?: string; usuario_id?: string; observaciones?: string; numero?: string; numero_interno?: string; recibo_html?: string; recibo_escpos_b64?: string; total_pagado?: number; saldo?: number; iva_10?: number; iva_5?: number; descuento_total?: number; sifen_estado?: string; cdc?: string; created_at?: string }
@@ -983,7 +983,7 @@ export const api = {
     delete: (id: string) => client.delete<void>(`/v1/categories/${id}`),
   },
   products: {
-    list: (params?: { search?: string; categoria_id?: string; supplier_id?: string; activo?: boolean; limit?: number; offset?: number }) => client.get<Product[]>(`/v1/companies/${COMPANY_ID}/products`, { search: params?.search, categoria_id: params?.categoria_id, supplier_id: params?.supplier_id, activo: params?.activo?.toString(), limit: params?.limit, offset: params?.offset }),
+    list: (params?: { search?: string; categoria_id?: string; supplier_id?: string; activo?: boolean; tipo_producto?: string; include_inactive?: boolean; limit?: number; offset?: number }) => client.get<Product[]>(`/v1/companies/${COMPANY_ID}/products`, { search: params?.search, categoria_id: params?.categoria_id, supplier_id: params?.supplier_id, activo: params?.activo !== undefined ? params?.activo.toString() : undefined, tipo_producto: params?.tipo_producto, include_inactive: params?.include_inactive ? "true" : undefined, limit: params?.limit, offset: params?.offset }),
     get: (id: string) => client.get<Product>(`/v1/products/${id}`),
     getStats: () => client.get<ProductsStatsResponse>(`/v1/companies/${COMPANY_ID}/products/stats`),
     get360: (id: string) => client.get<Product360Response>(`/v1/products/${id}/360`),
@@ -1131,10 +1131,75 @@ export const api = {
       ticketEscpos: (sessionId: string) => client.get<{ session_id: string; ticket_text: string; ticket_escpos_b64: string; reconciliation: any }>(`/v1/cash-sessions/${sessionId}/ticket-escpos`),
       updateFondo: (id: string, data: { monto_apertura: number; monto_apertura_brl?: number; monto_apertura_usd?: number; motivo?: string }) => client.patch<CashSession>(`/v1/cash-sessions/${id}/fondo-inicial`, data),
     },
-    sessionsSummary: (params?: { estado?: string; register_id?: string; limit?: number; offset?: number; fecha_desde?: string }) =>
+    sessionsSummary: (params?: { estado?: string; register_id?: string; limit?: number; offset?: number; fecha_desde?: string; fecha_hasta?: string; cajero_nombre?: string; user_id?: string; search?: string }) =>
       client.get<{ id: string; register_id: string; user_id: string; cajero_nombre: string | null; fecha_apertura: string; fecha_cierre: string | null; monto_apertura: number; monto_apertura_brl?: number; monto_apertura_usd?: number; monto_cierre: number | null; monto_cierre_esperado: number | null; diferencia: number | null; diferencia_usd: number | null; diferencia_brl: number | null; monto_cobrado: number; estado: string; cash_drop_alert: boolean; cash_drop_warning: boolean; cash_drop_threshold: number | null; efectivo_acumulado: number; efectivo_usd_acumulado: number; efectivo_brl_acumulado: number; ultimo_cash_drop_at: string | null }[]>(
         "/v1/cash-sessions-summary", { company_id: COMPANY_ID, ...params } as any
       ),
+    sessionSales: (sessionId: string) =>
+      client.get<{
+        session: {
+          id: string
+          register_id: string
+          register_nombre: string
+          register_codigo: string
+          cajero_nombre: string
+          user_id: string | null
+          fecha_apertura: string | null
+          fecha_cierre: string | null
+          fecha_apertura_local: string
+          fecha_cierre_local: string
+          estado: string
+          observaciones?: string | null
+        }
+        totales: {
+          total_ventas_gs: number
+          cantidad_ventas: number
+          ticket_promedio_gs: number
+          total_descuentos_gs: number
+          total_donaciones_gs: number
+          total_iva_10_gs: number
+          total_iva_5_gs: number
+          total_exenta_gs: number
+          cantidad_anuladas: number
+          total_anuladas_gs: number
+          fondo_apertura_gs: number
+          fondo_apertura_brl: number
+          fondo_apertura_usd: number
+          ventas_efectivo_gs: number
+          ventas_no_efectivo_gs: number
+          total_drops_gs: number
+          esperado_gaveta_gs: number
+          declarado_gaveta_gs: number
+          diferencia_gs: number
+          tasa_brl: number
+          tasa_usd: number
+        }
+        desglose_medios: { clave: string; label: string; monto_formateado: string; monto_gs: number }[]
+        reconciliation?: any
+        sales: {
+          id: string
+          numero: string
+          numero_interno?: string
+          fecha: string | null
+          fecha_local: string
+          hora_local: string
+          tipo_comprobante: string
+          condicion: string
+          estado: string
+          cliente_nombre: string
+          cliente_ruc: string
+          subtotal: number
+          descuento: number
+          total: number
+          monto_donacion: number
+          iva_10: number
+          iva_5: number
+          base_exenta: number
+          items_count: number
+          pagos: { forma_pago: string; moneda: string; monto: number }[]
+          forma_pago_resumen: string
+        }[]
+      }>(`/v1/cash-sessions/${sessionId}/sales`),
     paymentBreakdown: (sessionId: string) => client.get<{ pyg: { forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]; otras_monedas: { forma_pago: string; moneda: string; cantidad: number; monto: number }[] }>(`/v1/cash-sessions/${sessionId}/payment-breakdown`),
     cashDrop: (sessionId: string, data: { monto: number; monto_usd?: number; monto_brl?: number; observaciones?: string }) => client.post<any>(`/v1/cash-sessions/${sessionId}/cash-drop`, data),
     cashDropRequests: {

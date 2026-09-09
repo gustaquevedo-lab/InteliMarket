@@ -6,7 +6,8 @@ import {
   ArrowUpDown, CheckCircle2, ShieldAlert, Scale, ChevronDown, ChevronRight,
   Filter, Calendar, Clock, RefreshCw, Box, ExternalLink, ArrowRight,
   HelpCircle, Info, BookOpen, Gift, Check, Palette, Cpu, Zap, Copy,
-  Lock, Unlock, Calculator, Boxes, Truck, FileText, Image as ImageIcon
+  Lock, Unlock, Calculator, Boxes, Truck, FileText, Image as ImageIcon,
+  Wheat, Wrench, Ban, Power, ToggleLeft, ToggleRight
 } from "lucide-react"
 import {
   api,
@@ -347,6 +348,8 @@ export default function ProductsPage() {
   const [search, setSearch] = useState("")
   const [selectedCategory, setSelectedCategory] = useState("")
   const [filterStockTag, setFilterStockTag] = useState<"todos" | "con_stock" | "quiebre" | "bajo_stock" | "pesables" | "perecederos">("todos")
+  const [filterTipoProducto, setFilterTipoProducto] = useState<"todos" | "producto" | "materia_prima" | "insumo" | "servicio">("todos")
+  const [filterEstado, setFilterEstado] = useState<"todos" | "activos" | "inactivos">("activos")
   const [sortBy, setSortBy] = useState<"nombre" | "precio_desc" | "precio_asc" | "margen_desc">("nombre")
   
   // Paginación Catálogo
@@ -373,6 +376,8 @@ export default function ProductsPage() {
     categoria_id: "",
     supplier_id: "",
     tipo: "producto",
+    tipo_producto: "producto" as "producto" | "materia_prima" | "insumo" | "servicio",
+    activo: true,
     unidad_medida: "UN",
     iva_tasa: 10,
     stock_minimo: 5,
@@ -527,7 +532,7 @@ export default function ProductsPage() {
     setLoading(true)
     try {
       const [prodsRes, catsRes, suppsRes] = await Promise.allSettled([
-        api.products.list({ search: search || undefined, categoria_id: selectedCategory || undefined, limit: 1000 }),
+        api.products.list({ search: search || undefined, categoria_id: selectedCategory || undefined, include_inactive: true, limit: 1000 }),
         api.categories.list(),
         api.purchases.suppliers(),
       ])
@@ -638,6 +643,18 @@ export default function ProductsPage() {
       list = list.filter(p => (p as any).es_perecedero)
     }
 
+    // Filtro por Estado (Activos / Inactivos)
+    if (filterEstado === "activos") {
+      list = list.filter(p => p.activo !== false)
+    } else if (filterEstado === "inactivos") {
+      list = list.filter(p => p.activo === false)
+    }
+
+    // Filtro por Tipo de Producto
+    if (filterTipoProducto !== "todos") {
+      list = list.filter(p => (p.tipo_producto || "producto") === filterTipoProducto)
+    }
+
     // Ordenación
     list.sort((a, b) => {
       if (sortBy === "nombre") return (a.nombre || "").localeCompare(b.nombre || "")
@@ -652,7 +669,7 @@ export default function ProductsPage() {
     })
 
     return list
-  }, [products, filterStockTag, sortBy])
+  }, [products, filterStockTag, filterTipoProducto, filterEstado, sortBy])
 
   // Paginación
   const totalPages = Math.ceil(filteredAndSortedProducts.length / pageSize) || 1
@@ -679,6 +696,8 @@ export default function ProductsPage() {
         categoria_id: form.categoria_id && form.categoria_id.trim() !== "" ? form.categoria_id : null,
         supplier_id: form.supplier_id && form.supplier_id.trim() !== "" ? form.supplier_id : undefined,
         tipo: form.tipo || "producto",
+        tipo_producto: form.tipo_producto || "producto",
+        activo: form.activo !== false,
         tipo_venta: isPeso ? "peso" : "unidad",
         unidad_medida: isPeso ? "KG" : (form.unidad_medida === "KG" ? "UN" : (form.unidad_medida || "UN")),
         plu_balanza: isPeso && form.plu_balanza ? Number(form.plu_balanza) : null,
@@ -732,6 +751,24 @@ export default function ProductsPage() {
     }
   }
 
+  // Toggle rápido Activo / Inactivo con efecto inmediato en POS y Compras
+  const handleToggleActivo = async (p: Product) => {
+    const nuevoEstado = !(p.activo !== false)
+    try {
+      // Actualización optimista inmediata en UI
+      setProducts((prev) => prev.map((item) => item.id === p.id ? { ...item, activo: nuevoEstado } : item))
+      await api.products.update(p.id, { activo: nuevoEstado })
+      toast.success(
+        nuevoEstado ? "Producto Activado" : "Producto Desactivado",
+        `"${p.nombre}" ahora está ${nuevoEstado ? "activo (facturable en POS y disponible en compras)" : "inactivo (bloqueado para facturación y compras)"}.`
+      )
+    } catch (err: any) {
+      // Revertir en caso de falla
+      setProducts((prev) => prev.map((item) => item.id === p.id ? { ...item, activo: p.activo } : item))
+      toast.error("Error al cambiar estado", err.message || "No se pudo actualizar el estado del producto.")
+    }
+  }
+
   const handleEditClick = (p: Product) => {
     setEditingProduct(p)
     setCostoUnlocked(false)
@@ -753,6 +790,8 @@ export default function ProductsPage() {
       categoria_id: p.categoria_id || "",
       supplier_id: p.supplier_id || "",
       tipo: p.tipo || "producto",
+      tipo_producto: (p.tipo_producto || "producto") as any,
+      activo: p.activo !== false,
       unidad_medida: isPesable ? "KG" : (p.unidad_medida || "UN"),
       iva_tasa: Number(p.iva_tasa) !== undefined ? Number(p.iva_tasa) : 10,
       stock_minimo: Number(p.stock_minimo) || 5,
@@ -803,6 +842,8 @@ export default function ProductsPage() {
       categoria_id: "",
       supplier_id: "",
       tipo: "producto",
+      tipo_producto: "producto",
+      activo: true,
       unidad_medida: "UN",
       iva_tasa: 10,
       stock_minimo: 5,
@@ -1270,10 +1311,74 @@ export default function ProductsPage() {
               </div>
             </div>
 
-            {/* Pastillas de Filtro Interactivas (Tags) */}
+            {/* Pastillas de Clasificación (Tipo de Producto) y Estado */}
             <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-slate-100 dark:border-slate-800">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mr-1">
-                <Filter className="w-3 h-3" /> Filtro Rápido:
+                <Box className="w-3 h-3" /> Clasificación:
+              </span>
+              {[
+                { key: "todos", label: "Todos los Tipos" },
+                { key: "producto", label: "📦 Productos Finales" },
+                { key: "materia_prima", label: "🌾 Materias Primas" },
+                { key: "insumo", label: "🧴 Insumos" },
+                { key: "servicio", label: "🛠 Servicios" },
+              ].map((tag) => {
+                const isSelected = filterTipoProducto === tag.key
+                return (
+                  <button
+                    key={tag.key}
+                    type="button"
+                    onClick={() => {
+                      setFilterTipoProducto(tag.key as any)
+                      setPage(1)
+                    }}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                      isSelected
+                        ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                    }`}
+                  >
+                    {tag.label}
+                  </button>
+                )
+              })}
+
+              <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-1 hidden sm:block" />
+
+              {/* Selector de Estado Activo / Inactivo */}
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mr-1">
+                <Power className="w-3 h-3" /> Estado:
+              </span>
+              {[
+                { key: "activos", label: "Activos", activeClass: "bg-emerald-600 text-white" },
+                { key: "inactivos", label: "Inactivos", activeClass: "bg-rose-600 text-white" },
+                { key: "todos", label: "Todos", activeClass: "bg-slate-700 text-white" },
+              ].map((st) => {
+                const isSelected = filterEstado === st.key
+                return (
+                  <button
+                    key={st.key}
+                    type="button"
+                    onClick={() => {
+                      setFilterEstado(st.key as any)
+                      setPage(1)
+                    }}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                      isSelected
+                        ? `${st.activeClass} shadow-sm ring-2 ring-emerald-300/30`
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                    }`}
+                  >
+                    {st.label}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Pastillas de Filtro Interactivas (Tags de Stock) */}
+            <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-slate-100 dark:border-slate-800">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mr-1">
+                <Filter className="w-3 h-3" /> Stock:
               </span>
 
               {[
@@ -1346,6 +1451,8 @@ export default function ProductsPage() {
                   <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 font-bold uppercase text-[9px] tracking-wider border-b border-slate-200 dark:border-slate-800">
                     <tr>
                       <th className="py-2.5 px-2.5 min-w-[160px] max-w-[210px]">Producto & SKU</th>
+                      <th className="py-2.5 px-1.5 text-center whitespace-nowrap">Tipo</th>
+                      <th className="py-2.5 px-1.5 text-center whitespace-nowrap">Estado</th>
                       <th className="py-2.5 px-1.5 max-w-[85px]">Categoría</th>
                       <th className="py-2.5 px-1.5 max-w-[85px]">Proveedor</th>
                       <th className="py-2.5 px-1.5 whitespace-nowrap">Código / PLU</th>
@@ -1389,7 +1496,11 @@ export default function ProductsPage() {
                         <tr
                           key={p.id}
                           className={`transition-colors duration-150 border-b border-slate-100 dark:border-slate-800/60 ${
-                            isEven ? "bg-white dark:bg-slate-900" : "bg-slate-50/70 dark:bg-slate-800/40"
+                            p.activo === false
+                              ? "bg-rose-50/20 dark:bg-rose-950/10 opacity-75"
+                              : isEven
+                              ? "bg-white dark:bg-slate-900"
+                              : "bg-slate-50/70 dark:bg-slate-800/40"
                           } hover:!bg-indigo-50/60 dark:hover:!bg-indigo-950/30 cursor-pointer group`}
                           onClick={() => openProduct360(p.id)}
                         >
@@ -1407,12 +1518,68 @@ export default function ProductsPage() {
                                       Per.
                                     </span>
                                   )}
+                                  {p.activo === false && (
+                                    <span className="px-1 py-0.1 rounded text-[8px] font-extrabold bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 shrink-0">
+                                      INACTIVO
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="text-[9px] text-slate-400 font-mono">
                                   SKU: <strong className="text-slate-600 dark:text-slate-300">{p.sku}</strong>
                                 </div>
                               </div>
                             </div>
+                          </td>
+
+                          {/* Tipo de Producto */}
+                          <td className="py-2 px-1.5 text-center whitespace-nowrap">
+                            {p.tipo_producto === "materia_prima" ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60" title="Materia Prima para Producción interna">
+                                <Wheat className="w-2.5 h-2.5 text-amber-600" /> M. Prima
+                              </span>
+                            ) : p.tipo_producto === "insumo" ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-purple-50 dark:bg-purple-950/50 text-purple-700 dark:text-purple-400 border border-purple-200 dark:border-purple-800/60" title="Insumo o Suministro Interno">
+                                <Package className="w-2.5 h-2.5 text-purple-600" /> Insumo
+                              </span>
+                            ) : p.tipo_producto === "servicio" ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700" title="Servicio o Mano de Obra">
+                                <Wrench className="w-2.5 h-2.5 text-slate-500" /> Servicio
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800/60" title="Producto Final facturable en POS">
+                                <Box className="w-2.5 h-2.5 text-blue-600" /> Venta
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Toggle Activo con Efectos Reales */}
+                          <td className="py-2 px-1.5 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleActivo(p)}
+                              className={`group/tog inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold transition-all border cursor-pointer ${
+                                p.activo !== false
+                                  ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                                  : "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-800/60 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200"
+                              }`}
+                              title={p.activo !== false ? "Producto ACTIVO. Click para desactivar (bloquear de POS y compras)" : "Producto INACTIVO. Click para activar (habilitar en POS y compras)"}
+                            >
+                              {p.activo !== false ? (
+                                <>
+                                  <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 group-hover/tog:hidden" />
+                                  <Ban className="w-2.5 h-2.5 text-rose-600 hidden group-hover/tog:inline" />
+                                  <span className="group-hover/tog:hidden">Activo</span>
+                                  <span className="hidden group-hover/tog:inline">Desactivar</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Ban className="w-2.5 h-2.5 text-rose-600 group-hover/tog:hidden" />
+                                  <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 hidden group-hover/tog:inline" />
+                                  <span className="group-hover/tog:hidden">Inactivo</span>
+                                  <span className="hidden group-hover/tog:inline">Activar</span>
+                                </>
+                              )}
+                            </button>
                           </td>
 
                           {/* Categoría */}
@@ -2685,6 +2852,118 @@ export default function ProductsPage() {
           ────────────────────────────────────────────────────────── */}
           {formTab === "general" && (
             <div className="space-y-4 animate-fade-in">
+              {/* Clasificación de Negocio (Tipo de Producto) y Estado Operativo */}
+              <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                      Destino Operativo & Clasificación
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Define el comportamiento en ventas (POS), recetas de producción interna y compras
+                    </span>
+                  </div>
+
+                  {/* Toggle Activo / Inactivo */}
+                  <div className="flex items-center gap-2.5 bg-slate-50 dark:bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className={`text-xs font-bold ${form.activo !== false ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                      {form.activo !== false ? "Producto Activo" : "Producto Inactivo"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setForm(prev => ({ ...prev, activo: prev.activo === false }))}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        form.activo !== false ? "bg-emerald-600" : "bg-slate-300 dark:bg-slate-700"
+                      }`}
+                      title={form.activo !== false ? "Desactivar producto" : "Activar producto"}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          form.activo !== false ? "translate-x-5" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Selector visual de Tipo de Producto */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                  {[
+                    {
+                      key: "producto",
+                      icon: Box,
+                      title: "Producto Final",
+                      badge: "Venta Salón",
+                      desc: "Facturable en cajas POS, góndolas y mostrador.",
+                    },
+                    {
+                      key: "materia_prima",
+                      icon: Wheat,
+                      title: "Materia Prima",
+                      badge: "Producción",
+                      desc: "Para recetas y elaboración (Panadería, Rotisería, Carnicería). No se expone en POS.",
+                    },
+                    {
+                      key: "insumo",
+                      icon: Package,
+                      title: "Insumo / Suministro",
+                      badge: "Uso Interno",
+                      desc: "Embalajes, bobinas térmicas, limpieza, bolsas plásticas.",
+                    },
+                    {
+                      key: "servicio",
+                      icon: Wrench,
+                      title: "Servicio",
+                      badge: "Intangible",
+                      desc: "Fletes, mano de obra, servicios no inventariables.",
+                    },
+                  ].map((t) => {
+                    const isSelected = (form.tipo_producto || "producto") === t.key
+                    const IconComp = t.icon
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => setForm(prev => ({ ...prev, tipo_producto: t.key as any }))}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                          isSelected
+                            ? "border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 ring-2 ring-indigo-500/20 shadow-xs"
+                            : "border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850 hover:bg-slate-100/70 dark:hover:bg-slate-800"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <IconComp className={`w-4 h-4 ${isSelected ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400"}`} />
+                            <span className={`text-xs font-bold ${isSelected ? "text-indigo-950 dark:text-indigo-200" : "text-slate-700 dark:text-slate-300"}`}>
+                              {t.title}
+                            </span>
+                          </div>
+                          {isSelected && (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                          {t.desc}
+                        </p>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {form.activo === false && (
+                  <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 flex items-center gap-2 text-rose-700 dark:text-rose-400 text-xs">
+                    <Ban className="w-4 h-4 shrink-0 text-rose-500" />
+                    <span><strong>Efecto real:</strong> Al estar <strong>inactivo</strong>, este producto queda bloqueado en cajas POS (no facturable) y no podrá ser seleccionado en compras.</span>
+                  </div>
+                )}
+                {form.tipo_producto === "materia_prima" && (
+                  <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 flex items-center gap-2 text-amber-700 dark:text-amber-400 text-xs">
+                    <Wheat className="w-4 h-4 shrink-0 text-amber-500" />
+                    <span><strong>Materia Prima:</strong> Este producto estará disponible para costeo de recetas y consumo en sectores de producción interna (Panadería, Rotisería, Carnicería), y <strong>no aparecerá en POS</strong>.</span>
+                  </div>
+                )}
+              </div>
+
               <div className="bg-slate-50/80 dark:bg-slate-800/40 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>

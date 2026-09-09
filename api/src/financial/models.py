@@ -90,6 +90,7 @@ class BankAccount(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     banco = Column(String(100), nullable=False)
+    alias = Column(String(100))  # Nickname / nombre de fantasía para ubicarla rápido
     tipo = Column(String(20), nullable=False)
     numero_cuenta = Column(String(50), nullable=False)
     moneda = Column(String(3), default="PYG")
@@ -243,10 +244,28 @@ class SupplierCreditNote(Base):
     timbrado = Column(String(30))
     fecha = Column(Date, nullable=False)
     motivo = Column(String(150))
+    motivo_categoria = Column(String(50), nullable=True)  # 8 categorias: devolucion_rotura, devolucion_vencimiento, diferencia_precio, error_facturacion, faltante_recepcion, descuento_acordado, flete_no_pactado, bonificacion_volumen
+    impacto_contable = Column(String(30), default="otros_ingresos")  # otros_ingresos | recuperacion_merma
+    archivo_adjunto_path = Column(String(500), nullable=True)
     monto = Column(Numeric(15, 0), nullable=False)
+    saldo_disponible = Column(Numeric(15, 0))
     moneda = Column(String(3), default="PYG")
     observaciones = Column(Text)
     cancelado = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class SupplierCreditNoteApplication(Base):
+    """Aplicación de saldo de Nota de Crédito de Proveedor a una Factura AP."""
+    __tablename__ = "supplier_credit_note_applications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    credit_note_id = Column(UUID(as_uuid=True), ForeignKey("supplier_credit_notes.id"), nullable=False, index=True)
+    invoice_id = Column(UUID(as_uuid=True), ForeignKey("supplier_invoices.id"), nullable=False, index=True)
+    monto_aplicado = Column(Numeric(15, 0), nullable=False)
+    fecha = Column(DateTime(timezone=True), server_default=func.now())
+    observaciones = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -951,14 +951,13 @@ async def list_sessions_with_totals(
     limit: int = 50,
     offset: int = 0,
     fecha_desde=None,
+    fecha_hasta=None,
+    cajero_nombre: str | None = None,
+    user_id: str | None = None,
+    search: str | None = None,
 ) -> list[dict]:
     """Sesiones con el monto realmente cobrado (ventas confirmadas vinculadas
-    a la sesion real, no una aproximacion por sucursal) y alerta de cash drop.
-
-    fecha_desde filtra por fecha_apertura -- lo usa la PWA de supervisora para
-    listar solo cajas de HOY. Una caja abierta que quedo sin cerrar de un dia
-    anterior es un problema distinto (arqueo/turno colgado), no algo que la
-    supervisora deba seguir viendo en su cola de "cajas activas" del dia."""
+    a la sesion real) y conciliación consistente."""
     query = select(CashSession).join(CashRegister, CashRegister.id == CashSession.register_id).where(
         CashRegister.company_id == uuid.UUID(company_id)
     )
@@ -966,8 +965,27 @@ async def list_sessions_with_totals(
         query = query.where(CashSession.register_id == uuid.UUID(register_id))
     if estado:
         query = query.where(CashSession.estado == estado)
+    if user_id:
+        query = query.where(CashSession.user_id == uuid.UUID(user_id))
+    if cajero_nombre:
+        query = query.where(CashSession.cajero_nombre.ilike(f"%{cajero_nombre.strip()}%"))
     if fecha_desde:
-        query = query.where(CashSession.fecha_apertura >= fecha_desde)
+        query = query.where(func.coalesce(CashSession.fecha_cierre, CashSession.fecha_apertura) >= fecha_desde)
+    if fecha_hasta:
+        query = query.where(CashSession.fecha_apertura <= fecha_hasta)
+    if search and search.strip():
+        s_clean = search.strip()
+        from sqlalchemy import or_, cast, String
+        query = query.where(
+            or_(
+                CashSession.cajero_nombre.ilike(f"%{s_clean}%"),
+                CashRegister.nombre.ilike(f"%{s_clean}%"),
+                CashRegister.codigo.ilike(f"%{s_clean}%"),
+                cast(CashSession.id, String).ilike(f"%{s_clean}%"),
+                CashSession.observaciones.ilike(f"%{s_clean}%"),
+            )
+        )
+
     query = query.order_by(CashSession.fecha_apertura.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     sessions = list(result.scalars().all())
@@ -982,7 +1000,7 @@ async def list_sessions_with_totals(
         select(Sale.session_id, func.coalesce(func.sum(Sale.total), 0))
         .where(
             Sale.session_id.in_(session_ids),
-            Sale.estado == "confirmado",
+            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
         )
         .group_by(Sale.session_id)
     )
@@ -1018,19 +1036,13 @@ async def list_sessions_with_totals(
             register = register_result.scalar_one_or_none()
             if register:
                 desde = s.ultimo_cash_drop_at or s.fecha_apertura
-                # Los pagos sincronizados del legado solo tienen granularidad de dia
-                # (fin_recebimento.DT_RECEBIMENTO es DATE, sin hora) — comparar por
-                # dia en vez de timestamp exacto, o una sesion abierta hoy nunca
-                # verian sus propios cobros de hoy (medianoche < hora de apertura).
-                # Solo PYG entra en el acumulado que dispara la alerta — el efectivo
-                # en USD/BRL se informa aparte, sin mezclarlo (el legado tampoco
-                # convierte moneda al arquear).
                 monedas_result = await db.execute(
                     select(SalePayment.moneda, func.coalesce(func.sum(SalePayment.monto), 0))
                     .select_from(SalePayment)
                     .join(Sale, Sale.id == SalePayment.sale_id)
                     .where(
                         Sale.session_id == s.id,
+                        Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
                         SalePayment.forma_pago == "EFECTIVO",
                         func.date(SalePayment.fecha) >= func.date(desde),
                     )
@@ -1043,9 +1055,6 @@ async def list_sessions_with_totals(
                 if register.cash_drop_threshold:
                     cash_drop_threshold_val = float(register.cash_drop_threshold)
                     cash_drop_alert = efectivo_acumulado >= cash_drop_threshold_val
-                    # Aviso temprano al 80% del umbral -- antes era todo o nada
-                    # (recien avisaba al superarlo), sin margen para que el
-                    # cajero se organice antes de que sea urgente.
                     cash_drop_warning = (not cash_drop_alert) and efectivo_acumulado >= cash_drop_threshold_val * 0.8
 
         # Arqueo real (CashCount)
@@ -1053,27 +1062,31 @@ async def list_sessions_with_totals(
         diferencia_usd = None
         diferencia_brl = None
         monto_cierre_esperado = None
+        monto_cierre_declarado = None
         if s.estado == "cerrada":
             count = counts_map.get(s.id)
             if count:
-                diferencia = float(count.diferencia) if count.diferencia is not None else None
-                diferencia_usd = float(count.diferencia_usd) if count.diferencia_usd is not None else None
-                diferencia_brl = float(count.diferencia_brl) if count.diferencia_brl is not None else None
-                monto_cierre_esperado = float(count.monto_total) - float(count.diferencia or 0)
+                diferencia = float(count.diferencia) if count.diferencia is not None else 0.0
+                diferencia_usd = float(count.diferencia_usd) if count.diferencia_usd is not None else 0.0
+                diferencia_brl = float(count.diferencia_brl) if count.diferencia_brl is not None else 0.0
+                monto_cierre_declarado = float(count.monto_total) if count.monto_total is not None else (float(s.monto_cierre) if s.monto_cierre is not None else 0.0)
+                monto_cierre_esperado = monto_cierre_declarado - diferencia
             else:
+                monto_cierre_declarado = float(s.monto_cierre) if s.monto_cierre is not None else 0.0
                 monto_cierre_esperado = float(s.monto_apertura) + float(efectivo_acumulado)
+                diferencia = 0.0
 
         out.append({
             "id": str(s.id),
             "register_id": str(s.register_id),
             "user_id": str(s.user_id),
             "cajero_nombre": s.cajero_nombre,
-            "fecha_apertura": s.fecha_apertura.isoformat(),
+            "fecha_apertura": s.fecha_apertura.isoformat() if s.fecha_apertura else None,
             "fecha_cierre": s.fecha_cierre.isoformat() if s.fecha_cierre else None,
-            "monto_apertura": float(s.monto_apertura),
+            "monto_apertura": float(s.monto_apertura or 0),
             "monto_apertura_brl": float(s.monto_apertura_brl or 0),
             "monto_apertura_usd": float(s.monto_apertura_usd or 0),
-            "monto_cierre": float(s.monto_cierre) if s.monto_cierre is not None else None,
+            "monto_cierre": monto_cierre_declarado if s.estado == "cerrada" else (float(s.monto_cierre) if s.monto_cierre is not None else None),
             "monto_cierre_esperado": monto_cierre_esperado,
             "diferencia": diferencia,
             "diferencia_usd": diferencia_usd,
@@ -1089,6 +1102,195 @@ async def list_sessions_with_totals(
             "ultimo_cash_drop_at": s.ultimo_cash_drop_at.isoformat() if s.ultimo_cash_drop_at else None,
         })
     return out
+
+
+async def get_session_sales_detail(db: AsyncSession, session_id: str, company_id: str) -> dict | None:
+    """Retorna el detalle completo de las ventas que componen una sesión de caja específica,
+    junto con sus medios de pago, clientes, y resumen financiero consistente."""
+    s_uuid = uuid.UUID(str(session_id))
+    c_uuid = uuid.UUID(str(company_id))
+
+    sess_res = await db.execute(
+        select(CashSession, CashRegister)
+        .join(CashRegister, CashRegister.id == CashSession.register_id)
+        .where(CashSession.id == s_uuid, CashRegister.company_id == c_uuid)
+    )
+    row = sess_res.first()
+    if not row:
+        return None
+    session_obj, register_obj = row
+
+    # 1. Obtener reconciliación completa y tasas
+    recon = await get_session_reconciliation_data(db, session_obj.id)
+    tasa_brl = float(recon["tasa_brl"]) if recon else 1400.0
+    tasa_usd = float(recon["tasa_usd"]) if recon else 7800.0
+
+    # 2. Consultar todas las ventas de la sesión con cliente
+    from api.src.customers.models import Customer
+    sales_query = (
+        select(
+            Sale,
+            Customer.razon_social.label("cust_razon_social"),
+            Customer.nombre.label("cust_nombre"),
+            Customer.ruc_sin_dv.label("cust_ruc_sin_dv"),
+            Customer.ruc.label("cust_ruc"),
+            Customer.ci.label("cust_ci"),
+        )
+        .outerjoin(Customer, Customer.id == Sale.customer_id)
+        .where(Sale.session_id == s_uuid)
+        .order_by(Sale.fecha.asc())
+    )
+    sales_res = await db.execute(sales_query)
+    sales_rows = sales_res.all()
+
+    sale_ids = [r[0].id for r in sales_rows]
+
+    # 3. Consultar pagos de las ventas
+    payments_map: dict[uuid.UUID, list[dict]] = {}
+    if sale_ids:
+        pay_query = (
+            select(SalePayment)
+            .where(SalePayment.sale_id.in_(sale_ids))
+            .order_by(SalePayment.fecha.asc(), SalePayment.created_at.asc())
+        )
+        pay_res = await db.execute(pay_query)
+        for p in pay_res.scalars().all():
+            if p.sale_id not in payments_map:
+                payments_map[p.sale_id] = []
+            payments_map[p.sale_id].append({
+                "forma_pago": p.forma_pago,
+                "moneda": p.moneda or "PYG",
+                "monto": float(p.monto or 0),
+            })
+
+    # 4. Consultar conteo de items por venta
+    items_count_map: dict[uuid.UUID, int] = {}
+    if sale_ids:
+        from api.src.sales.models import SaleItem
+        ic_query = (
+            select(SaleItem.sale_id, func.count(SaleItem.id))
+            .where(SaleItem.sale_id.in_(sale_ids))
+            .group_by(SaleItem.sale_id)
+        )
+        ic_res = await db.execute(ic_query)
+        for s_id, count_val in ic_res.all():
+            items_count_map[s_id] = count_val
+
+    # 5. Formatear detalle de ventas
+    sales_list = []
+    total_ventas_gs = Decimal("0")
+    total_descuentos_gs = Decimal("0")
+    total_donaciones_gs = Decimal("0")
+    total_iva_10_gs = Decimal("0")
+    total_iva_5_gs = Decimal("0")
+    total_exenta_gs = Decimal("0")
+    confirmadas_count = 0
+    anuladas_count = 0
+    anuladas_total_gs = Decimal("0")
+
+    for sale, cust_rs, cust_nom, cust_ruc_sd, cust_ruc, cust_ci in sales_rows:
+        is_confirmed = (sale.estado or "").lower() in ["confirmado", "completada", "completado", "pagado"]
+        is_cancelled = (sale.estado or "").lower() in ["cancelado", "anulado", "anulada", "devuelto"]
+
+        tot = Decimal(str(sale.total or 0))
+        desc = Decimal(str(sale.descuento_total or 0))
+        dona = Decimal(str(sale.monto_donacion or 0))
+
+        if is_confirmed:
+            total_ventas_gs += tot
+            total_descuentos_gs += desc
+            total_donaciones_gs += dona
+            total_iva_10_gs += Decimal(str(sale.iva_10 or 0))
+            total_iva_5_gs += Decimal(str(sale.iva_5 or 0))
+            total_exenta_gs += Decimal(str(sale.base_exenta or 0))
+            confirmadas_count += 1
+        elif is_cancelled:
+            anuladas_count += 1
+            anuladas_total_gs += tot
+
+        cliente_nombre = cust_rs or cust_nom or "Consumidor Final"
+        cliente_doc = cust_ruc or cust_ruc_sd or cust_ci or "X"
+
+        p_list = payments_map.get(sale.id, [])
+        if not p_list:
+            fp_resumen = "Sin detalle"
+        elif len(p_list) == 1:
+            p0 = p_list[0]
+            mon_sym = "₲" if p0["moneda"] == "PYG" else ("R$" if p0["moneda"] == "BRL" else "US$")
+            fp_resumen = f"{p0['forma_pago']} {mon_sym} {p0['monto']:,.0f}" if p0["moneda"] == "PYG" else f"{p0['forma_pago']} {mon_sym} {p0['monto']:,.2f}"
+        else:
+            fp_resumen = "Mixto (" + " + ".join(f"{p['forma_pago']} ({p['moneda']})" for p in p_list) + ")"
+
+        fecha_loc = _to_asuncion_tz(sale.fecha)
+        sales_list.append({
+            "id": str(sale.id),
+            "numero": sale.numero,
+            "numero_interno": sale.numero_interno,
+            "fecha": sale.fecha.isoformat() if sale.fecha else None,
+            "fecha_local": fecha_loc.strftime("%d/%m/%Y %H:%M:%S") if fecha_loc else "-",
+            "hora_local": fecha_loc.strftime("%H:%M:%S") if fecha_loc else "-",
+            "tipo_comprobante": sale.tipo_comprobante,
+            "condicion": sale.condicion,
+            "estado": sale.estado,
+            "cliente_nombre": cliente_nombre,
+            "cliente_ruc": cliente_doc,
+            "subtotal": float(sale.subtotal or 0),
+            "descuento": float(desc),
+            "total": float(tot),
+            "monto_donacion": float(dona),
+            "iva_10": float(sale.iva_10 or 0),
+            "iva_5": float(sale.iva_5 or 0),
+            "base_exenta": float(sale.base_exenta or 0),
+            "items_count": items_count_map.get(sale.id, 0),
+            "pagos": p_list,
+            "forma_pago_resumen": fp_resumen,
+        })
+
+    ap_loc = _to_asuncion_tz(session_obj.fecha_apertura)
+    ci_loc = _to_asuncion_tz(session_obj.fecha_cierre)
+
+    return {
+        "session": {
+            "id": str(session_obj.id),
+            "register_id": str(session_obj.register_id),
+            "register_nombre": register_obj.nombre if register_obj else "Caja",
+            "register_codigo": register_obj.codigo if register_obj else "-",
+            "cajero_nombre": session_obj.cajero_nombre or "—",
+            "user_id": str(session_obj.user_id) if session_obj.user_id else None,
+            "fecha_apertura": session_obj.fecha_apertura.isoformat() if session_obj.fecha_apertura else None,
+            "fecha_cierre": session_obj.fecha_cierre.isoformat() if session_obj.fecha_cierre else None,
+            "fecha_apertura_local": ap_loc.strftime("%d/%m/%Y %H:%M:%S") if ap_loc else "-",
+            "fecha_cierre_local": ci_loc.strftime("%d/%m/%Y %H:%M:%S") if ci_loc else "EN CURSO",
+            "estado": session_obj.estado,
+            "observaciones": session_obj.observaciones,
+        },
+        "totales": {
+            "total_ventas_gs": float(total_ventas_gs),
+            "cantidad_ventas": confirmadas_count,
+            "ticket_promedio_gs": float(total_ventas_gs / confirmadas_count) if confirmadas_count > 0 else 0.0,
+            "total_descuentos_gs": float(total_descuentos_gs),
+            "total_donaciones_gs": float(total_donaciones_gs),
+            "total_iva_10_gs": float(total_iva_10_gs),
+            "total_iva_5_gs": float(total_iva_5_gs),
+            "total_exenta_gs": float(total_exenta_gs),
+            "cantidad_anuladas": anuladas_count,
+            "total_anuladas_gs": float(anuladas_total_gs),
+            "fondo_apertura_gs": float(recon["fondo_pyg"]) if recon else float(session_obj.monto_apertura or 0),
+            "fondo_apertura_brl": float(recon["fondo_brl"]) if recon else float(session_obj.monto_apertura_brl or 0),
+            "fondo_apertura_usd": float(recon["fondo_usd"]) if recon else float(session_obj.monto_apertura_usd or 0),
+            "ventas_efectivo_gs": float(recon["ventas_ef_total_gs"]) if recon else 0.0,
+            "ventas_no_efectivo_gs": float(recon["total_no_efectivo_gs"]) if recon else 0.0,
+            "total_drops_gs": float(recon["total_drops_gs"]) if recon else 0.0,
+            "esperado_gaveta_gs": float(recon["esperado_total_gs"]) if recon else 0.0,
+            "declarado_gaveta_gs": float(recon["contado_total_gs"]) if recon else 0.0,
+            "diferencia_gs": float(recon["diferencia_consolidada_gs"]) if recon else 0.0,
+            "tasa_brl": tasa_brl,
+            "tasa_usd": tasa_usd,
+        },
+        "desglose_medios": recon.get("desglose_detallado", []) if recon else [],
+        "reconciliation": recon,
+        "sales": sales_list,
+    }
 
 
 async def get_session_payment_breakdown(db: AsyncSession, session_id: str) -> dict:

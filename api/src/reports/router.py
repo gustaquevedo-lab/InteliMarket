@@ -60,6 +60,16 @@ async def sales_chart_comparison(
     return await service.get_chart_comparison(db, user["company_id"], agrupar_por, fecha_desde, fecha_hasta)
 
 
+@router.get("/sales/executive-profitability")
+async def sales_executive_profitability(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    branch_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    return await service.get_executive_sales_profitability(db, user["company_id"], fecha_desde, fecha_hasta, branch_id)
+
 
 @router.get("/sales/by-category")
 async def sales_by_category(fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
@@ -97,8 +107,8 @@ async def inventory_detail(warehouse_id: int | None = Query(None), db: AsyncSess
 
 
 @router.get("/inventory/rotation")
-async def inventory_rotation(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
-    return await service.get_inventory_rotation(db, user["company_id"])
+async def inventory_rotation(supplier_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.get_inventory_rotation(db, user["company_id"], supplier_id)
 
 
 @router.get("/fiscal/book")
@@ -137,8 +147,14 @@ async def inventory_cost_comparison(product_id: str | None = Query(None), wareho
 
 
 @router.get("/inventory/valuation")
-async def inventory_valuation(warehouse_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
-    return await service.get_inventory_valuation(db, user["company_id"], warehouse_id)
+async def inventory_valuation(
+    warehouse_id: str | None = Query(None),
+    supplier_id: str | None = Query(None),
+    fecha_corte: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    return await service.get_inventory_valuation(db, user["company_id"], warehouse_id, supplier_id, fecha_corte)
 
 
 # ==================== EXPORT ENDPOINTS ====================
@@ -187,10 +203,41 @@ async def export_inventory(warehouse_id: int | None = Query(None), db: AsyncSess
 
 
 @router.get("/export/inventory-rotation")
-async def export_inventory_rotation(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
-    data = await service.get_inventory_rotation(db, user["company_id"])
+async def export_inventory_rotation(supplier_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    data = await service.get_inventory_rotation(db, user["company_id"], supplier_id)
     xlsx = export_service.export_inventory_rotation(data)
     return _excel_response(xlsx, "rotacion_inventario.xlsx")
+
+
+@router.get("/export/inventory-valuation.pdf")
+async def export_inventory_valuation_pdf(
+    warehouse_id: str | None = Query(None),
+    supplier_id: str | None = Query(None),
+    fecha_corte: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    company_id = user["company_id"]
+    data = await service.get_inventory_valuation(db, company_id, warehouse_id, supplier_id, fecha_corte)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Auditoría de Stock"
+    pdf_bytes = pdf_reports.generate_inventory_valuation_pdf(company, data, fecha_corte, generated_by)
+    return _pdf_response(pdf_bytes, f"stock_valorizado_{fecha_corte or 'actual'}.pdf")
+
+
+@router.get("/export/inventory-valuation.xlsx")
+async def export_inventory_valuation_xlsx(
+    warehouse_id: str | None = Query(None),
+    supplier_id: str | None = Query(None),
+    fecha_corte: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    company_id = user["company_id"]
+    data = await service.get_inventory_valuation(db, company_id, warehouse_id, supplier_id, fecha_corte)
+    xlsx_bytes = export_service.export_inventory_valuation_xlsx(data, fecha_corte)
+    return _excel_response(xlsx_bytes, f"stock_valorizado_{fecha_corte or 'actual'}.xlsx")
+
 
 
 @router.get("/export/fiscal-book")
@@ -259,3 +306,34 @@ async def export_cash_flow_pdf(dias: int = Query(30, ge=7, le=180), db: AsyncSes
     generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
     pdf_bytes = pdf_reports.generate_cash_flow_pdf(company, dias_calc, dias, generated_by)
     return _pdf_response(pdf_bytes, "flujo_de_caja.pdf")
+
+
+@router.get("/export/sales-executive.pdf")
+async def export_sales_executive_pdf(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    branch_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    company_id = user["company_id"]
+    data = await service.get_executive_sales_profitability(db, company_id, fecha_desde, fecha_hasta, branch_id)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Auditoría Interna"
+    pdf_bytes = pdf_reports.generate_sales_executive_pdf(company, data, fecha_desde, fecha_hasta, generated_by)
+    return _pdf_response(pdf_bytes, f"informe_ventas_utilidad_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.pdf")
+
+
+@router.get("/export/sales-executive.xlsx")
+async def export_sales_executive_xlsx(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    branch_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    company_id = user["company_id"]
+    data = await service.get_executive_sales_profitability(db, company_id, fecha_desde, fecha_hasta, branch_id)
+    xlsx_bytes = export_service.export_sales_executive_xlsx(data, fecha_desde, fecha_hasta)
+    return _excel_response(xlsx_bytes, f"informe_ventas_utilidad_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.xlsx")
+
