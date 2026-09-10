@@ -57,7 +57,7 @@ async def delete_assignment(db: AsyncSession, assignment_id: str) -> bool:
 async def create_tiered_price(db: AsyncSession, company_id: str, data: TieredPriceCreate) -> dict:
     t = TieredPrice(company_id=uuid.UUID(company_id), **data.model_dump())
     db.add(t)
-    await db.flush()
+    await db.commit()
     await db.refresh(t)
     return _tiered_to_dict(t)
 
@@ -338,7 +338,7 @@ async def update_tiered_price(db: AsyncSession, tier_id: str, data: TieredPriceU
     update_data = data.model_dump(exclude_unset=True)
     for k, v in update_data.items():
         setattr(t, k, v)
-    await db.flush()
+    await db.commit()
     await db.refresh(t)
     return _tiered_to_dict(t)
 

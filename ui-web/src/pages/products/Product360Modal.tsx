@@ -6,7 +6,8 @@ import {
   CheckCircle2, Info, Clock, Star, Truck, Phone, Mail, MapPin,
   Zap, BarChart3, Activity, ArrowUpRight, ArrowDownRight, Box,
   Percent, Gift, Calendar, Scale, Loader2, ChevronRight, FileText,
-  RefreshCw, Eye, Hash, Filter, ArrowRight, ShieldCheck, Check, Calculator, User
+  RefreshCw, Eye, Hash, Filter, ArrowRight, ShieldCheck, Check, Calculator, User,
+  Plus, Pencil, Trash2
 } from "lucide-react"
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis,
@@ -128,7 +129,20 @@ export default function Product360Modal({ data, onClose, onPriceUpdated }: Props
   const m = data.metricas_financieras
   const r = data.rotacion
   const s = data.stock
-  const escalas = data.escalas_precio || []
+  const [localEscalas, setLocalEscalas] = useState<any[]>(() => data.escalas_precio || [])
+  const [editingTierId, setEditingTierId] = useState<string | null>(null) // null | "new" | string (tier.id)
+  const [tierMinQty, setTierMinQty] = useState<number>(6)
+  const [tierMaxQty, setTierMaxQty] = useState<string>("")
+  const [tierTargetMargin, setTierTargetMargin] = useState<string>("15")
+  const [tierPrice, setTierPrice] = useState<string>("")
+  const [savingTier, setSavingTier] = useState<boolean>(false)
+  const [deletingTierId, setDeletingTierId] = useState<string | null>(null)
+
+  useEffect(() => {
+    setLocalEscalas(data.escalas_precio || [])
+  }, [data.escalas_precio])
+
+  const escalas = localEscalas
 
   // Estructura de Costos y Margen Ponderado Real
   const margenPond = data.margen_ponderado_analisis || {
@@ -205,6 +219,139 @@ export default function Product360Modal({ data, onClose, onPriceUpdated }: Props
     } catch (e: any) { toast.error("Error al actualizar precio", e.message) }
     finally { setSavingPrice(false) }
   }, [newPriceNum, p.id, p.nombre, onPriceUpdated, toast])
+
+  const handleStartNewTier = useCallback(() => {
+    setEditingTierId("new")
+    const nextMin = localEscalas.length > 0 ? Math.max(...localEscalas.map(e => Number(e.min_qty) || 0)) + 6 : 6
+    setTierMinQty(nextMin)
+    setTierMaxQty("")
+    setTierTargetMargin("15")
+    if (costoBaseSim > 0) {
+      const pCalc = Math.round(costoBaseSim / (1 - 0.15))
+      const p77 = Math.floor(pCalc / 100) * 100 + 77
+      setTierPrice(String(p77))
+    } else {
+      setTierPrice("")
+    }
+  }, [localEscalas, costoBaseSim])
+
+  const handleEditTier = useCallback((esc: any) => {
+    setEditingTierId(esc.id)
+    setTierMinQty(esc.min_qty || 1)
+    setTierMaxQty(esc.max_qty ? String(esc.max_qty) : "")
+    setTierPrice(String(esc.precio_unitario || ""))
+    const pU = Number(esc.precio_unitario || 0)
+    if (pU > 0 && costoBaseSim > 0) {
+      const mPct = ((pU - costoBaseSim) / pU) * 100
+      setTierTargetMargin(mPct.toFixed(1))
+    } else {
+      setTierTargetMargin("15")
+    }
+  }, [costoBaseSim])
+
+  const handleMarginChange = useCallback((valStr: string) => {
+    setTierTargetMargin(valStr)
+    const mNum = parseFloat(valStr)
+    if (!isNaN(mNum) && mNum < 100 && costoBaseSim > 0) {
+      const rawPrice = Math.round(costoBaseSim / (1 - (mNum / 100)))
+      setTierPrice(String(rawPrice))
+    }
+  }, [costoBaseSim])
+
+  const handlePriceManualChange = useCallback((valStr: string) => {
+    setTierPrice(valStr)
+    const pNum = parseFloat(valStr)
+    if (!isNaN(pNum) && pNum > 0 && costoBaseSim > 0) {
+      const mPct = ((pNum - costoBaseSim) / pNum) * 100
+      setTierTargetMargin(mPct.toFixed(1))
+    }
+  }, [costoBaseSim])
+
+  const applyPsychological = useCallback((type: "77" | "900" | "500" | "000") => {
+    const currentP = parseFloat(tierPrice) || costoBaseSim
+    if (currentP <= 0) return
+    let newP = currentP
+    if (type === "77") {
+      newP = Math.floor(currentP / 100) * 100 + 77
+      if (newP < 77) newP = 77
+    } else if (type === "900") {
+      newP = Math.floor(currentP / 1000) * 1000 + 900
+    } else if (type === "500") {
+      newP = Math.floor(currentP / 1000) * 1000 + 500
+    } else if (type === "000") {
+      newP = Math.round(currentP / 1000) * 1000
+    }
+    setTierPrice(String(newP))
+    if (costoBaseSim > 0) {
+      const mPct = ((newP - costoBaseSim) / newP) * 100
+      setTierTargetMargin(mPct.toFixed(1))
+    }
+  }, [tierPrice, costoBaseSim])
+
+  const handleSaveTier = useCallback(async () => {
+    const pNum = parseFloat(tierPrice)
+    const qNum = Number(tierMinQty)
+    if (!pNum || pNum <= 0) {
+      toast.error("Precio inválido", "El precio mayorista debe ser mayor a 0")
+      return
+    }
+    if (!qNum || qNum < 1) {
+      toast.error("Cantidad inválida", "La cantidad mínima debe ser al menos 1")
+      return
+    }
+
+    setSavingTier(true)
+    try {
+      if (editingTierId === "new") {
+        await api.smartPricing.createTieredPrice({
+          product_id: p.id,
+          min_qty: qNum,
+          max_qty: tierMaxQty ? Number(tierMaxQty) : null,
+          precio_unitario: pNum,
+          moneda: "PYG",
+        })
+        toast.success("Escala creada", `Nueva escala para ${qNum}+ unidades guardada a ${formatPYG(pNum)}`)
+      } else if (editingTierId) {
+        await api.smartPricing.updateTieredPrice(editingTierId, {
+          min_qty: qNum,
+          max_qty: tierMaxQty ? Number(tierMaxQty) : null,
+          precio_unitario: pNum,
+        })
+        toast.success("Escala actualizada", `Escala para ${qNum}+ unidades actualizada a ${formatPYG(pNum)}`)
+      }
+
+      // Refrescar Ficha 360 en vivo
+      const fresh360 = await api.products.get360(p.id)
+      if (fresh360?.escalas_precio) {
+        setLocalEscalas(fresh360.escalas_precio)
+      }
+      setEditingTierId(null)
+    } catch (e: any) {
+      toast.error("Error al guardar escala", e.message)
+    } finally {
+      setSavingTier(false)
+    }
+  }, [tierPrice, tierMinQty, tierMaxQty, editingTierId, p.id, toast])
+
+  const handleDeleteTier = useCallback(async (tierId: string) => {
+    if (!window.confirm("¿Estás seguro de eliminar esta escala de precio mayorista?")) return
+    setDeletingTierId(tierId)
+    try {
+      await api.smartPricing.deleteTieredPrice(tierId)
+      toast.success("Escala eliminada", "La escala fue eliminada correctamente")
+      const fresh360 = await api.products.get360(p.id)
+      if (fresh360?.escalas_precio) {
+        setLocalEscalas(fresh360.escalas_precio)
+      } else {
+        setLocalEscalas(prev => prev.filter(e => e.id !== tierId))
+      }
+      if (editingTierId === tierId) setEditingTierId(null)
+    } catch (e: any) {
+      toast.error("Error al eliminar escala", e.message)
+    } finally {
+      setDeletingTierId(null)
+    }
+  }, [p.id, editingTierId, toast])
 
   const handleAnalyzeIA = useCallback(async () => {
     setIaLoading(true)
@@ -620,44 +767,311 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
               </div>
 
               {/* ── ESCALAS DE PRECIOS MAYORISTAS (sp_tiered_prices) ── */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
-                    <Scale className="w-4 h-4 text-indigo-500" />
-                    <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wider">Escalas de Precio por Volumen (Mayorista)</h4>
+                    <Scale className="w-5 h-5 text-indigo-500" />
+                    <div>
+                      <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wider">Escalas de Precio por Volumen (Mayorista)</h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Precios por escala calculados por margen comercial sobre costo PPP con terminaciones psicológicas.</p>
+                    </div>
                   </div>
-                  <span className="text-xs text-slate-400 font-semibold">{escalas.length} nivel{escalas.length !== 1 ? "es" : ""} configurado{escalas.length !== 1 ? "s" : ""}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 font-semibold">{escalas.length} nivel{escalas.length !== 1 ? "es" : ""} configurado{escalas.length !== 1 ? "s" : ""}</span>
+                    {!editingTierId && (
+                      <button
+                        onClick={handleStartNewTier}
+                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-sm hover:shadow"
+                      >
+                        <Plus className="w-4 h-4" /> Agregar Escala
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {/* ── PANEL DE EDICIÓN / ALTA DE ESCALA INTERACTIVO ── */}
+                {editingTierId && (
+                  <div className="rounded-2xl border-2 border-indigo-400/80 dark:border-indigo-600 bg-gradient-to-br from-indigo-50/90 via-white to-violet-50/50 dark:from-slate-900 dark:via-indigo-950/30 dark:to-slate-900 p-5 shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="flex items-center justify-between border-b border-indigo-100 dark:border-slate-800 pb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-1 rounded-lg text-xs font-black bg-indigo-600 text-white uppercase tracking-wider">
+                          {editingTierId === "new" ? "Nueva Escala" : "Editar Escala"}
+                        </span>
+                        <span className="text-xs text-slate-600 dark:text-slate-300 font-bold">
+                          Costo PPP de Referencia: <strong className="font-mono text-amber-600 dark:text-amber-400">{formatPYG(costoBaseSim)}</strong>
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setEditingTierId(null)}
+                        className="text-xs font-bold text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      {/* Cantidad Mínima */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Cantidad Mínima ({p.unidad_medida || "UN"})</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={tierMinQty}
+                          onChange={e => setTierMinQty(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold font-mono text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      {/* Cantidad Máxima (Opcional) */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Cantidad Máxima (Opcional)</label>
+                        <input
+                          type="number"
+                          min={tierMinQty}
+                          placeholder="Sin límite (+)"
+                          value={tierMaxQty}
+                          onChange={e => setTierMaxQty(e.target.value)}
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold font-mono text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      {/* % Margen Objetivo Deseado */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Margen Objetivo Comercial (%)</label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            step="0.5"
+                            value={tierTargetMargin}
+                            onChange={e => handleMarginChange(e.target.value)}
+                            className="w-full px-3.5 py-2 rounded-xl border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 font-bold font-mono text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 pr-8"
+                          />
+                          <span className="absolute right-3 top-2 text-xs font-bold text-slate-400">%</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Presets rápidos de margen */}
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 mr-1">Márgenes Rápidos:</span>
+                      {["10", "12.5", "15", "18", "20", "22", "25"].map(mVal => (
+                        <button
+                          key={mVal}
+                          type="button"
+                          onClick={() => handleMarginChange(mVal)}
+                          className={`px-2 py-0.5 rounded-lg font-mono text-[11px] font-bold border transition-colors ${
+                            tierTargetMargin === mVal
+                              ? "bg-indigo-600 text-white border-indigo-600"
+                              : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400"
+                          }`}
+                        >
+                          {mVal}%
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Barra de Atajos: Precios Psicológicos */}
+                    <div className="bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-200/60 dark:border-indigo-800/60 rounded-xl p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-indigo-900 dark:text-indigo-300 flex items-center gap-1">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                          Reglas de Precios Psicológicos (Supermercado):
+                        </span>
+                        <span className="text-[10px] text-slate-400">Click para ajustar terminación</span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => applyPsychological("77")}
+                          className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 text-xs font-black hover:bg-amber-50 dark:hover:bg-amber-950/50 transition-colors shadow-sm"
+                        >
+                          <span>✨ Final .77</span>
+                          <span className="text-[10px] opacity-75 font-mono">
+                            ({formatPYG(Math.floor((parseFloat(tierPrice) || costoBaseSim) / 100) * 100 + 77)})
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => applyPsychological("900")}
+                          className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 text-xs font-bold hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors"
+                        >
+                          <span>🎯 Final .900</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => applyPsychological("000")}
+                          className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                        >
+                          <span>⚪ Redondo .000</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => applyPsychological("500")}
+                          className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                        >
+                          <span>🪙 Final .500</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Input Principal: Precio Mayorista Editable */}
+                    <div className="flex flex-wrap items-end gap-3 pt-1">
+                      <div className="flex-1 min-w-[220px]">
+                        <label className="text-[10px] font-black uppercase text-indigo-900 dark:text-indigo-200 block mb-1">
+                          Precio Mayorista Final Resultante (₲ / unidad) — 100% editable
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            min={0}
+                            value={tierPrice}
+                            onChange={e => handlePriceManualChange(e.target.value)}
+                            className="w-full px-4 py-2.5 rounded-xl border-2 border-indigo-500 bg-white dark:bg-slate-900 font-black text-xl text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-400 font-mono"
+                          />
+                          <span className="absolute right-4 top-3 text-xs font-bold text-slate-400 font-mono">PYG</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSaveTier}
+                          disabled={savingTier || !parseFloat(tierPrice) || parseFloat(tierPrice) <= 0}
+                          className="flex items-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-bold transition-all shadow-md hover:shadow-lg"
+                        >
+                          {savingTier ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                          Guardar Escala
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingTierId(null)}
+                          className="px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Resumen en vivo de Rentabilidad y Ahorro */}
+                    {parseFloat(tierPrice) > 0 && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-indigo-100 dark:border-slate-800 text-xs">
+                        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                          <span className="text-[10px] text-slate-400 uppercase font-bold block">Margen Real</span>
+                          <span className={`font-mono font-black text-sm ${
+                            ((parseFloat(tierPrice) - costoBaseSim) / parseFloat(tierPrice) * 100) >= 15
+                              ? "text-emerald-600"
+                              : ((parseFloat(tierPrice) - costoBaseSim) / parseFloat(tierPrice) * 100) >= 8
+                              ? "text-amber-600"
+                              : "text-rose-600"
+                          }`}>
+                            {costoBaseSim > 0 ? (((parseFloat(tierPrice) - costoBaseSim) / parseFloat(tierPrice)) * 100).toFixed(1) : "—"}%
+                          </span>
+                          <p className="text-[9px] text-slate-400 font-mono">Ganancia: {formatPYG(parseFloat(tierPrice) - costoBaseSim)}</p>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                          <span className="text-[10px] text-slate-400 uppercase font-bold block">Descuento Cliente</span>
+                          <span className="font-mono font-black text-sm text-indigo-600 dark:text-indigo-400">
+                            {m.precio_venta > 0 && parseFloat(tierPrice) < m.precio_venta
+                              ? `-${(((m.precio_venta - parseFloat(tierPrice)) / m.precio_venta) * 100).toFixed(1)}%`
+                              : "0%"}
+                          </span>
+                          <p className="text-[9px] text-slate-400 font-mono">Ahorro: {formatPYG(Math.max(0, m.precio_venta - parseFloat(tierPrice)))}</p>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                          <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Lote Mínimo</span>
+                          <span className="font-mono font-black text-sm text-slate-800 dark:text-white">
+                            {formatPYG(Math.round((parseFloat(tierPrice) || 0) * tierMinQty))}
+                          </span>
+                          <p className="text-[9px] text-slate-400">{tierMinQty} {p.unidad_medida || "un."}</p>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                          <span className="text-[10px] text-slate-400 uppercase font-bold block">Markup s/ Costo</span>
+                          <span className="font-mono font-black text-sm text-violet-600">
+                            {costoBaseSim > 0 ? (((parseFloat(tierPrice) - costoBaseSim) / costoBaseSim) * 100).toFixed(1) : "—"}%
+                          </span>
+                          <p className="text-[9px] text-slate-400">Sobre PPP</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {parseFloat(tierPrice) > 0 && parseFloat(tierPrice) < costoBaseSim && (
+                      <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 rounded-xl p-3 text-xs flex items-center gap-2 text-rose-700 dark:text-rose-300">
+                        <AlertTriangle className="w-4 h-4 flex-shrink-0 text-rose-600" />
+                        <span>⚠️ <strong>Alerta de margen negativo:</strong> El precio mayorista ingresado ({formatPYG(parseFloat(tierPrice))}) es inferior al costo PPP ({formatPYG(costoBaseSim)}). El supermercado perdería {formatPYG(costoBaseSim - parseFloat(tierPrice))} por unidad.</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {escalas.length === 0 ? (
                   <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center">
                     <Scale className="w-10 h-10 text-slate-300 dark:text-slate-700 mx-auto mb-2" />
                     <p className="text-sm font-bold text-slate-600 dark:text-slate-400">Sin escalas mayoristas registradas</p>
-                    <p className="text-xs text-slate-400 mt-1">Este producto se vende exclusivamente a precio unitario estándar ({formatPYG(m.precio_venta)}).</p>
+                    <p className="text-xs text-slate-400 mt-1 mb-4">Este producto se vende exclusivamente a precio unitario estándar ({formatPYG(m.precio_venta)}).</p>
+                    {!editingTierId && (
+                      <button
+                        onClick={handleStartNewTier}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-sm"
+                      >
+                        <Plus className="w-4 h-4" /> Crear Primera Escala
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-4">
                     {/* Grid de Tiers */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       {escalas.map((esc, idx) => (
-                        <div key={esc.id || idx} className="rounded-2xl border border-indigo-200 dark:border-indigo-800/60 bg-gradient-to-br from-white to-indigo-50/30 dark:from-slate-900 dark:to-indigo-950/30 p-4 shadow-sm relative overflow-hidden flex flex-col justify-between">
-                          <div className="flex justify-between items-start mb-2">
-                            <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-md">
-                              Escala {idx + 1}: {esc.min_qty}+ unidades
-                            </span>
-                            <span className="text-xs font-black text-emerald-600 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded-md">
-                              -{esc.descuento_pct}%
-                            </span>
-                          </div>
+                        <div key={esc.id || idx} className="rounded-2xl border border-indigo-200 dark:border-indigo-800/60 bg-gradient-to-br from-white to-indigo-50/30 dark:from-slate-900 dark:to-indigo-950/30 p-4 shadow-sm relative overflow-hidden flex flex-col justify-between hover:border-indigo-400 transition-all group">
+                          <div>
+                            <div className="flex justify-between items-start mb-2">
+                              <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-md">
+                                Escala {idx + 1}: {esc.min_qty}+ unidades
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-xs font-black text-emerald-600 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded-md">
+                                  -{esc.descuento_pct}%
+                                </span>
+                                {esc.id && (
+                                  <div className="flex items-center gap-0.5 ml-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleEditTier(esc)}
+                                      title="Editar Escala"
+                                      className="p-1 rounded-lg hover:bg-indigo-100 dark:hover:bg-slate-800 text-indigo-600 hover:text-indigo-800 transition-colors"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteTier(esc.id)}
+                                      disabled={deletingTierId === esc.id}
+                                      title="Eliminar Escala"
+                                      className="p-1 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-950/50 text-rose-500 hover:text-rose-700 transition-colors"
+                                    >
+                                      {deletingTierId === esc.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
 
-                          <div className="my-2">
-                            <p className="text-2xl font-black font-mono text-slate-900 dark:text-white">
-                              {formatPYG(esc.precio_unitario)}
-                              <span className="text-xs font-normal text-slate-400"> / un.</span>
-                            </p>
-                            <p className="text-[11px] text-slate-500 mt-0.5">
-                              Ahorro cliente: <strong className="text-emerald-600">{formatPYG(esc.ahorro_por_unidad)}</strong> / unidad
-                            </p>
+                            <div className="my-2">
+                              <p className="text-2xl font-black font-mono text-slate-900 dark:text-white">
+                                {formatPYG(esc.precio_unitario)}
+                                <span className="text-xs font-normal text-slate-400"> / un.</span>
+                              </p>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                Ahorro cliente: <strong className="text-emerald-600">{formatPYG(esc.ahorro_por_unidad)}</strong> / unidad
+                              </p>
+                            </div>
                           </div>
 
                           <div className="pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-2 text-[10px]">
@@ -667,7 +1081,7 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                             </div>
                             <div className="text-right">
                               <span className="text-slate-400 block font-bold">Margen Supermercado</span>
-                              <span className={`font-mono font-bold ${esc.margen_pct >= 20 ? "text-emerald-600" : "text-amber-600"}`}>{esc.margen_pct}%</span>
+                              <span className={`font-mono font-bold ${esc.margen_pct >= 20 ? "text-emerald-600" : esc.margen_pct >= 10 ? "text-amber-600" : "text-rose-600"}`}>{esc.margen_pct}%</span>
                             </div>
                           </div>
                         </div>
@@ -687,6 +1101,7 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                             <th className="p-3 text-right">Desembolso Mínimo</th>
                             <th className="p-3 text-right">Margen Negocio</th>
                             <th className="p-3 text-right">Markup</th>
+                            <th className="p-3 text-center">Acciones</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -700,6 +1115,7 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                             <td className="p-3 text-right font-mono text-slate-700">{formatPYG(m.precio_venta)}</td>
                             <td className="p-3 text-right font-mono font-bold text-emerald-600">{margenPond.margen_lista_nominal_pct}%</td>
                             <td className="p-3 text-right font-mono text-violet-600">{margenPond.markup_lista_pct}%</td>
+                            <td className="p-3 text-center text-slate-400 text-[10px]">Fija</td>
                           </tr>
                           {escalas.map((esc, i) => (
                             <tr key={esc.id || i} className="hover:bg-indigo-50/40 dark:hover:bg-slate-800/60 transition-colors">
@@ -714,6 +1130,31 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                               <td className="p-3 text-right font-mono font-bold text-slate-900 dark:text-white">{formatPYG(esc.total_minimo)}</td>
                               <td className="p-3 text-right font-mono font-bold text-emerald-600">{esc.margen_pct}%</td>
                               <td className="p-3 text-right font-mono text-violet-600">{esc.markup_pct}%</td>
+                              <td className="p-3 text-center">
+                                {esc.id ? (
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleEditTier(esc)}
+                                      title="Editar"
+                                      className="p-1.5 rounded-lg hover:bg-indigo-100 dark:hover:bg-slate-800 text-indigo-600 transition-colors"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteTier(esc.id)}
+                                      disabled={deletingTierId === esc.id}
+                                      title="Eliminar"
+                                      className="p-1.5 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-950/50 text-rose-500 transition-colors"
+                                    >
+                                      {deletingTierId === esc.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400 text-[10px]">—</span>
+                                )}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -723,6 +1164,7 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                 )}
               </div>
             </div>
+
           )}
 
           {/* ════════════════════════════════════════════════════════════════════════
