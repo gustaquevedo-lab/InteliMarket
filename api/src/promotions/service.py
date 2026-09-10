@@ -718,8 +718,9 @@ async def calculate_applicable(
 ) -> CalculatePromoResponse:
     """Motor de cálculo en caja: Valida promociones y escalas mayoristas."""
     cid = uuid.UUID(company_id)
-    today = date.today()
-    now_time = datetime.now().time()
+    now_dt = datetime.now(PY_TZ)
+    today = now_dt.date()
+    now_time = now_dt.time()
     sunday_dow = (today.weekday() + 1) % 7
 
     promos_res = await db.execute(

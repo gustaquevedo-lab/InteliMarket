@@ -1,8 +1,12 @@
-from sqlalchemy import select, delete, func as sa_func, and_, desc
+from sqlalchemy import select, delete, func as sa_func, and_, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
+from decimal import Decimal
 from typing import Optional
 import uuid, math
+import logging
+
+logger = logging.getLogger(__name__)
 
 from api.src.smart_pricing.models import (
     PriceListAssignment, TieredPrice, Promotion, PromotionReward,
@@ -13,6 +17,8 @@ from api.src.smart_pricing.schemas import (
     PromotionCreate, PromotionUpdate, PriceSuggestionCreate, PriceSuggestionUpdate,
     PriceChangeRequestCreate, PriceChangeRequestReview, DynamicPriceRequest,
 )
+from api.src.promotions.models import Promotion as MainPromotion
+from api.src.products.models import Product
 
 
 # ===== PRICE LIST ASSIGNMENTS =====
@@ -70,7 +76,62 @@ async def list_tiered_prices(
         q = q.where(TieredPrice.price_list_id == uuid.UUID(price_list_id))
     q = q.order_by(TieredPrice.min_qty.asc())
     result = await db.execute(q)
-    return [_tiered_to_dict(r) for r in result.scalars().all()]
+    tiers = [_tiered_to_dict(r) for r in result.scalars().all()]
+
+    # Si se consulta un producto puntual, verificar si tiene promociones de volumen activas (ej: 2x1, 3x2)
+    # y anexar el escalón virtual para que el modal de consulta de precios de caja lo exponga
+    if product_id:
+        try:
+            cid = uuid.UUID(company_id)
+            pid = uuid.UUID(product_id)
+            try:
+                from zoneinfo import ZoneInfo
+                asuncion_tz = ZoneInfo("America/Asuncion")
+            except Exception:
+                asuncion_tz = None
+            today = datetime.now(asuncion_tz).date() if asuncion_tz else date.today()
+
+            promo_q = select(MainPromotion).where(
+                MainPromotion.company_id == cid,
+                MainPromotion.activo == True,
+                MainPromotion.estado == "activa",
+                MainPromotion.valido_desde <= today,
+                MainPromotion.valido_hasta >= today,
+                MainPromotion.producto_ids.contains([pid]),
+            ).order_by(MainPromotion.created_at.desc())
+
+            promo_res = await db.execute(promo_q)
+            for pr in promo_res.scalars().all():
+                if pr.tipo in ("dos_por_uno", "tres_por_dos", "nxm", "cantidad_lleva"):
+                    min_q = 2 if pr.tipo == "dos_por_uno" else (3 if pr.tipo == "tres_por_dos" else (pr.cantidad_minima or 2))
+                    # Consultar precio regular del producto
+                    p_res = await db.execute(select(Product.precio_venta, Product.precio_regular).where(Product.id == pid))
+                    p_row = p_res.first()
+                    if p_row:
+                        reg_p = Decimal(str(p_row.precio_regular)) if (p_row.precio_regular and p_row.precio_regular > 0) else Decimal(str(p_row.precio_venta or 0))
+                        if reg_p > 0:
+                            if pr.tipo == "dos_por_uno":
+                                unit_p = round(reg_p / Decimal("2"))
+                            elif pr.tipo == "tres_por_dos":
+                                unit_p = round((reg_p * Decimal("2")) / Decimal("3"))
+                            else:
+                                m = int(pr.valor) if pr.valor and pr.valor > 0 else 1
+                                unit_p = round((reg_p * Decimal(str(m))) / Decimal(str(min_q)))
+                            tiers.append({
+                                "id": f"promo-{pr.id}",
+                                "company_id": company_id,
+                                "price_list_id": price_list_id,
+                                "product_id": product_id,
+                                "min_qty": min_q,
+                                "max_qty": None,
+                                "precio_unitario": float(unit_p),
+                                "moneda": "PYG",
+                                "activo": True,
+                            })
+        except Exception as e:
+            logger.warning(f"Error anexando promo virtual a list_tiered_prices: {e}")
+
+    return tiers
 
 
 async def get_applicable_tier_price(
@@ -78,26 +139,158 @@ async def get_applicable_tier_price(
     price_list_id: Optional[str] = None
 ) -> Optional[dict]:
     active_promo_price: Optional[Decimal] = None
+    promo_applied_info: Optional[dict] = None
     try:
         cid = uuid.UUID(company_id)
         pid = uuid.UUID(product_id)
-        today = datetime.now().date()
-        promo_q = select(Promotion).where(
-            Promotion.company_id == cid,
-            Promotion.activo == True,
-            Promotion.estado == "activa",
-            Promotion.valido_desde <= today,
-            Promotion.valido_hasta >= today,
-            Promotion.producto_ids.any(pid)
 
+        try:
+            from zoneinfo import ZoneInfo
+            asuncion_tz = ZoneInfo("America/Asuncion")
+        except Exception:
+            asuncion_tz = None
+
+        if asuncion_tz:
+            now_dt = datetime.now(asuncion_tz)
+            today = now_dt.date()
+            now_time = now_dt.time()
+        else:
+            today = date.today()
+            now_time = datetime.now().time()
+        sunday_dow = (today.weekday() + 1) % 7
+
+        # 1. Obtener datos del producto (precio regular y categoría)
+        prod_res = await db.execute(
+            select(Product.precio_venta, Product.precio_regular, Product.categoria_id, Product.costo_promedio, Product.ultimo_costo)
+            .where(Product.id == pid)
         )
-        promo_res = await db.execute(promo_q)
-        active_promo = promo_res.scalars().first()
-        if active_promo and active_promo.tipo == "precio_fijo_oferta" and active_promo.precio_fijo_promocional:
-            active_promo_price = active_promo.precio_fijo_promocional
-    except Exception:
-        pass
+        prod_row = prod_res.first()
+        if prod_row:
+            pv = Decimal(str(prod_row.precio_venta or 0))
+            pr_val = Decimal(str(prod_row.precio_regular)) if (prod_row.precio_regular and prod_row.precio_regular > 0) else pv
+            p_precio_regular = pr_val
+            p_cat_id = prod_row.categoria_id
+            p_cost = prod_row.costo_promedio or prod_row.ultimo_costo
+        else:
+            pv = Decimal("0")
+            pr_val = Decimal("0")
+            p_precio_regular = Decimal("0")
+            p_cat_id = None
+            p_cost = None
 
+        # 2. Si el producto tiene precio válido, evaluar promociones comerciales en tabla `promotions`
+        if pv > 0 or p_precio_regular > 0:
+            condiciones_aplica = [
+                MainPromotion.producto_ids.contains([pid]),
+                MainPromotion.aplica_a == "carrito",
+            ]
+            if p_cat_id:
+                condiciones_aplica.append(
+                    and_(MainPromotion.aplica_a == "categoria", MainPromotion.categoria_ids.contains([p_cat_id]))
+                )
+
+            promo_q = select(MainPromotion).where(
+                MainPromotion.company_id == cid,
+                MainPromotion.activo == True,
+                MainPromotion.estado == "activa",
+                MainPromotion.valido_desde <= today,
+                MainPromotion.valido_hasta >= today,
+                or_(*condiciones_aplica)
+            ).order_by(MainPromotion.created_at.desc())
+
+            promo_res = await db.execute(promo_q)
+            promos = promo_res.scalars().all()
+
+            qty_dec = Decimal(str(quantity))
+            volume_types = ("dos_por_uno", "tres_por_dos", "nxm", "cantidad_lleva", "segunda_unidad_pct")
+
+            from api.src.promotions.service import calcular_precio_promocional
+
+            for pr in promos:
+                # Validar restricciones de días, horario y límites
+                if pr.dias_semana and len(pr.dias_semana) > 0 and sunday_dow not in pr.dias_semana:
+                    continue
+                if pr.horario_desde and pr.horario_hasta and not (pr.horario_desde <= now_time <= pr.horario_hasta):
+                    continue
+                if pr.limitar_unidades and pr.stock_limite_unidades:
+                    if (pr.unidades_vendidas_promo or Decimal("0")) >= pr.stock_limite_unidades:
+                        continue
+                if pr.usos_maximos and (pr.usos_actuales or 0) >= pr.usos_maximos:
+                    continue
+
+                eff_qty = qty_dec
+                if pr.limite_por_compra and eff_qty > Decimal(str(pr.limite_por_compra)):
+                    eff_qty = Decimal(str(pr.limite_por_compra))
+
+                calc_unit_price: Optional[Decimal] = None
+                min_req = pr.cantidad_minima or 1
+
+                # Para mecánicas de volumen (2x1, etc.) la base es siempre el precio de venta en góndola (pv)
+                calc_base = pv if pr.tipo in volume_types else pr_val
+
+                if pr.tipo == "dos_por_uno":
+                    min_req = 2
+                    if quantity >= 2:
+                        grupos = int(eff_qty // Decimal("2"))
+                        unidades_gratis = Decimal(str(grupos * 1))
+                        # Total pagado por las unidades de la línea
+                        total_linea = (qty_dec - unidades_gratis) * calc_base
+                        calc_unit_price = (total_linea / qty_dec).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+                elif pr.tipo == "tres_por_dos":
+                    min_req = 3
+                    if quantity >= 3:
+                        grupos = int(eff_qty // Decimal("3"))
+                        unidades_gratis = Decimal(str(grupos * 1))
+                        total_linea = (qty_dec - unidades_gratis) * calc_base
+                        calc_unit_price = (total_linea / qty_dec).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+                elif pr.tipo in ("nxm", "cantidad_lleva"):
+                    n = pr.cantidad_minima or 2
+                    m = int(pr.valor) if pr.valor and pr.valor > 0 else 1
+                    min_req = n
+                    if n > m and quantity >= n:
+                        grupos = int(eff_qty // Decimal(str(n)))
+                        unidades_gratis = Decimal(str(grupos * (n - m)))
+                        total_linea = (qty_dec - unidades_gratis) * calc_base
+                        calc_unit_price = (total_linea / qty_dec).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+                elif pr.tipo == "segunda_unidad_pct":
+                    min_req = 2
+                    if quantity >= 2:
+                        pares = int(eff_qty // Decimal("2"))
+                        pct = (pr.valor or Decimal("50")) / Decimal("100")
+                        descuento = Decimal(str(pares)) * (calc_base * pct)
+                        total_linea = (qty_dec * calc_base) - descuento
+                        calc_unit_price = (total_linea / qty_dec).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+                elif pr.tipo == "precio_fijo_oferta" and pr.precio_fijo_promocional:
+                    if quantity >= min_req:
+                        calc_unit_price = Decimal(str(pr.precio_fijo_promocional))
+                elif pr.tipo in ("monto_fijo", "porcentaje"):
+                    if quantity >= min_req:
+                        c_unit = calcular_precio_promocional(
+                            tipo=pr.tipo,
+                            precio_regular=calc_base,
+                            valor=pr.valor,
+                            precio_fijo_promocional=pr.precio_fijo_promocional,
+                            costo_unitario_referencia=p_cost or pr.costo_unitario_referencia,
+                            base_calculo_pct=pr.base_calculo_pct or "venta",
+                            terminacion_psicologica=pr.terminacion_psicologica,
+                        )
+                        if c_unit < calc_base:
+                            calc_unit_price = c_unit
+
+                # No aplicar si es más caro que el precio de venta en góndola (pv)
+                if calc_unit_price is not None and calc_unit_price <= pv and calc_unit_price < calc_base:
+                    if active_promo_price is None or calc_unit_price < active_promo_price:
+                        active_promo_price = calc_unit_price
+                        promo_applied_info = {
+                            "promo_id": str(pr.id),
+                            "promo_nombre": pr.nombre,
+                            "promo_tipo": pr.tipo,
+                            "min_qty": min_req,
+                        }
+    except Exception as e:
+        logger.warning(f"Error evaluando promociones en get_applicable_tier_price: {e}")
+
+    # 3. Evaluar escalas mayoristas de sp_tiered_prices
     q = select(TieredPrice).where(
         TieredPrice.company_id == uuid.UUID(company_id),
         TieredPrice.product_id == uuid.UUID(product_id),
@@ -113,18 +306,20 @@ async def get_applicable_tier_price(
     for t in result.scalars().all():
         if t.max_qty is None or quantity <= t.max_qty:
             t_dict = _tiered_to_dict(t)
-            # Si hay una promo activa con precio aun menor, preferir la promo
+            # Si hay una promo activa con precio aún menor que la escala mayorista, gana la promo
             if active_promo_price is not None and Decimal(str(t_dict["precio_unitario"])) > active_promo_price:
                 t_dict["precio_unitario"] = float(active_promo_price)
             return t_dict
 
+    # Si no hay escala en sp_tiered_prices pero sí hay promo activa por volumen
     if active_promo_price is not None:
+        min_q = (promo_applied_info or {}).get("min_qty", 1)
         return {
             "id": f"promo-{product_id}",
             "company_id": company_id,
             "price_list_id": price_list_id,
             "product_id": product_id,
-            "min_qty": 1,
+            "min_qty": min_q,
             "max_qty": None,
             "precio_unitario": float(active_promo_price),
             "moneda": "PYG",

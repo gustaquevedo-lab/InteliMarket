@@ -459,6 +459,8 @@ async def list_products(
 async def annotate_products_with_promos(db: AsyncSession, company_id: str, products: list) -> None:
     """Anota en lote los productos con la promo vigente HOY (si la hay).
     Muta los objetos directamente -- Pydantic los lee via getattr (from_attributes=True).
+    Soporta precio_fijo_oferta, porcentaje, monto_fijo, combos y promociones por categoría
+    utilizando el motor unificado de cálculo (calcular_precio_promocional).
     """
     if not products:
         return
@@ -477,59 +479,133 @@ async def annotate_products_with_promos(db: AsyncSession, company_id: str, produ
         asuncion_tz = None
 
     if asuncion_tz:
-        today = datetime.now(asuncion_tz).date()
+        now_dt = datetime.now(asuncion_tz)
+        today = now_dt.date()
+        now_time = now_dt.time()
     else:
         today = date.today()
+        now_time = datetime.now().time()
     # Python weekday(): 0=Lun..6=Dom -> convertir a 0=Dom..6=Sab del legacy
     sunday_dow = (today.weekday() + 1) % 7
 
+    from api.src.promotions.service import calcular_precio_promocional
+
     promo_rows = await db.execute(
-        select(
-            Promotion.producto_ids,
-            Promotion.id,
-            Promotion.nombre,
-            Promotion.precio_fijo_promocional,
-            Promotion.dias_semana,
-        ).where(
+        select(Promotion).where(
             Promotion.company_id == c_uuid,
             Promotion.activo == True,
             Promotion.estado == "activa",
             Promotion.valido_desde <= today,
             Promotion.valido_hasta >= today,
-            Promotion.precio_fijo_promocional != None,
-        ).order_by(Promotion.precio_fijo_promocional.asc(), Promotion.valido_hasta.asc())
+        ).order_by(Promotion.created_at.desc())
     )
+    all_promos = promo_rows.scalars().all()
 
-    promo_map: dict[UUID, dict] = {}
-    for pr in promo_rows.all():
-        prod_ids_promo = pr.producto_ids or []
+    # Filtrar promociones que cumplan restricciones de tiempo, cupo y usos
+    active_promos = []
+    for pr in all_promos:
         dias = pr.dias_semana or []
-        # Saltar si la promo no aplica hoy por dia de semana
         if dias and sunday_dow not in dias:
             continue
-        for pid in prod_ids_promo:
-            # Priorizar siempre la promoción con menor precio (mayor descuento al cliente)
-            if pid not in promo_map or pr.precio_fijo_promocional < promo_map[pid]["precio"]:
-                promo_map[pid] = {
-                    "id": str(pr.id),
-                    "nombre": pr.nombre,
-                    "precio": pr.precio_fijo_promocional,
-                    "dias": dias,
-                }
+        if pr.horario_desde and pr.horario_hasta:
+            if not (pr.horario_desde <= now_time <= pr.horario_hasta):
+                continue
+        if pr.limitar_unidades and pr.stock_limite_unidades:
+            if (pr.unidades_vendidas_promo or Decimal("0")) >= pr.stock_limite_unidades:
+                continue
+        if pr.usos_maximos and (pr.usos_actuales or 0) >= pr.usos_maximos:
+            continue
+        active_promos.append(pr)
+
+    from collections import defaultdict
+    promo_by_pid = defaultdict(list)
+    promo_by_cat = defaultdict(list)
+    cart_promos = []
+
+    for pr in active_promos:
+        if pr.aplica_a == "producto" and pr.producto_ids:
+            for pid in pr.producto_ids:
+                promo_by_pid[pid].append(pr)
+        elif pr.aplica_a == "categoria" and pr.categoria_ids:
+            for cat_id in pr.categoria_ids:
+                promo_by_cat[cat_id].append(pr)
+        elif pr.aplica_a == "carrito":
+            cart_promos.append(pr)
 
     for p in products:
-        info = promo_map.get(p.id)
-        if info and info["precio"]:
-            promo_p = info["precio"]
-            p.__dict__["precio_promo"] = promo_p
+        p_cat_id = getattr(p, "categoria_id", None)
+        candidates = promo_by_pid.get(p.id, [])
+        if p_cat_id and p_cat_id in promo_by_cat:
+            candidates = candidates + promo_by_cat[p_cat_id]
+        if cart_promos:
+            candidates = candidates + cart_promos
+
+        if not candidates:
+            p.__dict__["precio_promo"] = None
+            p.__dict__["en_promocion"] = False
+            p.__dict__["promocion_id"] = None
+            p.__dict__["promocion_nombre"] = None
+            p.__dict__["promo_dias_semana"] = None
+            continue
+
+        pv = Decimal(str(p.precio_venta)) if (p.precio_venta and p.precio_venta > 0) else Decimal("0")
+        pr_val = Decimal(str(p.precio_regular)) if (getattr(p, "precio_regular", None) is not None and p.precio_regular > 0) else pv
+
+        if pv <= 0 and pr_val <= 0:
+            p.__dict__["precio_promo"] = None
+            p.__dict__["en_promocion"] = False
+            p.__dict__["promocion_id"] = None
+            p.__dict__["promocion_nombre"] = None
+            p.__dict__["promo_dias_semana"] = None
+            continue
+
+        best_promo = None
+        best_price = None
+        best_regular_base = None
+
+        volume_types = ("dos_por_uno", "tres_por_dos", "nxm", "cantidad_lleva", "segunda_unidad_pct")
+
+        for pr in candidates:
+            # Promos con umbral mínimo de compra de volumen mayorista (ej. a partir de 6 unidades)
+            # que no correspondan a mecánicas de promoción directa (2x1, 3x2) se excluyen de la ficha unitaria
+            if pr.tipo not in volume_types and pr.cantidad_minima and pr.cantidad_minima > 1:
+                continue
+
+            # Para mecánicas de volumen (2x1, 3x2, etc.), la base de cálculo de la unidad equivalente
+            # es siempre el precio de venta en góndola (pv). Para precio_fijo_oferta / % sincronizado,
+            # pr_val es el precio regular histórico.
+            calc_base = pv if pr.tipo in volume_types else pr_val
+
+            prod_cost = getattr(p, "costo_promedio", None) or getattr(p, "ultimo_costo", None) or pr.costo_unitario_referencia
+            calc_p = calcular_precio_promocional(
+                tipo=pr.tipo,
+                precio_regular=calc_base,
+                valor=pr.valor,
+                precio_fijo_promocional=pr.precio_fijo_promocional,
+                costo_unitario_referencia=prod_cost,
+                base_calculo_pct=pr.base_calculo_pct or "venta",
+                terminacion_psicologica=pr.terminacion_psicologica,
+            )
+
+            # Regla de oro comercial:
+            # 1. El precio promocional no puede ser superior al precio de venta actual en góndola (pv).
+            #    (Evita que ofertas desfasadas del ERP inflen el precio del producto).
+            # 2. Debe representar un descuento real frente al precio regular de referencia (calc_base).
+            if calc_p > pv:
+                continue
+            if calc_p < calc_base:
+                if best_price is None or calc_p < best_price:
+                    best_price = calc_p
+                    best_promo = pr
+                    best_regular_base = calc_base
+
+        if best_promo and best_price is not None:
+            p.__dict__["precio_promo"] = Decimal(str(best_price))
             p.__dict__["en_promocion"] = True
-            p.__dict__["promocion_id"] = info["id"]
-            p.__dict__["promocion_nombre"] = info["nombre"]
-            p.__dict__["promo_dias_semana"] = info["dias"]
-            # Preservar precio regular si precio_venta ya está en promo o si falta
-            if getattr(p, "precio_regular", None) is None or getattr(p, "precio_regular", None) <= promo_p:
-                if p.precio_venta and p.precio_venta > promo_p:
-                    p.__dict__["precio_regular"] = p.precio_venta
+            p.__dict__["promocion_id"] = str(best_promo.id)
+            p.__dict__["promocion_nombre"] = best_promo.nombre
+            p.__dict__["promo_dias_semana"] = best_promo.dias_semana
+            p.__dict__["precio_regular"] = best_regular_base or pv
         else:
             p.__dict__["precio_promo"] = None
             p.__dict__["en_promocion"] = False
