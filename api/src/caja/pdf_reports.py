@@ -9,9 +9,14 @@ from zoneinfo import ZoneInfo
 
 TZ_ASUNCION = ZoneInfo("America/Asuncion")
 
-def _to_asuncion_tz(dt: datetime | None) -> datetime | None:
+def _to_asuncion_tz(dt: datetime | str | None) -> datetime | None:
     if not dt:
         return None
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        except Exception:
+            return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(TZ_ASUNCION)
