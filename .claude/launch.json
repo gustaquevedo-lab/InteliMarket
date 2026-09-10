@@ -1,6 +1,7 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "prueba-etiqueta", "runtimeExecutable": "python3", "runtimeArgs": ["-m","http.server","8777","--directory","/private/tmp/claude-501/-Users-gustaquevedo-Library-CloudStorage-OneDrive-Personal-Dev-Intelimarket/bf71d8b5-831a-4da5-b0c8-2195ca8b8444/scratchpad"], "port": 8777 }
+    { "name": "prueba-etiqueta", "runtimeExecutable": "python3", "runtimeArgs": ["-m","http.server","8777","--directory","/private/tmp/claude-501/-Users-gustaquevedo-Library-CloudStorage-OneDrive-Personal-Dev-Intelimarket/bf71d8b5-831a-4da5-b0c8-2195ca8b8444/scratchpad"], "port": 8777 },
+    { "name": "ui-web-prod-api", "runtimeExecutable": "bash", "runtimeArgs": ["/Users/gustaquevedo/Library/CloudStorage/OneDrive-Personal/Dev/Intelimarket/ui-web/.devscripts/dev_prod_api.sh"], "port": 5180 }
   ]
 }
