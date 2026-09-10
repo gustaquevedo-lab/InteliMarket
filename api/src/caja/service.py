@@ -1131,8 +1131,7 @@ async def get_session_sales_detail(db: AsyncSession, session_id: str, company_id
         select(
             Sale,
             Customer.razon_social.label("cust_razon_social"),
-            Customer.nombre.label("cust_nombre"),
-            Customer.ruc_sin_dv.label("cust_ruc_sin_dv"),
+            Customer.nombre_fantasia.label("cust_nombre_fantasia"),
             Customer.ruc.label("cust_ruc"),
             Customer.ci.label("cust_ci"),
         )
@@ -1188,7 +1187,7 @@ async def get_session_sales_detail(db: AsyncSession, session_id: str, company_id
     anuladas_count = 0
     anuladas_total_gs = Decimal("0")
 
-    for sale, cust_rs, cust_nom, cust_ruc_sd, cust_ruc, cust_ci in sales_rows:
+    for sale, cust_rs, cust_nom_fantasia, cust_ruc, cust_ci in sales_rows:
         is_confirmed = (sale.estado or "").lower() in ["confirmado", "completada", "completado", "pagado"]
         is_cancelled = (sale.estado or "").lower() in ["cancelado", "anulado", "anulada", "devuelto"]
 
@@ -1208,8 +1207,8 @@ async def get_session_sales_detail(db: AsyncSession, session_id: str, company_id
             anuladas_count += 1
             anuladas_total_gs += tot
 
-        cliente_nombre = cust_rs or cust_nom or "Consumidor Final"
-        cliente_doc = cust_ruc or cust_ruc_sd or cust_ci or "X"
+        cliente_nombre = cust_rs or cust_nom_fantasia or "Consumidor Final"
+        cliente_doc = cust_ruc or cust_ci or "X"
 
         p_list = payments_map.get(sale.id, [])
         if not p_list:
