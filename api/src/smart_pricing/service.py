@@ -231,35 +231,22 @@ async def get_applicable_tier_price(
                 if pr.tipo == "dos_por_uno":
                     min_req = 2
                     if quantity >= 2:
-                        grupos = int(eff_qty // Decimal("2"))
-                        unidades_gratis = Decimal(str(grupos * 1))
-                        # Total pagado por las unidades de la línea
-                        total_linea = (qty_dec - unidades_gratis) * calc_base
-                        calc_unit_price = (total_linea / qty_dec).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+                        calc_unit_price = (calc_base / Decimal("2")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
                 elif pr.tipo == "tres_por_dos":
                     min_req = 3
                     if quantity >= 3:
-                        grupos = int(eff_qty // Decimal("3"))
-                        unidades_gratis = Decimal(str(grupos * 1))
-                        total_linea = (qty_dec - unidades_gratis) * calc_base
-                        calc_unit_price = (total_linea / qty_dec).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+                        calc_unit_price = ((calc_base * Decimal("2")) / Decimal("3")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
                 elif pr.tipo in ("nxm", "cantidad_lleva"):
                     n = pr.cantidad_minima or 2
                     m = int(pr.valor) if pr.valor and pr.valor > 0 else 1
                     min_req = n
                     if n > m and quantity >= n:
-                        grupos = int(eff_qty // Decimal(str(n)))
-                        unidades_gratis = Decimal(str(grupos * (n - m)))
-                        total_linea = (qty_dec - unidades_gratis) * calc_base
-                        calc_unit_price = (total_linea / qty_dec).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+                        calc_unit_price = ((calc_base * Decimal(str(m))) / Decimal(str(n))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
                 elif pr.tipo == "segunda_unidad_pct":
                     min_req = 2
                     if quantity >= 2:
-                        pares = int(eff_qty // Decimal("2"))
                         pct = (pr.valor or Decimal("50")) / Decimal("100")
-                        descuento = Decimal(str(pares)) * (calc_base * pct)
-                        total_linea = (qty_dec * calc_base) - descuento
-                        calc_unit_price = (total_linea / qty_dec).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+                        calc_unit_price = (calc_base * (Decimal("1") - (pct / Decimal("2")))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
                 elif pr.tipo == "precio_fijo_oferta" and pr.precio_fijo_promocional:
                     if quantity >= min_req:
                         calc_unit_price = Decimal(str(pr.precio_fijo_promocional))
