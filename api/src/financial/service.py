@@ -96,7 +96,11 @@ async def list_invoices(
         query = query.where(SupplierInvoice.fecha_emision >= desde)
     if hasta:
         query = query.where(SupplierInvoice.fecha_emision <= hasta)
-    query = query.order_by(SupplierInvoice.fecha_vencimiento.asc()).offset(offset).limit(limit)
+    query = query.order_by(
+        case((SupplierInvoice.saldo_pendiente > 0, 0), else_=1),
+        SupplierInvoice.fecha_vencimiento.asc(),
+        SupplierInvoice.fecha_emision.desc(),
+    ).offset(offset).limit(limit)
     result = await db.execute(query)
     invoices = list(result.scalars().all())
 
@@ -2009,8 +2013,11 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
     nadie eligiera nada)."""
     query = select(SupplierInvoice).where(
         SupplierInvoice.company_id == uuid.UUID(company_id),
-        SupplierInvoice.estado.in_(["aprobada", "parcial"]),
-        SupplierInvoice.bloqueada_para_pago == False,
+        SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]),
+        or_(
+            SupplierInvoice.bloqueada_para_pago == False,
+            SupplierInvoice.bloqueada_para_pago.is_(None),
+        ),
         SupplierInvoice.saldo_pendiente > 0,
     )
     if supplier_id:
@@ -2045,20 +2052,23 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
 
 async def create_payment_run(db: AsyncSession, data: PaymentRunCreate) -> PaymentRun | dict:
     """Crea un lote de pago SOLO con las facturas que el usuario eligio a
-    mano (data.invoice_ids) y que estén estrictamente APROBADAS y NO bloqueadas
+    mano (data.invoice_ids) y que estén en estado pendiente/aprobada/parcial y NO bloqueadas
     por falta de Nota de Crédito o discrepancias en muelle."""
     invoices_result = await db.execute(
         select(SupplierInvoice).where(
             SupplierInvoice.id.in_(data.invoice_ids),
             SupplierInvoice.company_id == data.company_id,
-            SupplierInvoice.estado.in_(["aprobada", "parcial"]),
-            SupplierInvoice.bloqueada_para_pago == False,
+            SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]),
+            or_(
+                SupplierInvoice.bloqueada_para_pago == False,
+                SupplierInvoice.bloqueada_para_pago.is_(None),
+            ),
             SupplierInvoice.saldo_pendiente > 0,
         )
     )
     invoices = list(invoices_result.scalars().all())
     if not invoices:
-        return {"error": "Ninguna de las facturas seleccionadas es válida para pago (deben estar APROBADAS por 3-Way Match y sin retenciones de NC pendientes)."}
+        return {"error": "Ninguna de las facturas seleccionadas es válida para pago (deben tener saldo pendiente y sin retenciones pendientes)."}
 
 
     run = PaymentRun(

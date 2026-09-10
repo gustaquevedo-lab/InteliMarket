@@ -174,7 +174,7 @@ export default function FinancialPage() {
         supsData,
       ] = await Promise.allSettled([
         api.financial.apDashboard(),
-        api.financial.invoices.list({ limit: 1000 }),
+        api.financial.invoices.list({ limit: 2500 }),
         api.financial.aging().catch(() => ({ por_supplier: [] })),
         api.financial.paymentRuns.list(),
         api.financial.cashFlow.list(),
@@ -355,9 +355,10 @@ export default function FinancialPage() {
         inv.supplier_nombre?.toLowerCase().includes(search.toLowerCase()) ||
         inv.timbrado?.includes(search)
 
-      const isVencida = inv.estado === "pendiente" && inv.fecha_vencimiento && new Date(inv.fecha_vencimiento) < new Date()
+      const isPendiente = !!inv.estado && ["pendiente", "aprobada", "parcial"].includes(inv.estado) && Number(inv.saldo_pendiente ?? inv.total ?? 0) > 0
+      const isVencida = isPendiente && !!inv.fecha_vencimiento && new Date(inv.fecha_vencimiento) < new Date()
       let matchEstado = true
-      if (filterEstado === "pendiente") matchEstado = inv.estado === "pendiente"
+      if (filterEstado === "pendiente") matchEstado = isPendiente
       if (filterEstado === "pagada") matchEstado = inv.estado === "pagada"
       if (filterEstado === "vencida") matchEstado = !!isVencida
 
@@ -846,7 +847,7 @@ export default function FinancialPage() {
 
                 <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-800 text-xs text-gray-500">
                   <span>Mostrando <b>{filteredInvoices.length}</b> facturas de <b>{invoices.length}</b> totales</span>
-                  <span>Total Saldo Pendiente Filtrado: <b className="text-gray-900 dark:text-white font-mono">{formatPYG(filteredInvoices.filter(i => i.estado === "pendiente").reduce((acc, i) => acc + Number(i.saldo_pendiente ?? i.total ?? 0), 0))}</b></span>
+                  <span>Total Saldo Pendiente Filtrado: <b className="text-gray-900 dark:text-white font-mono">{formatPYG(filteredInvoices.filter(i => !!i.estado && ["pendiente", "aprobada", "parcial"].includes(i.estado)).reduce((acc, i) => acc + Number(i.saldo_pendiente ?? i.total ?? 0), 0))}</b></span>
                 </div>
               </div>
 

@@ -253,6 +253,13 @@ export default function PaymentsPage() {
     if (!selectedInvoice) return
     setSavingPay(true)
     try {
+      await api.financial.invoices.pay(selectedInvoice.id, {
+        monto: parseFloat(payForm.monto_pago) || 0,
+        metodo_pago: payForm.metodo_pago,
+        bank_account_id: payForm.bank_account_id || undefined,
+        numero_comprobante: payForm.numero_comprobante || undefined,
+        notas: payForm.observaciones || undefined,
+      })
       toast.success("Pago Registrado", `Se registró el pago de ${formatPYG(parseFloat(payForm.monto_pago) || 0)} para ${selectedInvoice.numero_factura}.`)
       setShowPayModal(false)
       setSelectedInvoice(null)
