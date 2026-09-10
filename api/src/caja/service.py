@@ -1012,6 +1012,7 @@ async def list_sessions_with_totals(
     # Batch 2: Último CashCount de cada sesión cerrada (1 sola query con DISTINCT ON)
     closed_session_ids = [s.id for s in sessions if s.estado == "cerrada"]
     counts_map = {}
+    handoffs_map = {}
     if closed_session_ids:
         counts_query = (
             select(CashCount)
@@ -1022,6 +1023,16 @@ async def list_sessions_with_totals(
         counts_res = await db.execute(counts_query)
         for c in counts_res.scalars().all():
             counts_map[c.session_id] = c
+
+        handoffs_query = (
+            select(CashHandoff)
+            .where(CashHandoff.session_id.in_(closed_session_ids))
+            .distinct(CashHandoff.session_id)
+            .order_by(CashHandoff.session_id, CashHandoff.created_at.desc())
+        )
+        handoffs_res = await db.execute(handoffs_query)
+        for h in handoffs_res.scalars().all():
+            handoffs_map[h.session_id] = h
 
     out = []
     for s in sessions:
@@ -1078,6 +1089,20 @@ async def list_sessions_with_totals(
                 monto_cierre_esperado = float(s.monto_apertura) + float(efectivo_acumulado)
                 diferencia = 0.0
 
+        h_obj = handoffs_map.get(s.id)
+        handoff_data = {
+            "id": str(h_obj.id),
+            "estado": h_obj.estado,
+            "monto_declarado_pyg": float(h_obj.monto_pyg or 0),
+            "monto_declarado_brl": float(h_obj.monto_brl or 0),
+            "monto_confirmado_pyg": float(h_obj.monto_confirmado_pyg) if h_obj.monto_confirmado_pyg is not None else None,
+            "monto_confirmado_brl": float(h_obj.monto_confirmado_brl) if h_obj.monto_confirmado_brl is not None else None,
+            "discrepancia_confirmacion": h_obj.discrepancia_confirmacion,
+            "recibido_por_nombre": h_obj.recibido_por_nombre,
+            "fecha_confirmacion": _to_asuncion_tz(h_obj.fecha_confirmacion).strftime("%d/%m/%Y %H:%M") if h_obj.fecha_confirmacion else None,
+            "observaciones": h_obj.observaciones,
+        } if h_obj else None
+
         out.append({
             "id": str(s.id),
             "register_id": str(s.register_id),
@@ -1102,6 +1127,8 @@ async def list_sessions_with_totals(
             "efectivo_usd_acumulado": efectivo_usd_acumulado,
             "efectivo_brl_acumulado": efectivo_brl_acumulado,
             "ultimo_cash_drop_at": s.ultimo_cash_drop_at.isoformat() if s.ultimo_cash_drop_at else None,
+            "handoff": handoff_data,
+            "observaciones": s.observaciones,
         })
     return out
 
@@ -3046,16 +3073,151 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     if not summary_final:
         summary_final = summary_por_canal
 
-    # Filtrar solo canales que tengan transacciones
-    canales_activos = [c for c in vouchers_by_channel.values() if c["cantidad_esperada"] > 0]
+    res_h = await db.execute(
+        select(CashHandoff).where(CashHandoff.session_id == sid).order_by(CashHandoff.created_at.desc()).limit(1)
+    )
+    h_obj = res_h.scalar_one_or_none()
+    handoff_dict = {
+        "id": str(h_obj.id) if h_obj else None,
+        "estado": h_obj.estado if h_obj else "pendiente",
+        "monto_declarado_pyg": float(h_obj.monto_pyg) if h_obj else float(session_data.get("monto_cierre") or 0),
+        "monto_declarado_brl": float(h_obj.monto_brl or 0) if h_obj else float(session_data.get("monto_efectivo_brl") or 0),
+        "monto_declarado_usd": float(h_obj.monto_usd or 0) if h_obj else float(session_data.get("monto_efectivo_usd") or 0),
+        "monto_confirmado_pyg": float(h_obj.monto_confirmado_pyg) if h_obj and h_obj.monto_confirmado_pyg is not None else None,
+        "monto_confirmado_brl": float(h_obj.monto_confirmado_brl) if h_obj and h_obj.monto_confirmado_brl is not None else None,
+        "monto_confirmado_usd": float(h_obj.monto_confirmado_usd) if h_obj and h_obj.monto_confirmado_usd is not None else None,
+        "discrepancia_confirmacion": h_obj.discrepancia_confirmacion if h_obj else False,
+        "recibido_por_nombre": h_obj.recibido_por_nombre if h_obj else None,
+        "fecha_confirmacion": _to_asuncion_tz(h_obj.fecha_confirmacion).strftime("%d/%m/%Y %H:%M") if h_obj and h_obj.fecha_confirmacion else None,
+        "observaciones": h_obj.observaciones if h_obj else None,
+    }
+    session_data["handoff"] = handoff_dict
 
     return {
         "session_data": session_data,
+        "handoff": handoff_dict,
         "summary_by_method": summary_final,
         "payments_breakdown": breakdown,
         "vouchers": vouchers,
         "grupos_comprobantes": canales_activos,
         "total_vouchers": len(vouchers),
+    }
+
+
+async def confirm_session_cash_reception(
+    db: AsyncSession,
+    session_id: str,
+    company_id: str,
+    user_id: str,
+    user_nombre: str,
+    monto_recibido_pyg: Decimal,
+    monto_recibido_brl: Decimal = Decimal("0"),
+    monto_recibido_usd: Decimal = Decimal("0"),
+    observaciones: str | None = None,
+) -> dict:
+    """Asienta formalmente el recuento y recepción física del sobre de efectivo en Tesorería.
+    Compara lo efectivamente contado en Tesorería contra lo declarado por la cajera/supervisora al cierre."""
+    cid = uuid.UUID(company_id)
+    sid = uuid.UUID(session_id)
+
+    res = await db.execute(
+        select(CashSession, CashRegister)
+        .join(CashRegister, CashRegister.id == CashSession.register_id)
+        .where(CashSession.id == sid, CashRegister.company_id == cid)
+    )
+    row = res.first()
+    if not row:
+        raise ValueError("Sesión de caja no encontrada")
+    session_obj, register = row
+
+    res_h = await db.execute(
+        select(CashHandoff).where(CashHandoff.session_id == sid).order_by(CashHandoff.created_at.desc()).limit(1)
+    )
+    handoff = res_h.scalar_one_or_none()
+
+    if not handoff:
+        count_res = await db.execute(
+            select(CashCount).where(CashCount.session_id == sid).order_by(CashCount.created_at.desc()).limit(1)
+        )
+        count = count_res.scalar_one_or_none()
+        count_id = count.id if count else session_obj.id
+        m_cierre_pyg = Decimal(str(session_obj.monto_cierre or 0))
+        m_cierre_brl = Decimal(str(count.monto_efectivo_brl or 0)) if count else Decimal("0")
+        m_cierre_usd = Decimal(str(count.monto_efectivo_usd or 0)) if count else Decimal("0")
+        handoff = CashHandoff(
+            company_id=cid,
+            session_id=sid,
+            cash_count_id=count_id,
+            entregado_por=session_obj.user_id,
+            entregado_por_nombre=session_obj.cajero_nombre,
+            monto_pyg=m_cierre_pyg,
+            monto_brl=m_cierre_brl,
+            monto_usd=m_cierre_usd,
+            estado="pendiente",
+        )
+        db.add(handoff)
+        await db.flush()
+
+    m_decl_pyg = Decimal(str(handoff.monto_pyg or 0))
+    m_decl_brl = Decimal(str(handoff.monto_brl or 0))
+    m_decl_usd = Decimal(str(handoff.monto_usd or 0))
+
+    dif_pyg = monto_recibido_pyg - m_decl_pyg
+    dif_brl = monto_recibido_brl - m_decl_brl
+    dif_usd = monto_recibido_usd - m_decl_usd
+
+    discrepancia = bool(dif_pyg != 0 or dif_brl != 0 or dif_usd != 0)
+
+    handoff.monto_confirmado_pyg = monto_recibido_pyg
+    handoff.monto_confirmado_brl = monto_recibido_brl
+    handoff.monto_confirmado_usd = monto_recibido_usd
+    handoff.discrepancia_confirmacion = discrepancia
+    try:
+        handoff.recibido_por = uuid.UUID(user_id)
+    except Exception:
+        handoff.recibido_por = None
+    handoff.recibido_por_nombre = user_nombre
+    handoff.fecha_confirmacion = datetime.now(timezone.utc)
+    handoff.observaciones = observaciones
+    handoff.estado = "confirmado"
+
+    now_py = datetime.now(TZ_ASUNCION).strftime("%d/%m/%Y %H:%M")
+    if dif_pyg == 0 and dif_brl == 0:
+        dictamen_txt = "CONFORME (Coincide con lo declarado)"
+    elif dif_pyg < 0 or dif_brl < 0:
+        dictamen_txt = f"FALTANTE EN ENTREGA (Vino menos de lo declarado: {dif_pyg:+,.0f} Gs. / {dif_brl:+} R$)"
+    else:
+        dictamen_txt = f"SOBRANTE EN ENTREGA (Vino más de lo declarado: {dif_pyg:+,.0f} Gs. / {dif_brl:+} R$)"
+
+    nota_rec = (
+        f"\n[RECEPCIÓN Y RECUENTO DE EFECTIVO EN TESORERÍA ({now_py}) por {user_nombre}]: "
+        f"Declarado: ₲ {float(m_decl_pyg):,.0f} | R$ {float(m_decl_brl):.2f}. "
+        f"Recibido Físico: ₲ {float(monto_recibido_pyg):,.0f} | R$ {float(monto_recibido_brl):.2f}. "
+        f"Dictamen Custodia: {dictamen_txt}."
+    )
+    if observaciones:
+        nota_rec += f" Obs: {observaciones.strip()}"
+    session_obj.observaciones = (session_obj.observaciones or "") + nota_rec
+
+    await db.commit()
+    await db.refresh(handoff)
+    await db.refresh(session_obj)
+
+    return {
+        "status": "ok",
+        "session_id": str(sid),
+        "handoff_id": str(handoff.id),
+        "monto_declarado_pyg": float(m_decl_pyg),
+        "monto_declarado_brl": float(m_decl_brl),
+        "monto_confirmado_pyg": float(monto_recibido_pyg),
+        "monto_confirmado_brl": float(monto_recibido_brl),
+        "diferencia_entrega_gs": float(dif_pyg),
+        "diferencia_entrega_brl": float(dif_brl),
+        "discrepancia": discrepancia,
+        "recibido_por_nombre": user_nombre,
+        "fecha_confirmacion": _to_asuncion_tz(handoff.fecha_confirmacion).strftime("%d/%m/%Y %H:%M"),
+        "observaciones": observaciones,
+        "dictamen": dictamen_txt,
     }
 
 
@@ -3067,8 +3229,13 @@ async def save_session_punteo_audit(
     items: list[dict],
     observaciones_dictamen: str | None,
     diferencia_vouchers_gs: Decimal,
+    monto_recibido_pyg: Decimal | None = None,
+    monto_recibido_brl: Decimal | None = None,
+    monto_recibido_usd: Decimal | None = None,
+    observaciones_efectivo: str | None = None,
+    user_id: str | None = None,
 ) -> dict:
-    """Asienta formalmente el dictamen de auditoría y cotejo físico de comprobantes."""
+    """Asienta formalmente el dictamen de auditoría y cotejo físico de comprobantes y efectivo."""
     cid = uuid.UUID(company_id)
     sid = uuid.UUID(session_id)
 
@@ -3080,6 +3247,21 @@ async def save_session_punteo_audit(
     session_obj = res.scalar_one_or_none()
     if not session_obj:
         raise ValueError("Sesión de caja no encontrada")
+
+    # Si se proporcionó conteo físico de efectivo de tesorería, registrarlo
+    cash_reception_res = None
+    if monto_recibido_pyg is not None:
+        cash_reception_res = await confirm_session_cash_reception(
+            db=db,
+            session_id=session_id,
+            company_id=company_id,
+            user_id=user_id or str(session_obj.user_id),
+            user_nombre=auditor_nombre,
+            monto_recibido_pyg=monto_recibido_pyg,
+            monto_recibido_brl=monto_recibido_brl or Decimal("0"),
+            monto_recibido_usd=monto_recibido_usd or Decimal("0"),
+            observaciones=observaciones_efectivo,
+        )
 
     now_py = datetime.now(TZ_ASUNCION).strftime("%d/%m/%Y %H:%M")
     conformes = [it for it in items if it.get("estado") == "conforme"]
@@ -3108,6 +3290,7 @@ async def save_session_punteo_audit(
         "faltantes": len(faltantes),
         "discrepantes": len(discrepantes),
         "diferencia_vouchers_gs": float(diferencia_vouchers_gs),
+        "cash_reception": cash_reception_res,
         "observaciones_actualizadas": session_obj.observaciones,
     }
 
@@ -3578,9 +3761,22 @@ async def incorporate_session_to_vault_and_banks(
     session_obj, count_obj, reg = row
 
     # 1. BÓVEDA CENTRAL: Incorporar efectivo físico contado
-    m_ef_pyg = Decimal(str(count_obj.monto_efectivo or 0))
-    m_ef_brl = Decimal(str(count_obj.monto_efectivo_brl or 0))
-    m_ef_usd = Decimal(str(count_obj.monto_efectivo_usd or 0))
+    # Priorizar el monto efectivamente verificado y recibido en Tesorería (CashHandoff) si ya fue auditado.
+    handoff_res = await db.execute(
+        select(CashHandoff).where(CashHandoff.session_id == sid).order_by(CashHandoff.created_at.desc()).limit(1)
+    )
+    handoff_obj = handoff_res.scalar_one_or_none()
+
+    if handoff_obj and handoff_obj.estado == "confirmado" and handoff_obj.monto_confirmado_pyg is not None:
+        m_ef_pyg = Decimal(str(handoff_obj.monto_confirmado_pyg or 0))
+        m_ef_brl = Decimal(str(handoff_obj.monto_confirmado_brl or 0))
+        m_ef_usd = Decimal(str(handoff_obj.monto_confirmado_usd or 0))
+        extra_obs = f" [Efectivo verificado por {handoff_obj.recibido_por_nombre or 'Tesorería'}]"
+    else:
+        m_ef_pyg = Decimal(str(count_obj.monto_efectivo or 0))
+        m_ef_brl = Decimal(str(count_obj.monto_efectivo_brl or 0))
+        m_ef_usd = Decimal(str(count_obj.monto_efectivo_usd or 0))
+        extra_obs = ""
     m_cheque = Decimal(str(count_obj.monto_cheque or 0))
 
     vault_entries_creados = []
@@ -3597,12 +3793,13 @@ async def incorporate_session_to_vault_and_banks(
                 company_id=cid,
                 branch_id=reg.branch_id,
                 origen="entrega_cajero",
+                handoff_id=handoff_obj.id if handoff_obj else None,
                 monto_pyg=m_ef_pyg,
                 monto_usd=m_ef_usd,
                 monto_brl=m_ef_brl,
                 estado="en_boveda",
                 registrado_por=uuid.UUID(user_id),
-                observaciones=f"Incorporación automática arqueo [{str(sid)[:8]}] de {session_obj.cajero_nombre} ({reg.nombre}). {observaciones or ''}".strip(),
+                observaciones=f"Incorporación automática arqueo [{str(sid)[:8]}] de {session_obj.cajero_nombre} ({reg.nombre}).{extra_obs} {observaciones or ''}".strip(),
             )
             db.add(ve_cash)
             vault_entries_creados.append({"tipo": "efectivo", "pyg": float(m_ef_pyg), "brl": float(m_ef_brl), "usd": float(m_ef_usd)})

@@ -22,6 +22,7 @@ from api.src.caja.schemas import (
     PaymentMethodBankMappingUpdate, PaymentMethodBankMappingResponse,
     CashShortageConfigUpdate, CashShortageConfigResponse,
     ResolveCashShortageRequest, IncorporateSessionVaultAndBanksRequest,
+    ConfirmSessionCashReceptionRequest,
 )
 from api.src.caja import service
 from api.src.caja import pdf_reports
@@ -387,6 +388,7 @@ async def save_session_punteo_audit(
     user=Depends(require_auth),
 ):
     auditor_nombre = user.get("user_nombre") or user.get("user_email") or "Auditoría de Salón"
+    user_id = user.get("user_id") or user.get("sub")
     try:
         return await service.save_session_punteo_audit(
             db,
@@ -396,6 +398,36 @@ async def save_session_punteo_audit(
             [it.model_dump() for it in body.items],
             body.observaciones_dictamen,
             body.diferencia_vouchers_gs,
+            monto_recibido_pyg=body.monto_recibido_pyg,
+            monto_recibido_brl=body.monto_recibido_brl,
+            monto_recibido_usd=body.monto_recibido_usd,
+            observaciones_efectivo=body.observaciones_efectivo,
+            user_id=str(user_id) if user_id else None,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/cash-sessions/{session_id}/confirm-cash-reception")
+async def confirm_session_cash_reception(
+    session_id: str,
+    body: ConfirmSessionCashReceptionRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_id = user.get("user_id") or user.get("sub") or str(uuid.uuid4())
+    user_nombre = user.get("user_nombre") or user.get("user_email") or "Tesorería Central"
+    try:
+        return await service.confirm_session_cash_reception(
+            db=db,
+            session_id=session_id,
+            company_id=user["company_id"],
+            user_id=str(user_id),
+            user_nombre=user_nombre,
+            monto_recibido_pyg=body.monto_recibido_pyg,
+            monto_recibido_brl=body.monto_recibido_brl,
+            monto_recibido_usd=body.monto_recibido_usd,
+            observaciones=body.observaciones,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

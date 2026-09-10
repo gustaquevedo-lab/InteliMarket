@@ -5,7 +5,7 @@ import {
   Settings, X, ShieldCheck, Clock, EyeOff, Calculator, FileText, Download,
   Layers, Users, RefreshCw, Printer, Check, ChevronRight, Activity, ShieldAlert,
   Coins, Sparkles, Building2, Store, Lock, KeyRound, Heart, FileSpreadsheet,
-  BarChart3, Calendar, Filter, PieChart, Receipt, ClipboardCheck
+  BarChart3, Calendar, Filter, PieChart, Receipt, ClipboardCheck, Info
 } from "lucide-react"
 import {
   api,
@@ -82,6 +82,18 @@ interface SessionSummary {
   efectivo_usd_acumulado: number
   efectivo_brl_acumulado: number
   ultimo_cash_drop_at: string | null
+  handoff?: {
+    id: string
+    estado: string
+    monto_declarado_pyg?: number
+    monto_declarado_brl?: number
+    monto_confirmado_pyg?: number | null
+    monto_confirmado_brl?: number | null
+    discrepancia_confirmacion?: boolean
+    recibido_por_nombre?: string | null
+    fecha_confirmacion?: string | null
+    observaciones?: string | null
+  } | null
 }
 
 interface PaymentBreakdownItem {
@@ -240,6 +252,12 @@ export default function CajaPage() {
   const [punteoObsDictamen, setPunteoObsDictamen] = useState("")
   const [savingPunteoAudit, setSavingPunteoAudit] = useState(false)
 
+  // ── Conteo y Recepción de Efectivo en Tesorería ──
+  const [efectivoRecibidoPyg, setEfectivoRecibidoPyg] = useState<number>(0)
+  const [efectivoRecibidoBrl, setEfectivoRecibidoBrl] = useState<number>(0)
+  const [efectivoObsTesoreria, setEfectivoObsTesoreria] = useState("")
+  const [savingEfectivoReception, setSavingEfectivoReception] = useState(false)
+
   // ── Mapeos de Medios de Pago a Cuentas Bancarias ──
   const [bankMappings, setBankMappings] = useState<BankMappingItem[]>([])
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
@@ -316,11 +334,58 @@ export default function CajaPage() {
         })
       }
       setPunteoStatuses(initStatuses)
+
+      const handoff = data?.handoff || data?.session_data?.handoff
+      const declPyg = Number(handoff?.monto_confirmado_pyg ?? handoff?.monto_declarado_pyg ?? data?.session_data?.monto_cierre ?? 0)
+      const declBrl = Number(handoff?.monto_confirmado_brl ?? handoff?.monto_declarado_brl ?? data?.session_data?.monto_efectivo_brl ?? 0)
+      setEfectivoRecibidoPyg(declPyg)
+      setEfectivoRecibidoBrl(declBrl)
+      setEfectivoObsTesoreria(handoff?.observaciones || "")
     } catch (err: any) {
       toast.error("Error al cargar planilla", err?.message || "No se pudo obtener el detalle de vouchers de la sesión.")
       setPunteoModalOpen(false)
     } finally {
       setPunteoLoading(false)
+    }
+  }
+
+  const handleConfirmEfectivoReception = async () => {
+    if (!punteoData?.session_data?.id) return
+    setSavingEfectivoReception(true)
+    try {
+      const res = await api.caja.confirmSessionCash(punteoData.session_data.id, {
+        monto_recibido_pyg: Number(efectivoRecibidoPyg || 0),
+        monto_recibido_brl: Number(efectivoRecibidoBrl || 0),
+        observaciones: efectivoObsTesoreria.trim() || undefined,
+      })
+      toast.success("Efectivo Asentado en Tesorería", `Recuento registrado: ${formatPYG(res.monto_confirmado_pyg)} / R$ ${res.monto_confirmado_brl.toFixed(2)}. ${res.dictamen}`)
+      setPunteoData((prev: any) => {
+        if (!prev) return prev
+        const nextHandoff = {
+          ...(prev.handoff || {}),
+          estado: "confirmado",
+          monto_confirmado_pyg: res.monto_confirmado_pyg,
+          monto_confirmado_brl: res.monto_confirmado_brl,
+          discrepancia_confirmacion: res.discrepancia,
+          recibido_por_nombre: res.recibido_por_nombre,
+          fecha_confirmacion: res.fecha_confirmacion,
+          observaciones: res.observaciones,
+        }
+        return {
+          ...prev,
+          handoff: nextHandoff,
+          session_data: {
+            ...prev.session_data,
+            handoff: nextHandoff,
+          },
+        }
+      })
+      fetchData()
+      fetchHistorial()
+    } catch (err: any) {
+      toast.error("Error al asentar efectivo", err?.message || "No se pudo registrar el recuento de Tesorería.")
+    } finally {
+      setSavingEfectivoReception(false)
     }
   }
 
@@ -367,9 +432,12 @@ export default function CajaPage() {
         items: itemsPayload,
         observaciones_dictamen: punteoObsDictamen.trim() || undefined,
         diferencia_vouchers_gs: difVouchers,
+        monto_recibido_pyg: Number(efectivoRecibidoPyg || 0),
+        monto_recibido_brl: Number(efectivoRecibidoBrl || 0),
+        observaciones_efectivo: efectivoObsTesoreria.trim() || undefined,
       })
 
-      toast.success("Auditoría Asentada", "Dictamen de control de comprobantes guardado correctamente en la sesión.")
+      toast.success("Auditoría Asentada", "Dictamen de control de comprobantes y recuento de efectivo guardados correctamente.")
       fetchData()
       fetchHistorial()
     } catch (err: any) {
@@ -1644,7 +1712,26 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           {formatDateTime(s.fecha_cierre || s.fecha_apertura)}
                         </td>
                         <td className="p-3.5 font-bold text-gray-900 dark:text-white">
-                          {getCajero(s)}
+                          <div className="text-xs font-bold">{getCajero(s)}</div>
+                          {s.handoff ? (
+                            <div className="mt-1">
+                              {s.handoff.estado === "confirmado" ? (
+                                s.handoff.discrepancia_confirmacion ? (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800" title={`Tesorería contó: ₲ ${formatPYG(s.handoff.monto_confirmado_pyg || 0)}. Discrepancia con cierre.`}>
+                                    ⚠️ Tesorería: {formatPYG(s.handoff.monto_confirmado_pyg || 0)} (Dif. Entrega)
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800" title={`Verificado y conforme por ${s.handoff.recibido_por_nombre || 'Tesorería'}`}>
+                                    ✓ Tesorería: {formatPYG(s.handoff.monto_confirmado_pyg || 0)} (Conforme)
+                                  </span>
+                                )
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60">
+                                  ⏳ Pendiente recuento Tesorería
+                                </span>
+                              )}
+                            </div>
+                          ) : null}
                         </td>
                         <td className="p-3.5 text-right font-mono font-bold text-gray-800 dark:text-gray-200">
                           {formatPYG(s.monto_cierre || 0)}
@@ -1709,11 +1796,11 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             <button
                               type="button"
                               onClick={() => handleOpenPunteoModal(s.id)}
-                              title="Planilla de Punteo y Cotejo de Vouchers"
-                              className="p-1.5 rounded-lg border border-purple-300 dark:border-purple-800 text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/30 hover:bg-purple-100 dark:hover:bg-purple-900/50 inline-flex items-center gap-1 font-bold text-[11px] transition-colors"
+                              title="Planilla de Punteo de Vouchers y Conteo Físico de Efectivo en Tesorería"
+                              className="p-1.5 rounded-lg border border-purple-300 dark:border-purple-800 text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/30 hover:bg-purple-100 dark:hover:bg-purple-900/50 inline-flex items-center gap-1 font-bold text-[11px] transition-colors shadow-sm whitespace-nowrap"
                             >
                               <ClipboardCheck className="w-3.5 h-3.5" />
-                              Punteo
+                              Punteo & Efectivo
                             </button>
                             <button
                               type="button"
@@ -4302,43 +4389,212 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               </div>
             ) : punteoData ? (
               <div className="flex-1 overflow-y-auto space-y-4 py-3 pr-1">
-                {/* 🌟 SECCIÓN 1: RENDICIÓN DE EFECTIVO FÍSICO EN BILLETES (GAVETA) */}
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 to-slate-800 text-white border border-slate-700/80 shadow-md space-y-2">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-700/60 pb-2.5">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                        <Banknote className="w-4 h-4" />
+                {/* 🌟 SECCIÓN 1: RECEPCIÓN Y CONTEO FÍSICO DE EFECTIVO EN TESORERÍA (DOBLE CONTROL) */}
+                {(() => {
+                  const handoff = punteoData.handoff || punteoData.session_data?.handoff
+                  const declPyg = Number(handoff?.monto_declarado_pyg ?? punteoData.session_data?.monto_cierre ?? 0)
+                  const declBrl = Number(handoff?.monto_declarado_brl ?? punteoData.session_data?.monto_efectivo_brl ?? 0)
+                  const espPyg = Number(punteoData.session_data?.monto_cierre_esperado ?? 0)
+
+                  const recPyg = Number(efectivoRecibidoPyg || 0)
+                  const recBrl = Number(efectivoRecibidoBrl || 0)
+                  const difEntregaPyg = recPyg - declPyg
+                  const difEntregaBrl = recBrl - declBrl
+
+                  const hasShortage = difEntregaPyg < 0 || difEntregaBrl < 0
+                  const hasSurplus = difEntregaPyg > 0 || difEntregaBrl > 0
+
+                  return (
+                    <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 text-white border border-slate-700/80 shadow-xl space-y-4">
+                      {/* Cabecera del Control de Custodia */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0">
+                            <Banknote className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-black text-sm sm:text-base text-emerald-400 tracking-wide">
+                                Recepción y Conteo Físico en Tesorería (Doble Control de Custodia)
+                              </h4>
+                              {handoff?.estado === "confirmado" && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                  ✓ Recuento Asentado
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-400 leading-tight mt-0.5">
+                              La cajera/supervisora remite el sobre de la caja. La Tesorera cuenta físicamente los billetes y asienta si vino completo, faltante o sobrante.
+                            </p>
+                          </div>
+                        </div>
+
+                        {handoff?.fecha_confirmacion && (
+                          <div className="text-right text-[11px] text-slate-400 shrink-0 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700">
+                            <span className="text-slate-400 block text-[9px] uppercase font-bold">Verificado por</span>
+                            <span className="font-bold text-white">{handoff.recibido_por_nombre || "Tesorería"}</span>
+                            <span className="text-slate-400 text-[10px] block font-mono">{handoff.fecha_confirmacion}</span>
+                          </div>
+                        )}
                       </div>
-                      <div>
-                        <h4 className="font-bold text-xs sm:text-sm text-emerald-400">Rendición de Efectivo Físico (Billetes y Monedas en Gaveta)</h4>
-                        <p className="text-[10px] sm:text-[11px] text-slate-400">
-                          El efectivo se rinde contando billetes en el arqueo ciego. A continuación se cotejan exclusivamente los comprobantes no-efectivo.
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 font-mono text-xs shrink-0">
-                      <div className="text-right">
-                        <span className="text-slate-400 text-[9px] block uppercase font-bold">Contado Físico</span>
-                        <span className="font-bold text-white text-xs sm:text-sm">{formatPYG(punteoData.session_data?.monto_cierre || 0)}</span>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-slate-400 text-[9px] block uppercase font-bold">Esperado Sistema</span>
-                        <span className="text-slate-300 text-xs sm:text-sm">{formatPYG(punteoData.session_data?.monto_cierre_esperado || 0)}</span>
-                      </div>
-                      <div className="text-right pl-2.5 border-l border-slate-700">
-                        <span className="text-slate-400 text-[9px] block uppercase font-bold">Diferencia Efectivo</span>
-                        {(() => {
-                          const difEf = Number(punteoData.session_data?.monto_cierre || 0) - Number(punteoData.session_data?.monto_cierre_esperado || 0)
-                          return (
-                            <span className={`font-black text-xs sm:text-sm ${difEf === 0 ? "text-emerald-400" : difEf < 0 ? "text-rose-400" : "text-blue-400"}`}>
-                              {difEf !== 0 ? (difEf > 0 ? `+${formatPYG(difEf)}` : formatPYG(difEf)) : "₲ 0 (Exacto)"}
+
+                      {/* Grid de 3 Tarjetas Comparativas */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                        {/* Tarjeta 1: Declarado en Cierre */}
+                        <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/80 space-y-2">
+                          <div className="flex items-center justify-between text-xs text-slate-400 font-bold uppercase tracking-wider">
+                            <span>1. Declarado en Cierre</span>
+                            <span className="text-[10px] text-slate-500 font-mono">Por Cajero/a</span>
+                          </div>
+                          <div className="space-y-1">
+                            <div className="flex items-baseline justify-between">
+                              <span className="text-xs text-slate-300">Efectivo Gs:</span>
+                              <span className="font-mono font-black text-white text-base">{formatPYG(declPyg)}</span>
+                            </div>
+                            <div className="flex items-baseline justify-between">
+                              <span className="text-xs text-slate-300">Efectivo R$:</span>
+                              <span className="font-mono font-bold text-amber-400 text-sm">R$ {declBrl.toFixed(2)}</span>
+                            </div>
+                          </div>
+                          <div className="pt-2 border-t border-slate-700/60 text-[10px] text-slate-400 flex items-center justify-between">
+                            <span>Esperado sistema:</span>
+                            <span className="font-mono text-slate-300">{formatPYG(espPyg)}</span>
+                          </div>
+                        </div>
+
+                        {/* Tarjeta 2: Conteo Físico Real en Tesorería */}
+                        <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40 ring-1 ring-emerald-500/30 space-y-2.5">
+                          <div className="flex items-center justify-between text-xs text-emerald-400 font-bold uppercase tracking-wider">
+                            <span>2. Conteo Físico en Tesorería</span>
+                            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded font-mono">Editable</span>
+                          </div>
+                          <div className="space-y-2">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-300 uppercase block mb-1">
+                                Efectivo Contado en Guaraníes (₲):
+                              </label>
+                              <input
+                                type="number"
+                                value={efectivoRecibidoPyg}
+                                onChange={e => setEfectivoRecibidoPyg(Number(e.target.value))}
+                                placeholder="0"
+                                className="w-full bg-slate-900 border border-emerald-500/60 rounded-lg px-3 py-1.5 text-base font-black font-mono text-emerald-300 outline-none focus:ring-2 focus:ring-emerald-400 text-right"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-300 uppercase block mb-1">
+                                Efectivo Contado en Reales (R$):
+                              </label>
+                              <input
+                                type="number"
+                                step="0.50"
+                                value={efectivoRecibidoBrl}
+                                onChange={e => setEfectivoRecibidoBrl(Number(e.target.value))}
+                                placeholder="0.00"
+                                className="w-full bg-slate-900 border border-amber-500/60 rounded-lg px-3 py-1.5 text-sm font-bold font-mono text-amber-300 outline-none focus:ring-2 focus:ring-amber-400 text-right"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Tarjeta 3: Dictamen de Custodia y Diferencia de Entrega */}
+                        <div className={`p-3.5 rounded-xl border flex flex-col justify-between space-y-2 ${
+                          hasShortage
+                            ? "bg-rose-950/40 border-rose-500/60 ring-1 ring-rose-500/30"
+                            : hasSurplus
+                            ? "bg-blue-950/40 border-blue-500/60 ring-1 ring-blue-500/30"
+                            : "bg-emerald-950/20 border-emerald-600/40"
+                        }`}>
+                          <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider">
+                            <span className={hasShortage ? "text-rose-300" : hasSurplus ? "text-blue-300" : "text-emerald-300"}>
+                              3. Comparativo de Entrega
                             </span>
-                          )
-                        })()}
+                            <span className="text-[10px] text-slate-400 font-mono">Recibido - Declarado</span>
+                          </div>
+
+                          <div className="space-y-1.5 my-auto">
+                            {/* Diferencia en Gs */}
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-slate-300">Diferencia Gs:</span>
+                              <span className={`font-mono font-black text-base ${
+                                difEntregaPyg === 0 ? "text-emerald-400" : difEntregaPyg < 0 ? "text-rose-400" : "text-blue-400"
+                              }`}>
+                                {difEntregaPyg !== 0 ? (difEntregaPyg > 0 ? `+${formatPYG(difEntregaPyg)}` : formatPYG(difEntregaPyg)) : "₲ 0 (Conforme)"}
+                              </span>
+                            </div>
+
+                            {/* Diferencia en R$ */}
+                            {(declBrl > 0 || recBrl > 0) && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-slate-300">Diferencia R$:</span>
+                                <span className={`font-mono font-bold text-sm ${
+                                  difEntregaBrl === 0 ? "text-emerald-400" : difEntregaBrl < 0 ? "text-rose-400" : "text-blue-400"
+                                }`}>
+                                  {difEntregaBrl !== 0 ? (difEntregaBrl > 0 ? `+R$ ${difEntregaBrl.toFixed(2)}` : `R$ ${difEntregaBrl.toFixed(2)}`) : "R$ 0.00 (Conforme)"}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Banner de Estado */}
+                            <div className="pt-2">
+                              {hasShortage ? (
+                                <div className="p-2 rounded-lg bg-rose-900/60 border border-rose-500 text-rose-200 text-xs font-bold flex items-center gap-2">
+                                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                                  <span>🔴 FALTANTE EN ENTREGA: Vino MENOS efectivo del declarado.</span>
+                                </div>
+                              ) : hasSurplus ? (
+                                <div className="p-2 rounded-lg bg-blue-900/60 border border-blue-500 text-blue-200 text-xs font-bold flex items-center gap-2">
+                                  <Info className="w-4 h-4 text-blue-400 shrink-0" />
+                                  <span>🔵 SOBRANTE EN ENTREGA: Vino MÁS efectivo del declarado.</span>
+                                </div>
+                              ) : (
+                                <div className="p-2 rounded-lg bg-emerald-900/60 border border-emerald-500 text-emerald-200 text-xs font-bold flex items-center gap-2">
+                                  <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                                  <span>🟢 EFECTIVO CONFORME: El conteo coincide con lo declarado.</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <p className="text-[10px] text-slate-400 pt-1 border-t border-slate-800">
+                            * A Bóveda Central ingresará el monto contado por Tesorería ({formatPYG(recPyg)}).
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Fila de Observaciones y Botón de Asiento de Efectivo */}
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-2 border-t border-slate-800">
+                        <div className="flex-1">
+                          <input
+                            type="text"
+                            value={efectivoObsTesoreria}
+                            onChange={e => setEfectivoObsTesoreria(e.target.value)}
+                            placeholder="Observación de Tesorería (ej: 'Sobre verificado junto a supervisora. Billete de 100.000 menos detectado', 'Sobre íntegro sin novedades')..."
+                            className="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleConfirmEfectivoReception}
+                          disabled={savingEfectivoReception}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 shrink-0 whitespace-nowrap disabled:opacity-50"
+                        >
+                          {savingEfectivoReception ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>Asentando en Tesorería...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Asentar Conteo Físico de Tesorería</span>
+                            </>
+                          )}
+                        </button>
                       </div>
                     </div>
-                  </div>
-                </div>
+                  )
+                })()}
 
                 {/* 🌟 SECCIÓN 2: COMPROBANTES DE PAGO NO EFECTIVO */}
                 <div className="flex items-center justify-between pt-1">

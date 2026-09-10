@@ -201,6 +201,17 @@ class SavePunteoAuditRequest(BaseModel):
     items: list[PunteoItemVerification] = []
     observaciones_dictamen: Optional[str] = None
     diferencia_vouchers_gs: Decimal = Decimal("0")
+    monto_recibido_pyg: Optional[Decimal] = None
+    monto_recibido_brl: Optional[Decimal] = None
+    monto_recibido_usd: Optional[Decimal] = None
+    observaciones_efectivo: Optional[str] = None
+
+
+class ConfirmSessionCashReceptionRequest(BaseModel):
+    monto_recibido_pyg: Decimal
+    monto_recibido_brl: Decimal = Decimal("0")
+    monto_recibido_usd: Decimal = Decimal("0")
+    observaciones: Optional[str] = None
 
 
 class PaymentMethodBankMappingUpdate(BaseModel):

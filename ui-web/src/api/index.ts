@@ -1233,8 +1233,10 @@ export const api = {
     downloadSessionSalesPdf: (sessionId: string, filename?: string) =>
       downloadAuthenticated(`/v1/cash-sessions/${sessionId}/sales/export.pdf`, undefined, filename || `ventas_${sessionId.slice(0, 8)}.pdf`),
     sessionPunteo: (sessionId: string) => client.get<any>(`/v1/cash-sessions/${sessionId}/punteo`),
-    savePunteoAudit: (sessionId: string, data: { items: any[]; observaciones_dictamen?: string; diferencia_vouchers_gs?: number }) =>
+    savePunteoAudit: (sessionId: string, data: { items: any[]; observaciones_dictamen?: string; diferencia_vouchers_gs?: number; monto_recibido_pyg?: number; monto_recibido_brl?: number; monto_recibido_usd?: number; observaciones_efectivo?: string }) =>
       client.post<any>(`/v1/cash-sessions/${sessionId}/punteo/asentar`, data),
+    confirmSessionCash: (sessionId: string, data: { monto_recibido_pyg: number; monto_recibido_brl?: number; monto_recibido_usd?: number; observaciones?: string }) =>
+      client.post<any>(`/v1/cash-sessions/${sessionId}/confirm-cash-reception`, data),
     downloadSessionPunteoPdf: (sessionId: string) =>
       downloadAuthenticated(`/v1/cash-sessions/${sessionId}/export/punteo.pdf`, undefined, `planilla_punteo_${sessionId.slice(0, 8)}.pdf`),
     bankMappings: {
