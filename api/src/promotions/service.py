@@ -21,7 +21,7 @@ from api.src.promotions.schemas import (
     PromotionAIInsight, PromotionAnalytics360Response
 )
 from api.src.products.models import Product
-from api.src.purchases.models import Supplier, PurchaseOrder
+from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseOrderItem
 from api.src.smart_pricing.models import TieredPrice
 from api.src.sales.models import Sale, SaleItem, SalePayment
 from api.src.customers.models import Customer
@@ -593,80 +593,106 @@ async def generate_sell_out_claim(db: AsyncSession, company_id: str, promo_id: s
     supplier_email = None
     supplier_telefono = None
 
+    valid_p_ids: list[uuid.UUID] = []
+    if promo.producto_ids:
+        for p in promo.producto_ids:
+            try:
+                if p:
+                    valid_p_ids.append(uuid.UUID(str(p)))
+            except Exception:
+                pass
+
     # Si no tiene supplier_id directo, buscar el proveedor de los productos incluidos
-    if not supplier_id and promo.producto_ids:
-        supp_find = await db.execute(
-            text("""
-                SELECT po.supplier_id, s.razon_social, s.ruc, s.email, s.telefono
-                FROM purchase_order_items poi
-                JOIN purchase_orders po ON po.id = poi.purchase_order_id
-                JOIN suppliers s ON s.id = po.supplier_id
-                WHERE poi.product_id = ANY(:p_ids)
-                ORDER BY poi.created_at DESC
-                LIMIT 1
-            """),
-            {"p_ids": [uuid.UUID(str(p)) for p in promo.producto_ids if p]}
-        )
-        s_row = supp_find.first()
-        if s_row:
-            supplier_id = s_row[0]
-            supplier_nombre = s_row[1]
-            supplier_ruc = s_row[2]
-            supplier_email = s_row[3]
-            supplier_telefono = s_row[4]
+    if not supplier_id and valid_p_ids:
+        try:
+            supp_find = await db.execute(
+                text("""
+                    SELECT po.supplier_id, s.razon_social, s.ruc, s.email, s.telefono
+                    FROM purchase_order_items poi
+                    JOIN purchase_orders po ON po.id = poi.purchase_order_id
+                    JOIN suppliers s ON s.id = po.supplier_id
+                    WHERE poi.product_id = ANY(:p_ids)
+                    ORDER BY poi.created_at DESC
+                    LIMIT 1
+                """),
+                {"p_ids": valid_p_ids}
+            )
+            s_row = supp_find.first()
+            if s_row:
+                supplier_id = s_row[0]
+                supplier_nombre = s_row[1]
+                supplier_ruc = s_row[2]
+                supplier_email = s_row[3]
+                supplier_telefono = s_row[4]
+        except Exception:
+            pass
 
     if supplier_id and not supplier_ruc:
-        supp_res = await db.execute(select(Supplier).where(Supplier.id == supplier_id))
-        supp = supp_res.scalar_one_or_none()
-        if supp:
-            supplier_nombre = supp.razon_social or supp.nombre
-            supplier_ruc = supp.ruc
-            supplier_email = supp.email
-            supplier_telefono = supp.telefono
+        try:
+            supp_res = await db.execute(select(Supplier).where(Supplier.id == supplier_id))
+            supp = supp_res.scalar_one_or_none()
+            if supp:
+                supplier_nombre = supp.razon_social or supp.nombre
+                supplier_ruc = supp.ruc
+                supplier_email = supp.email
+                supplier_telefono = supp.telefono
+        except Exception:
+            pass
 
     # Facturas / Órdenes de compra afectadas
     facturas_ref = []
-    if promo.purchases_invoices_ids:
-        po_res = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id.in_(promo.purchases_invoices_ids)))
-        for po in po_res.scalars().all():
-            facturas_ref.append({
-                "id": str(po.id),
-                "numero": po.numero or f"FAC-{str(po.id)[:8]}",
-                "timbrado": getattr(po, "timbrado", None) or "18545636",
-                "fecha": po.created_at.strftime("%d/%m/%Y") if po.created_at else "S/F",
-                "total": float(po.total or 0)
-            })
-    elif promo.producto_ids:
-        po_res = await db.execute(
-            select(PurchaseOrder)
-            .join(PurchaseOrderItem, PurchaseOrderItem.purchase_order_id == PurchaseOrder.id)
-            .where(PurchaseOrderItem.product_id.in_([uuid.UUID(str(p)) for p in promo.producto_ids if p]))
-            .order_by(PurchaseOrder.created_at.desc())
-            .limit(6)
-        )
-        for po in po_res.scalars().all():
-            facturas_ref.append({
-                "id": str(po.id),
-                "numero": po.numero or f"FAC-{str(po.id)[:8]}",
-                "timbrado": getattr(po, "timbrado", None) or "18545636",
-                "fecha": po.created_at.strftime("%d/%m/%Y") if po.created_at else "S/F",
-                "total": float(po.total or 0)
-            })
-    elif supplier_id:
-        po_res = await db.execute(
-            select(PurchaseOrder)
-            .where(PurchaseOrder.supplier_id == supplier_id)
-            .order_by(PurchaseOrder.created_at.desc())
-            .limit(6)
-        )
-        for po in po_res.scalars().all():
-            facturas_ref.append({
-                "id": str(po.id),
-                "numero": po.numero or f"FAC-{str(po.id)[:8]}",
-                "timbrado": getattr(po, "timbrado", None) or "18545636",
-                "fecha": po.created_at.strftime("%d/%m/%Y") if po.created_at else "S/F",
-                "total": float(po.total or 0)
-            })
+    try:
+        if promo.purchases_invoices_ids:
+            valid_inv_ids = []
+            for inv_id in promo.purchases_invoices_ids:
+                try:
+                    if inv_id:
+                        valid_inv_ids.append(uuid.UUID(str(inv_id)))
+                except Exception:
+                    pass
+            if valid_inv_ids:
+                po_res = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id.in_(valid_inv_ids)))
+                for po in po_res.scalars().all():
+                    facturas_ref.append({
+                        "id": str(po.id),
+                        "numero": po.numero or f"FAC-{str(po.id)[:8]}",
+                        "timbrado": getattr(po, "timbrado", None) or "18545636",
+                        "fecha": po.created_at.strftime("%d/%m/%Y") if po.created_at else "S/F",
+                        "total": float(po.total or 0)
+                    })
+        elif valid_p_ids:
+            po_res = await db.execute(
+                select(PurchaseOrder)
+                .join(PurchaseOrderItem, PurchaseOrderItem.purchase_order_id == PurchaseOrder.id)
+                .where(PurchaseOrderItem.product_id.in_(valid_p_ids))
+                .order_by(PurchaseOrder.created_at.desc())
+                .limit(6)
+            )
+            for po in po_res.scalars().all():
+                facturas_ref.append({
+                    "id": str(po.id),
+                    "numero": po.numero or f"FAC-{str(po.id)[:8]}",
+                    "timbrado": getattr(po, "timbrado", None) or "18545636",
+                    "fecha": po.created_at.strftime("%d/%m/%Y") if po.created_at else "S/F",
+                    "total": float(po.total or 0)
+                })
+        elif supplier_id:
+            po_res = await db.execute(
+                select(PurchaseOrder)
+                .where(PurchaseOrder.supplier_id == supplier_id)
+                .order_by(PurchaseOrder.created_at.desc())
+                .limit(6)
+            )
+            for po in po_res.scalars().all():
+                facturas_ref.append({
+                    "id": str(po.id),
+                    "numero": po.numero or f"FAC-{str(po.id)[:8]}",
+                    "timbrado": getattr(po, "timbrado", None) or "18545636",
+                    "fecha": po.created_at.strftime("%d/%m/%Y") if po.created_at else "S/F",
+                    "total": float(po.total or 0)
+                })
+    except Exception:
+        pass
 
     return VendorClaimResponse(
         promotion_id=str(promo.id),
