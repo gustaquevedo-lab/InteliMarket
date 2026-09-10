@@ -21,7 +21,7 @@ def _require_intellizapp_key(x_api_key: str = Header(...)) -> None:
 
 @router.post("/sync", response_model=NemuhaSyncRunResponse, dependencies=[Depends(require_auth)])
 async def trigger_sync(body: TriggerSyncRequest, db: AsyncSession = Depends(get_db)):
-    run = await service.run_sync(db, str(body.company_id), body.since)
+    run = await service.run_sync(db, str(body.company_id), body.since, body.modules)
     return run
 
 

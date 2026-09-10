@@ -2527,9 +2527,65 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
     return 0
 
 
-# ── Orquestador ──────────────────────────────────────────────────────────────
+# ── Catálogo de Módulos de Sincronización y Orquestador ───────────────────────
 
-async def run_sync(db: AsyncSession, company_id: str, since: date | None = None) -> NemuhaSyncRun:
+AVAILABLE_SYNC_MODULES = {
+    # ── 2. Stock e Inventario (ACTIVO) ──────────────────────────────────
+    "stock": sync_stock,
+    "inventory_adjustments": sync_inventory_adjustments,
+    # ── 3. Compras y Proveedores (ACTIVO) ───────────────────────────────
+    "purchase_orders": sync_purchase_orders,
+    "purchase_receipts": sync_purchase_receipts,
+    "supplier_credit_notes": sync_supplier_credit_notes,
+    "supplier_returns": sync_supplier_returns,
+    "supplier_balances": sync_supplier_balances,
+    "accounts_payable": sync_accounts_payable,
+    "supplier_invoice_payments": sync_supplier_invoice_payments,
+    # ── Módulos en PAUSA (solo se ejecutan bajo petición explícita) ──────
+    "catalog_prices_and_scales": sync_catalog_prices_and_scales,
+    "reconcile_legacy_placeholders": reconcile_unresolved_products,
+    "accounts_receivable": sync_accounts_receivable,
+    "credit_accounts": sync_credit_accounts,
+    "extra_club_numeros": sync_extra_club_numeros,
+    "bank_accounts": sync_bank_accounts,
+    "bank_transactions": sync_bank_transactions,
+    "bank_balances": sync_bank_balances,
+    "expense_categories": sync_expense_categories,
+    "petty_cash_expenses": sync_petty_cash_expenses,
+    "payroll_movements": sync_payroll_movements,
+    "cash_register_arqueo": sync_cash_register_arqueo,
+    "cash_deposit_gaps": sync_cash_deposit_gaps,
+    "cash_sessions": sync_cash_sessions,
+    "cash_register_movements": sync_cash_register_movements,
+    "exchange_rates": sync_exchange_rates,
+    "fiscal_setup": sync_fiscal_setup,
+}
+
+# Módulos activos en sincronizaciones periódicas automáticas (2. Stock e Inventario, 3. Compras y Proveedores)
+DEFAULT_ACTIVE_MODULES = [
+    # 2. Stock e Inventario
+    "stock",
+    "inventory_adjustments",
+    # 3. Compras y Proveedores
+    "purchase_orders",
+    "purchase_receipts",
+    "supplier_credit_notes",
+    "supplier_returns",
+    "supplier_balances",
+    "accounts_payable",
+    "supplier_invoice_payments",
+]
+
+
+async def run_sync(
+    db: AsyncSession,
+    company_id: str,
+    since: date | None = None,
+    modules: list[str] | None = None,
+) -> NemuhaSyncRun:
+    """Ejecuta la sincronización con Ñemuha.
+    Por defecto corre únicamente módulos de Stock y Compras/Proveedores (2 y 3).
+    Cualquier otro módulo pausado se ejecuta únicamente si se solicita explícitamente en `modules`."""
     run = NemuhaSyncRun(company_id=company_id, since_date=since, status="running")
     db.add(run)
     await db.flush()
@@ -2537,40 +2593,13 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
     rows_synced: dict[str, int] = {}
     errors: dict[str, str] = {}
 
-    for name, fn in (
-        ("reconcile_legacy_placeholders", reconcile_unresolved_products),
-        ("accounts_payable", sync_accounts_payable),
-        ("accounts_receivable", sync_accounts_receivable),
-        ("bank_accounts", sync_bank_accounts),
-        ("bank_transactions", sync_bank_transactions),
-        ("bank_balances", sync_bank_balances),
-        ("supplier_invoice_payments", sync_supplier_invoice_payments),
-        ("exchange_rates", sync_exchange_rates),
-        ("fiscal_setup", sync_fiscal_setup),
-        ("expense_categories", sync_expense_categories),
-        ("petty_cash_expenses", sync_petty_cash_expenses),
-        ("cash_register_arqueo", sync_cash_register_arqueo),
-        ("cash_deposit_gaps", sync_cash_deposit_gaps),
-        ("cash_sessions", sync_cash_sessions),
-        ("catalog_prices_and_scales", sync_catalog_prices_and_scales),
-        # Las promociones y ofertas ya no se importan desde ven_promocao de Ñemuha (gestión 100% exclusiva en InteliMarket desde Septiembre 2026)
-        # ("promotions", sync_promotions),
-        # Las ventas, pagos y devoluciones de clientes ya no se sincronizan desde el legacy (operación 100% en Intelimarket POS desde el 01/09/2026)
-        # ("sales", sync_sales),
-        # ("sale_payments", sync_sale_payments),
-        # ("customer_returns", sync_customer_returns),
-        ("stock", sync_stock),
-        ("inventory_adjustments", sync_inventory_adjustments),
-        ("credit_accounts", sync_credit_accounts),
-        ("extra_club_numeros", sync_extra_club_numeros),
-        ("supplier_balances", sync_supplier_balances),
-        ("purchase_orders", sync_purchase_orders),
-        ("purchase_receipts", sync_purchase_receipts),
-        ("supplier_credit_notes", sync_supplier_credit_notes),
-        ("supplier_returns", sync_supplier_returns),
-        ("payroll_movements", sync_payroll_movements),
-        ("cash_register_movements", sync_cash_register_movements),
-    ):
+    target_modules = modules if modules else DEFAULT_ACTIVE_MODULES
+
+    for name in target_modules:
+        fn = AVAILABLE_SYNC_MODULES.get(name)
+        if not fn:
+            logger.warning("Módulo de sincronización desconocido o desactivado: %s", name)
+            continue
         try:
             rows_synced[name] = await fn(db, company_id, since)
             await db.commit()
