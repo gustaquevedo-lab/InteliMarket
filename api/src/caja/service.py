@@ -778,6 +778,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         "fondo_brl_gs": float(fondo_brl_gs),
         "fondo_usd_gs": float(fondo_usd_gs),
         "fondo_total_gs": float(fondo_total_gs),
+        "total_no_efectivo_gs": float(total_no_efectivo_gs),
         "efectivo_pyg": float(efectivo_pyg),
         "efectivo_brl": float(efectivo_brl),
         "efectivo_usd": float(efectivo_usd),
@@ -798,6 +799,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         "total_cobrado_gs": float(sales_row.total_cobrado if sales_row else 0),
         "terminales_operadas": terminales_operadas,
         "medios_pago_detallados": desglose_detallado,
+        "desglose_detallado": desglose_detallado,
     }
 
     escpos = generate_cierre_escpos(recon_data)
@@ -1122,8 +1124,8 @@ async def get_session_sales_detail(db: AsyncSession, session_id: str, company_id
 
     # 1. Obtener reconciliación completa y tasas
     recon = await get_session_reconciliation_data(db, session_obj.id)
-    tasa_brl = float(recon["tasa_brl"]) if recon else 1400.0
-    tasa_usd = float(recon["tasa_usd"]) if recon else 7800.0
+    tasa_brl = float(recon.get("tasa_brl", 1400.0)) if recon else 1400.0
+    tasa_usd = float(recon.get("tasa_usd", 7800.0)) if recon else 7800.0
 
     # 2. Consultar todas las ventas de la sesión con cliente
     from api.src.customers.models import Customer
@@ -1274,19 +1276,19 @@ async def get_session_sales_detail(db: AsyncSession, session_id: str, company_id
             "total_exenta_gs": float(total_exenta_gs),
             "cantidad_anuladas": anuladas_count,
             "total_anuladas_gs": float(anuladas_total_gs),
-            "fondo_apertura_gs": float(recon["fondo_pyg"]) if recon else float(session_obj.monto_apertura or 0),
-            "fondo_apertura_brl": float(recon["fondo_brl"]) if recon else float(session_obj.monto_apertura_brl or 0),
-            "fondo_apertura_usd": float(recon["fondo_usd"]) if recon else float(session_obj.monto_apertura_usd or 0),
-            "ventas_efectivo_gs": float(recon["ventas_ef_total_gs"]) if recon else 0.0,
-            "ventas_no_efectivo_gs": float(recon["total_no_efectivo_gs"]) if recon else 0.0,
-            "total_drops_gs": float(recon["total_drops_gs"]) if recon else 0.0,
-            "esperado_gaveta_gs": float(recon["esperado_total_gs"]) if recon else 0.0,
-            "declarado_gaveta_gs": float(recon["contado_total_gs"]) if recon else 0.0,
-            "diferencia_gs": float(recon["diferencia_consolidada_gs"]) if recon else 0.0,
+            "fondo_apertura_gs": float(recon.get("fondo_pyg", 0.0)) if recon else float(session_obj.monto_apertura or 0),
+            "fondo_apertura_brl": float(recon.get("fondo_brl", 0.0)) if recon else float(session_obj.monto_apertura_brl or 0),
+            "fondo_apertura_usd": float(recon.get("fondo_usd", 0.0)) if recon else float(session_obj.monto_apertura_usd or 0),
+            "ventas_efectivo_gs": float(recon.get("ventas_ef_total_gs", 0.0)) if recon else 0.0,
+            "ventas_no_efectivo_gs": float(recon.get("total_no_efectivo_gs", 0.0)) if recon else 0.0,
+            "total_drops_gs": float(recon.get("total_drops_gs", 0.0)) if recon else 0.0,
+            "esperado_gaveta_gs": float(recon.get("esperado_total_gs", 0.0)) if recon else 0.0,
+            "declarado_gaveta_gs": float(recon.get("contado_total_gs", 0.0)) if recon else 0.0,
+            "diferencia_gs": float(recon.get("diferencia_consolidada_gs", 0.0)) if recon else 0.0,
             "tasa_brl": tasa_brl,
             "tasa_usd": tasa_usd,
         },
-        "desglose_medios": recon.get("desglose_detallado", []) if recon else [],
+        "desglose_medios": (recon.get("desglose_detallado") or recon.get("medios_pago_detallados") or []) if recon else [],
         "reconciliation": recon,
         "sales": sales_list,
     }
