@@ -247,7 +247,7 @@ def _company_header(company: dict, styles, report_title: str, subtitle: str, gen
             ],
             meta_lines,
         ]],
-        colWidths=[40 * mm, 85 * mm, 55 * mm],
+        colWidths=[40 * mm, 88 * mm, 58 * mm],
     )
     header_table.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),

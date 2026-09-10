@@ -417,7 +417,7 @@ def generate_boveda_movimientos_pdf(company: dict, entries: list[dict], fecha_de
             e["fecha_deposito"].strftime("%d/%m/%Y") if e.get("fecha_deposito") else "—",
         ])
 
-    t = Table(data, colWidths=[32 * mm, 32 * mm, 32 * mm, 28 * mm, 30 * mm], repeatRows=1)
+    t = Table(data, colWidths=[40 * mm, 36 * mm, 36 * mm, 34 * mm, 40 * mm], repeatRows=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
         ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
@@ -461,11 +461,11 @@ def generate_cierre_sesion_individual_pdf(
     cierre_str = ci_local.strftime("%d/%m/%Y %H:%M:%S") if ci_local else "—"
     
     meta_data = [
-        ["Cajero/a:", s.get("cajero_nombre") or "—", "Caja / Terminal:", s.get("register_nombre") or "—"],
+        ["Cajero/a:", Paragraph(f"<b>{s.get('cajero_nombre') or '—'}</b>", styles["Normal"]), "Caja / Terminal:", Paragraph(f"<b>{s.get('register_nombre') or '—'}</b>", styles["Normal"])],
         ["Fecha Apertura:", apertura_str, "Fecha Cierre:", cierre_str],
-        ["Estado Sesión:", s.get("estado", "cerrada").upper(), "ID Sesión:", str(s.get("id", "—"))],
+        ["Estado Sesión:", s.get("estado", "cerrada").upper(), "ID Sesión:", str(s.get("id", "—"))[:8].upper()],
     ]
-    t_meta = Table(meta_data, colWidths=[30 * mm, 55 * mm, 30 * mm, 65 * mm])
+    t_meta = Table(meta_data, colWidths=[28 * mm, 64 * mm, 30 * mm, 64 * mm])
     t_meta.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (0, -1), FONT_BOLD),
         ("FONTNAME", (2, 0), (2, -1), FONT_BOLD),
@@ -499,41 +499,44 @@ def generate_cierre_sesion_individual_pdf(
 
         dif_pyg = c_pyg - esp_pyg
         signo_p = "+" if dif_pyg >= 0 else ""
+        dif_p_color = "#059669" if dif_pyg >= 0 else "#DC2626"
         arqueo_rows.append([
             "Guaraníes (PYG)",
             _fmt_gs(f_pyg),
             _fmt_gs(recon.get("efectivo_pyg", 0)),
             _fmt_gs(esp_pyg),
             _fmt_gs(c_pyg),
-            f"{signo_p}{_fmt_gs(dif_pyg)}",
+            Paragraph(f"<font color='{dif_p_color}'><b>{signo_p}{_fmt_gs(dif_pyg)}</b></font>", ParagraphStyle("DifP", parent=styles["Normal"], alignment=TA_RIGHT, fontSize=7.5)),
         ])
 
         dif_brl = c_brl - esp_brl
         signo_b = "+" if dif_brl >= 0 else ""
         comp_brl_gs = dif_brl * tasa_brl
         signo_cb = "+" if comp_brl_gs >= 0 else ""
+        dif_b_color = "#059669" if dif_brl >= 0 else "#DC2626"
         arqueo_rows.append([
             "Reales (R$)",
             f"R$ {f_brl:.2f}",
             f"R$ {recon.get('efectivo_brl', 0):.2f}",
             f"R$ {esp_brl:.2f}",
             f"R$ {c_brl:.2f}",
-            f"{signo_b}R$ {dif_brl:.2f} ({signo_cb}{comp_brl_gs:,.0f} Gs.)",
+            Paragraph(f"<font color='{dif_b_color}'><b>{signo_b}R$ {dif_brl:.2f}</b><br/>({signo_cb}{comp_brl_gs:,.0f} Gs.)</font>", ParagraphStyle("DifB", parent=styles["Normal"], alignment=TA_RIGHT, fontSize=6.5, leading=8)),
         ])
 
         if c_usd > 0 or esp_usd > 0 or f_usd > 0:
             dif_usd = c_usd - esp_usd
             signo_u = "+" if dif_usd >= 0 else ""
+            dif_u_color = "#059669" if dif_usd >= 0 else "#DC2626"
             arqueo_rows.append([
                 "Dólares (US$)",
                 f"US$ {f_usd:.2f}",
                 f"US$ {recon.get('efectivo_usd', 0):.2f}",
                 f"US$ {esp_usd:.2f}",
                 f"US$ {c_usd:.2f}",
-                f"{signo_u}US$ {dif_usd:.2f}",
+                Paragraph(f"<font color='{dif_u_color}'><b>{signo_u}US$ {dif_usd:.2f}</b></font>", ParagraphStyle("DifU", parent=styles["Normal"], alignment=TA_RIGHT, fontSize=7.5)),
             ])
 
-        t_arq = Table(arqueo_rows, colWidths=[35 * mm, 27 * mm, 27 * mm, 27 * mm, 27 * mm, 37 * mm])
+        t_arq = Table(arqueo_rows, colWidths=[36 * mm, 30 * mm, 30 * mm, 30 * mm, 30 * mm, 30 * mm])
         style_arq = [
             ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
             ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#0F172A")),
@@ -545,35 +548,35 @@ def generate_cierre_sesion_individual_pdf(
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, HexColor("#F8FAFC")]),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
             ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ]
         t_arq.setStyle(TableStyle(style_arq))
         elements.append(t_arq)
         elements.append(Spacer(1, 4))
 
-        # Banner de Conciliación Consolidada
+        # Banner de Conciliación Consolidada (diseño apilado en Paragraph que jamás se solapa)
         estado_cuadre = "CUADRADO" if abs(dif_consolidada) < 5000 else ("SOBRANTE" if dif_consolidada > 0 else "FALTANTE")
         signo_cons = "+" if dif_consolidada >= 0 else ""
         bg_color = HexColor("#ECFDF5") if estado_cuadre == "CUADRADO" else (HexColor("#FEF3C7") if estado_cuadre == "SOBRANTE" else HexColor("#FEE2E2"))
         txt_color = HexColor("#065F46") if estado_cuadre == "CUADRADO" else (HexColor("#92400E") if estado_cuadre == "SOBRANTE" else HexColor("#991B1B"))
+        txt_color_hex = "#065F46" if estado_cuadre == "CUADRADO" else ("#92400E" if estado_cuadre == "SOBRANTE" else "#991B1B")
 
+        style_box_cell = ParagraphStyle("BoxCell", parent=styles["Normal"], alignment=TA_CENTER, leading=11)
         resumen_box = [
             [
-                f"Total Esperado Gaveta: {_fmt_gs(recon.get('esperado_total_gs', 0))}",
-                f"Total Rendido Físico: {_fmt_gs(recon.get('contado_total_gs', 0))}",
-                f"Diferencia Consolidada: {signo_cons}{_fmt_gs(dif_consolidada)}",
-                f"DICTAMEN: {estado_cuadre}",
+                Paragraph(f"<font size=5.8 color='{txt_color_hex}'><b>TOTAL ESPERADO GAVETA</b></font><br/><font size=9.5 color='{txt_color_hex}'><b>{_fmt_gs(recon.get('esperado_total_gs', 0))}</b></font>", style_box_cell),
+                Paragraph(f"<font size=5.8 color='{txt_color_hex}'><b>TOTAL RENDIDO FÍSICO</b></font><br/><font size=9.5 color='{txt_color_hex}'><b>{_fmt_gs(recon.get('contado_total_gs', 0))}</b></font>", style_box_cell),
+                Paragraph(f"<font size=5.8 color='{txt_color_hex}'><b>DIFERENCIA CONSOLIDADA</b></font><br/><font size=9.5 color='{txt_color_hex}'><b>{signo_cons}{_fmt_gs(dif_consolidada)}</b></font>", style_box_cell),
+                Paragraph(f"<font size=5.8 color='{txt_color_hex}'><b>DICTAMEN DE ARQUEO</b></font><br/><font size=9.5 color='{txt_color_hex}'><b>{estado_cuadre}</b></font>", style_box_cell),
             ]
         ]
-        t_box = Table(resumen_box, colWidths=[45 * mm, 45 * mm, 45 * mm, 45 * mm])
+        t_box = Table(resumen_box, colWidths=[46.5 * mm, 46.5 * mm, 46.5 * mm, 46.5 * mm])
         t_box.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), bg_color),
-            ("TEXTCOLOR", (0, 0), (-1, -1), txt_color),
-            ("FONTNAME", (0, 0), (-1, -1), FONT_BOLD),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("BOX", (0, 0), (-1, -1), 1.0, txt_color),
             ("TOPPADDING", (0, 0), (-1, -1), 4),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ]))
         elements.append(t_box)
         elements.append(Spacer(1, 10))
@@ -631,7 +634,7 @@ def generate_cierre_sesion_individual_pdf(
                 "EXACTO" if diferencia_brl == 0 else "DESCUADRE",
             ])
 
-        t_arq = Table(arqueo_rows, colWidths=[24 * mm, 26 * mm, 26 * mm, 26 * mm, 26 * mm, 26 * mm, 26 * mm])
+        t_arq = Table(arqueo_rows, colWidths=[24 * mm, 27 * mm, 27 * mm, 27 * mm, 27 * mm, 27 * mm, 27 * mm])
         style_arq = [
             ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
             ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#0F172A")),
@@ -676,7 +679,7 @@ def generate_cierre_sesion_individual_pdf(
             _fmt_gs(tot_cobrado),
             "100.0%",
         ])
-        t_pay = Table(pay_data, colWidths=[55 * mm, 20 * mm, 45 * mm, 35 * mm, 25 * mm])
+        t_pay = Table(pay_data, colWidths=[58 * mm, 18 * mm, 45 * mm, 38 * mm, 27 * mm])
     else:
         pyg_payments = payments_breakdown.get("pyg", [])
         otras_payments = payments_breakdown.get("otras_monedas", [])
@@ -711,7 +714,7 @@ def generate_cierre_sesion_individual_pdf(
             _fmt_gs(total_recaudado_pyg),
             "100.0%",
         ])
-        t_pay = Table(pay_data, colWidths=[55 * mm, 25 * mm, 30 * mm, 40 * mm, 30 * mm])
+        t_pay = Table(pay_data, colWidths=[60 * mm, 20 * mm, 30 * mm, 46 * mm, 30 * mm])
 
     t_pay.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
@@ -760,7 +763,7 @@ def generate_cierre_sesion_individual_pdf(
                 cd.get("confirmado_por_nombre") or "—",
                 (cd.get("estado") or "pendiente").upper(),
             ])
-        t_cd = Table(cd_data, colWidths=[30 * mm, 40 * mm, 45 * mm, 40 * mm, 25 * mm])
+        t_cd = Table(cd_data, colWidths=[26 * mm, 45 * mm, 45 * mm, 45 * mm, 25 * mm])
         t_cd.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
             ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#0F172A")),
@@ -789,7 +792,7 @@ def generate_cierre_sesion_individual_pdf(
         [f"Cajero/a: {s.get('cajero_nombre') or '—'}", "Recepción y Verificación en Bóveda"],
         ["Fecha: ____/____/________   Hora: ____:____", "Fecha: ____/____/________   Hora: ____:____"],
     ]
-    t_firmas = Table(firmas_data, colWidths=[90 * mm, 90 * mm])
+    t_firmas = Table(firmas_data, colWidths=[93 * mm, 93 * mm])
     t_firmas.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("FONTSIZE", (0, 0), (-1, -1), 7.5),
@@ -838,7 +841,7 @@ def generate_treasury_remittance_pdf(
             Paragraph(f"<b>Estado Actual:</b> {(remittance.get('estado') or 'en_transito').upper()}", styles["Small"]),
         ],
     ]
-    t_info = Table(info_data, colWidths=[90 * mm, 90 * mm])
+    t_info = Table(info_data, colWidths=[93 * mm, 93 * mm])
     t_info.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), GRAY_LIGHT),
         ("PADDING", (0, 0), (-1, -1), 4),
@@ -887,7 +890,7 @@ def generate_treasury_remittance_pdf(
             verif_str,
         ])
 
-    t_items = Table(table_data, colWidths=[8 * mm, 32 * mm, 40 * mm, 30 * mm, 28 * mm, 22 * mm, 20 * mm], repeatRows=1)
+    t_items = Table(table_data, colWidths=[8 * mm, 34 * mm, 42 * mm, 30 * mm, 28 * mm, 24 * mm, 20 * mm], repeatRows=1)
     t_items.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
         ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
@@ -915,7 +918,7 @@ def generate_treasury_remittance_pdf(
         [f"Supervisora: {remittance.get('supervisor_nombre') or '—'}", f"Tesorería: {remittance.get('tesorero_nombre') or '____________________'}"],
         ["Fecha: ____/____/________   Hora: ____:____", "Fecha: ____/____/________   Hora: ____:____"],
     ]
-    t_firmas = Table(firmas_data, colWidths=[90 * mm, 90 * mm])
+    t_firmas = Table(firmas_data, colWidths=[93 * mm, 93 * mm])
     t_firmas.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("FONTSIZE", (0, 0), (-1, -1), 7.5),
@@ -974,7 +977,7 @@ def generate_ventas_por_cajero_pdf(
             [Paragraph("CAJEROS ACTIVOS", kpi_style_sub), Paragraph(str(cajeros_activos), kpi_style_val)],
         ]
     ]
-    t_kpi = Table(kpi_data, colWidths=[47.5 * mm, 47.5 * mm, 47.5 * mm, 47.5 * mm])
+    t_kpi = Table(kpi_data, colWidths=[46.5 * mm, 46.5 * mm, 46.5 * mm, 46.5 * mm])
     t_kpi.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F1F5F9")),
         ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
@@ -1021,7 +1024,7 @@ def generate_ventas_por_cajero_pdf(
         "100.0%",
     ])
 
-    t_cajeros = Table(table_data, colWidths=[8 * mm, 62 * mm, 18 * mm, 22 * mm, 30 * mm, 34 * mm, 16 * mm], repeatRows=1)
+    t_cajeros = Table(table_data, colWidths=[8 * mm, 60 * mm, 16 * mm, 22 * mm, 30 * mm, 34 * mm, 16 * mm], repeatRows=1)
     t_cajeros.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
         ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
@@ -1045,7 +1048,7 @@ def generate_ventas_por_cajero_pdf(
         ["RESPONSABLE DE AUDITORÍA / CAJAS", "GERENCIA DE ADMINISTRACIÓN Y FINANZAS"],
         ["Extra Supermercado Mayorista", "GRUPO SANTA TERESA E.A.S."],
     ]
-    t_firmas = Table(firmas, colWidths=[95 * mm, 95 * mm])
+    t_firmas = Table(firmas, colWidths=[93 * mm, 93 * mm])
     t_firmas.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("FONTSIZE", (0, 0), (-1, -1), 7.5),
@@ -1099,7 +1102,7 @@ def generate_ventas_por_medio_pago_pdf(
             [Paragraph("DÓLARES EN GAVETA (US$)", kpi_style_sub), Paragraph(f"US$ {_fmt_val(usd_monto, is_divisa=True)}", kpi_style_val)],
         ]
     ]
-    t_kpi = Table(kpi_data, colWidths=[47.5 * mm, 47.5 * mm, 47.5 * mm, 47.5 * mm])
+    t_kpi = Table(kpi_data, colWidths=[46.5 * mm, 46.5 * mm, 46.5 * mm, 46.5 * mm])
     t_kpi.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F1F5F9")),
         ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
@@ -1152,7 +1155,7 @@ def generate_ventas_por_medio_pago_pdf(
         "100.0%",
     ])
 
-    t_medios = Table(table_data, colWidths=[8 * mm, 72 * mm, 18 * mm, 28 * mm, 38 * mm, 26 * mm], repeatRows=1)
+    t_medios = Table(table_data, colWidths=[8 * mm, 68 * mm, 18 * mm, 28 * mm, 38 * mm, 26 * mm], repeatRows=1)
     t_medios.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
         ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
@@ -1175,7 +1178,7 @@ def generate_ventas_por_medio_pago_pdf(
         ["RESPONSABLE DE TESORERÍA / BÓVEDA", "GERENCIA DE ADMINISTRACIÓN Y FINANZAS"],
         ["Extra Supermercado Mayorista", "GRUPO SANTA TERESA E.A.S."],
     ]
-    t_firmas = Table(firmas, colWidths=[95 * mm, 95 * mm])
+    t_firmas = Table(firmas, colWidths=[93 * mm, 93 * mm])
     t_firmas.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("FONTSIZE", (0, 0), (-1, -1), 7.5),
@@ -1219,11 +1222,11 @@ def generate_punteo_vouchers_pdf(
     cierre_str = ci_local.strftime("%d/%m/%Y %H:%M:%S") if ci_local else "En curso"
 
     meta_data = [
-        ["Cajero/a:", s.get("cajero_nombre") or "—", "Terminal / Caja:", s.get("register_nombre") or "—"],
+        ["Cajero/a:", Paragraph(f"<b>{s.get('cajero_nombre') or '—'}</b>", styles["Normal"]), "Terminal / Caja:", Paragraph(f"<b>{s.get('register_nombre') or '—'}</b>", styles["Normal"])],
         ["Fecha Apertura:", apertura_str, "Fecha Cierre:", cierre_str],
         ["ID Sesión:", str(s.get("id", "—"))[:8].upper(), "Estado:", str(s.get("estado", "cerrada")).upper()],
     ]
-    t_meta = Table(meta_data, colWidths=[30 * mm, 60 * mm, 30 * mm, 60 * mm])
+    t_meta = Table(meta_data, colWidths=[28 * mm, 65 * mm, 28 * mm, 65 * mm])
     t_meta.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (0, -1), FONT_BOLD),
         ("FONTNAME", (2, 0), (2, -1), FONT_BOLD),
@@ -1253,7 +1256,7 @@ def generate_punteo_vouchers_pdf(
 
     res_rows.append(["TOTAL MEDIOS NO EFECTIVO", str(total_cant), _fmt_gs(total_monto_no_ef)])
 
-    t_res = Table(res_rows, colWidths=[90 * mm, 35 * mm, 55 * mm])
+    t_res = Table(res_rows, colWidths=[96 * mm, 35 * mm, 55 * mm])
     t_res.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
         ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
@@ -1276,6 +1279,10 @@ def generate_punteo_vouchers_pdf(
     elements.append(Paragraph("<font color='#64748B' size=6.5>Coteje cada comprobante físico contra el reporte: verifique número de ticket, código de autorización del POS y monto exacto.</font>", styles["Small"]))
     elements.append(Spacer(1, 4))
 
+    style_v_cell = ParagraphStyle("VCell", parent=styles["Normal"], fontSize=6, leading=7.5)
+    style_v_center = ParagraphStyle("VCellC", parent=style_v_cell, alignment=TA_CENTER)
+    style_v_right = ParagraphStyle("VCellR", parent=style_v_cell, alignment=TA_RIGHT)
+
     v_headers = ["[  ]", "Hora", "Ticket / Factura", "Medio / Tarjeta", "Boleta / Aut. / NSU", "Moneda", "Monto Orig.", "Monto Gs.", "Dictamen"]
     v_rows = [v_headers]
 
@@ -1295,25 +1302,25 @@ def generate_punteo_vouchers_pdf(
             aut_parts.append(f"Aut: {v['codigo_autorizacion']}")
         if v.get("nsu") and v.get("nsu") != "—":
             aut_parts.append(f"NSU: {v['nsu']}")
-        aut_info = " | ".join(aut_parts) if aut_parts else "—"
+        aut_info = "<br/>".join(aut_parts) if aut_parts else "—"
 
         v_rows.append([
             "[   ]",
             hora_str,
-            str(v.get("numero_ticket") or v.get("numero_venta") or "—"),
-            tarjeta_info,
-            aut_info,
+            Paragraph(str(v.get("numero_ticket") or v.get("numero_venta") or "—"), style_v_center),
+            Paragraph(tarjeta_info, style_v_cell),
+            Paragraph(aut_info, style_v_center),
             str(v.get("moneda") or "PYG"),
             _fmt_val(v.get("monto_original", v.get("monto", 0)), is_divisa=v.get("moneda") != "PYG"),
             _fmt_gs(v.get("monto_gs", v.get("monto", 0))),
-            "CONFORME [ ]  FALTANTE [ ]",
+            Paragraph("<font size=5 color='#334155'><b>CONF [ ]<br/>FALT [ ]</b></font>", style_v_center),
         ])
 
     if len(vouchers) == 0:
         v_rows.append(["—", "—", "Sin comprobantes registrados", "—", "—", "—", "—", "—", "—"])
 
-    # Anchos milimétricos (A4 horizontal o vertical: total ~195mm)
-    t_v = Table(v_rows, colWidths=[9 * mm, 14 * mm, 26 * mm, 34 * mm, 33 * mm, 12 * mm, 20 * mm, 22 * mm, 25 * mm], repeatRows=1)
+    # Anchos milimétricos exactos: 8+14+24+34+36+12+18+20+20 = 186mm
+    t_v = Table(v_rows, colWidths=[8 * mm, 14 * mm, 24 * mm, 34 * mm, 36 * mm, 12 * mm, 18 * mm, 20 * mm, 20 * mm], repeatRows=1)
     t_v.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), HexColor("#334155")),
         ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
@@ -1321,13 +1328,13 @@ def generate_punteo_vouchers_pdf(
         ("FONTSIZE", (0, 0), (-1, -1), 6.5),
         ("ALIGN", (0, 0), (0, -1), "CENTER"),
         ("ALIGN", (1, 0), (1, -1), "CENTER"),
-        ("ALIGN", (4, 0), (5, -1), "CENTER"),
+        ("ALIGN", (5, 0), (5, -1), "CENTER"),
         ("ALIGN", (6, 0), (7, -1), "RIGHT"),
-        ("ALIGN", (8, 0), (8, -1), "CENTER"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, GRAY_LIGHT]),
         ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
         ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]))
     elements.append(t_v)
     elements.append(Spacer(1, 10))
@@ -1344,7 +1351,7 @@ def generate_punteo_vouchers_pdf(
             "Gs. ________________________ [  ] CONFORME   [  ] DESCUADRE",
         ]
     ]
-    t_ctrl = Table(resumen_control, colWidths=[65 * mm, 35 * mm, 45 * mm, 57 * mm])
+    t_ctrl = Table(resumen_control, colWidths=[60 * mm, 34 * mm, 44 * mm, 48 * mm])
     t_ctrl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
         ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
@@ -1367,7 +1374,7 @@ def generate_punteo_vouchers_pdf(
         ["FIRMA CAJERO/A", "FIRMA SUPERVISOR DE CAJA", "FIRMA AUDITORÍA / TESORERÍA"],
         [s.get("cajero_nombre") or "Cajero/a", "Supervisor de Turno", "GRUPO SANTA TERESA E.A.S."],
     ]
-    t_firmas = Table(firmas, colWidths=[67 * mm, 67 * mm, 68 * mm])
+    t_firmas = Table(firmas, colWidths=[62 * mm, 62 * mm, 62 * mm])
     t_firmas.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("FONTSIZE", (0, 0), (-1, -1), 7.5),
@@ -1407,11 +1414,11 @@ def generate_session_sales_pdf(
 
     # 1. Metadatos de la sesión
     meta_data = [
-        ["Caja / Terminal:", sess.get("register_nombre") or "—", "Cajero/a:", sess.get("cajero_nombre") or "—"],
+        ["Caja / Terminal:", Paragraph(f"<b>{sess.get('register_nombre') or '—'}</b>", styles["Normal"]), "Cajero/a:", Paragraph(f"<b>{sess.get('cajero_nombre') or '—'}</b>", styles["Normal"])],
         ["Fecha Apertura:", sess.get("fecha_apertura_local") or "—", "Fecha Cierre:", sess.get("fecha_cierre_local") or "—"],
         ["Estado Sesión:", (sess.get("estado") or "cerrada").upper(), "ID Turno:", str(sess.get("id", "—"))[:8].upper()],
     ]
-    t_meta = Table(meta_data, colWidths=[32 * mm, 55 * mm, 30 * mm, 63 * mm])
+    t_meta = Table(meta_data, colWidths=[30 * mm, 63 * mm, 30 * mm, 63 * mm])
     t_meta.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (0, -1), FONT_BOLD),
         ("FONTNAME", (2, 0), (2, -1), FONT_BOLD),
@@ -1426,24 +1433,28 @@ def generate_session_sales_pdf(
     elements.append(Paragraph("<b>1. RESUMEN FINANCIERO Y RENDIMIENTO DEL TURNO</b>", styles["Normal"]))
     elements.append(Spacer(1, 4))
 
+    style_kpi_cell = ParagraphStyle(
+        "KpiSalesCell",
+        parent=styles["Normal"],
+        alignment=TA_CENTER,
+        leading=11,
+    )
     kpis_table = [
         [
-            f"Total Facturado:\n<b>{_fmt_gs(tot.get('total_ventas_gs', 0))}</b>",
-            f"Tickets Emitidos:\n<b>{tot.get('cantidad_ventas', 0)}</b>",
-            f"Ticket Promedio:\n<b>{_fmt_gs(tot.get('ticket_promedio_gs', 0))}</b>",
-            f"Ventas Efectivo:\n<b>{_fmt_gs(tot.get('ventas_efectivo_gs', 0))}</b>",
-            f"Ventas No Efectivo:\n<b>{_fmt_gs(tot.get('ventas_no_efectivo_gs', 0))}</b>",
+            Paragraph(f"<font size=5.8 color='#64748B'><b>TOTAL FACTURADO</b></font><br/><font size=9.5 color='#0F172A'><b>{_fmt_gs(tot.get('total_ventas_gs', 0))}</b></font>", style_kpi_cell),
+            Paragraph(f"<font size=5.8 color='#64748B'><b>TICKETS EMITIDOS</b></font><br/><font size=9.5 color='#0F172A'><b>{tot.get('cantidad_ventas', 0)}</b></font>", style_kpi_cell),
+            Paragraph(f"<font size=5.8 color='#64748B'><b>TICKET PROMEDIO</b></font><br/><font size=9.5 color='#0F172A'><b>{_fmt_gs(tot.get('ticket_promedio_gs', 0))}</b></font>", style_kpi_cell),
+            Paragraph(f"<font size=5.8 color='#64748B'><b>VENTAS EFECTIVO</b></font><br/><font size=9.5 color='#059669'><b>{_fmt_gs(tot.get('ventas_efectivo_gs', 0))}</b></font>", style_kpi_cell),
+            Paragraph(f"<font size=5.8 color='#64748B'><b>VENTAS NO EFECTIVO</b></font><br/><font size=9.5 color='#1E40AF'><b>{_fmt_gs(tot.get('ventas_no_efectivo_gs', 0))}</b></font>", style_kpi_cell),
         ]
     ]
-    t_kpis = Table(kpis_table, colWidths=[36 * mm, 36 * mm, 36 * mm, 36 * mm, 36 * mm])
+    t_kpis = Table(kpis_table, colWidths=[37.2 * mm, 37.2 * mm, 37.2 * mm, 37.2 * mm, 37.2 * mm])
     t_kpis.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F8FAFC")),
         ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]))
     elements.append(t_kpis)
     elements.append(Spacer(1, 8))
@@ -1470,7 +1481,7 @@ def generate_session_sales_pdf(
             _fmt_gs(tot.get("total_ventas_gs", 0)),
             "100.0%",
         ])
-        t_med = Table(medios_rows, colWidths=[60 * mm, 50 * mm, 45 * mm, 25 * mm])
+        t_med = Table(medios_rows, colWidths=[62 * mm, 48 * mm, 46 * mm, 30 * mm])
         t_med.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
             ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#0F172A")),
@@ -1500,9 +1511,9 @@ def generate_session_sales_pdf(
         sales_rows.append([
             s_item.get("numero_interno") or s_item.get("numero") or "—",
             s_item.get("hora_local") or "—",
-            (s_item.get("cliente_nombre") or "Consumidor Final")[:26],
+            (s_item.get("cliente_nombre") or "Consumidor Final")[:28],
             s_item.get("cliente_ruc") or "X",
-            s_item.get("forma_pago_resumen") or "Efectivo",
+            (s_item.get("forma_pago_resumen") or "Efectivo")[:20],
             _fmt_gs(s_item.get("total", 0)),
         ])
 
@@ -1516,7 +1527,7 @@ def generate_session_sales_pdf(
         _fmt_gs(tot.get("total_ventas_gs", 0)),
     ])
 
-    t_sales = Table(sales_rows, colWidths=[32 * mm, 16 * mm, 50 * mm, 24 * mm, 38 * mm, 20 * mm])
+    t_sales = Table(sales_rows, colWidths=[30 * mm, 16 * mm, 54 * mm, 24 * mm, 38 * mm, 24 * mm])
     t_sales.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
         ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#0F172A")),
@@ -1543,7 +1554,7 @@ def generate_session_sales_pdf(
         [f"Cajero/a: {sess.get('cajero_nombre') or '—'}", "Revisión y Control de Comprobantes"],
         ["Fecha: ____/____/________", "Fecha: ____/____/________"],
     ]
-    t_firmas = Table(firmas_data, colWidths=[90 * mm, 90 * mm])
+    t_firmas = Table(firmas_data, colWidths=[93 * mm, 93 * mm])
     t_firmas.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("FONTNAME", (0, 1), (-1, 1), FONT_BOLD),
