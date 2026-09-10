@@ -4302,6 +4302,54 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               </div>
             ) : punteoData ? (
               <div className="flex-1 overflow-y-auto space-y-4 py-3 pr-1">
+                {/* 🌟 SECCIÓN 1: RENDICIÓN DE EFECTIVO FÍSICO EN BILLETES (GAVETA) */}
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 to-slate-800 text-white border border-slate-700/80 shadow-md space-y-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-700/60 pb-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                        <Banknote className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-xs sm:text-sm text-emerald-400">Rendición de Efectivo Físico (Billetes y Monedas en Gaveta)</h4>
+                        <p className="text-[10px] sm:text-[11px] text-slate-400">
+                          El efectivo se rinde contando billetes en el arqueo ciego. A continuación se cotejan exclusivamente los comprobantes no-efectivo.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 font-mono text-xs shrink-0">
+                      <div className="text-right">
+                        <span className="text-slate-400 text-[9px] block uppercase font-bold">Contado Físico</span>
+                        <span className="font-bold text-white text-xs sm:text-sm">{formatPYG(punteoData.session_data?.monto_cierre || 0)}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-slate-400 text-[9px] block uppercase font-bold">Esperado Sistema</span>
+                        <span className="text-slate-300 text-xs sm:text-sm">{formatPYG(punteoData.session_data?.monto_cierre_esperado || 0)}</span>
+                      </div>
+                      <div className="text-right pl-2.5 border-l border-slate-700">
+                        <span className="text-slate-400 text-[9px] block uppercase font-bold">Diferencia Efectivo</span>
+                        {(() => {
+                          const difEf = Number(punteoData.session_data?.monto_cierre || 0) - Number(punteoData.session_data?.monto_cierre_esperado || 0)
+                          return (
+                            <span className={`font-black text-xs sm:text-sm ${difEf === 0 ? "text-emerald-400" : difEf < 0 ? "text-rose-400" : "text-blue-400"}`}>
+                              {difEf !== 0 ? (difEf > 0 ? `+${formatPYG(difEf)}` : formatPYG(difEf)) : "₲ 0 (Exacto)"}
+                            </span>
+                          )
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 🌟 SECCIÓN 2: COMPROBANTES DE PAGO NO EFECTIVO */}
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-xs font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
+                    <ClipboardCheck className="w-4 h-4" /> Comprobantes y Vouchers a Puntear (Medios No Efectivo)
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                    Total comprobantes: <b>{punteoData.vouchers?.length || 0}</b>
+                  </span>
+                </div>
+
                 {/* 1. Resumen de Comprobantes por Medio de Pago */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
                   {Object.entries(punteoData.summary_by_method || {}).map(([key, val]: [string, any]) => {

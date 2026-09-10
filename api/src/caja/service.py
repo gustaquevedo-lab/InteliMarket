@@ -2845,7 +2845,6 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         "TRANSFERENCIA": {"canal_key": "TRANSFERENCIA", "canal_label": "Transferencias SIPAP", "icon": "landmark", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
         "EXTRA_CLUB": {"canal_key": "EXTRA_CLUB", "canal_label": "Crédito Extra Club", "icon": "award", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
         "VALES": {"canal_key": "VALES", "canal_label": "Vales & Cheques", "icon": "file-check", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
-        "EFECTIVO": {"canal_key": "EFECTIVO", "canal_label": "Efectivo Físico", "icon": "banknote", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
         "OTROS": {"canal_key": "OTROS", "canal_label": "Otros Comprobantes", "icon": "file-text", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
     }
 
@@ -2854,7 +2853,12 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     auto_linked_count = 0
 
     for row in rows:
-        fp_raw = (row.forma_pago or "").upper()
+        fp_raw = (row.forma_pago or "").upper().strip()
+        # El efectivo físico se rinde contando billetes en gaveta (Arqueo ciego).
+        # El punteo de comprobantes es EXCLUSIVAMENTE para medios no-efectivo (tarjetas, QR, PIX, vales, transferencias).
+        if fp_raw in ("EFECTIVO", "CASH") or "EFECTIVO" in fp_raw:
+            continue
+
         mon = (row.moneda or "PYG").upper()
         m_dec = Decimal(str(row.monto or 0))
 
@@ -2882,9 +2886,6 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         elif "TRANSFERENCIA" in fp_raw:
             medio_label = "Transferencia Bancaria"
             canal_key = "TRANSFERENCIA"
-        elif fp_raw == "EFECTIVO":
-            medio_label = f"Efectivo {mon}"
-            canal_key = "EFECTIVO"
         else:
             medio_label = row.forma_pago
             canal_key = "OTROS"
@@ -3030,12 +3031,27 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         except Exception:
             pass
 
+    summary_por_canal = {
+        k: {
+            "canal_key": v["canal_key"],
+            "label": v["canal_label"],
+            "cantidad": v["cantidad_esperada"],
+            "monto_gs": v["total_esperado_gs"],
+            "icon": v["icon"],
+        }
+        for k, v in vouchers_by_channel.items()
+        if v["cantidad_esperada"] > 0
+    }
+    summary_final = medios_dict if any(v.get("cantidad", 0) > 0 for v in medios_dict.values()) else summary_por_canal
+    if not summary_final:
+        summary_final = summary_por_canal
+
     # Filtrar solo canales que tengan transacciones
     canales_activos = [c for c in vouchers_by_channel.values() if c["cantidad_esperada"] > 0]
 
     return {
         "session_data": session_data,
-        "summary_by_method": medios_dict,
+        "summary_by_method": summary_final,
         "payments_breakdown": breakdown,
         "vouchers": vouchers,
         "grupos_comprobantes": canales_activos,
