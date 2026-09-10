@@ -17,6 +17,7 @@ def _to_asuncion_tz(dt: datetime | None) -> datetime | None:
 
 from reportlab.lib.units import mm
 from reportlab.lib.colors import HexColor
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle, KeepTogether
 
