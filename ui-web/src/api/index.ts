@@ -154,7 +154,8 @@ export const client = {
 
 export async function downloadAuthenticated(path: string, params: Record<string, any> | undefined, filename: string) {
   const token = localStorage.getItem("access_token")
-  const cleanPath = path.startsWith("/") ? path : `/${path}`
+  const normalizedPath = path.startsWith("/api") ? path.substring(4) : path
+  const cleanPath = normalizedPath.startsWith("/") ? normalizedPath : `/${normalizedPath}`
   const qs = params ? new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => [k, String(v)]))).toString() : ""
   const sep = cleanPath.includes("?") ? "&" : "?"
   const url = `${API_BASE}${cleanPath}${qs ? `${sep}${qs}` : ""}`
