@@ -3,6 +3,7 @@ visuales compartidos de integrated_finance.pdf_reports (mismo estilo que
 Bancos, AP y AR) en vez de reimplementar estilos de tabla."""
 from __future__ import annotations
 import io
+from decimal import Decimal
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
