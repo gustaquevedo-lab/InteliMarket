@@ -3093,6 +3093,8 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     }
     session_data["handoff"] = handoff_dict
 
+    canales_activos = [c for c in vouchers_by_channel.values() if c["cantidad_esperada"] > 0]
+
     return {
         "session_data": session_data,
         "handoff": handoff_dict,
