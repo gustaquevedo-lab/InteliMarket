@@ -652,44 +652,67 @@ def generate_cierre_sesion_individual_pdf(
         elements.append(Spacer(1, 10))
 
     # 3. DESGLOSE DE VENTAS POR MEDIO DE PAGO
-    elements.append(Paragraph("<b>2. DESGLOSE DE VENTAS POR MEDIOS DE PAGO DEL TURNO</b>", styles["Normal"]))
+    elements.append(Paragraph("<b>2. DESGLOSE DE VENTAS POR MEDIOS DE PAGO DEL TURNO (100% EN GUARANÍES)</b>", styles["Normal"]))
     elements.append(Spacer(1, 4))
 
-    pyg_payments = payments_breakdown.get("pyg", [])
-    otras_payments = payments_breakdown.get("otras_monedas", [])
-
-    pay_data = [["Medio de Pago", "Moneda", "Cant. Operaciones", "Total Recaudado", "% Participación"]]
-    total_recaudado_pyg = sum(p.get("monto", 0) for p in pyg_payments)
-    total_ops = sum(p.get("cantidad", 0) for p in pyg_payments)
-
-    for p in pyg_payments:
+    if recon and recon.get("medios_pago_detallados"):
+        tot_cobrado = float(recon.get("total_cobrado_gs") or 0)
+        pay_data = [["Medio de Pago / Canal", "Moneda", "Detalle Moneda Original", "Total Recaudado (₲)", "% Participación"]]
+        for m in recon["medios_pago_detallados"]:
+            m_gs = float(m.get("monto_gs") or 0)
+            pct = (m_gs / tot_cobrado * 100) if tot_cobrado > 0 else 0
+            mon_txt = "BRL" if "BRL" in m.get("clave", "") else ("USD" if "USD" in m.get("clave", "") else "PYG")
+            pay_data.append([
+                m.get("label", "—"),
+                mon_txt,
+                m.get("monto_formateado", "—"),
+                _fmt_gs(m_gs),
+                f"{pct:.1f}%",
+            ])
         pay_data.append([
-            p.get("forma_pago", "—"),
+            "TOTAL FACTURADO EN TICKETS (PYG)",
             "PYG",
-            str(p.get("cantidad", 0)),
-            _fmt_gs(p.get("monto", 0)),
-            f"{p.get('porcentaje', 0):.1f}%",
+            f"{recon.get('total_ventas_count', 0)} tickets emitidos",
+            _fmt_gs(tot_cobrado),
+            "100.0%",
         ])
+        t_pay = Table(pay_data, colWidths=[55 * mm, 20 * mm, 45 * mm, 35 * mm, 25 * mm])
+    else:
+        pyg_payments = payments_breakdown.get("pyg", [])
+        otras_payments = payments_breakdown.get("otras_monedas", [])
 
-    for p in otras_payments:
+        pay_data = [["Medio de Pago", "Moneda", "Cant. Operaciones", "Total Recaudado", "% Participación"]]
+        total_recaudado_pyg = sum(p.get("monto", 0) for p in pyg_payments)
+        total_ops = sum(p.get("cantidad", 0) for p in pyg_payments)
+
+        for p in pyg_payments:
+            pay_data.append([
+                p.get("forma_pago", "—"),
+                "PYG",
+                str(p.get("cantidad", 0)),
+                _fmt_gs(p.get("monto", 0)),
+                f"{p.get('porcentaje', 0):.1f}%",
+            ])
+
+        for p in otras_payments:
+            pay_data.append([
+                p.get("forma_pago", "—"),
+                p.get("moneda", "—"),
+                str(p.get("cantidad", 0)),
+                f"{p.get('monto', 0):.2f}",
+                "—",
+            ])
+
+        # Fila de Totales
         pay_data.append([
-            p.get("forma_pago", "—"),
-            p.get("moneda", "—"),
-            str(p.get("cantidad", 0)),
-            f"{p.get('monto', 0):.2f}",
-            "—",
+            "TOTAL VENTAS TURNO (PYG)",
+            "PYG",
+            str(total_ops),
+            _fmt_gs(total_recaudado_pyg),
+            "100.0%",
         ])
+        t_pay = Table(pay_data, colWidths=[55 * mm, 25 * mm, 30 * mm, 40 * mm, 30 * mm])
 
-    # Fila de Totales
-    pay_data.append([
-        "TOTAL VENTAS TURNO (PYG)",
-        "PYG",
-        str(total_ops),
-        _fmt_gs(total_recaudado_pyg),
-        "100.0%",
-    ])
-
-    t_pay = Table(pay_data, colWidths=[55 * mm, 25 * mm, 30 * mm, 40 * mm, 30 * mm])
     t_pay.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
         ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#0F172A")),
@@ -1351,6 +1374,182 @@ def generate_punteo_vouchers_pdf(
         ("FONTNAME", (0, 1), (-1, 1), FONT_BOLD),
         ("TOPPADDING", (0, 0), (-1, -1), 3),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(KeepTogether([t_firmas]))
+
+    _build(doc, elements)
+    return buffer.getvalue()
+
+
+def generate_session_sales_pdf(
+    company: dict,
+    sales_detail: dict,
+    generated_by: str = "",
+) -> bytes:
+    """Informe Detallado de Ventas de la Sesión en formato A4 Portrait.
+    Incluye membrete fiscal institucional de Extra Supermercado, métricas
+    clave, desglose consolidado por medios de pago y el listado comprobante
+    por comprobante con hora paraguaya, cliente, RUC y montos."""
+    buffer = io.BytesIO()
+    doc, styles = _base_doc(buffer, "Informe Detallado de Ventas", company, generated_by)
+
+    sess = sales_detail.get("session", {})
+    tot = sales_detail.get("totales", {})
+    desglose = sales_detail.get("desglose_medios", [])
+    sales = sales_detail.get("sales", [])
+
+    subtitulo = f"Caja: {sess.get('register_nombre') or 'Caja'}  |  Cajero/a: {sess.get('cajero_nombre') or '—'}"
+    elements = _company_header(
+        company, styles, "INFORME DETALLADO DE VENTAS DE CAJA",
+        subtitulo,
+        generated_by,
+    )
+
+    # 1. Metadatos de la sesión
+    meta_data = [
+        ["Caja / Terminal:", sess.get("register_nombre") or "—", "Cajero/a:", sess.get("cajero_nombre") or "—"],
+        ["Fecha Apertura:", sess.get("fecha_apertura_local") or "—", "Fecha Cierre:", sess.get("fecha_cierre_local") or "—"],
+        ["Estado Sesión:", (sess.get("estado") or "cerrada").upper(), "ID Turno:", str(sess.get("id", "—"))[:8].upper()],
+    ]
+    t_meta = Table(meta_data, colWidths=[32 * mm, 55 * mm, 30 * mm, 63 * mm])
+    t_meta.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (0, -1), FONT_BOLD),
+        ("FONTNAME", (2, 0), (2, -1), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    elements.append(t_meta)
+    elements.append(Spacer(1, 8))
+
+    # 2. Resumen Financiero (KPIs)
+    elements.append(Paragraph("<b>1. RESUMEN FINANCIERO Y RENDIMIENTO DEL TURNO</b>", styles["Normal"]))
+    elements.append(Spacer(1, 4))
+
+    kpis_table = [
+        [
+            f"Total Facturado:\n<b>{_fmt_gs(tot.get('total_ventas_gs', 0))}</b>",
+            f"Tickets Emitidos:\n<b>{tot.get('cantidad_ventas', 0)}</b>",
+            f"Ticket Promedio:\n<b>{_fmt_gs(tot.get('ticket_promedio_gs', 0))}</b>",
+            f"Ventas Efectivo:\n<b>{_fmt_gs(tot.get('ventas_efectivo_gs', 0))}</b>",
+            f"Ventas No Efectivo:\n<b>{_fmt_gs(tot.get('ventas_no_efectivo_gs', 0))}</b>",
+        ]
+    ]
+    t_kpis = Table(kpis_table, colWidths=[36 * mm, 36 * mm, 36 * mm, 36 * mm, 36 * mm])
+    t_kpis.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F8FAFC")),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(t_kpis)
+    elements.append(Spacer(1, 8))
+
+    # 3. Desglose Consolidado por Medios de Pago
+    if desglose:
+        elements.append(Paragraph("<b>2. DESGLOSE CONSOLIDADO POR MEDIOS DE PAGO (100% EN GUARANÍES)</b>", styles["Normal"]))
+        elements.append(Spacer(1, 4))
+
+        tot_v = float(tot.get("total_ventas_gs") or 1)
+        medios_rows = [["Medio de Pago", "Detalle Moneda Original", "Total Recaudado (₲)", "% Facturación"]]
+        for m in desglose:
+            m_gs = float(m.get("monto_gs") or 0)
+            pct = (m_gs / tot_v * 100) if tot_v > 0 else 0
+            medios_rows.append([
+                m.get("label", "—"),
+                m.get("monto_formateado", "—"),
+                _fmt_gs(m_gs),
+                f"{pct:.1f}%",
+            ])
+        medios_rows.append([
+            "TOTAL FACTURADO EN TICKETS",
+            "—",
+            _fmt_gs(tot.get("total_ventas_gs", 0)),
+            "100.0%",
+        ])
+        t_med = Table(medios_rows, colWidths=[60 * mm, 50 * mm, 45 * mm, 25 * mm])
+        t_med.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#0F172A")),
+            ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+            ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+            ("ALIGN", (2, 0), (3, -1), "RIGHT"),
+            ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+            ("LINEBELOW", (0, 0), (-1, 0), 1.0, HexColor("#94A3B8")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -2), [WHITE, HexColor("#F8FAFC")]),
+            ("FONTNAME", (0, -1), (-1, -1), FONT_BOLD),
+            ("BACKGROUND", (0, -1), (-1, -1), HexColor("#F1F5F9")),
+            ("LINEABOVE", (0, -1), (-1, -1), 1.0, HexColor("#0F172A")),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(t_med)
+        elements.append(Spacer(1, 10))
+
+    # 4. Listado Detallado de Ventas / Tickets
+    elements.append(Paragraph(f"<b>3. COMPROBANTES Y TICKETS EMITIDOS ({len(sales)} OPERACIONES)</b>", styles["Normal"]))
+    elements.append(Spacer(1, 4))
+
+    sales_header = ["N° Comprobante", "Hora", "Cliente / Razón Social", "RUC / C.I.", "Forma de Pago", "Total (₲)"]
+    sales_rows = [sales_header]
+
+    for s_item in sales:
+        sales_rows.append([
+            s_item.get("numero_interno") or s_item.get("numero") or "—",
+            s_item.get("hora_local") or "—",
+            (s_item.get("cliente_nombre") or "Consumidor Final")[:26],
+            s_item.get("cliente_ruc") or "X",
+            s_item.get("forma_pago_resumen") or "Efectivo",
+            _fmt_gs(s_item.get("total", 0)),
+        ])
+
+    # Fila de Total
+    sales_rows.append([
+        "TOTAL GENERAL COMPROBANTES",
+        "",
+        "",
+        "",
+        f"{len(sales)} tickets",
+        _fmt_gs(tot.get("total_ventas_gs", 0)),
+    ])
+
+    t_sales = Table(sales_rows, colWidths=[32 * mm, 16 * mm, 50 * mm, 24 * mm, 38 * mm, 20 * mm])
+    t_sales.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#0F172A")),
+        ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("ALIGN", (1, 0), (1, -1), "CENTER"),
+        ("ALIGN", (5, 0), (5, -1), "RIGHT"),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("LINEBELOW", (0, 0), (-1, 0), 1.0, HexColor("#94A3B8")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [WHITE, HexColor("#F8FAFC")]),
+        ("FONTNAME", (0, -1), (-1, -1), FONT_BOLD),
+        ("BACKGROUND", (0, -1), (-1, -1), HexColor("#F1F5F9")),
+        ("LINEABOVE", (0, -1), (-1, -1), 1.0, HexColor("#0F172A")),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+    ]))
+    elements.append(t_sales)
+    elements.append(Spacer(1, 14))
+
+    # 5. Firmas de Cierre
+    firmas_data = [
+        ["_________________________________________", "_________________________________________"],
+        ["FIRMA DEL CAJERO/A", "SUPERVISIÓN / AUDITORÍA DE CAJA"],
+        [f"Cajero/a: {sess.get('cajero_nombre') or '—'}", "Revisión y Control de Comprobantes"],
+        ["Fecha: ____/____/________", "Fecha: ____/____/________"],
+    ]
+    t_firmas = Table(firmas_data, colWidths=[90 * mm, 90 * mm])
+    t_firmas.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTNAME", (0, 1), (-1, 1), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
     ]))
     elements.append(KeepTogether([t_firmas]))
 

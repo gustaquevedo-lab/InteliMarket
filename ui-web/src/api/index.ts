@@ -1230,6 +1230,8 @@ export const api = {
       downloadAuthenticated("/v1/caja/export/arqueo.pdf", { fecha_desde, fecha_hasta }, `acta_arqueo_consolidado_${fecha_desde}_${fecha_hasta}.pdf`),
     downloadCierrePdf: (sessionId: string) =>
       downloadAuthenticated(`/v1/cash-sessions/${sessionId}/export/cierre.pdf`, undefined, `cierre_caja_${sessionId.slice(0, 8)}.pdf`),
+    downloadSessionSalesPdf: (sessionId: string, filename?: string) =>
+      downloadAuthenticated(`/v1/cash-sessions/${sessionId}/sales/export.pdf`, undefined, filename || `ventas_${sessionId.slice(0, 8)}.pdf`),
     sessionPunteo: (sessionId: string) => client.get<any>(`/v1/cash-sessions/${sessionId}/punteo`),
     savePunteoAudit: (sessionId: string, data: { items: any[]; observaciones_dictamen?: string; diferencia_vouchers_gs?: number }) =>
       client.post<any>(`/v1/cash-sessions/${sessionId}/punteo/asentar`, data),

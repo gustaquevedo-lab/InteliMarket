@@ -273,6 +273,7 @@ export default function CajaPage() {
   const [sessionSalesLoading, setSessionSalesLoading] = useState(false)
   const [sessionSalesSearch, setSessionSalesSearch] = useState("")
   const [sessionSalesStatusFilter, setSessionSalesStatusFilter] = useState<"todas" | "confirmadas" | "anuladas">("todas")
+  const [downloadingSalesPdf, setDownloadingSalesPdf] = useState(false)
 
   // ── Filtros Avanzados para Historial de Cierres ──
   const [historialCajeroFilter, setHistorialCajeroFilter] = useState("")
@@ -4759,6 +4760,35 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {sessionSalesData?.session && (
+                  <button
+                    type="button"
+                    disabled={downloadingSalesPdf}
+                    onClick={async () => {
+                      if (!selectedSalesSessionId) return
+                      try {
+                        setDownloadingSalesPdf(true)
+                        const safeCajero = (sessionSalesData?.session?.cajero_nombre || "caja").replace(/\s+/g, "_")
+                        const safeFecha = (sessionSalesData?.session?.fecha_apertura_local || "").slice(0, 10).replace(/\//g, "-") || "sesion"
+                        await api.caja.downloadSessionSalesPdf(selectedSalesSessionId, `ventas_${safeCajero}_${safeFecha}.pdf`)
+                        toast.success("PDF generado", "Informe de ventas A4 descargado con éxito.")
+                      } catch (err: any) {
+                        toast.error("Error al exportar", err?.message || "No se pudo generar el PDF de ventas.")
+                      } finally {
+                        setDownloadingSalesPdf(false)
+                      }
+                    }}
+                    title="Descargar Informe Completo de Ventas en PDF (Formato A4)"
+                    className="px-3 py-1.5 rounded-xl border border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 font-bold text-xs inline-flex items-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    {downloadingSalesPdf ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600 dark:text-indigo-400" />
+                    ) : (
+                      <FileText className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                    )}
+                    <span>Exportar PDF A4</span>
+                  </button>
+                )}
                 <button
                   onClick={() => setSessionSalesModalOpen(false)}
                   className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"

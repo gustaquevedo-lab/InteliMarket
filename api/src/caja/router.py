@@ -274,6 +274,29 @@ async def get_cash_session_sales(
     return result
 
 
+@router.get("/cash-sessions/{session_id}/sales/export.pdf")
+async def export_session_sales_pdf(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    sales_detail = await service.get_session_sales_detail(db, session_id, user["company_id"])
+    if not sales_detail:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada o no pertenece a su empresa")
+
+    company = await _get_company_info(db, user["company_id"])
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_session_sales_pdf(
+        company,
+        sales_detail,
+        generated_by,
+    )
+    safe_cajero = (sales_detail.get("session", {}).get("cajero_nombre") or "caja").replace(" ", "_")
+    raw_fecha = sales_detail.get("session", {}).get("fecha_apertura_local") or "sesion"
+    safe_fecha = raw_fecha[:10].replace("/", "-")
+    return _pdf_response(pdf_bytes, f"ventas_{safe_cajero}_{safe_fecha}.pdf")
+
+
 @router.get("/cash-sessions/{session_id}/payment-breakdown")
 async def session_payment_breakdown(session_id: str, db: AsyncSession = Depends(get_db)):
     return await service.get_session_payment_breakdown(db, session_id)

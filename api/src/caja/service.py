@@ -2752,8 +2752,9 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
 
     cid = uuid.UUID(company_id)
     sid = uuid.UUID(session_id)
-    tasa_brl = Decimal(str(breakdown.get("tasa_brl") or 1400))
-    tasa_usd = Decimal(str(breakdown.get("tasa_usd") or 7800))
+    recon = session_data.get("recon") or {}
+    tasa_brl = Decimal(str(recon.get("tasa_brl") or breakdown.get("tasa_brl") or 1130))
+    tasa_usd = Decimal(str(recon.get("tasa_usd") or breakdown.get("tasa_usd") or 5840))
 
     # 1. Obtener la sesión para conocer el rango de fechas
     res_sess = await db.execute(select(CashSession).where(CashSession.id == sid))
@@ -2770,6 +2771,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             Sale.id.label("sale_id"),
             Sale.numero.label("numero_venta"),
             Sale.numero_interno,
+            Sale.total.label("sale_total"),
             Sale.tipo_comprobante,
             Sale.observaciones.label("sale_obs"),
             PosTerminalTransaction.id.label("pos_txn_id"),
@@ -2790,6 +2792,13 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         .order_by(SalePayment.fecha.asc())
     )
     rows = vouchers_res.all()
+
+    # Agrupar pagos por venta para calcular con exactitud la porción del ticket en Guaraníes
+    sale_payments_map: dict[uuid.UUID, list] = {}
+    for r in rows:
+        if r.sale_id not in sale_payments_map:
+            sale_payments_map[r.sale_id] = []
+        sale_payments_map[r.sale_id].append(r)
 
     # 3. Transacciones POS huérfanas de la sesión (ej. Dinelco o caídas temporales de red antes de vincular sale_id)
     unlinked_pos_txns: list[PosTerminalTransaction] = []
@@ -2880,7 +2889,17 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             medio_label = row.forma_pago
             canal_key = "OTROS"
 
-        m_gs = m_dec * tasa_brl if mon == "BRL" else (m_dec * tasa_usd if mon == "USD" else m_dec)
+        if mon == "PYG":
+            m_gs = m_dec
+        else:
+            sale_total_gs = Decimal(str(row.sale_total or 0))
+            sibling_pays = sale_payments_map.get(row.sale_id, [])
+            sibling_pyg = sum(Decimal(str(sp.monto or 0)) for sp in sibling_pays if (sp.moneda or "PYG").upper() == "PYG")
+            sibling_divisas = [sp for sp in sibling_pays if (sp.moneda or "PYG").upper() != "PYG"]
+            if sale_total_gs > 0 and len(sibling_divisas) == 1:
+                m_gs = max(Decimal("0"), sale_total_gs - sibling_pyg)
+            else:
+                m_gs = m_dec * tasa_brl if mon == "BRL" else (m_dec * tasa_usd if mon == "USD" else m_dec)
         m_gs_float = float(m_gs)
 
         nro_boleta = None
