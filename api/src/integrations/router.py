@@ -77,26 +77,26 @@ async def claim_pos_match(body: PosClaimRequest, db=Depends(get_db), user=Depend
 # webhooks) es una accion de back-office real -- antes cualquier token valido,
 # incluido el de un cajero, podia reconfigurar esto en caliente.
 @router.get("/configs")
-def list_configs(db=Depends(get_db), _=Depends(require_auth)):
-    return service.get_configs(db)
+async def list_configs(db=Depends(get_db), _=Depends(require_auth)):
+    return await service.get_configs(db)
 
 
 @router.post("/configs", status_code=201)
-def create_config(data: IntegrationConfigCreate, db=Depends(get_db), _=Depends(require_permission("integrations:configure"))):
-    return service.create_config(db, data.model_dump())
+async def create_config(data: IntegrationConfigCreate, db=Depends(get_db), _=Depends(require_permission("integrations:configure"))):
+    return await service.create_config(db, data.model_dump())
 
 
 @router.put("/configs/{config_id}")
-def update_config(config_id: str, data: IntegrationConfigUpdate, db=Depends(get_db), _=Depends(require_permission("integrations:configure"))):
-    cfg = service.update_config(db, config_id, data.model_dump(exclude_unset=True))
+async def update_config(config_id: str, data: IntegrationConfigUpdate, db=Depends(get_db), _=Depends(require_permission("integrations:configure"))):
+    cfg = await service.update_config(db, config_id, data.model_dump(exclude_unset=True))
     if not cfg:
         raise HTTPException(404, "Config no encontrada")
     return cfg
 
 
 @router.delete("/configs/{config_id}", status_code=204)
-def delete_config(config_id: str, db=Depends(get_db), _=Depends(require_permission("integrations:configure"))):
-    if not service.delete_config(db, config_id):
+async def delete_config(config_id: str, db=Depends(get_db), _=Depends(require_permission("integrations:configure"))):
+    if not await service.delete_config(db, config_id):
         raise HTTPException(404, "Config no encontrada")
 
 

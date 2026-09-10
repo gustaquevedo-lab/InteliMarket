@@ -1418,7 +1418,24 @@ async def _resolve_deposito(db: AsyncSession, company_id: str, id_filial: int) -
 
 
 async def sync_stock(db: AsyncSession, company_id: str, since: date | None) -> int:
-    rows = await _fetch("SELECT * FROM view_estoque_catalogo WHERE produtoAtivo = 1")
+    # Solo tomar existencias activas (BO_ATIVO = 1) agrupadas por producto y filial.
+    # Esto evita que códigos de barra inactivos/descontinuados con cantidades viejas
+    # pisen el stock real activo (donde ingresan las compras nuevas).
+    rows = await _fetch("""
+        SELECT 
+            p.ID_PRODUTO as idProduto,
+            e.ID_FILIAL as idFilial,
+            MAX(e.CODIGO_BARRA) as codigoBarra,
+            trim(p.DS_PRODUTO) as dsProduto,
+            p.UNIDADE_MEDIDA as unidadMedida,
+            SUM(e.QTD_PRODUTO) as qtdAtual,
+            p.VL_CUSTO_MEDIO_GS as vlCustoMedioGs,
+            p.BO_ATIVO as produtoAtivo
+        FROM est_produto p
+        JOIN est_existencia e ON e.ID_PRODUTO = p.ID_PRODUTO AND e.BO_ATIVO = 1
+        WHERE p.BO_ATIVO = 1
+        GROUP BY p.ID_PRODUTO, e.ID_FILIAL, p.DS_PRODUTO, p.UNIDADE_MEDIDA, p.VL_CUSTO_MEDIO_GS, p.BO_ATIVO
+    """)
 
     # Opción B: Obtener las ventas netas realizadas en Intelimarket (POS nuevo) desde el 31/08/2026.
     # Excluimos las ventas importadas del legado (source_table = 'ven_venda').
@@ -1451,7 +1468,7 @@ async def sync_stock(db: AsyncSession, company_id: str, since: date | None) -> i
         result = await db.execute(
             select(Stock).where(Stock.warehouse_id == warehouse_id, Stock.product_id == product_id)
         )
-        stock = result.scalar_one_or_none()
+        stock = result.scalars().first()
         qtd_legacy = Decimal(str(r["qtdAtual"] or 0))
         qty_vendida = ventas_intelimarket.get(product_id, Decimal("0"))
         # Stock neto: lo que tiene el legacy menos lo que vendió Intelimarket desde que arrancó el POS nuevo

@@ -81,6 +81,21 @@ async def create_return(db: AsyncSession, data: ReturnCreate) -> Return:
     db.add(return_obj)
     await db.flush()
 
+    # ── Política de devolución: máximo 48 horas ─────────────────────────
+    if data.sale_id:
+        sale_res = await db.execute(select(Sale).where(Sale.id == data.sale_id))
+        sale_obj = sale_res.scalar_one_or_none()
+        if sale_obj and sale_obj.fecha:
+            sale_date = sale_obj.fecha
+            if sale_date.tzinfo is None:
+                sale_date = sale_date.replace(tzinfo=timezone.utc)
+            horas_pasadas = (datetime.now(timezone.utc) - sale_date).total_seconds() / 3600.0
+            if horas_pasadas > 48.0:
+                raise ValueError(
+                    f"La factura original {sale_obj.numero or ''} fue emitida el {sale_date.strftime('%d/%m/%Y %H:%M')}. "
+                    f"La política comercial permite devoluciones únicamente hasta 48 horas posteriores a la compra (han transcurrido {int(horas_pasadas)} horas)."
+                )
+
     # ── Anti doble-devolucion ────────────────────────────────────────────
     # Sin esto, nada impedia devolver dos veces el mismo item de la misma
     # venta -- cada devolucion se creaba en el vacio, sin mirar si ya se

@@ -864,6 +864,7 @@ export default function POSPage() {
   const [priceCheckLoadingPromo, setPriceCheckLoadingPromo] = useState(false)
   const [priceCheckPacks, setPriceCheckPacks] = useState<{ id: string; etiqueta: string; unidades_por_paquete: number }[]>([])
   const [priceCheckScannedAsPack, setPriceCheckScannedAsPack] = useState<{ etiqueta: string; unidadesPorPaquete: number } | null>(null)
+  const priceCheckRequestIdRef = useRef(0)
 
   // ── MULTIMONEDA & COTIZACIONES ────────────────────────────────────────────
   const [rates, setRates] = useState<CurrencyRates>(() => {
@@ -1897,19 +1898,12 @@ export default function POSPage() {
     // --- Búsqueda local instantánea ---
     if (products.length > 0) {
       const q = query.toLowerCase()
-      const matched = products.filter(
-        (p) =>
-          p.nombre?.toLowerCase().includes(q) ||
-          p.sku?.toLowerCase().includes(q) ||
-          (p.codigo_barra && p.codigo_barra.toLowerCase().includes(q))
-      ).slice(0, 30)
 
-      // Sin match directo: puede ser el codigo de barra de una caja/pack
-      // (no del producto suelto) -- mismo fallback que ya usa el escaneo de venta.
-      if (matched.length === 0) {
-        const packMatch = packBarcodeMap.get(query)
-        const baseProduct = packMatch ? products.find((p) => p.id === packMatch.productId) : null
-        if (packMatch && baseProduct) {
+      // 1. Prioridad: ¿Es código de barra exacto de un pack / caja?
+      const packMatch = packBarcodeMap.get(query)
+      if (packMatch) {
+        const baseProduct = products.find((p) => p.id === packMatch.productId)
+        if (baseProduct) {
           setPriceCheckResults([baseProduct])
           setPriceCheckHighlight(0)
           handlePriceCheckSelect(baseProduct, { etiqueta: packMatch.etiqueta, unidadesPorPaquete: packMatch.unidadesPorPaquete })
@@ -1917,10 +1911,39 @@ export default function POSPage() {
         }
       }
 
+      // 2. Prioridad: ¿Es código de barra o SKU EXACTO de un producto suelto?
+      const exactMatch = products.find((p) => {
+        if (p.codigo_barra === query || p.sku === query) return true
+        const pCode = p.codigo_barra?.trim()
+        if (pCode && pCode.length >= 8 && query.length >= 8) {
+          return pCode.padStart(13, "0") === query.padStart(13, "0")
+        }
+        return false
+      })
+      if (exactMatch) {
+        setPriceCheckResults([exactMatch])
+        setPriceCheckHighlight(0)
+        handlePriceCheckSelect(exactMatch)
+        return
+      }
+
+      // 3. Coincidencia parcial por subcadena (para búsqueda interactiva por texto)
+      const matched = products.filter(
+        (p) =>
+          p.nombre?.toLowerCase().includes(q) ||
+          p.sku?.toLowerCase().includes(q) ||
+          (p.codigo_barra && p.codigo_barra.toLowerCase().includes(q))
+      ).slice(0, 30)
+
       setPriceCheckResults(matched)
       setPriceCheckHighlight(0)
-      // Codigo de barras escaneado: 1 sola coincidencia → abre detalle directo
-      if (matched.length === 1) {
+
+      // NUNCA auto-seleccionar por subcadena intermedia de código de barras mientras
+      // el lector o el usuario está tipeando (evita que un prefijo común como 78400500101
+      // seleccione prematuramente un producto ajeno de la misma marca antes de que
+      // termine de entrar el código completo del pack u otro producto).
+      // Solo auto-seleccionar si el resultado único es coincidencia EXACTA.
+      if (matched.length === 1 && (matched[0].codigo_barra === query || matched[0].sku === query)) {
         handlePriceCheckSelect(matched[0])
       }
       return
@@ -1933,7 +1956,7 @@ export default function POSPage() {
         const res = await api.products.list({ search: query, limit: 30 })
         setPriceCheckResults(res || [])
         setPriceCheckHighlight(0)
-        if (res && res.length === 1) {
+        if (res && res.length === 1 && (res[0].codigo_barra === query || res[0].sku === query)) {
           handlePriceCheckSelect(res[0])
         }
       } catch (e) {
@@ -3082,7 +3105,7 @@ export default function POSPage() {
 
   // ── REIMPRESIÓN DE VENTAS YA EMITIDAS ──────────────────────────────────────
   const [showReimprimirModal, setShowReimprimirModal] = useState(false)
-  const [reimprimirTab, setReimprimirTab] = useState<"ventas" | "devoluciones" | "cierres">("ventas")
+  const [reimprimirTab, setReimprimirTab] = useState<"ventas" | "supervisor" | "devoluciones" | "cierres">("ventas")
   const [reimprimirSearch, setReimprimirSearch] = useState("")
   const [reimprimirSales, setReimprimirSales] = useState<Sale[]>([])
   const [reimprimirReturns, setReimprimirReturns] = useState<any[]>([])
@@ -3091,6 +3114,16 @@ export default function POSPage() {
   const [reimprimirCierreFecha, setReimprimirCierreFecha] = useState("")
   const [reimprimirLoading, setReimprimirLoading] = useState(false)
   const [reimprimirError, setReimprimirError] = useState("")
+
+  // Modo Supervisora para consulta y reimpresión de todas las cajas (últimos 7 días)
+  const [reimprimirSupervisorUnlocked, setReimprimirSupervisorUnlocked] = useState(false)
+  const [reimprimirSupervisorEmail, setReimprimirSupervisorEmail] = useState("")
+  const [reimprimirSupervisorPin, setReimprimirSupervisorPin] = useState("")
+  const [reimprimirSupervisorVerifying, setReimprimirSupervisorVerifying] = useState(false)
+  const [reimprimirSupervisorSales, setReimprimirSupervisorSales] = useState<Sale[]>([])
+  const [reimprimirSupervisorLoading, setReimprimirSupervisorLoading] = useState(false)
+  const [reimprimirSupervisorSearch, setReimprimirSupervisorSearch] = useState("")
+  const [reimprimirSupervisorCajero, setReimprimirSupervisorCajero] = useState("")
 
   const validReimprimirSessions = useMemo(() => {
     const LEGACY_SESSION_IDS = new Set([
@@ -3158,6 +3191,42 @@ export default function POSPage() {
       )
     })
   }, [reimprimirSales, reimprimirSearch])
+
+  const filteredReimprimirSupervisorSales = useMemo(() => {
+    let list = reimprimirSupervisorSales
+    if (reimprimirSupervisorCajero) {
+      list = list.filter((s: any) => s.cajero_nombre === reimprimirSupervisorCajero || (s.user && s.user.nombre === reimprimirSupervisorCajero))
+    }
+    const q = reimprimirSupervisorSearch.trim().toLowerCase()
+    if (!q) return list
+    const qNum = q.replace(/\D/g, "")
+    return list.filter((s: any) => {
+      const num = (s.numero || "").toLowerCase()
+      const numInt = (s.numero_interno || "").toLowerCase()
+      const cNom = (s.customer_nombre || s.customer?.nombre || s.customer?.razon_social || "").toLowerCase()
+      const cDoc = (s.customer_doc || s.customer?.ruc || s.customer?.ci || s.customer?.telefono || "").toLowerCase()
+      const cDocClean = cDoc.replace(/\D/g, "")
+      const cEc = (s.customer_extra_club || s.customer?.extra_club_numero || "").toLowerCase()
+      const totalStr = String(s.total || 0)
+      const totalFormatted = (s.total || 0).toLocaleString("es-PY").toLowerCase()
+      const fp = (s.forma_pago || (s.condicion === "credito" ? "EXTRA_CLUB" : "EFECTIVO")).toLowerCase()
+      const cajero = (s.cajero_nombre || (s.user && s.user.nombre) || "").toLowerCase()
+
+      return (
+        num.includes(q) ||
+        numInt.includes(q) ||
+        cNom.includes(q) ||
+        cDoc.includes(q) ||
+        cajero.includes(q) ||
+        (qNum && cDocClean.includes(qNum)) ||
+        cEc.includes(q) ||
+        fp.includes(q) ||
+        totalStr.includes(q) ||
+        totalFormatted.includes(q) ||
+        (qNum && totalStr.includes(qNum))
+      )
+    })
+  }, [reimprimirSupervisorSales, reimprimirSupervisorCajero, reimprimirSupervisorSearch])
 
   // Reabrir factura -- agregar identificacion de cliente a una venta que
   // salio como Consumidor Final. Pedido real: el cliente se va, la caja
@@ -3564,23 +3633,68 @@ export default function POSPage() {
     setReimprimirLoading(true)
     setReimprimirError("")
     try {
-      // Acotado a la sesión de caja actual (este cajero, turno todavía no
-      // rendido) -- no la lista completa de la empresa. Al cerrar caja la
-      // sesión cambia, así que las ventas ya rendidas dejan de aparecer acá.
-      // Si esa consulta acotada no trae nada (sesión recién abierta, o
-      // ventas viejas de antes de que existiera este seguimiento), se cae
-      // a las últimas de la empresa en vez de dejar la lista vacía.
-      let sales = cashSessionId
-        ? await api.sales.list({ session_id: cashSessionId } as any)
-        : (user?.id ? await api.sales.list({ user_id: user.id } as any) : [])
-      if (!Array.isArray(sales) || sales.length === 0) {
-        sales = await api.sales.list()
+      // Política comercial y de seguridad: la cajera solo puede consultar y reimprimir sus propias
+      // facturas emitidas hasta 48 horas antes. Sin mezclar con ventas de otras cajeras.
+      const date48hAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
+      let sales: any[] = []
+      if (user?.id) {
+        sales = await api.sales.list({ user_id: user.id, fecha_desde: date48hAgo, limit: 100 } as any)
+      } else if (cashSessionId) {
+        sales = await api.sales.list({ session_id: cashSessionId, fecha_desde: date48hAgo, limit: 100 } as any)
       }
       setReimprimirSales(Array.isArray(sales) ? sales : [])
     } catch (e) {
       setReimprimirError("No se pudo cargar el historial de ventas.")
     } finally {
       setReimprimirLoading(false)
+    }
+  }
+
+  const fetchSupervisorSales = async (searchTerm?: string) => {
+    setReimprimirSupervisorLoading(true)
+    try {
+      const date7dAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+      const q = searchTerm !== undefined ? searchTerm : reimprimirSupervisorSearch.trim()
+      const res = await api.sales.list({
+        fecha_desde: date7dAgo,
+        search: q || undefined,
+        limit: 150,
+      } as any)
+      setReimprimirSupervisorSales(Array.isArray(res) ? res : [])
+    } catch (e) {
+      toast.error("Error al cargar ventas", "No se pudieron obtener las ventas de los últimos 7 días.")
+    } finally {
+      setReimprimirSupervisorLoading(false)
+    }
+  }
+
+  const handleUnlockSupervisor = async () => {
+    if (!reimprimirSupervisorEmail) {
+      toast.warning("Seleccione supervisor", "Debe elegir una cuenta de supervisor.")
+      return
+    }
+    if (!reimprimirSupervisorPin) {
+      toast.warning("Ingrese PIN / Clave", "Debe ingresar la clave o PIN del supervisor.")
+      return
+    }
+    setReimprimirSupervisorVerifying(true)
+    try {
+      const res = await api.auth.verifySupervisor({
+        email: reimprimirSupervisorEmail,
+        password: reimprimirSupervisorPin,
+      })
+      if (!res?.valid) {
+        toast.warning("Autorización rechazada", "Contraseña incorrecta o la cuenta no tiene nivel de supervisor.")
+        return
+      }
+      setReimprimirSupervisorUnlocked(true)
+      setReimprimirSupervisorPin("")
+      toast.success("Modo Supervisora Habilitado", `Autorizado por ${res.nombre || "Supervisor"}.`)
+      await fetchSupervisorSales()
+    } catch (e) {
+      toast.error("Error de verificación", "No se pudo verificar la clave del supervisor.")
+    } finally {
+      setReimprimirSupervisorVerifying(false)
     }
   }
 
@@ -4594,12 +4708,9 @@ export default function POSPage() {
     setDevolucionObservaciones("")
     setDevolucionSalesLoading(true)
     try {
-      let sales = cashSessionId
-        ? await api.sales.list({ session_id: cashSessionId } as any)
-        : (user?.id ? await api.sales.list({ user_id: user.id } as any) : [])
-      if (!Array.isArray(sales) || sales.length === 0) {
-        sales = await api.sales.list()
-      }
+      // Política comercial de devoluciones: compras emitidas hasta 48 horas antes
+      const date48hAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
+      const sales = await api.sales.list({ fecha_desde: date48hAgo, limit: 100 } as any)
       setDevolucionSales(Array.isArray(sales) ? sales : [])
     } catch (e) {
       toast.error("No se pudo cargar el historial de ventas", "Intente nuevamente.")
@@ -4855,7 +4966,14 @@ export default function POSPage() {
   const devolucionSalesFiltradas = useMemo(() => {
     const q = devolucionSearch.trim().toLowerCase()
     if (!q) return devolucionSales
-    return devolucionSales.filter((s) => (s.numero || "").toLowerCase().includes(q))
+    const qNum = q.replace(/\D/g, "")
+    return devolucionSales.filter((s) => {
+      const num = (s.numero || "").toLowerCase()
+      const numInt = (s.numero_interno || "").toLowerCase()
+      const cNom = (s.customer_nombre || s.customer?.nombre || s.customer?.razon_social || "").toLowerCase()
+      const cDoc = (s.customer_doc || s.customer?.ruc || s.customer?.ci || "").toLowerCase()
+      return num.includes(q) || numInt.includes(q) || cNom.includes(q) || cDoc.includes(q) || (qNum && cDoc.includes(qNum))
+    })
   }, [devolucionSales, devolucionSearch])
 
   const updateQuantity = (id: string, delta: number) => {
@@ -5065,7 +5183,14 @@ export default function POSPage() {
     } else if (e.key === "Enter") {
       e.preventDefault()
       const p = priceCheckResults[priceCheckHighlight]
-      if (p) handlePriceCheckSelect(p)
+      if (p) {
+        const packMatch = packBarcodeMap.get(priceCheckSearch.trim())
+        if (packMatch && packMatch.productId === p.id) {
+          handlePriceCheckSelect(p, { etiqueta: packMatch.etiqueta, unidadesPorPaquete: packMatch.unidadesPorPaquete })
+        } else {
+          handlePriceCheckSelect(p)
+        }
+      }
     }
   }
 
@@ -5082,6 +5207,7 @@ export default function POSPage() {
   }
 
   const handlePriceCheckSelect = async (p: Product, scannedAsPack?: { etiqueta: string; unidadesPorPaquete: number }) => {
+    const reqId = ++priceCheckRequestIdRef.current
     setPriceCheckSelected(p)
     setPriceCheckTiers([])
     setPriceCheckStock(null)
@@ -5094,23 +5220,37 @@ export default function POSPage() {
     setPriceCheckLoadingPromo(true)
 
     api.products.packBarcodes.list(p.id)
-      .then((packs) => setPriceCheckPacks((packs || []).map((pk: any) => ({ id: pk.id, etiqueta: pk.etiqueta, unidades_por_paquete: Number(pk.unidades_por_paquete) }))))
+      .then((packs) => {
+        if (priceCheckRequestIdRef.current !== reqId) return
+        setPriceCheckPacks((packs || []).map((pk: any) => ({ id: pk.id, etiqueta: pk.etiqueta, unidades_por_paquete: Number(pk.unidades_por_paquete) })))
+      })
       .catch(() => {})
 
     api.smartPricing.listTieredPrices(COMPANY_ID, p.id)
-      .then((tiers) => setPriceCheckTiers((tiers || []).slice().sort((a: any, b: any) => (a.min_qty || 0) - (b.min_qty || 0))))
+      .then((tiers) => {
+        if (priceCheckRequestIdRef.current !== reqId) return
+        setPriceCheckTiers((tiers || []).slice().sort((a: any, b: any) => (a.min_qty || 0) - (b.min_qty || 0)))
+      })
       .catch(() => {})
-      .finally(() => setPriceCheckLoadingTiers(false))
+      .finally(() => {
+        if (priceCheckRequestIdRef.current === reqId) setPriceCheckLoadingTiers(false)
+      })
 
     api.inventory.getProductStock(p.id)
-      .then((res) => setPriceCheckStock(res))
+      .then((res) => {
+        if (priceCheckRequestIdRef.current !== reqId) return
+        setPriceCheckStock(res)
+      })
       .catch(() => {})
-      .finally(() => setPriceCheckLoadingStock(false))
+      .finally(() => {
+        if (priceCheckRequestIdRef.current === reqId) setPriceCheckLoadingStock(false)
+      })
 
     api.promotions.calculate({
       items: [{ producto_id: p.id, categoria_id: p.categoria_id || undefined, cantidad: 1, precio_unitario: Number(p.precio_venta) || 0 }],
     })
       .then((res) => {
+        if (priceCheckRequestIdRef.current !== reqId) return
         const promo = res?.applicable_promotions?.[0]
         if (promo) {
           setPriceCheckPromo({
@@ -5122,10 +5262,13 @@ export default function POSPage() {
         }
       })
       .catch(() => {})
-      .finally(() => setPriceCheckLoadingPromo(false))
+      .finally(() => {
+        if (priceCheckRequestIdRef.current === reqId) setPriceCheckLoadingPromo(false)
+      })
   }
 
   const closePriceCheckModal = () => {
+    priceCheckRequestIdRef.current++
     setShowPriceCheckModal(false)
     setPriceCheckSearch("")
     setPriceCheckResults([])
@@ -10554,7 +10697,14 @@ export default function POSPage() {
                 {priceCheckResults.map((p, i) => (
                   <button
                     key={p.id}
-                    onClick={() => handlePriceCheckSelect(p)}
+                    onClick={() => {
+                      const packMatch = packBarcodeMap.get(priceCheckSearch.trim())
+                      if (packMatch && packMatch.productId === p.id) {
+                        handlePriceCheckSelect(p, { etiqueta: packMatch.etiqueta, unidadesPorPaquete: packMatch.unidadesPorPaquete })
+                      } else {
+                        handlePriceCheckSelect(p)
+                      }
+                    }}
                     onMouseEnter={() => setPriceCheckHighlight(i)}
                     className={`w-full flex items-center justify-between gap-3 py-2.5 px-1 rounded-lg text-left cursor-pointer ${
                       priceCheckHighlight === i ? "bg-orange-100 dark:bg-orange-900/30 ring-1 ring-brand-orange" : "hover:bg-slate-100 dark:hover:bg-slate-800/40"
@@ -10803,7 +10953,24 @@ export default function POSPage() {
                   reimprimirTab === "ventas" ? "bg-brand-orange text-[#1C1710]" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
                 }`}
               >
-                Ventas
+                Mis Ventas (48h)
+              </button>
+              <button
+                onClick={() => {
+                  setReimprimirTab("supervisor")
+                  if (isSupervisorUser) {
+                    setReimprimirSupervisorUnlocked(true)
+                    if (reimprimirSupervisorSales.length === 0) fetchSupervisorSales()
+                  }
+                }}
+                className={`flex-1 py-2 rounded-lg text-xs font-bold cursor-pointer flex items-center justify-center gap-1 ${
+                  reimprimirTab === "supervisor"
+                    ? "bg-purple-600 text-white shadow-sm"
+                    : "bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30"
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Supervisora (7d)
               </button>
               <button
                 onClick={() => { setReimprimirTab("devoluciones"); if (reimprimirReturns.length === 0) fetchReimprimirReturns() }}
@@ -10832,7 +10999,7 @@ export default function POSPage() {
                     type="text"
                     value={reimprimirSearch}
                     onChange={(e) => setReimprimirSearch(e.target.value)}
-                    placeholder="🔍 Buscar factura, nombre de cliente, CI, RUC o monto..."
+                    placeholder="🔍 Buscar en mis facturas de las últimas 48h..."
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl pl-9 pr-8 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500 font-medium placeholder:text-slate-400"
                   />
                   {reimprimirSearch && (
@@ -10844,6 +11011,59 @@ export default function POSPage() {
                       ✕
                     </button>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* Buscador y Filtros para Supervisora (7 días de todas las cajas) */}
+            {reimprimirTab === "supervisor" && reimprimirSupervisorUnlocked && (
+              <div className="px-2 pt-2 space-y-1.5">
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={reimprimirSupervisorSearch}
+                      onChange={(e) => setReimprimirSupervisorSearch(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") fetchSupervisorSales(reimprimirSupervisorSearch) }}
+                      placeholder="🔍 Buscar factura, cliente, CI/RUC, cajera..."
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl pl-9 pr-8 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-purple-500 font-medium placeholder:text-slate-400"
+                    />
+                    {reimprimirSupervisorSearch && (
+                      <button
+                        type="button"
+                        onClick={() => { setReimprimirSupervisorSearch(""); fetchSupervisorSales("") }}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold p-0.5"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => fetchSupervisorSales(reimprimirSupervisorSearch)}
+                    disabled={reimprimirSupervisorLoading}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0 disabled:opacity-50"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    Buscar
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    value={reimprimirSupervisorCajero}
+                    onChange={(e) => setReimprimirSupervisorCajero(e.target.value)}
+                    className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1 text-xs text-slate-900 dark:text-white font-medium outline-none focus:border-purple-500"
+                  >
+                    <option value="">👤 Todas las cajeras ({Array.from(new Set(reimprimirSupervisorSales.map((s: any) => s.cajero_nombre || (s.user && s.user.nombre)).filter(Boolean))).length})</option>
+                    {Array.from(new Set(reimprimirSupervisorSales.map((s: any) => s.cajero_nombre || (s.user && s.user.nombre)).filter(Boolean))).map((nombre: any) => (
+                      <option key={nombre} value={nombre}>{nombre}</option>
+                    ))}
+                  </select>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 ml-auto font-medium shrink-0">
+                    {filteredReimprimirSupervisorSales.length} ventas (7d)
+                  </div>
                 </div>
               </div>
             )}
@@ -10914,6 +11134,11 @@ export default function POSPage() {
                     const clienteDoc = sale.customer_doc || sale.customer?.ruc || sale.customer?.ci || sale.customer?.telefono || ""
                     const extraClubNum = sale.customer_extra_club || sale.customer?.extra_club_numero || ""
 
+                    const saleDate = sale.fecha ? new Date(sale.fecha) : null
+                    const horasPasadas = saleDate ? (Date.now() - saleDate.getTime()) / (3600 * 1000) : 0
+                    const isWithin48h = horasPasadas <= 48.0
+                    const isCurrentActiveSession = Boolean(cashSessionId && sale.session_id === cashSessionId)
+
                     return (
                     <div
                       key={sale.id}
@@ -10971,61 +11196,80 @@ export default function POSPage() {
                       {/* Barra de Acciones */}
                       <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
                         {esConsumidorFinal && (
+                          isWithin48h ? (
+                            <button
+                              onClick={() => {
+                                setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id)
+                                setReabrirFacturaSearch("")
+                                setReabrirFacturaResults([])
+                                setReabrirPagoSaleId(null)
+                              }}
+                              title="Agregar identificación de cliente a esta factura (política hasta 48h, requiere supervisor)"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-600/10 hover:bg-purple-600/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 cursor-pointer"
+                            >
+                              <User className="w-3.5 h-3.5" />
+                              Reabrir Titular
+                            </button>
+                          ) : (
+                            <span
+                              title="Plazo comercial vencido: solo se puede modificar titular dentro de las 48 horas posteriores a la venta"
+                              className="text-[10px] font-bold text-slate-400 dark:text-slate-500 px-2 py-1 bg-slate-100 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-800 cursor-not-allowed"
+                            >
+                              Titular expirado (&gt;48h)
+                            </span>
+                          )
+                        )}
+                        {isCurrentActiveSession ? (
                           <button
                             onClick={() => {
-                              setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id)
-                              setReabrirFacturaSearch("")
-                              setReabrirFacturaResults([])
-                              setReabrirPagoSaleId(null)
-                            }}
-                            title="Agregar identificación de cliente a esta factura (requiere autorización de supervisor)"
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-600/10 hover:bg-purple-600/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 cursor-pointer"
-                          >
-                            <User className="w-3.5 h-3.5" />
-                            Reabrir Titular
-                          </button>
-                        )}
-                        <button
-                          onClick={() => {
-                            if (reabrirPagoSaleId === sale.id) {
-                              setReabrirPagoSaleId(null)
-                              setReabrirPagoFormaPago("")
-                              setReabrirPagoMotivo("")
-                              setReabrirPagoCustomer(null)
-                              setReabrirPagoCustomerSearch("")
-                              setReabrirPagoCustomerResults([])
-                            } else {
-                              setReabrirPagoSaleId(sale.id)
-                              setReabrirPagoFormaPago(fpActual)
-                              setReabrirPagoMotivo("")
-                              setReabrirFacturaSaleId(null)
-                              if (sale.customer && String(sale.customer.id) !== DEFAULT_CUSTOMER.id) {
-                                setReabrirPagoCustomer(normalizeCustomer(sale.customer))
-                              } else if (sale.customer_id && sale.customer_id !== DEFAULT_CUSTOMER.id && sale.customer_nombre) {
-                                setReabrirPagoCustomer(normalizeCustomer({
-                                  id: sale.customer_id,
-                                  razon_social: sale.customer_nombre,
-                                  nombre: sale.customer_nombre,
-                                  ruc: sale.customer_doc,
-                                  extra_club_numero: sale.customer_extra_club,
-                                }))
-                              } else {
+                              if (reabrirPagoSaleId === sale.id) {
+                                setReabrirPagoSaleId(null)
+                                setReabrirPagoFormaPago("")
+                                setReabrirPagoMotivo("")
                                 setReabrirPagoCustomer(null)
+                                setReabrirPagoCustomerSearch("")
+                                setReabrirPagoCustomerResults([])
+                              } else {
+                                setReabrirPagoSaleId(sale.id)
+                                setReabrirPagoFormaPago(fpActual)
+                                setReabrirPagoMotivo("")
+                                setReabrirFacturaSaleId(null)
+                                if (sale.customer && String(sale.customer.id) !== DEFAULT_CUSTOMER.id) {
+                                  setReabrirPagoCustomer(normalizeCustomer(sale.customer))
+                                } else if (sale.customer_id && sale.customer_id !== DEFAULT_CUSTOMER.id && sale.customer_nombre) {
+                                  setReabrirPagoCustomer(normalizeCustomer({
+                                    id: sale.customer_id,
+                                    razon_social: sale.customer_nombre,
+                                    nombre: sale.customer_nombre,
+                                    ruc: sale.customer_doc,
+                                    extra_club_numero: sale.customer_extra_club,
+                                  }))
+                                } else {
+                                  setReabrirPagoCustomer(null)
+                                }
+                                setReabrirPagoCustomerSearch("")
+                                setReabrirPagoCustomerResults([])
                               }
-                              setReabrirPagoCustomerSearch("")
-                              setReabrirPagoCustomerResults([])
-                            }
-                          }}
-                          title="Cambiar forma de pago (solo turno actual, requiere supervisor y motivo)"
-                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                            reabrirPagoSaleId === sale.id
-                              ? "bg-amber-600 text-white"
-                              : "bg-amber-600/10 hover:bg-amber-600/20 text-amber-600 dark:text-amber-400 border border-amber-500/30"
-                          }`}
-                        >
-                          <CreditCard className="w-3.5 h-3.5" />
-                          Cambiar Pago
-                        </button>
+                            }}
+                            title="Cambiar forma de pago (solo sesión en curso, requiere supervisor y motivo)"
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                              reabrirPagoSaleId === sale.id
+                                ? "bg-amber-600 text-white"
+                                : "bg-amber-600/10 hover:bg-amber-600/20 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+                            }`}
+                          >
+                            <CreditCard className="w-3.5 h-3.5" />
+                            Cambiar Pago
+                          </button>
+                        ) : (
+                          <span
+                            title="El medio de pago solo puede modificarse durante la sesión activa en curso. El turno de esta venta ya está cerrado."
+                            className="flex items-center gap-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 px-2 py-1 bg-slate-100 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-800 cursor-not-allowed"
+                          >
+                            <Lock className="w-3 h-3 text-slate-400" />
+                            Pago bloqueado (turno cerrado)
+                          </span>
+                        )}
                         <button
                           onClick={() => handleReimprimirSale(sale)}
                           className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-xs active:scale-95 transition-all"
@@ -11291,6 +11535,265 @@ export default function POSPage() {
                       )}
                     </div>
                   )})}
+                </>
+              )}
+
+              {/* ── MODO SUPERVISORA: CONSULTA Y REIMPRESIÓN GENERAL (7 DÍAS) ── */}
+              {reimprimirTab === "supervisor" && !reimprimirSupervisorUnlocked && (
+                <div className="p-6 flex flex-col items-center justify-center text-center max-w-sm mx-auto my-4">
+                  <div className="w-12 h-12 rounded-2xl bg-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center mb-3">
+                    <ShieldCheck className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white mb-1">
+                    Acceso de Supervisora (Historial 7 Días)
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                    Permite consultar y reimprimir comprobantes de todas las cajeras emitidos en los últimos 7 días.
+                  </p>
+
+                  <div className="w-full space-y-2.5 text-left">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                        Supervisora / Administrador:
+                      </label>
+                      <select
+                        value={reimprimirSupervisorEmail}
+                        onChange={(e) => setReimprimirSupervisorEmail(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white font-medium outline-none focus:border-purple-500"
+                      >
+                        <option value="">Seleccione supervisora...</option>
+                        {supervisorStaffOptions.map((s) => (
+                          <option key={s.id} value={s.email}>
+                            {s.nombre} ({s.rol})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                        PIN / Contraseña de Supervisora:
+                      </label>
+                      <input
+                        type="password"
+                        value={reimprimirSupervisorPin}
+                        onChange={(e) => setReimprimirSupervisorPin(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleUnlockSupervisor() }}
+                        placeholder="Ingrese clave o PIN..."
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white font-medium outline-none focus:border-purple-500"
+                      />
+                    </div>
+
+                    <button
+                      onClick={handleUnlockSupervisor}
+                      disabled={reimprimirSupervisorVerifying}
+                      className="w-full mt-2 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-black text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
+                    >
+                      {reimprimirSupervisorVerifying ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <KeyRound className="w-4 h-4" />
+                      )}
+                      Habilitar Consulta (7 Días)
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {reimprimirTab === "supervisor" && reimprimirSupervisorUnlocked && (
+                <>
+                  {reimprimirSupervisorLoading && (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="w-6 h-6 animate-spin text-purple-600 dark:text-purple-400" />
+                    </div>
+                  )}
+
+                  {!reimprimirSupervisorLoading && filteredReimprimirSupervisorSales.length === 0 && (
+                    <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-12">
+                      {reimprimirSupervisorSearch ? `No se encontraron ventas para "${reimprimirSupervisorSearch}".` : "No se registraron ventas en los últimos 7 días."}
+                    </div>
+                  )}
+
+                  {!reimprimirSupervisorLoading && filteredReimprimirSupervisorSales.map((sale) => {
+                    const fpActual = (sale.forma_pago || (sale.condicion === "credito" ? "EXTRA_CLUB" : "EFECTIVO")).toUpperCase()
+                    const clienteNombre = sale.customer_nombre || sale.customer?.nombre || sale.customer?.razon_social || "Consumidor Final"
+                    const esConsumidorFinal = !sale.customer_id || sale.customer_id === DEFAULT_CUSTOMER.id || clienteNombre === "Consumidor Final"
+                    const clienteDoc = sale.customer_doc || sale.customer?.ruc || sale.customer?.ci || sale.customer?.telefono || ""
+                    const extraClubNum = sale.customer_extra_club || sale.customer?.extra_club_numero || ""
+                    const cajeroNombre = sale.cajero_nombre || (sale.user && sale.user.nombre) || ""
+
+                    const saleDate = sale.fecha ? new Date(sale.fecha) : null
+                    const horasPasadas = saleDate ? (Date.now() - saleDate.getTime()) / (3600 * 1000) : 0
+                    const isWithin48h = horasPasadas <= 48.0
+                    const isCurrentActiveSession = Boolean(cashSessionId && sale.session_id === cashSessionId)
+
+                    return (
+                      <div
+                        key={sale.id}
+                        className="p-3 mx-1 my-2 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 transition-all space-y-2"
+                      >
+                        {/* Cabecera: Cajera, Factura Nº, Fecha y Forma de Pago */}
+                        <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-1.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-black font-posMono text-slate-900 dark:text-white tracking-tight">
+                              Nº {sale.numero || sale.numero_interno || sale.id.slice(0, 8)}
+                            </span>
+                            {cajeroNombre && (
+                              <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
+                                👤 {cajeroNombre}
+                              </span>
+                            )}
+                            <span className="text-[10px] text-slate-400">
+                              {sale.fecha ? new Date(sale.fecha).toLocaleString("es-PY", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"}
+                            </span>
+                          </div>
+                          <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md border ${
+                            fpActual === "EXTRA_CLUB"
+                              ? "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30"
+                              : fpActual === "TARJETA"
+                              ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30"
+                              : fpActual === "TRANSFERENCIA" || fpActual === "QR"
+                              ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                              : fpActual === "CREDITO"
+                              ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                              : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                          }`}>
+                            {fpActual === "EXTRA_CLUB" ? "★ Extra Club" : fpActual}
+                          </span>
+                        </div>
+
+                        {/* Fila Central: Datos del Cliente y Monto Total */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1 text-xs font-bold text-slate-800 dark:text-slate-200">
+                              <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span className="truncate">{clienteNombre}</span>
+                              {extraClubNum && (
+                                <span className="px-1.5 py-0.2 rounded bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black shrink-0">
+                                  ★ #{extraClubNum}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                              {clienteDoc ? `Doc: ${clienteDoc}` : "Sin documento"} · {sale.condicion ? sale.condicion.toUpperCase() : "CONTADO"}
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <div className="text-sm font-black font-posMono text-slate-900 dark:text-white">
+                              {formatPYG(sale.total || 0)}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Barra de Acciones */}
+                        <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
+                          {esConsumidorFinal && (
+                            isWithin48h ? (
+                              <button
+                                onClick={() => {
+                                  setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id)
+                                  setReabrirFacturaSearch("")
+                                  setReabrirFacturaResults([])
+                                  setReabrirPagoSaleId(null)
+                                }}
+                                title="Agregar identificación de cliente a esta factura (política hasta 48h, requiere supervisor)"
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-600/10 hover:bg-purple-600/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 cursor-pointer"
+                              >
+                                <User className="w-3.5 h-3.5" />
+                                Reabrir Titular
+                              </button>
+                            ) : (
+                              <span
+                                title="Plazo comercial vencido: solo se puede modificar titular dentro de las 48 horas posteriores a la venta"
+                                className="text-[10px] font-bold text-slate-400 dark:text-slate-500 px-2 py-1 bg-slate-100 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-800 cursor-not-allowed"
+                              >
+                                Titular expirado (&gt;48h)
+                              </span>
+                            )
+                          )}
+
+                          {isCurrentActiveSession ? (
+                            <button
+                              onClick={() => {
+                                if (reabrirPagoSaleId === sale.id) {
+                                  setReabrirPagoSaleId(null)
+                                  setReabrirPagoFormaPago("")
+                                  setReabrirPagoMotivo("")
+                                } else {
+                                  setReabrirPagoSaleId(sale.id)
+                                  setReabrirPagoFormaPago(fpActual)
+                                  setReabrirPagoMotivo("")
+                                  setReabrirFacturaSaleId(null)
+                                }
+                              }}
+                              title="Cambiar forma de pago (solo sesión en curso, requiere supervisor y motivo)"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-600/10 hover:bg-amber-600/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 cursor-pointer"
+                            >
+                              <CreditCard className="w-3.5 h-3.5" />
+                              Cambiar Pago
+                            </button>
+                          ) : (
+                            <span
+                              title="El medio de pago solo puede modificarse durante la sesión activa en curso. El turno de esta venta ya está cerrado."
+                              className="flex items-center gap-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 px-2 py-1 bg-slate-100 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-800 cursor-not-allowed"
+                            >
+                              <Lock className="w-3 h-3 text-slate-400" />
+                              Pago bloqueado (turno cerrado)
+                            </span>
+                          )}
+
+                          <button
+                            onClick={() => handleReimprimirSale(sale)}
+                            className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-xs active:scale-95 transition-all"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            Reimprimir
+                          </button>
+                        </div>
+
+                        {/* Panel de Reabrir Titular en Modo Supervisora */}
+                        {reabrirFacturaSaleId === sale.id && (
+                          <div className="mt-2 border-t border-slate-200 dark:border-slate-800 pt-2">
+                            <input
+                              type="text"
+                              value={reabrirFacturaSearch}
+                              onChange={(e) => setReabrirFacturaSearch(e.target.value)}
+                              placeholder="Buscar cliente por nombre, CI o RUC..."
+                              autoFocus
+                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-sm text-slate-900 dark:text-white outline-none focus:border-purple-500"
+                            />
+                            {reabrirFacturaSearch.trim() && (
+                              <div className="mt-1.5 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                                {reabrirFacturaSearching ? (
+                                  <div className="p-2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando...</div>
+                                ) : reabrirFacturaResults.length > 0 ? (
+                                  reabrirFacturaResults.map((c) => (
+                                    <button
+                                      key={String(c.id)}
+                                      disabled={submittingReabrirFactura}
+                                      onClick={() => requestSupervisorAuthorization({ type: "reopen_invoice", sale, customer: c })}
+                                      className="w-full text-left p-2 text-sm hover:bg-purple-50 dark:hover:bg-purple-500/10 border-b border-slate-100 dark:border-slate-800 last:border-b-0 disabled:opacity-50"
+                                    >
+                                      <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                                        {c.nombre}
+                                        {(c as any).extra_club_numero ? (
+                                          <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black uppercase tracking-wider">★ Extra Club</span>
+                                        ) : null}
+                                      </div>
+                                      <div className="text-xs text-slate-500 dark:text-slate-400">{c.ruc || c.ci || c.telefono || "—"}</div>
+                                    </button>
+                                  ))
+                                ) : (
+                                  <div className="p-2 text-xs text-slate-500 dark:text-slate-400">No se encontró ningún cliente.</div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </>
               )}
 

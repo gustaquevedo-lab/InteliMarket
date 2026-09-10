@@ -816,6 +816,17 @@ async def reopen_sale_customer(
     if not sale:
         return None
 
+    if sale.fecha:
+        sale_date = sale.fecha
+        if sale_date.tzinfo is None:
+            sale_date = sale_date.replace(tzinfo=timezone.utc)
+        horas_pasadas = (datetime.now(timezone.utc) - sale_date).total_seconds() / 3600.0
+        if horas_pasadas > 48.0:
+            raise ValueError(
+                f"No se puede cambiar el titular: la factura fue emitida hace {int(horas_pasadas)} horas. "
+                f"La política permite modificar titular únicamente hasta 48 horas posteriores a la compra."
+            )
+
     cust_res = await db.execute(select(Customer).where(Customer.id == uuid.UUID(customer_id)))
     cust = cust_res.scalar_one_or_none()
 
@@ -1124,6 +1135,18 @@ async def reopen_sale_payment(
     if not sale:
         return None
 
+    # ── Blindaje contable: Solo se puede cambiar medio de pago en sesión activa ──
+    if not sale.session_id:
+        raise ValueError("No se puede cambiar el medio de pago: la venta no tiene sesión de caja asociada.")
+    from api.src.caja.models import CashSession
+    sess_res = await db.execute(select(CashSession).where(CashSession.id == sale.session_id))
+    session_obj = sess_res.scalar_one_or_none()
+    if not session_obj or session_obj.estado != "abierta":
+        raise ValueError(
+            "El medio de pago solo puede modificarse durante la sesión activa y abierta de la caja. "
+            "El turno de esta venta ya fue cerrado o no está activo."
+        )
+
     # Obtener forma de pago anterior desde sale_payments
     pm_res = await db.execute(select(SalePayment).where(SalePayment.sale_id == sale.id))
     existing_payments = list(pm_res.scalars().all())
@@ -1290,7 +1313,7 @@ async def list_sales(
     if tipo_comprobante and tipo_comprobante != "todos":
         query = query.where(Sale.tipo_comprobante == tipo_comprobante)
 
-    # Búsqueda directa en Base de Datos (Número comprobante, RUC/CI, CDC o Cliente)
+    # Búsqueda directa en Base de Datos (Número comprobante, RUC/CI, CDC, Cliente o Cajero)
     if search and search.strip():
         s_term = f"%{search.strip()}%"
         query = query.where(
@@ -1303,6 +1326,8 @@ async def list_sales(
                 Customer.ruc.ilike(s_term),
                 Customer.ci.ilike(s_term),
                 Customer.telefono.ilike(s_term),
+                User.nombre.ilike(s_term),
+                CashSession.cajero_nombre.ilike(s_term),
             )
         )
 
