@@ -8,7 +8,7 @@ import {
 import { api } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG, formatDate, formatCurrency } from "../../utils/format"
+import { formatPYG, formatDate, formatCurrency, getTodayAsuncion } from "../../utils/format"
 
 type ChequeTab = "cartera" | "emitidos" | "depositados" | "rechazados" | "dashboard"
 type ChequeTipo = "recibido" | "emitido"
@@ -56,8 +56,8 @@ export default function ChequesPage() {
     supplier_id: "",
     monto: "",
     moneda: "PYG",
-    fecha_emision: new Date().toISOString().split("T")[0],
-    fecha_pago: new Date().toISOString().split("T")[0],
+    fecha_emision: getTodayAsuncion(),
+    fecha_pago: getTodayAsuncion(),
     fecha_entrega: "",
     tipo: "emitido",
     diferido: false,
@@ -191,8 +191,8 @@ export default function ChequesPage() {
       setShowModal(false)
       setForm({
         numero: "", banco_emisor: BANCOS_PARAGUAY[0], bank_account_id: "", beneficiario: "",
-        supplier_id: "", monto: "", moneda: "PYG", fecha_emision: new Date().toISOString().split("T")[0],
-        fecha_pago: new Date().toISOString().split("T")[0], fecha_entrega: "", tipo: "emitido",
+        supplier_id: "", monto: "", moneda: "PYG", fecha_emision: getTodayAsuncion(),
+        fecha_pago: getTodayAsuncion(), fecha_entrega: "", tipo: "emitido",
         diferido: false, cruzado: true, no_a_la_orden: false, observaciones: ""
       })
       loadData()

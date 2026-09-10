@@ -9,7 +9,7 @@ import {
 import { api } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG, formatDate } from "../../utils/format"
+import { formatPYG, formatDate, getTodayAsuncion } from "../../utils/format"
 
 type Tab = "dashboard" | "departamentos" | "analisis_margen" | "gastos_directos"
 
@@ -28,7 +28,7 @@ export default function PyGDiarioPage() {
   const companyId = (user as any)?.company_id || "00000000-0000-0000-0000-000000000010"
 
   const [tab, setTab] = useState<Tab>("dashboard")
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().slice(0, 10))
+  const [selectedDate, setSelectedDate] = useState<string>(getTodayAsuncion())
   const [loading, setLoading] = useState(false)
 
   const [realDeptos, setRealDeptos] = useState<any[]>([])

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react"
 import { api, type BankAccount } from "../../api"
-import { formatPYG } from "../../utils/format"
+import { formatPYG, getTodayAsuncion } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
 import {
   Plus, Loader2, Landmark, CheckCircle, XCircle, Upload, Wand2, AlertTriangle,
@@ -68,7 +68,7 @@ export default function BancosPage() {
   const [chequeHistorial, setChequeHistorial] = useState<{ cheque: any; items: any[] } | null>(null)
   const [chequeForm, setChequeForm] = useState({
     numero: "", bank_account_id: "", banco_emisor: "", beneficiario: "",
-    monto: "", moneda: "PYG", fecha_emision: new Date().toISOString().slice(0, 10),
+    monto: "", moneda: "PYG", fecha_emision: getTodayAsuncion(),
     fecha_entrega: "", fecha_pago: "", diferido: false, concepto: "",
   })
   const [submittingCheque, setSubmittingCheque] = useState(false)
@@ -355,7 +355,7 @@ export default function BancosPage() {
       setShowChequeModal(false)
       setChequeForm({
         numero: "", bank_account_id: "", banco_emisor: "", beneficiario: "",
-        monto: "", moneda: "PYG", fecha_emision: new Date().toISOString().slice(0, 10),
+        monto: "", moneda: "PYG", fecha_emision: getTodayAsuncion(),
         fecha_entrega: "", fecha_pago: "", diferido: false, concepto: "",
       })
       fetchCheques()
@@ -946,9 +946,10 @@ export default function BancosPage() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => {
-                        const hoy = new Date()
-                        const desde = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().slice(0, 10)
-                        api.financial.downloadReconciliationPdf(selectedBank, { desde, hasta: hoy.toISOString().slice(0, 10) }).catch((e: any) => toast.error("Error", e.message))
+                        const hoyStr = getTodayAsuncion()
+                        const [year, month] = hoyStr.split("-")
+                        const desde = `${year}-${month}-01`
+                        api.financial.downloadReconciliationPdf(selectedBank, { desde, hasta: hoyStr }).catch((e: any) => toast.error("Error", e.message))
                       }}
                       className="btn-outline text-xs flex items-center gap-1.5"
                     >

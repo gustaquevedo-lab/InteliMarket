@@ -21,7 +21,7 @@ import {
 } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG, formatDateTime } from "../../utils/format"
+import { formatPYG, formatDateTime, getTodayAsuncion, getAsuncionDateStr } from "../../utils/format"
 
 const downloadPdf = (endpoint: string, filename: string) => downloadAuthenticated(endpoint, undefined, filename)
 
@@ -157,8 +157,12 @@ export default function CajaPage() {
   const [donationRecent, setDonationRecent] = useState<DonationRecord[]>([])
   const [donationsLoading, setDonationsLoading] = useState(false)
   const [showLiquidarModal, setShowLiquidarModal] = useState(false)
-  const [liquidarDesde, setLiquidarDesde] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10))
-  const [liquidarHasta, setLiquidarHasta] = useState(new Date().toISOString().slice(0, 10))
+  const [liquidarDesde, setLiquidarDesde] = useState(() => {
+    const today = getTodayAsuncion()
+    const [year, month] = today.split("-")
+    return `${year}-${month}-01`
+  })
+  const [liquidarHasta, setLiquidarHasta] = useState(() => getTodayAsuncion())
   const [liquidarEntregadoPor, setLiquidarEntregadoPor] = useState("")
   const [liquidarRecibidoPor, setLiquidarRecibidoPor] = useState("Lic. María Fernández (Directora)")
   const [liquidarRecibidoCi, setLiquidarRecibidoCi] = useState("3.456.789")
@@ -1552,7 +1556,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 <button
                   type="button"
                   onClick={() => {
-                    const hoy = new Date().toISOString().slice(0, 10)
+                    const hoy = getTodayAsuncion()
                     setHistorialFechaDesde(hoy)
                     setHistorialFechaHasta(hoy)
                     fetchHistorial(undefined, { fecha_desde: hoy, fecha_hasta: hoy })
@@ -1564,9 +1568,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 <button
                   type="button"
                   onClick={() => {
-                    const d = new Date()
-                    d.setDate(d.getDate() - 1)
-                    const ayer = d.toISOString().slice(0, 10)
+                    const ayer = getAsuncionDateStr(new Date(Date.now() - 24 * 60 * 60 * 1000))
                     setHistorialFechaDesde(ayer)
                     setHistorialFechaHasta(ayer)
                     fetchHistorial(undefined, { fecha_desde: ayer, fecha_hasta: ayer })
@@ -1578,10 +1580,8 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 <button
                   type="button"
                   onClick={() => {
-                    const hoy = new Date().toISOString().slice(0, 10)
-                    const d = new Date()
-                    d.setDate(d.getDate() - 7)
-                    const sem = d.toISOString().slice(0, 10)
+                    const hoy = getTodayAsuncion()
+                    const sem = getAsuncionDateStr(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
                     setHistorialFechaDesde(sem)
                     setHistorialFechaHasta(hoy)
                     fetchHistorial(undefined, { fecha_desde: sem, fecha_hasta: hoy })
@@ -1691,8 +1691,10 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                               type="button"
                               onClick={async () => {
                                 try {
-                                  await downloadPdf(`/v1/cash-sessions/${s.id}/export/cierre.pdf`, `cierre_caja_${s.id.slice(0, 8)}.pdf`)
-                                  toast.success("Acta descargada", `Cierre ${s.id.slice(0, 8)} descargado.`)
+                                  const safeCajero = (s.cajero_nombre || "caja").replace(/\s+/g, "_")
+                                  const safeFecha = (s.fecha_apertura || "").slice(0, 10) || "sesion"
+                                  await downloadPdf(`/v1/cash-sessions/${s.id}/export/cierre.pdf`, `cierre_${safeCajero}_${safeFecha}.pdf`)
+                                  toast.success("Acta descargada", `Cierre de ${s.cajero_nombre || "caja"} descargado.`)
                                 } catch {
                                   toast.error("Error", "No se pudo generar el PDF del cierre.")
                                 }
@@ -2901,7 +2903,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             {formatDateTime(req.created_at)}
                           </div>
                           <div className="text-[10px] text-slate-400">
-                            ID: {req.session_id.slice(0, 8)}...
+                            Caja {(req as any).register_codigo || "POS"} · {req.cajero_nombre}
                           </div>
                         </td>
                         <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">
@@ -3019,7 +3021,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     Dictamen de Faltante de Caja
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Expediente ID: {resolvingShortageModal.id.slice(0, 8)}
+                    Expediente: {resolvingShortageModal.cajero_nombre} · {formatDateTime(resolvingShortageModal.created_at)}
                   </p>
                 </div>
               </div>
@@ -3832,7 +3834,9 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 onClick={async () => {
                   if (selectedSession) {
                     try {
-                      await downloadPdf(`/v1/cash-sessions/${selectedSession.id}/export/cierre.pdf`, `cierre_caja_${selectedSession.id.slice(0, 8)}.pdf`)
+                      const safeCajero = (selectedSession.cajero_nombre || "caja").replace(/\s+/g, "_")
+                      const safeFecha = (selectedSession.fecha_apertura || "").slice(0, 10) || "sesion"
+                      await downloadPdf(`/v1/cash-sessions/${selectedSession.id}/export/cierre.pdf`, `cierre_${safeCajero}_${safeFecha}.pdf`)
                       toast.success("Acta descargada", "Comprobante de cierre generado correctamente.")
                     } catch {
                       toast.error("Error", "No se pudo generar el PDF del cierre.")
@@ -4206,7 +4210,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                         const url = URL.createObjectURL(blob)
                         const a = document.createElement("a")
                         a.href = url
-                        a.download = `cierre_caja_${escposTicketData.session_id.slice(0, 8)}.txt`
+                        a.download = `cierre_${getTodayAsuncion().replace(/-/g, "")}.txt`
                         a.click()
                         URL.revokeObjectURL(url)
                       }}
@@ -4257,7 +4261,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   <h3 className="font-bold text-base sm:text-lg text-slate-900 dark:text-white">Planilla de Punteo de Arqueo y Control de Vouchers</h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     {punteoData?.session_data ? (
-                      `Caja: ${punteoData.session_data.register_nombre || "Caja"} · Cajero/a: ${punteoData.session_data.cajero_nombre || "—"} · Turno: ${punteoData.session_data.id.slice(0, 8).toUpperCase()}`
+                      `Caja: ${punteoData.session_data.register_nombre || "Caja"} · Cajero/a: ${punteoData.session_data.cajero_nombre || "—"} · Apertura: ${formatDateTime(punteoData.session_data.fecha_apertura)}`
                     ) : "Cotejo físico comprobante por comprobante"}
                   </p>
                 </div>

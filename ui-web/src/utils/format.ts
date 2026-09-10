@@ -78,6 +78,15 @@ export function formatTime(date: string | Date | null | undefined): string {
   })
 }
 
+export function getTodayAsuncion(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Asuncion" }).format(new Date())
+}
+
+export function getAsuncionDateStr(d: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Asuncion" }).format(d)
+}
+
+
 export function formatNumber(value: number | string | null | undefined, decimals = 0): string {
   if (value == null) return "0"
   const num = typeof value === "string" ? parseFloat(value) : value

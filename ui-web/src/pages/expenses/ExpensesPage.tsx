@@ -13,7 +13,7 @@ import {
   type BankAccount, type PettyCashFundCount
 } from "../../api"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG } from "../../utils/format"
+import { formatPYG, getTodayAsuncion } from "../../utils/format"
 import { useAuth } from "../../context/AuthContext"
 
 type Tab = "dashboard" | "fondos" | "list" | "arqueos" | "sectores" | "categories" | "reportes"
@@ -58,7 +58,7 @@ export default function ExpensesPage() {
     iva_5: "",
     exentas: "",
     tipo_pago: "efectivo",
-    fecha_gasto: new Date().toISOString().split("T")[0]
+    fecha_gasto: getTodayAsuncion()
   })
   const [catForm, setCatForm] = useState({ nombre: "", descripcion: "", presupuesto_mensual: "" })
   const [sectorForm, setSectorForm] = useState({ nombre: "", tipo: "sector", peso_prorateo: "1" })
@@ -96,7 +96,6 @@ export default function ExpensesPage() {
 
   // 📊 Centro de Reportes
   const [reportSubTab, setReportSubTab] = useState<ReportSubTab>("sector")
-  const getTodayAsuncion = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Asuncion' }).format(new Date())
   const getStartOfMonthAsuncion = () => {
     const today = getTodayAsuncion()
     return `${today.slice(0, 7)}-01`
@@ -300,7 +299,7 @@ export default function ExpensesPage() {
         timbrado: "",
         numero_factura: "",
         tipo_pago: "efectivo",
-        fecha_gasto: new Date().toISOString().split("T")[0]
+        fecha_gasto: getTodayAsuncion()
       })
       setComprobanteFile(null)
       fetchAll()

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react"
 import { api, type SupplierInvoice, type Budget, type PaymentRun, type CashFlowProjection, type FinancialDashboard, type BankAccount } from "../../api"
-import { formatPYG, formatDate } from "../../utils/format"
+import { formatPYG, formatDate, getTodayAsuncion } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
 import { useAuth } from "../../context/AuthContext"
 import {
@@ -79,7 +79,7 @@ export default function FinancialPage() {
     monto: "",
     payment_method: "transferencia",
     bank_account_id: "",
-    fecha_pago: new Date().toISOString().split("T")[0],
+    fecha_pago: getTodayAsuncion(),
     referencia: "",
     retencion_iva: "0",
     retencion_renta: "0",
@@ -90,8 +90,8 @@ export default function FinancialPage() {
   const [showPaymentRunWizard, setShowPaymentRunWizard] = useState(false)
   const [runStep, setRunStep] = useState<1 | 2 | 3>(1)
   const [runForm, setRunForm] = useState({
-    nombre: `Lote de Pago ${new Date().toLocaleDateString("es-PY")}`,
-    fecha_programada: new Date().toISOString().split("T")[0],
+    nombre: `Lote de Pago ${getTodayAsuncion()}`,
+    fecha_programada: getTodayAsuncion(),
     metodo_pago: "transferencia",
     bank_account_id: "",
   })
@@ -103,13 +103,13 @@ export default function FinancialPage() {
   const [showBudgetForm, setShowBudgetForm] = useState(false)
   const [budgetForm, setBudgetForm] = useState({
     nombre: "",
-    periodo: new Date().toISOString().slice(0, 7),
+    periodo: getTodayAsuncion().slice(0, 7),
     categoria: "Almacén",
     monto_presupuestado: "",
     area: "salon",
     tipo: "egreso",
   })
-  const [budgetFilterPeriodo, setBudgetFilterPeriodo] = useState(new Date().toISOString().slice(0, 7))
+  const [budgetFilterPeriodo, setBudgetFilterPeriodo] = useState(getTodayAsuncion().slice(0, 7))
 
   // Exportar PnL
   const [exportingPnl, setExportingPnl] = useState(false)
@@ -122,7 +122,7 @@ export default function FinancialPage() {
     numero: "",
     timbrado: "",
     numero_factura_origen: "",
-    fecha: new Date().toISOString().split("T")[0],
+    fecha: getTodayAsuncion(),
     monto: "",
     motivo: "",
     motivo_categoria: "devolucion_rotura",
@@ -253,7 +253,7 @@ export default function FinancialPage() {
         numero: "",
         timbrado: "",
         numero_factura_origen: "",
-        fecha: new Date().toISOString().split("T")[0],
+        fecha: getTodayAsuncion(),
         monto: "",
         motivo: "",
         motivo_categoria: "devolucion_rotura",
@@ -384,7 +384,7 @@ export default function FinancialPage() {
   }, [dashboard, invoices])
 
   const facturasVencidas = useMemo(() => {
-    const today = new Date().toISOString().split("T")[0]
+    const today = getTodayAsuncion()
     return invoices.filter(i => i.estado === "pendiente" && i.fecha_vencimiento && i.fecha_vencimiento < today)
   }, [invoices])
 
@@ -426,18 +426,17 @@ export default function FinancialPage() {
     })
   }, [creditNotes, ncSearch, ncFilterSupplier, ncFilterMotivo, ncFilterImpacto])
 
-  // Datos para Gráfico de Vencimientos Semanales
   const weeklyDueData = useMemo(() => {
     const weeks: Record<string, number> = { "Vencidas": 0, "Semana 1": 0, "Semana 2": 0, "Semana 3": 0, "Semana 4+": 0 }
-    const now = new Date()
-    const todayStr = now.toISOString().split("T")[0]
+    const todayStr = getTodayAsuncion()
+    const nowTime = new Date(`${todayStr}T12:00:00`).getTime()
 
     invoices.filter(i => i.estado === "pendiente").forEach(i => {
       const saldo = Number(i.saldo_pendiente ?? i.total ?? 0)
       if (!i.fecha_vencimiento || i.fecha_vencimiento < todayStr) {
         weeks["Vencidas"] += saldo
       } else {
-        const diffDays = Math.ceil((new Date(i.fecha_vencimiento).getTime() - now.getTime()) / (1000 * 3600 * 24))
+        const diffDays = Math.ceil((new Date(`${i.fecha_vencimiento}T12:00:00`).getTime() - nowTime) / (1000 * 3600 * 24))
         if (diffDays <= 7) weeks["Semana 1"] += saldo
         else if (diffDays <= 14) weeks["Semana 2"] += saldo
         else if (diffDays <= 21) weeks["Semana 3"] += saldo
@@ -455,7 +454,7 @@ export default function FinancialPage() {
       monto: String(inv.saldo_pendiente ?? inv.total ?? ""),
       payment_method: "transferencia",
       bank_account_id: banks[0]?.id || "",
-      fecha_pago: new Date().toISOString().split("T")[0],
+      fecha_pago: getTodayAsuncion(),
       referencia: "",
       retencion_iva: "0",
       retencion_renta: "0",

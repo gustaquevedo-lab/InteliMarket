@@ -96,7 +96,7 @@ ui-web/tsconfig.tsbuildinfo
 tsconfig.tsbuildinfo
 
 # Datos locales / extractos bancarios / zips temporales
-Bancos/
+/Bancos/
 *.xlsx
 *.zip
 .claude/

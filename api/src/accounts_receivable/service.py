@@ -505,19 +505,27 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
     customer_ruc = (cust_row.ruc or "—") if cust_row else "—"
 
     payment_id = uuid.uuid4()
-    numero_recibo = f"REC-{str(payment_id)[:8].upper()}"
+    p_date = data.fecha or date.today()
+    p_date_str = p_date.strftime("%Y%m%d")
+    seq_res = await db.execute(
+        text("SELECT count(*) FROM receivable_payments WHERE company_id = :cid AND fecha = :fec"),
+        {"cid": company_id, "fec": p_date}
+    )
+    daily_seq = (seq_res.scalar() or 0) + 1
+    numero_recibo = f"REC-{p_date_str}-{daily_seq:04d}"
 
     await db.execute(
         text("""
             INSERT INTO receivable_payments
-                (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por)
-            VALUES (:id, :company_id, :customer_id, :monto_total, :moneda, :forma_pago, :referencia, :fecha, :observaciones, :registrado_por)
+                (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por, numero_recibo)
+            VALUES (:id, :company_id, :customer_id, :monto_total, :moneda, :forma_pago, :referencia, :fecha, :observaciones, :registrado_por, :numero_recibo)
         """),
         {
             "id": payment_id, "company_id": company_id, "customer_id": str(data.customer_id),
             "monto_total": float(data.monto_total), "moneda": data.moneda, "forma_pago": data.forma_pago,
-            "referencia": data.referencia, "fecha": data.fecha or date.today(),
+            "referencia": data.referencia, "fecha": p_date,
             "observaciones": data.observaciones, "registrado_por": registrado_por,
+            "numero_recibo": numero_recibo,
         },
     )
 
@@ -799,14 +807,20 @@ async def apply_global_payment(
     customer_ruc = (cust_row.ruc or "—") if cust_row else "—"
 
     payment_id = uuid.uuid4()
-    numero_recibo = f"REC-{str(payment_id)[:8].upper()}"
     fecha_pago = data.fecha or date.today()
+    p_date_str = fecha_pago.strftime("%Y%m%d")
+    seq_res = await db.execute(
+        text("SELECT count(*) FROM receivable_payments WHERE company_id = :cid AND fecha = :fec"),
+        {"cid": company_id, "fec": fecha_pago}
+    )
+    daily_seq = (seq_res.scalar() or 0) + 1
+    numero_recibo = f"REC-{p_date_str}-{daily_seq:04d}"
 
     await db.execute(
         text("""
             INSERT INTO receivable_payments
-                (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por)
-            VALUES (:id, :company_id, :customer_id, :monto_total, :moneda, :forma_pago, :referencia, :fecha, :observaciones, :registrado_por)
+                (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por, numero_recibo)
+            VALUES (:id, :company_id, :customer_id, :monto_total, :moneda, :forma_pago, :referencia, :fecha, :observaciones, :registrado_por, :numero_recibo)
         """),
         {
             "id": payment_id,
@@ -819,6 +833,7 @@ async def apply_global_payment(
             "fecha": fecha_pago,
             "observaciones": data.observaciones,
             "registrado_por": registrado_por,
+            "numero_recibo": numero_recibo,
         },
     )
 
@@ -1054,6 +1069,7 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
         SELECT
             rp.id, rp.company_id, rp.customer_id, rp.monto_total, rp.moneda,
             rp.forma_pago, rp.referencia, rp.fecha, rp.observaciones, rp.created_at,
+            rp.numero_recibo,
             c.razon_social as customer_name, c.nombre_fantasia, c.ruc as customer_ruc,
             c.telefono as customer_telefono, c.empresa_vinculada_nombre,
             comp.razon_social as comp_razon_social, comp.ruc as comp_ruc,
@@ -1083,7 +1099,8 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
 
     pay_dict = dict(row._mapping)
     pay_dict["allocations"] = allocations
-    pay_dict["numero_recibo"] = f"REC-{str(payment_id)[:8].upper()}"
+    rec_fallback = f"REC-{row.fecha.strftime('%Y%m%d') if row.fecha else '20260910'}-{str(abs(hash(str(payment_id))))[:4]}"
+    pay_dict["numero_recibo"] = getattr(row, "numero_recibo", None) or rec_fallback
     return pay_dict
 
 

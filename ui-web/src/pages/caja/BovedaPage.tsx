@@ -8,7 +8,7 @@ import {
 } from "lucide-react"
 import { api, downloadAuthenticated, type BankAccount, type BankTransaction, type VaultDashboard, type VaultEntry } from "../../api"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG, formatDate, formatDateTime } from "../../utils/format"
+import { formatPYG, formatDate, formatDateTime, getTodayAsuncion } from "../../utils/format"
 
 const downloadPdf = (endpoint: string, filename: string) => downloadAuthenticated(endpoint, undefined, filename)
 
@@ -209,7 +209,7 @@ export default function BovedaPage() {
   const [depositBankId, setDepositBankId] = useState("")
   const [depositBoleta, setDepositBoleta] = useState("")
   const [depositTransportadora, setDepositTransportadora] = useState("Prosegur")
-  const [depositFecha, setDepositFecha] = useState(new Date().toISOString().slice(0, 10))
+  const [depositFecha, setDepositFecha] = useState(getTodayAsuncion())
   const [depositObservaciones, setDepositObservaciones] = useState("")
   const [submittingDepositToBank, setSubmittingDepositToBank] = useState(false)
 

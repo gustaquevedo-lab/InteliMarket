@@ -9,7 +9,7 @@ import {
 } from "lucide-react"
 import { api, type AccountsReceivable, type Sale, type SaleItem, type CreditAccount } from "../../api"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG, formatDate, formatPercentage } from "../../utils/format"
+import { formatPYG, formatDate, formatPercentage, getTodayAsuncion, getAsuncionDateStr } from "../../utils/format"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
@@ -106,12 +106,8 @@ export default function AccountsReceivablePage() {
   const [paymentsLoading, setPaymentsLoading] = useState(false)
 
   // Reportes exportables (Aging / Cobranzas / Deuda Detallada)
-  const [reportFechaDesde, setReportFechaDesde] = useState(() => {
-    const d = new Date()
-    d.setDate(d.getDate() - 30)
-    return d.toISOString().split("T")[0]
-  })
-  const [reportFechaHasta, setReportFechaHasta] = useState(() => new Date().toISOString().split("T")[0])
+  const [reportFechaDesde, setReportFechaDesde] = useState(() => getAsuncionDateStr(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)))
+  const [reportFechaHasta, setReportFechaHasta] = useState(() => getTodayAsuncion())
   const [reportCustomerId, setReportCustomerId] = useState<string>("")
   const [reportCustomerName, setReportCustomerName] = useState<string>("")
   const [reportEmpresaVinculada, setReportEmpresaVinculada] = useState<string>("")
@@ -138,7 +134,7 @@ export default function AccountsReceivablePage() {
   const [completedReceipt, setCompletedReceipt] = useState<{ id: string; numero_recibo: string; monto_total: number; documentos_afectados: number } | null>(null)
   const [payFormaPago, setPayFormaPago] = useState("efectivo")
   const [payReferencia, setPayReferencia] = useState("")
-  const [payFecha, setPayFecha] = useState(() => new Date().toISOString().split("T")[0])
+  const [payFecha, setPayFecha] = useState(() => getTodayAsuncion())
   const [payObservaciones, setPayObservaciones] = useState("")
   const [submittingPayment, setSubmittingPayment] = useState(false)
 
@@ -150,8 +146,8 @@ export default function AccountsReceivablePage() {
   const [payChequeBanco, setPayChequeBanco] = useState("")
   const [payChequeLibrador, setPayChequeLibrador] = useState("")
   const [payChequeRuc, setPayChequeRuc] = useState("")
-  const [payChequeFechaEmision, setPayChequeFechaEmision] = useState(() => new Date().toISOString().split("T")[0])
-  const [payChequeFechaCobro, setPayChequeFechaCobro] = useState(() => new Date().toISOString().split("T")[0])
+  const [payChequeFechaEmision, setPayChequeFechaEmision] = useState(() => getTodayAsuncion())
+  const [payChequeFechaCobro, setPayChequeFechaCobro] = useState(() => getTodayAsuncion())
 
   // ⚡ Modal de Inicio Rápido de Cobro (Cabecera)
   const [showQuickCobroModal, setShowQuickCobroModal] = useState(false)
@@ -181,20 +177,16 @@ export default function AccountsReceivablePage() {
     forma_pago: "transferencia",
     bank_account_id: "",
     referencia: "",
-    fecha_pago: new Date().toISOString().split("T")[0],
+    fecha_pago: getTodayAsuncion(),
     notas: "",
   })
   const [payingRemission, setPayingRemission] = useState(false)
 
   // 📊 Filtros en línea del Centro de Reportes
-  const [repAgingDesde, setRepAgingDesde] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split("T")[0]
-  })
-  const [repAgingHasta, setRepAgingHasta] = useState(() => new Date().toISOString().split("T")[0])
-  const [repCobranzasDesde, setRepCobranzasDesde] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split("T")[0]
-  })
-  const [repCobranzasHasta, setRepCobranzasHasta] = useState(() => new Date().toISOString().split("T")[0])
+  const [repAgingDesde, setRepAgingDesde] = useState(() => getAsuncionDateStr(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)))
+  const [repAgingHasta, setRepAgingHasta] = useState(() => getTodayAsuncion())
+  const [repCobranzasDesde, setRepCobranzasDesde] = useState(() => getAsuncionDateStr(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)))
+  const [repCobranzasHasta, setRepCobranzasHasta] = useState(() => getTodayAsuncion())
   const [repEmpresaExtracto, setRepEmpresaExtracto] = useState("")
   const [repPeriodoExtracto, setRepPeriodoExtracto] = useState(() => {
     const now = new Date()
@@ -521,8 +513,8 @@ export default function AccountsReceivablePage() {
     setPayChequeBanco("")
     setPayChequeLibrador(custInfo?.razon_social || "")
     setPayChequeRuc(custInfo?.ruc || "")
-    setPayChequeFechaEmision(new Date().toISOString().split("T")[0])
-    setPayChequeFechaCobro(new Date().toISOString().split("T")[0])
+    setPayChequeFechaEmision(getTodayAsuncion())
+    setPayChequeFechaCobro(getTodayAsuncion())
 
     setPendingLoading(true)
     try {
@@ -619,7 +611,7 @@ export default function AccountsReceivablePage() {
 
       setCompletedReceipt({
         id: res.payment_id || res.id,
-        numero_recibo: res.numero_recibo || `REC-${(res.payment_id || res.id).slice(0, 8).toUpperCase()}`,
+        numero_recibo: res.numero_recibo || `REC-${getTodayAsuncion().replace(/-/g, "")}-0001`,
         monto_total: montoTotalPago,
         documentos_afectados: res.documentos_afectados || allocs.length,
       })
@@ -1694,7 +1686,7 @@ export default function AccountsReceivablePage() {
                                         forma_pago: "transferencia",
                                         bank_account_id: bankAccounts.length > 0 ? bankAccounts[0].id : "",
                                         referencia: "",
-                                        fecha_pago: new Date().toISOString().split("T")[0],
+                                        fecha_pago: getTodayAsuncion(),
                                         notas: "",
                                       })
                                     }}
@@ -2373,7 +2365,7 @@ export default function AccountsReceivablePage() {
                       />
                     </div>
                   </div>
-                  {payChequeFechaCobro > new Date().toISOString().split("T")[0] && (
+                  {payChequeFechaCobro > getTodayAsuncion() && (
                     <div className="text-[11px] font-bold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5" />
                       <span>Cheque Diferido: quedará asentado en Cartera de Cheques a Depositar hasta la fecha de cobro indicada.</span>
@@ -2877,7 +2869,7 @@ export default function AccountsReceivablePage() {
                     value={reportFechaHasta}
                     onChange={e => setReportFechaHasta(e.target.value)}
                     min={reportFechaDesde}
-                    max={new Date().toISOString().split("T")[0]}
+                    max={getTodayAsuncion()}
                   />
                 </div>
               </div>
