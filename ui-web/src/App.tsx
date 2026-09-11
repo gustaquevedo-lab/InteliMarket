@@ -138,6 +138,7 @@ const EmailPage = lazy(() => import("./pages/email/EmailPage"))
 const BancardPage = lazy(() => import("./pages/bancard/BancardPage"))
 // const DinelcoPage = lazy(() => import("./pages/dinelco/DinelcoPage"))  // DESACTIVADO: checkout viejo apuntando a un host fantasma -- el terminal fisico real de Dinelco va por electron/dinelco-client.cjs, no toca esta pagina. Ver auditoria 2026-09-02
 const LoyaltyPage = lazy(() => import("./pages/loyalty/LoyaltyPage"))
+const TarjetasSocioPage = lazy(() => import("./pages/loyalty/TarjetasSocioPage"))
 const PortalPage = lazy(() => import("./pages/portal/PortalPage"))
 const ClientAppPage = lazy(() => import("./pages/client-app/ClientAppPage"))
 const SifenAvanzadoPage = lazy(() => import("./pages/sifen-avanzado/SifenAvanzadoPage"))
@@ -388,6 +389,7 @@ function AppRoutes() {
         <Route path="bancard" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="bancard"><BancardPage /></FeatureRoute></Suspense>} />
         {/* <Route path="dinelco" .../> DESACTIVADO: checkout viejo sin credenciales, distinto del terminal fisico real (electron/dinelco-client.cjs). Ver auditoria 2026-09-02 */}
         <Route path="loyalty" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="loyalty"><LoyaltyPage /></FeatureRoute></Suspense>} />
+        <Route path="tarjetas-extra-club" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="loyalty"><TarjetasSocioPage /></FeatureRoute></Suspense>} />
         <Route path="portal" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="portal"><PortalPage /></FeatureRoute></Suspense>} />
         <Route path="client-app" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="client_app"><ClientAppPage /></FeatureRoute></Suspense>} />
         <Route path="manual" element={<Suspense fallback={<PageLoader />}><ManualPage /></Suspense>} />

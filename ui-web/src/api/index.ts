@@ -2073,8 +2073,8 @@ export const api = {
       client.put<{ hook_alias: string; status: string; response_code?: string; response_description?: string }>(`/v1/bancard-qr/revert/${hookAlias}`, {}),
   },
   labelPrinting: {
-    getPrinterConfig: (tipo: "pantum_rollo" | "zebra_zpl") => client.get<any | null>(`/v1/label-printing/printer-config/${tipo}`),
-    updatePrinterConfig: (tipo: "pantum_rollo" | "zebra_zpl", data: Record<string, any>) => client.put<any>(`/v1/label-printing/printer-config/${tipo}`, data),
+    getPrinterConfig: (tipo: "pantum_rollo" | "zebra_zpl" | "zc300_tarjeta") => client.get<any | null>(`/v1/label-printing/printer-config/${tipo}`),
+    updatePrinterConfig: (tipo: "pantum_rollo" | "zebra_zpl" | "zc300_tarjeta", data: Record<string, any>) => client.put<any>(`/v1/label-printing/printer-config/${tipo}`, data),
     listTemplates: (tipoImpresora?: string) => client.get<any[]>("/v1/label-printing/templates", tipoImpresora ? { tipo_impresora: tipoImpresora } : undefined),
     createTemplate: (data: Record<string, any>) => client.post<any>("/v1/label-printing/templates", data),
     aprobarTemplate: (id: string) => client.post<any>(`/v1/label-printing/templates/${id}/aprobar`, {}),
@@ -2285,6 +2285,16 @@ export const api = {
     deleteReward: (rewardId: string) => client.delete<void>(`/v1/loyalty/rewards/${rewardId}`),
     solicitudesTarjetas: () => client.get<{ cola: any[] }>("/v1/loyalty/solicitudes-tarjetas"),
     marcarImpresa: (colaId: number) => client.post<any>(`/v1/loyalty/solicitudes-tarjetas/${colaId}/imprimir`),
+    // Tarjetas Extra Club (Zebra ZC300)
+    tarjetasSocios: (params: { q?: string; solo_con_numero?: boolean; limit?: number }) =>
+      client.get<any[]>("/v1/loyalty/tarjetas/socios", {
+        ...(params.q ? { q: params.q } : {}),
+        solo_con_numero: String(!!params.solo_con_numero),
+        limit: String(params.limit ?? 50),
+      }),
+    asignarNumeroSocio: (customerId: string) =>
+      client.post<{ extra_club_numero: string; asignado_ahora: boolean }>(`/v1/loyalty/tarjetas/socios/${customerId}/numero`),
+    estadoImpresoraTarjetas: () => client.get<any>("/v1/loyalty/tarjetas/impresora/estado"),
   },
   imports: {
     templates: () => client.get<ImportTemplate[]>("/v1/imports/templates"),

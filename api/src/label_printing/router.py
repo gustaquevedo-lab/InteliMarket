@@ -19,7 +19,9 @@ from api.src.label_printing.schemas import (
 
 router = APIRouter(prefix="/api/v1/label-printing", tags=["label-printing"])
 
-ALLOWED_TIPOS = {"pantum_rollo", "zebra_zpl"}
+# zc300_tarjeta: impresora de TARJETAS (credenciales Extra Club), no de etiquetas.
+# Se reusa esta tabla para no agregar otra solo por un nombre de impresora.
+ALLOWED_TIPOS = {"pantum_rollo", "zebra_zpl", "zc300_tarjeta"}
 
 
 @router.get("/qz-certificate", response_model=QzCertificateResponse)

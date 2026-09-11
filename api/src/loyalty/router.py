@@ -106,3 +106,40 @@ async def marcar_tarjeta_impresa(cola_id: int, user=Depends(require_auth)):
             return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# ── Tarjetas Extra Club (Zebra ZC300) ─────────────────────────────────────
+
+@router.get("/tarjetas/socios")
+async def tarjetas_socios(
+    q: str | None = None,
+    solo_con_numero: bool = False,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.listar_socios_tarjeta(db, user["company_id"], q, solo_con_numero, limit)
+
+
+@router.post("/tarjetas/socios/{customer_id}/numero")
+async def tarjetas_asignar_numero(
+    customer_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("crm:update")),
+):
+    import uuid as _uuid
+    try:
+        _uuid.UUID(customer_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Identificador de cliente invalido")
+    r = await service.asignar_numero_socio(db, user["company_id"], customer_id)
+    if r is None:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    return r
+
+
+@router.get("/tarjetas/impresora/estado")
+async def tarjetas_estado_impresora(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.estado_impresora_tarjetas(db, user["company_id"])

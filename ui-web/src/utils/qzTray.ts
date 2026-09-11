@@ -128,3 +128,35 @@ export async function verificarImpresora(printerName: string): Promise<void> {
     )
   }
 }
+
+
+export interface QzImagenOptions {
+  printerName: string
+  imagenBase64: string // PNG sin el prefijo data:
+  widthMm: number
+  heightMm: number
+}
+
+/**
+ * Imprime una imagen ya compuesta (PNG) por el driver de Windows. Es el camino
+ * de la Zebra ZC300: las impresoras de tarjetas no hablan ZPL sino ZMotif, un
+ * protocolo binario propio, asi que no se les puede mandar comandos crudos como
+ * a la ZD220. El driver recibe la imagen y se encarga de los paneles de la
+ * cinta (color, negro, protector).
+ *
+ * OJO con la orientacion: la tarjeta es apaisada (85,6 x 53,98). Si la primera
+ * prueba sale rotada o recortada, el ajuste va aca (orientation) y no en el
+ * dibujo: el dibujo es correcto a su tamaño real.
+ */
+export async function printImageViaQz({ printerName, imagenBase64, widthMm, heightMm }: QzImagenOptions): Promise<void> {
+  const qz = await ensureQzConnected()
+  await verificarImpresora(printerName)
+  const config = qz.configs.create(printerName, {
+    size: { width: widthMm, height: heightMm },
+    units: "mm",
+    margins: 0,
+    scaleContent: true,
+    colorType: "color",
+  })
+  await qz.print(config, [{ type: "pixel", format: "image", flavor: "base64", data: imagenBase64 }])
+}
