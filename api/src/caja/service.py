@@ -9,6 +9,7 @@ from decimal import Decimal
 import uuid
 import base64
 import re
+import asyncio
 
 TZ_ASUNCION = ZoneInfo("America/Asuncion")
 
@@ -1186,8 +1187,22 @@ async def list_sessions_with_totals(
     if cajero_nombre:
         query = query.where(CashSession.cajero_nombre.ilike(f"%{cajero_nombre.strip()}%"))
     if fecha_desde:
+        if isinstance(fecha_desde, str):
+            try:
+                fecha_desde = datetime.fromisoformat(fecha_desde)
+            except Exception:
+                pass
+        elif isinstance(fecha_desde, date) and not isinstance(fecha_desde, datetime):
+            fecha_desde = datetime.combine(fecha_desde, time.min, tzinfo=TZ_ASUNCION)
         query = query.where(CashSession.fecha_apertura >= fecha_desde)
     if fecha_hasta:
+        if isinstance(fecha_hasta, str):
+            try:
+                fecha_hasta = datetime.fromisoformat(fecha_hasta)
+            except Exception:
+                pass
+        elif isinstance(fecha_hasta, date) and not isinstance(fecha_hasta, datetime):
+            fecha_hasta = datetime.combine(fecha_hasta, time.max, tzinfo=TZ_ASUNCION)
         query = query.where(CashSession.fecha_apertura <= fecha_hasta)
     if search and search.strip():
         s_clean = search.strip()
