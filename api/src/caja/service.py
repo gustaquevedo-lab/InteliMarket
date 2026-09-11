@@ -62,6 +62,7 @@ LEGACY_SESSION_IDS = [
     uuid.UUID("6552392f-6844-4ba7-9cce-ca792b52a41b"),  # Tomasa Caja 4 legacy 31/08
     uuid.UUID("e93a5246-d1de-4de2-b016-b9bb86de0a15"),  # Zunilda Caja 2 legacy 31/08
     uuid.UUID("0fca771a-860a-4e80-9513-d8ada4f7043d"),  # Tomasa Caja 2 apertura 29 seg cancelada
+    uuid.UUID("6680f158-977e-43b1-8316-f0f45c177333"),  # Tomasa Caja 5 (09/09 08:14 - 12:00) apertura fallida sin ventas cobradas (solo 1 cancelada)
 ]
 
 INTELIMARKET_31_08_SESSION_IDS = [
@@ -1247,6 +1248,15 @@ async def list_sessions_with_totals(
         for h in handoffs_res.scalars().all():
             handoffs_map[h.session_id] = h
 
+    # Reconciliación oficial en paralelo para todas las sesiones cerradas del listado
+    recon_map = {}
+    if closed_session_ids:
+        recon_tasks = [get_session_reconciliation_data(db, sid) for sid in closed_session_ids]
+        recon_results = await asyncio.gather(*recon_tasks, return_exceptions=True)
+        for sid, r in zip(closed_session_ids, recon_results):
+            if isinstance(r, dict):
+                recon_map[sid] = r
+
     out = []
     for s in sessions:
         monto_cobrado = cobrado_map.get(s.id, 0.0)
@@ -1283,38 +1293,60 @@ async def list_sessions_with_totals(
                     cash_drop_alert = efectivo_acumulado >= cash_drop_threshold_val
                     cash_drop_warning = (not cash_drop_alert) and efectivo_acumulado >= cash_drop_threshold_val * 0.8
 
-        # Arqueo real (CashCount)
+        # Arqueo real y conciliación contable unificada (regla estricta para todas las cajas)
         diferencia = None
         diferencia_usd = None
         diferencia_brl = None
         monto_cierre_esperado = None
         monto_cierre_declarado = None
+        recon_obj = recon_map.get(s.id)
+
         if s.estado == "cerrada":
-            count = counts_map.get(s.id)
-            if count:
-                diferencia = float(count.diferencia) if count.diferencia is not None else 0.0
-                diferencia_usd = float(count.diferencia_usd) if count.diferencia_usd is not None else 0.0
-                diferencia_brl = float(count.diferencia_brl) if count.diferencia_brl is not None else 0.0
-                monto_cierre_declarado = float(count.monto_total) if count.monto_total is not None else (float(s.monto_cierre) if s.monto_cierre is not None else 0.0)
-                monto_cierre_esperado = monto_cierre_declarado - diferencia
+            if recon_obj:
+                monto_cierre_esperado = float(recon_obj["esperado_total_gs"])
+                monto_cierre_declarado = float(recon_obj["contado_total_gs"])
+                diferencia = float(recon_obj["diferencia_consolidada_gs"])
+                diferencia_usd = float(recon_obj.get("diferencia_usd") or 0.0)
+                diferencia_brl = float(recon_obj.get("diferencia_brl") or 0.0)
             else:
-                monto_cierre_declarado = float(s.monto_cierre) if s.monto_cierre is not None else 0.0
-                monto_cierre_esperado = float(s.monto_apertura) + float(efectivo_acumulado)
-                diferencia = 0.0
+                count = counts_map.get(s.id)
+                if count:
+                    diferencia = float(count.diferencia) if count.diferencia is not None else 0.0
+                    diferencia_usd = float(count.diferencia_usd) if count.diferencia_usd is not None else 0.0
+                    diferencia_brl = float(count.diferencia_brl) if count.diferencia_brl is not None else 0.0
+                    monto_cierre_declarado = float(count.monto_total) if count.monto_total is not None else (float(s.monto_cierre) if s.monto_cierre is not None else 0.0)
+                    monto_cierre_esperado = monto_cierre_declarado - diferencia
+                else:
+                    monto_cierre_declarado = float(s.monto_cierre) if s.monto_cierre is not None else 0.0
+                    monto_cierre_esperado = float(efectivo_acumulado)
+                    diferencia = 0.0
 
         h_obj = handoffs_map.get(s.id)
-        handoff_data = {
-            "id": str(h_obj.id),
-            "estado": h_obj.estado,
-            "monto_declarado_pyg": float(h_obj.monto_pyg or 0),
-            "monto_declarado_brl": float(h_obj.monto_brl or 0),
-            "monto_confirmado_pyg": float(h_obj.monto_confirmado_pyg) if h_obj.monto_confirmado_pyg is not None else None,
-            "monto_confirmado_brl": float(h_obj.monto_confirmado_brl) if h_obj.monto_confirmado_brl is not None else None,
-            "discrepancia_confirmacion": h_obj.discrepancia_confirmacion,
-            "recibido_por_nombre": h_obj.recibido_por_nombre,
-            "fecha_confirmacion": _to_asuncion_tz(h_obj.fecha_confirmacion).strftime("%d/%m/%Y %H:%M") if h_obj.fecha_confirmacion else None,
-            "observaciones": h_obj.observaciones,
-        } if h_obj else None
+        if h_obj:
+            decl_pyg = float(h_obj.monto_confirmado_pyg) if h_obj.monto_confirmado_pyg is not None else (
+                float(h_obj.monto_pyg) if h_obj.estado == "confirmado" else (
+                    float(recon_obj["contado_pyg"]) if recon_obj else float(h_obj.monto_pyg or 0)
+                )
+            )
+            decl_brl = float(h_obj.monto_confirmado_brl) if h_obj.monto_confirmado_brl is not None else (
+                float(h_obj.monto_brl) if h_obj.estado == "confirmado" else (
+                    float(recon_obj["contado_brl"]) if recon_obj else float(h_obj.monto_brl or 0)
+                )
+            )
+            handoff_data = {
+                "id": str(h_obj.id),
+                "estado": h_obj.estado,
+                "monto_declarado_pyg": decl_pyg,
+                "monto_declarado_brl": decl_brl,
+                "monto_confirmado_pyg": float(h_obj.monto_confirmado_pyg) if h_obj.monto_confirmado_pyg is not None else None,
+                "monto_confirmado_brl": float(h_obj.monto_confirmado_brl) if h_obj.monto_confirmado_brl is not None else None,
+                "discrepancia_confirmacion": h_obj.discrepancia_confirmacion,
+                "recibido_por_nombre": h_obj.recibido_por_nombre,
+                "fecha_confirmacion": _to_asuncion_tz(h_obj.fecha_confirmacion).strftime("%d/%m/%Y %H:%M") if h_obj.fecha_confirmacion else None,
+                "observaciones": h_obj.observaciones,
+            }
+        else:
+            handoff_data = None
 
         out.append({
             "id": str(s.id),

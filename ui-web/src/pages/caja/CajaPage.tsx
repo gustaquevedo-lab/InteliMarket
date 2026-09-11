@@ -30,6 +30,7 @@ const LEGACY_SESSION_IDS = new Set([
   "6552392f-6844-4ba7-9cce-ca792b52a41b", // Tomasa Caja 4 legacy 31/08
   "e93a5246-d1de-4de2-b016-b9bb86de0a15", // Zunilda Caja 2 legacy 31/08
   "0fca771a-860a-4e80-9513-d8ada4f7043d", // Tomasa Caja 2 apertura 29 seg
+  "6680f158-977e-43b1-8316-f0f45c177333", // Tomasa Caja 5 (09/09 08:14 - 12:00) apertura fallida sin ventas cobradas (solo 1 cancelada)
 ])
 
 // Únicas cajas de producción oficiales de InteliMarket el 31/08/2026
