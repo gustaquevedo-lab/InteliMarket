@@ -2578,8 +2578,10 @@ AVAILABLE_SYNC_MODULES = {
     "fiscal_setup": sync_fiscal_setup,
 }
 
-# Módulos activos en sincronizaciones periódicas automáticas (2. Stock e Inventario, 3. Compras y Proveedores)
+# Módulos activos en sincronizaciones periódicas automáticas (1. Catálogo/Precios, 2. Stock e Inventario, 3. Compras y Proveedores)
 DEFAULT_ACTIVE_MODULES = [
+    # 1. Catálogo y Precios
+    "catalog_prices_and_scales",
     # 2. Stock e Inventario
     "stock",
     "inventory_adjustments",
