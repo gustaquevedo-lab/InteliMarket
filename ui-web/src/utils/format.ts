@@ -33,14 +33,22 @@ export function formatPYG(value: number | string | null | undefined): string {
 }
 
 export function formatUSD(value: number | string | null | undefined): string {
-  if (value == null) return "$ 0.00"
+  if (value == null) return "US$ 0.00"
   const num = typeof value === "string" ? parseFloat(value) : value
-  if (isNaN(num)) return "$ 0.00"
-  return `$ ${num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  if (isNaN(num)) return "US$ 0.00"
+  return `US$ ${num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+export function formatBRL(value: number | string | null | undefined): string {
+  if (value == null) return "R$ 0,00"
+  const num = typeof value === "string" ? parseFloat(value) : value
+  if (isNaN(num)) return "R$ 0,00"
+  return `R$ ${num.toLocaleString("es-PY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 export function formatCurrency(value: number | string | null | undefined, currency = "PYG"): string {
   if (currency === "USD") return formatUSD(value)
+  if (currency === "BRL") return formatBRL(value)
   return formatPYG(value)
 }
 

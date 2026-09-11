@@ -21,7 +21,7 @@ import {
 } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG, formatDateTime, getTodayAsuncion, getAsuncionDateStr, parseAsuncionDateStr } from "../../utils/format"
+import { formatPYG, formatBRL, formatUSD, formatDateTime, getTodayAsuncion, getAsuncionDateStr, parseAsuncionDateStr } from "../../utils/format"
 
 // Sesiones del sistema legacy anterior (Supermer) o pruebas accidentales
 const LEGACY_SESSION_IDS = new Set([
@@ -271,6 +271,7 @@ export default function CajaPage() {
   // ── Conteo y Recepción de Efectivo en Tesorería ──
   const [efectivoRecibidoPyg, setEfectivoRecibidoPyg] = useState<number>(0)
   const [efectivoRecibidoBrl, setEfectivoRecibidoBrl] = useState<number>(0)
+  const [efectivoRecibidoUsd, setEfectivoRecibidoUsd] = useState<number>(0)
   const [efectivoObsTesoreria, setEfectivoObsTesoreria] = useState("")
   const [savingEfectivoReception, setSavingEfectivoReception] = useState(false)
 
@@ -354,8 +355,10 @@ export default function CajaPage() {
       const handoff = data?.handoff || data?.session_data?.handoff
       const declPyg = Number(handoff?.monto_confirmado_pyg ?? handoff?.monto_declarado_pyg ?? data?.session_data?.monto_cierre ?? 0)
       const declBrl = Number(handoff?.monto_confirmado_brl ?? handoff?.monto_declarado_brl ?? data?.session_data?.monto_efectivo_brl ?? 0)
+      const declUsd = Number(handoff?.monto_confirmado_usd ?? handoff?.monto_declarado_usd ?? data?.session_data?.monto_efectivo_usd ?? 0)
       setEfectivoRecibidoPyg(declPyg)
       setEfectivoRecibidoBrl(declBrl)
+      setEfectivoRecibidoUsd(declUsd)
       setEfectivoObsTesoreria(handoff?.observaciones || "")
     } catch (err: any) {
       toast.error("Error al cargar planilla", err?.message || "No se pudo obtener el detalle de vouchers de la sesión.")
@@ -372,6 +375,7 @@ export default function CajaPage() {
       const res = await api.caja.confirmSessionCash(punteoData.session_data.id, {
         monto_recibido_pyg: Number(efectivoRecibidoPyg || 0),
         monto_recibido_brl: Number(efectivoRecibidoBrl || 0),
+        monto_recibido_usd: Number(efectivoRecibidoUsd || 0),
         observaciones: efectivoObsTesoreria.trim() || undefined,
       })
       toast.success("Efectivo Asentado en Tesorería", `Recuento registrado: ${formatPYG(res.monto_confirmado_pyg)} / R$ ${res.monto_confirmado_brl.toFixed(2)}. ${res.dictamen}`)
@@ -450,6 +454,7 @@ export default function CajaPage() {
         diferencia_vouchers_gs: difVouchers,
         monto_recibido_pyg: Number(efectivoRecibidoPyg || 0),
         monto_recibido_brl: Number(efectivoRecibidoBrl || 0),
+        monto_recibido_usd: Number(efectivoRecibidoUsd || 0),
         observaciones_efectivo: efectivoObsTesoreria.trim() || undefined,
       })
 
@@ -3461,7 +3466,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           type="number"
                           min="0"
                           placeholder="0"
-                          className="w-14 p-1 border border-gray-200 dark:border-gray-700 rounded-lg text-right font-mono font-black bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-white outline-none focus:border-emerald-500"
+                          className="w-14 p-1 border border-gray-200 dark:border-gray-700 rounded-lg text-right font-mono font-black bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-white outline-none focus:border-emerald-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           value={conteoBilletes[d.valor] || ""}
                           onChange={e => handleDenominacionChange(d.valor, parseInt(e.target.value) || 0)}
                         />
@@ -3480,7 +3485,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                         <span className="text-xs font-black text-amber-900 dark:text-amber-300">Reales (BRL)</span>
                       </div>
                       <span className="font-mono font-black text-xs text-amber-700 dark:text-amber-300">
-                        R$ {parseFloat(montoCierreBrl || "0").toFixed(2)}
+                        {formatBRL(parseFloat(montoCierreBrl || "0"))}
                       </span>
                     </div>
 
@@ -3492,7 +3497,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             type="number"
                             min="0"
                             placeholder="0"
-                            className="w-12 p-1 border border-gray-200 dark:border-gray-700 rounded text-right font-mono font-bold bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-white text-xs outline-none focus:border-amber-500"
+                            className="w-12 p-1 border border-gray-200 dark:border-gray-700 rounded text-right font-mono font-bold bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-white text-xs outline-none focus:border-amber-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             value={conteoBrl[d.valor] || ""}
                             onChange={e => handleDenominacionBrlChange(d.valor, parseInt(e.target.value) || 0)}
                           />
@@ -3509,7 +3514,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                         <span className="text-xs font-black text-blue-900 dark:text-blue-300">Dólares (USD)</span>
                       </div>
                       <span className="font-mono font-black text-xs text-blue-700 dark:text-blue-300">
-                        $ {parseFloat(montoCierreUsd || "0").toFixed(2)}
+                        {formatUSD(parseFloat(montoCierreUsd || "0"))}
                       </span>
                     </div>
 
@@ -3521,7 +3526,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             type="number"
                             min="0"
                             placeholder="0"
-                            className="w-12 p-1 border border-gray-200 dark:border-gray-700 rounded text-right font-mono font-bold bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-white text-xs outline-none focus:border-blue-500"
+                            className="w-12 p-1 border border-gray-200 dark:border-gray-700 rounded text-right font-mono font-bold bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-white text-xs outline-none focus:border-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             value={conteoUsd[d.valor] || ""}
                             onChange={e => handleDenominacionUsdChange(d.valor, parseInt(e.target.value) || 0)}
                           />
@@ -4428,15 +4433,26 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   const handoff = punteoData.handoff || punteoData.session_data?.handoff
                   const declPyg = Number(handoff?.monto_declarado_pyg ?? punteoData.session_data?.monto_cierre ?? 0)
                   const declBrl = Number(handoff?.monto_declarado_brl ?? punteoData.session_data?.monto_efectivo_brl ?? 0)
-                  const espPyg = Number(punteoData.session_data?.monto_cierre_esperado ?? 0)
+                  const declUsd = Number(handoff?.monto_declarado_usd ?? punteoData.session_data?.monto_efectivo_usd ?? 0)
+                  const espPyg = Number(punteoData.session_data?.monto_cierre_esperado ?? punteoData.session_data?.recon?.esperado_total_gs ?? 0)
+
+                  const tasaBrl = Number(punteoData.session_data?.recon?.tasa_brl || 1130)
+                  const tasaUsd = Number(punteoData.session_data?.recon?.tasa_usd || 5840)
 
                   const recPyg = Number(efectivoRecibidoPyg || 0)
                   const recBrl = Number(efectivoRecibidoBrl || 0)
+                  const recUsd = Number(efectivoRecibidoUsd || 0)
+
                   const difEntregaPyg = recPyg - declPyg
                   const difEntregaBrl = recBrl - declBrl
+                  const difEntregaUsd = recUsd - declUsd
 
-                  const hasShortage = difEntregaPyg < 0 || difEntregaBrl < 0
-                  const hasSurplus = difEntregaPyg > 0 || difEntregaBrl > 0
+                  const recTotalGs = recPyg + (recBrl * tasaBrl) + (recUsd * tasaUsd)
+                  const declTotalGs = declPyg + (declBrl * tasaBrl) + (declUsd * tasaUsd)
+                  const difTotalGs = recTotalGs - declTotalGs
+
+                  const hasShortage = difTotalGs < -5000
+                  const hasSurplus = difTotalGs > 5000
 
                   return (
                     <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 text-white border border-slate-700/80 shadow-xl space-y-4">
@@ -4458,7 +4474,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                               )}
                             </div>
                             <p className="text-xs text-slate-400 leading-tight mt-0.5">
-                              La cajera/supervisora remite el sobre de la caja. La Tesorera cuenta físicamente los billetes y asienta si vino completo, faltante o sobrante.
+                              La cajera/supervisora remite el sobre de la caja. La Tesorera cuenta físicamente los billetes (Gs., R$, US$) y asienta si vino completo, faltante o sobrante.
                             </p>
                           </div>
                         </div>
@@ -4487,12 +4503,24 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             </div>
                             <div className="flex items-baseline justify-between">
                               <span className="text-xs text-slate-300">Efectivo R$:</span>
-                              <span className="font-mono font-bold text-amber-400 text-sm">R$ {declBrl.toFixed(2)}</span>
+                              <span className="font-mono font-bold text-amber-400 text-sm">{formatBRL(declBrl)}</span>
                             </div>
+                            {declUsd > 0 && (
+                              <div className="flex items-baseline justify-between">
+                                <span className="text-xs text-slate-300">Efectivo US$:</span>
+                                <span className="font-mono font-bold text-blue-400 text-sm">{formatUSD(declUsd)}</span>
+                              </div>
+                            )}
                           </div>
-                          <div className="pt-2 border-t border-slate-700/60 text-[10px] text-slate-400 flex items-center justify-between">
-                            <span>Esperado sistema:</span>
-                            <span className="font-mono text-slate-300">{formatPYG(espPyg)}</span>
+                          <div className="pt-2 border-t border-slate-700/60 space-y-0.5 text-[10px] text-slate-400">
+                            <div className="flex items-center justify-between">
+                              <span>Total declarado equiv.:</span>
+                              <span className="font-mono font-bold text-white">{formatPYG(declTotalGs)}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span>Esperado sistema:</span>
+                              <span className="font-mono text-slate-300">{formatPYG(espPyg)}</span>
+                            </div>
                           </div>
                         </div>
 
@@ -4512,20 +4540,47 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                 value={efectivoRecibidoPyg}
                                 onChange={e => setEfectivoRecibidoPyg(Number(e.target.value))}
                                 placeholder="0"
-                                className="w-full bg-slate-900 border border-emerald-500/60 rounded-lg px-3 py-1.5 text-base font-black font-mono text-emerald-300 outline-none focus:ring-2 focus:ring-emerald-400 text-right"
+                                className="w-full bg-slate-900 border border-emerald-500/60 rounded-lg px-3 py-1.5 text-base font-black font-mono text-emerald-300 outline-none focus:ring-2 focus:ring-emerald-400 text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               />
                             </div>
                             <div>
-                              <label className="text-[10px] font-bold text-slate-300 uppercase block mb-1">
-                                Efectivo Contado en Reales (R$):
-                              </label>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className="text-[10px] font-bold text-slate-300 uppercase">
+                                  Efectivo Contado en Reales (R$):
+                                </label>
+                                {recBrl > 0 && (
+                                  <span className="text-[10px] font-mono text-amber-400">
+                                    equiv. {formatPYG(recBrl * tasaBrl)}
+                                  </span>
+                                )}
+                              </div>
                               <input
                                 type="number"
                                 step="0.50"
                                 value={efectivoRecibidoBrl}
                                 onChange={e => setEfectivoRecibidoBrl(Number(e.target.value))}
                                 placeholder="0.00"
-                                className="w-full bg-slate-900 border border-amber-500/60 rounded-lg px-3 py-1.5 text-sm font-bold font-mono text-amber-300 outline-none focus:ring-2 focus:ring-amber-400 text-right"
+                                className="w-full bg-slate-900 border border-amber-500/60 rounded-lg px-3 py-1.5 text-sm font-bold font-mono text-amber-300 outline-none focus:ring-2 focus:ring-amber-400 text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                            </div>
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className="text-[10px] font-bold text-slate-300 uppercase">
+                                  Efectivo Contado en Dólares (US$):
+                                </label>
+                                {recUsd > 0 && (
+                                  <span className="text-[10px] font-mono text-blue-400">
+                                    equiv. {formatPYG(recUsd * tasaUsd)}
+                                  </span>
+                                )}
+                              </div>
+                              <input
+                                type="number"
+                                step="1"
+                                value={efectivoRecibidoUsd}
+                                onChange={e => setEfectivoRecibidoUsd(Number(e.target.value))}
+                                placeholder="0.00"
+                                className="w-full bg-slate-900 border border-blue-500/60 rounded-lg px-3 py-1.5 text-sm font-bold font-mono text-blue-300 outline-none focus:ring-2 focus:ring-blue-400 text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               />
                             </div>
                           </div>
@@ -4564,22 +4619,42 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                 <span className={`font-mono font-bold text-sm ${
                                   difEntregaBrl === 0 ? "text-emerald-400" : difEntregaBrl < 0 ? "text-rose-400" : "text-blue-400"
                                 }`}>
-                                  {difEntregaBrl !== 0 ? (difEntregaBrl > 0 ? `+R$ ${difEntregaBrl.toFixed(2)}` : `R$ ${difEntregaBrl.toFixed(2)}`) : "R$ 0.00 (Conforme)"}
+                                  {difEntregaBrl !== 0 ? (difEntregaBrl > 0 ? `+${formatBRL(difEntregaBrl)}` : formatBRL(difEntregaBrl)) : "R$ 0,00 (Conforme)"}
                                 </span>
                               </div>
                             )}
+
+                            {/* Diferencia en US$ */}
+                            {(declUsd > 0 || recUsd > 0) && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-slate-300">Diferencia US$:</span>
+                                <span className={`font-mono font-bold text-sm ${
+                                  difEntregaUsd === 0 ? "text-emerald-400" : difEntregaUsd < 0 ? "text-rose-400" : "text-blue-400"
+                                }`}>
+                                  {difEntregaUsd !== 0 ? (difEntregaUsd > 0 ? `+${formatUSD(difEntregaUsd)}` : formatUSD(difEntregaUsd)) : "US$ 0.00 (Conforme)"}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Total Consolidado en Gs */}
+                            <div className="pt-1.5 border-t border-slate-700/60 flex items-center justify-between">
+                              <span className="text-xs text-slate-300 font-bold">Total Rendido Gs:</span>
+                              <span className="font-mono font-black text-white text-sm">
+                                {formatPYG(recTotalGs)}
+                              </span>
+                            </div>
 
                             {/* Banner de Estado */}
                             <div className="pt-2">
                               {hasShortage ? (
                                 <div className="p-2 rounded-lg bg-rose-900/60 border border-rose-500 text-rose-200 text-xs font-bold flex items-center gap-2">
                                   <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-                                  <span>🔴 FALTANTE EN ENTREGA: Vino MENOS efectivo del declarado.</span>
+                                  <span>🔴 FALTANTE EN ENTREGA: Vino MENOS efectivo del declarado ({formatPYG(difTotalGs)}).</span>
                                 </div>
                               ) : hasSurplus ? (
                                 <div className="p-2 rounded-lg bg-blue-900/60 border border-blue-500 text-blue-200 text-xs font-bold flex items-center gap-2">
                                   <Info className="w-4 h-4 text-blue-400 shrink-0" />
-                                  <span>🔵 SOBRANTE EN ENTREGA: Vino MÁS efectivo del declarado.</span>
+                                  <span>🔵 SOBRANTE EN ENTREGA: Vino MÁS efectivo del declarado (+{formatPYG(difTotalGs)}).</span>
                                 </div>
                               ) : (
                                 <div className="p-2 rounded-lg bg-emerald-900/60 border border-emerald-500 text-emerald-200 text-xs font-bold flex items-center gap-2">
@@ -4591,7 +4666,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           </div>
 
                           <p className="text-[10px] text-slate-400 pt-1 border-t border-slate-800">
-                            * A Bóveda Central ingresará el monto contado por Tesorería ({formatPYG(recPyg)}).
+                            * A Bóveda Central ingresará el total contado por Tesorería ({formatPYG(recTotalGs)}).
                           </p>
                         </div>
                       </div>

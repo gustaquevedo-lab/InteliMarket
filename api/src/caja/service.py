@@ -565,35 +565,28 @@ def generate_cierre_escpos(recon: dict) -> dict:
     lines.append(_format_two_col("TOTAL FACTURADO (Tickets):", f"{recon['total_cobrado_gs']:,.0f} Gs.", W))
     lines.append("-" * W)
 
-    # 3. Efectivo Esperado a Rendir a Tesorería (Ventas Efectivo menos Drops)
-    lines.append("[3. EFECTIVO ESPERADO A RENDIR A TESORERÍA]")
-    lines.append(_format_two_col("  Ventas Efectivo Gs.:", f"{recon.get('efectivo_pyg', 0):,.0f} Gs.", W))
-    drop_gs = recon.get('d_pyg', recon.get('total_drops_gs', 0))
-    if drop_gs > 0:
-        lines.append(_format_two_col("  (-) Retiros / Drops Gs.:", f"-{drop_gs:,.0f} Gs.", W))
-    esp_pyg = recon.get('esp_pyg', recon.get('efectivo_pyg', 0) - drop_gs)
-    lines.append(_format_two_col("  >> Esperado a Rendir Gs.:", f"{esp_pyg:,.0f} Gs.", W))
-    lines.append("")
-    if recon.get('efectivo_brl', 0) > 0:
-        lines.append(_format_two_col("  Ventas Efectivo R$:", f"R$ {recon['efectivo_brl']:,.2f}", W))
-        if recon.get('d_brl', 0) > 0:
-            lines.append(_format_two_col("  (-) Retiros R$:", f"-R$ {recon['d_brl']:,.2f}", W))
-        lines.append(_format_two_col("  >> Esperado a Rendir R$:", f"R$ {recon['esp_brl']:,.2f}", W))
-    if recon.get('efectivo_usd', 0) > 0:
-        lines.append(_format_two_col("  Ventas Efectivo US$:", f"US$ {recon['efectivo_usd']:,.2f}", W))
-        lines.append(_format_two_col("  >> Esperado a Rendir US$:", f"US$ {recon['esp_usd']:,.2f}", W))
+    # 3. Efectivo Esperado a Rendir a Tesorería (100% en Guaraníes)
+    lines.append("[3. EFECTIVO ESPERADO A RENDIR]")
+    lines.append(_format_two_col("  Total Facturado:", f"{recon['total_cobrado_gs']:,.0f} Gs.", W))
+    lines.append(_format_two_col("  (-) Medios No Efectivo:", f"-{recon['total_no_efectivo_gs']:,.0f} Gs.", W))
+    lines.append(_format_two_col("  (=) Efectivo Ventas:", f"{recon['ventas_ef_total_gs']:,.0f} Gs.", W))
+    tot_drops = recon.get('total_drops_gs', 0)
+    if tot_drops > 0:
+        lines.append(_format_two_col("  (-) Retiros / Drops:", f"-{tot_drops:,.0f} Gs.", W))
+    lines.append(_format_two_col("  >> Esperado a Rendir:", f"{recon['esperado_total_gs']:,.0f} Gs.", W))
     lines.append("-" * W)
 
     # 4. Arqueo Físico Rendido a Tesorería
     lines.append("[4. ARQUEO FÍSICO RENDIDO A TESORERÍA]")
     lines.append(_format_two_col("  Rendido Guaraníes:", f"{recon['contado_pyg']:,.0f} Gs.", W))
-    if recon.get('fondo_deducido_de_conteo'):
-        lines.append("  (Gaveta menos ₲ 500.000 fondo retenido)")
-    lines.append(_format_two_col("  Rendido Reales:", f"R$ {recon['contado_brl']:,.2f}", W))
-    lines.append(f"  ({recon['contado_brl_gs']:,.0f} Gs. equivalentes)")
+    if recon.get('contado_brl', 0) > 0:
+        brl_fmt = f"{recon['contado_brl']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        lines.append(_format_two_col("  Rendido Reales:", f"R$ {brl_fmt}", W))
+        lines.append(f"  ({recon['contado_brl_gs']:,.0f} Gs. equiv. a 1:{recon['tasa_brl']:,.0f})")
     if recon.get('contado_usd', 0) > 0:
-        lines.append(_format_two_col("  Rendido Dólares:", f"US$ {recon['contado_usd']:,.2f}", W))
-        lines.append(f"  ({recon['contado_usd_gs']:,.0f} Gs. equivalentes)")
+        usd_fmt = f"{recon['contado_usd']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        lines.append(_format_two_col("  Rendido Dólares:", f"US$ {usd_fmt}", W))
+        lines.append(f"  ({recon['contado_usd_gs']:,.0f} Gs. equiv. a 1:{recon['tasa_usd']:,.0f})")
     lines.append("-" * W)
     lines.append(_format_two_col("TOTAL RENDIDO A TESORERÍA:", f"{recon['contado_total_gs']:,.0f} Gs.", W))
     lines.append("=" * W)
@@ -818,14 +811,17 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         if not data or (data["cantidad"] == 0 and data["monto_gs"] == 0):
             continue
 
+        gs_str = f"{data['monto_gs']:,.0f}".replace(",", ".") + " Gs."
         if ckey == "EFECTIVO_PYG":
-            fmt = f"{data['monto_gs']:,.0f} Gs."
+            fmt = gs_str
         elif ckey == "EFECTIVO_BRL":
-            fmt = f"R$ {data['monto_orig']:,.2f} ({data['monto_gs']:,.0f} Gs.)"
+            orig_str = f"{data['monto_orig']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            fmt = f"R$ {orig_str} ({gs_str})"
         elif ckey == "EFECTIVO_USD":
-            fmt = f"US$ {data['monto_orig']:,.2f} ({data['monto_gs']:,.0f} Gs.)"
+            orig_str = f"{data['monto_orig']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            fmt = f"US$ {orig_str} ({gs_str})"
         else:
-            fmt = f"{data['monto_gs']:,.0f} Gs."
+            fmt = gs_str
 
         desglose_detallado.append({
             "clave": ckey,
@@ -887,11 +883,14 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     # NUEVA REGLA INMUTABLE: El fondo inicial NO es dinero que llega a Tesorería.
     # Se certifica su existencia en gaveta por Supervisora y queda en custodia permanente
     # de la cajera para su siguiente turno.
-    # El monto esperado a rendir a Tesorería es estrictamente: Ventas en Efectivo - Retiros/Drops
+    # REGLA INMUTABLE: El supermercado vende 100% en Guaraníes (PYG).
+    # Las divisas (R$, US$) son exclusivamente medios de pago, no ventas en moneda extranjera.
+    # El monto esperado a rendir a Tesorería en Guaraníes es estrictamente:
+    # Total Facturado en Ventas - Ventas Cobradas en Medios No Efectivo - Retiros/Drops
+    esperado_total_gs = max(Decimal("0"), ventas_ef_total_gs - total_drops_gs)
     esp_pyg = max(Decimal("0"), Decimal(str(efectivo_pyg)) - d_pyg)
     esp_brl = max(Decimal("0"), Decimal(str(efectivo_brl)) - d_brl)
     esp_usd = max(Decimal("0"), Decimal(str(efectivo_usd)) - d_usd)
-    esperado_total_gs = esp_pyg + (esp_brl * tasa_brl) + (esp_usd * tasa_usd)
 
     # Arqueo contado
     if count_obj:

@@ -38,7 +38,7 @@ from api.src.integrated_finance.pdf_reports import (
 def _fmt_val(v, is_divisa=False) -> str:
     """Formatea valores monetarios tabulares sin símbolos repetitivos de moneda."""
     if v is None or float(v or 0) == 0:
-        return "—"
+        return "0,00" if is_divisa else "0"
     if is_divisa:
         return f"{float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return f"{int(round(float(v))):,}".replace(",", ".")
@@ -496,89 +496,97 @@ def generate_cierre_sesion_individual_pdf(
         f_pyg = recon.get("fondo_pyg", 0)
         f_brl = recon.get("fondo_brl", 0)
         f_usd = recon.get("fondo_usd", 0)
+        tot_facturado = recon.get("total_cobrado_gs", 0)
+        tot_no_ef = recon.get("total_no_efectivo_gs", 0)
+        ventas_ef_total = recon.get("ventas_ef_total_gs", max(0, tot_facturado - tot_no_ef))
         drops_pyg = recon.get("drops_pyg", 0)
-        drops_brl = recon.get("drops_brl", 0)
-        drops_usd = recon.get("drops_usd", 0)
-        ef_pyg = recon.get("efectivo_pyg", 0)
-        ef_brl = recon.get("efectivo_brl", 0)
-        ef_usd = recon.get("efectivo_usd", 0)
-        esp_pyg = recon.get("esp_pyg", max(0, ef_pyg - drops_pyg))
-        esp_brl = recon.get("esp_brl", max(0, ef_brl - drops_brl))
-        esp_usd = recon.get("esp_usd", max(0, ef_usd - drops_usd))
+        drops_total = recon.get("total_drops_gs", drops_pyg)
+        esp_total = recon.get("esperado_total_gs", max(0, ventas_ef_total - drops_total))
+
         c_pyg = recon.get("contado_pyg", 0)
         c_brl = recon.get("contado_brl", 0)
         c_usd = recon.get("contado_usd", 0)
-        dif_consolidada = recon.get("diferencia_consolidada_gs", 0)
         tasa_brl = recon.get("tasa_brl", 1130)
-        tasa_usd = recon.get("tasa_usd", 7400)
+        tasa_usd = recon.get("tasa_usd", 5840.1)
+        c_brl_gs = recon.get("contado_brl_gs", c_brl * tasa_brl)
+        c_usd_gs = recon.get("contado_usd_gs", c_usd * tasa_usd)
+        c_total = recon.get("contado_total_gs", c_pyg + c_brl_gs + c_usd_gs)
 
-        arqueo_header = ["Moneda", "Ventas Efectivo", "(-) Retiros / Drops", "(=) Esperado a Rendir", "Contado Rendido", "Diferencia"]
-        arqueo_rows = [arqueo_header]
+        dif_consolidada = recon.get("diferencia_consolidada_gs", c_total - esp_total)
+        estado_cuadre = "CUADRADO" if abs(dif_consolidada) < 5000 else ("SOBRANTE" if dif_consolidada > 0 else "FALTANTE")
+        signo_cons = "+" if dif_consolidada >= 0 else ""
+        dif_color_hex = "#059669" if dif_consolidada >= 0 else "#DC2626"
 
-        dif_pyg = recon.get("diferencia_pyg", c_pyg - esp_pyg)
-        signo_p = "+" if dif_pyg >= 0 else ""
-        dif_p_color = "#059669" if dif_pyg >= 0 else "#DC2626"
-        drops_p_str = f"-{_fmt_gs(drops_pyg)}" if drops_pyg > 0 else "0 Gs."
-        arqueo_rows.append([
-            "Guaraníes (PYG)",
-            _fmt_gs(ef_pyg),
-            drops_p_str,
-            _fmt_gs(esp_pyg),
-            _fmt_gs(c_pyg),
-            Paragraph(f"<font color='{dif_p_color}'><b>{signo_p}{_fmt_gs(dif_pyg)}</b></font>", ParagraphStyle("DifP", parent=styles["Normal"], alignment=TA_RIGHT, fontSize=7.5)),
-        ])
+        style_th = ParagraphStyle("TH", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=7.5, leading=9, textColor=HexColor("#0F172A"))
+        style_tl = ParagraphStyle("TL", parent=styles["Normal"], fontSize=7, leading=8.5, textColor=HexColor("#334155"))
+        style_tr = ParagraphStyle("TR", parent=styles["Normal"], fontSize=7, leading=8.5, alignment=TA_RIGHT, fontName=FONT_BOLD, textColor=HexColor("#0F172A"))
+        style_tr_num = ParagraphStyle("TRN", parent=styles["Normal"], fontSize=7, leading=8.5, alignment=TA_RIGHT, textColor=HexColor("#0F172A"))
 
-        dif_brl = recon.get("diferencia_brl", c_brl - esp_brl)
-        signo_b = "+" if dif_brl >= 0 else ""
-        comp_brl_gs = dif_brl * tasa_brl
-        signo_cb = "+" if comp_brl_gs >= 0 else ""
-        dif_b_color = "#059669" if dif_brl >= 0 else "#DC2626"
-        drops_b_str = f"-R$ {drops_brl:.2f}" if drops_brl > 0 else "R$ 0,00"
-        arqueo_rows.append([
-            "Reales (R$)",
-            f"R$ {ef_brl:.2f}",
-            drops_b_str,
-            f"R$ {esp_brl:.2f}",
-            f"R$ {c_brl:.2f}",
-            Paragraph(f"<font color='{dif_b_color}'><b>{signo_b}R$ {dif_brl:.2f}</b><br/>({signo_cb}{comp_brl_gs:,.0f} Gs.)</font>", ParagraphStyle("DifB", parent=styles["Normal"], alignment=TA_RIGHT, fontSize=6.5, leading=8)),
-        ])
-
-        if c_usd > 0 or esp_usd > 0 or ef_usd > 0 or drops_usd > 0:
-            dif_usd = recon.get("diferencia_usd", c_usd - esp_usd)
-            signo_u = "+" if dif_usd >= 0 else ""
-            dif_u_color = "#059669" if dif_usd >= 0 else "#DC2626"
-            drops_u_str = f"-US$ {drops_usd:.2f}" if drops_usd > 0 else "US$ 0,00"
-            arqueo_rows.append([
-                "Dólares (US$)",
-                f"US$ {ef_usd:.2f}",
-                drops_u_str,
-                f"US$ {esp_usd:.2f}",
-                f"US$ {c_usd:.2f}",
-                Paragraph(f"<font color='{dif_u_color}'><b>{signo_u}US$ {dif_usd:.2f}</b></font>", ParagraphStyle("DifU", parent=styles["Normal"], alignment=TA_RIGHT, fontSize=7.5)),
-            ])
-
-        t_arq = Table(arqueo_rows, colWidths=[30 * mm, 32 * mm, 32 * mm, 32 * mm, 30 * mm, 30 * mm])
-        style_arq = [
-            ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#0F172A")),
-            ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
-            ("FONTSIZE", (0, 0), (-1, -1), 7.5),
-            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        # Tabla Izquierda: Conciliación Efectivo Esperado (100% en Guaraníes)
+        cant_tickets = recon.get("total_ventas_count", 0)
+        drops_p_str = f"-{_fmt_gs(drops_total)}" if drops_total > 0 else "0 Gs."
+        esp_rows = [
+            [Paragraph("<b>1.A CONCILIACIÓN EFECTIVO ESPERADO (₲)</b>", style_th), ""],
+            [Paragraph(f"Total Ventas Facturadas ({cant_tickets} tickets):", style_tl), Paragraph(f"{_fmt_gs(tot_facturado)}", style_tr_num)],
+            [Paragraph("(-) Medios No Efectivo (Tarjetas, QR, PIX):", style_tl), Paragraph(f"-{_fmt_gs(tot_no_ef)}", style_tr_num)],
+            [Paragraph("(=) Efectivo Total por Ventas:", style_tl), Paragraph(f"{_fmt_gs(ventas_ef_total)}", style_tr_num)],
+            [Paragraph("(-) Retiros / Cash Drops Confirmados:", style_tl), Paragraph(drops_p_str, style_tr_num)],
+            [Paragraph("<b>(=) TOTAL ESPERADO A RENDIR:</b>", style_th), Paragraph(f"<b>{_fmt_gs(esp_total)}</b>", style_tr)],
+        ]
+        t_esp = Table(esp_rows, colWidths=[58 * mm, 33 * mm])
+        t_esp.setStyle(TableStyle([
+            ("SPAN", (0, 0), (1, 0)),
+            ("BACKGROUND", (0, 0), (1, 0), HexColor("#F1F5F9")),
             ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
             ("LINEBELOW", (0, 0), (-1, 0), 1.0, HexColor("#94A3B8")),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, HexColor("#F8FAFC")]),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LINEABOVE", (0, -1), (-1, -1), 0.75, HexColor("#94A3B8")),
+            ("BACKGROUND", (0, -1), (-1, -1), HexColor("#F8FAFC")),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3.5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3.5),
+        ]))
+
+        # Tabla Derecha: Desglose Efectivo Físico Rendido a Tesorería
+        brl_entregado_str = f"R$ {_fmt_val(c_brl, is_divisa=True)}"
+        usd_entregado_str = f"US$ {_fmt_val(c_usd, is_divisa=True)}"
+        ren_rows = [
+            [Paragraph("<b>1.B DESGLOSE EFECTIVO RENDIDO A TESORERÍA</b>", style_th), ""],
+            [Paragraph("Efectivo Físico Guaraníes (PYG):", style_tl), Paragraph(f"{_fmt_gs(c_pyg)}", style_tr_num)],
+            [Paragraph(f"Efectivo Reales ({brl_entregado_str} x {_fmt_gs(tasa_brl)}):", style_tl), Paragraph(f"{_fmt_gs(c_brl_gs)}", style_tr_num)],
+            [Paragraph(f"Efectivo Dólares ({usd_entregado_str} x {_fmt_gs(tasa_usd)}):", style_tl), Paragraph(f"{_fmt_gs(c_usd_gs)}", style_tr_num)],
+            [Paragraph("<b>TOTAL RENDIDO A TESORERÍA:</b>", style_th), Paragraph(f"<b>{_fmt_gs(c_total)}</b>", style_tr)],
+            [Paragraph("<b>DIFERENCIA (Rendido - Esperado):</b>", style_th), Paragraph(f"<font color='{dif_color_hex}'><b>{signo_cons}{_fmt_gs(dif_consolidada)} ({estado_cuadre})</b></font>", style_tr)],
         ]
-        t_arq.setStyle(TableStyle(style_arq))
-        elements.append(t_arq)
+        t_ren = Table(ren_rows, colWidths=[61 * mm, 33 * mm])
+        t_ren.setStyle(TableStyle([
+            ("SPAN", (0, 0), (1, 0)),
+            ("BACKGROUND", (0, 0), (1, 0), HexColor("#F1F5F9")),
+            ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+            ("LINEBELOW", (0, 0), (-1, 0), 1.0, HexColor("#94A3B8")),
+            ("LINEABOVE", (0, -2), (-1, -2), 0.75, HexColor("#94A3B8")),
+            ("BACKGROUND", (0, -2), (-1, -1), HexColor("#F8FAFC")),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3.5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3.5),
+        ]))
+
+        t_master = Table([[t_esp, t_ren]], colWidths=[92 * mm, 94 * mm])
+        t_master.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        elements.append(t_master)
         elements.append(Spacer(1, 4))
 
         # Certificación de Fondo de Apertura en Gaveta (Custodia Permanente)
         f_cert_p = _fmt_gs(f_pyg)
-        f_cert_b = f"R$ {f_brl:.2f}"
-        f_cert_u = f"US$ {f_usd:.2f}"
+        f_cert_b = f"R$ {_fmt_val(f_brl, is_divisa=True)}"
+        f_cert_u = f"US$ {_fmt_val(f_usd, is_divisa=True)}"
         style_cert = ParagraphStyle("CertBox", parent=styles["Normal"], fontSize=7, leading=9.5, textColor=HexColor("#1E293B"))
         cert_content = [
             [
@@ -594,17 +602,15 @@ def generate_cierre_sesion_individual_pdf(
         t_cert.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F1F5F9")),
             ("BOX", (0, 0), (-1, -1), 0.75, HexColor("#94A3B8")),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
             ("LEFTPADDING", (0, 0), (-1, -1), 6),
             ("RIGHTPADDING", (0, 0), (-1, -1), 6),
         ]))
         elements.append(t_cert)
-        elements.append(Spacer(1, 6))
+        elements.append(Spacer(1, 5))
 
-        # Banner de Conciliación Consolidada (diseño apilado en Paragraph que jamás se solapa)
-        estado_cuadre = "CUADRADO" if abs(dif_consolidada) < 5000 else ("SOBRANTE" if dif_consolidada > 0 else "FALTANTE")
-        signo_cons = "+" if dif_consolidada >= 0 else ""
+        # Banner de Conciliación Consolidada
         bg_color = HexColor("#ECFDF5") if estado_cuadre == "CUADRADO" else (HexColor("#FEF3C7") if estado_cuadre == "SOBRANTE" else HexColor("#FEE2E2"))
         txt_color = HexColor("#065F46") if estado_cuadre == "CUADRADO" else (HexColor("#92400E") if estado_cuadre == "SOBRANTE" else HexColor("#991B1B"))
         txt_color_hex = "#065F46" if estado_cuadre == "CUADRADO" else ("#92400E" if estado_cuadre == "SOBRANTE" else "#991B1B")
@@ -612,9 +618,9 @@ def generate_cierre_sesion_individual_pdf(
         style_box_cell = ParagraphStyle("BoxCell", parent=styles["Normal"], alignment=TA_CENTER, leading=10)
         resumen_box = [
             [
-                Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>TOTAL FACTURADO</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{_fmt_gs(recon.get('total_cobrado_gs', 0))}</b></font>", style_box_cell),
-                Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>TOTAL ESPERADO A RENDIR</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{_fmt_gs(recon.get('esperado_total_gs', 0))}</b></font>", style_box_cell),
-                Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>TOTAL RENDIDO A TESORERÍA</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{_fmt_gs(recon.get('contado_total_gs', 0))}</b></font>", style_box_cell),
+                Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>TOTAL FACTURADO</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{_fmt_gs(tot_facturado)}</b></font>", style_box_cell),
+                Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>TOTAL ESPERADO A RENDIR</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{_fmt_gs(esp_total)}</b></font>", style_box_cell),
+                Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>TOTAL RENDIDO A TESORERÍA</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{_fmt_gs(c_total)}</b></font>", style_box_cell),
                 Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>DIFERENCIA RENDICIÓN</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{signo_cons}{_fmt_gs(dif_consolidada)}</b></font>", style_box_cell),
                 Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>DICTAMEN DE ARQUEO</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{estado_cuadre}</b></font>", style_box_cell),
             ]
@@ -623,12 +629,12 @@ def generate_cierre_sesion_individual_pdf(
         t_box.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), bg_color),
             ("BOX", (0, 0), (-1, -1), 1.0, txt_color),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ]))
         elements.append(t_box)
-        elements.append(Spacer(1, 10))
+        elements.append(Spacer(1, 8))
     else:
         monto_apertura = s.get("monto_apertura") or 0
         monto_cierre_esperado = s.get("monto_cierre_esperado") or 0
