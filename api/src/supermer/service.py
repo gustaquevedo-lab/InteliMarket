@@ -38,7 +38,7 @@ async def _get_product_name(db: AsyncSession, product_id: UUID) -> Optional[str]
 
 
 async def _get_user_name(db: AsyncSession, user_id: UUID) -> Optional[str]:
-    from api.src.users.models import User
+    from api.src.auth.models import User
     r = await db.execute(select(User.nombre).where(User.id == user_id))
     row = r.scalar_one_or_none()
     return str(row) if row else None
