@@ -216,6 +216,10 @@ class ConfirmSessionCashReceptionRequest(BaseModel):
 
 class PaymentMethodBankMappingUpdate(BaseModel):
     bank_account_id: Optional[str] = None
+    comision_porcentaje: Optional[Decimal] = None
+    comision_fija_gs: Optional[Decimal] = None
+    plazo_acreditacion_dias: Optional[int] = None
+    tipo_plazo: Optional[str] = None
     activo: Optional[bool] = True
 
 
@@ -227,6 +231,10 @@ class PaymentMethodBankMappingResponse(BaseModel):
     banco_nombre: Optional[str] = None
     numero_cuenta: Optional[str] = None
     moneda: Optional[str] = None
+    comision_porcentaje: Optional[float] = 0.0
+    comision_fija_gs: Optional[float] = 0.0
+    plazo_acreditacion_dias: Optional[int] = 1
+    tipo_plazo: Optional[str] = "habiles"
     activo: bool
 
 

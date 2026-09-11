@@ -4310,39 +4310,63 @@ async def get_sales_by_payment_method_report(
 # ── Mapeo de Medios Electrónicos a Cuentas Bancarias Corrientes ────────
 
 DEFAULT_CANALES = [
-    ("TARJETA_BANCARD", "Tarjetas Bancard POS"),
-    ("TARJETA_DINELCO", "Tarjetas Dinelco POS"),
+    ("BANCARD_DEBITO", "Bancard Tarjeta de Débito"),
+    ("BANCARD_CREDITO", "Bancard Tarjeta de Crédito"),
     ("BANCARD_QR", "Cobros QR Bancard"),
+    ("BANCARD_PIX", "Bancard PIX"),
+    ("DINELCO_DEBITO", "Dinelco Tarjeta de Débito"),
+    ("DINELCO_CREDITO", "Dinelco Tarjeta de Crédito"),
     ("DINELCO_QR", "Cobros QR Dinelco"),
-    ("PIX", "PIX Brasil (Plug Pay)"),
-    ("TRANSFERENCIA", "Transferencias SIPAP"),
+    ("DINELCO_PIX", "Dinelco PIX"),
+    ("PLUGPAY_PIX", "Plug Pay PIX Brasil"),
+    ("PLUGPAY_CREDITO", "Plug Pay Crédito Parcelado"),
+    ("TRANSFERENCIA", "Transferencias Bancarias SIPAP"),
 ]
 
 
 async def list_payment_method_bank_mappings(db: AsyncSession, company_id: str) -> list[dict]:
     """Lista todos los mapeos de medios de pago a cuentas bancarias corrientes.
-    Si no existen aún para la empresa, los inicializa con los canales predeterminados."""
+    Sincroniza y auto-inicializa cualquier canal oficial faltante para la empresa."""
     cid = uuid.UUID(company_id)
 
     query = (
         select(PaymentMethodBankMapping, BankAccount)
         .outerjoin(BankAccount, BankAccount.id == PaymentMethodBankMapping.bank_account_id)
         .where(PaymentMethodBankMapping.company_id == cid)
-        .order_by(PaymentMethodBankMapping.canal_key.asc())
+        .order_by(PaymentMethodBankMapping.canal_label.asc())
     )
     result = await db.execute(query)
     rows = result.all()
 
-    if not rows:
-        for k, lbl in DEFAULT_CANALES:
-            db.add(PaymentMethodBankMapping(company_id=cid, canal_key=k, canal_label=lbl, activo=True))
-        await db.commit()
+    existing_keys = {m.canal_key for m, _ in rows}
+    needs_commit = False
+    for k, lbl in DEFAULT_CANALES:
+        if k not in existing_keys:
+            # defaults coherentes por canal: D+0 para SIPAP/PIX, D+1 para debito/QR, D+2 para credito
+            dias_def = 0 if ("TRANSFERENCIA" in k or "PIX" in k) else (2 if "CREDITO" in k else 1)
+            pct_def = Decimal("2.80") if "CREDITO" in k else (Decimal("1.50") if "DEBITO" in k else (Decimal("0.80") if "QR" in k else Decimal("1.20")))
+            db.add(PaymentMethodBankMapping(
+                company_id=cid,
+                canal_key=k,
+                canal_label=lbl,
+                comision_porcentaje=pct_def,
+                comision_fija_gs=Decimal("0"),
+                plazo_acreditacion_dias=dias_def,
+                tipo_plazo="habiles",
+                activo=True,
+            ))
+            needs_commit = True
 
+    if needs_commit:
+        await db.commit()
         result = await db.execute(query)
         rows = result.all()
 
     out = []
     for mapping, bank in rows:
+        # Cheques no ingresan a linkeo bancario automático directo (van a Bóveda Central)
+        if mapping.canal_key in ["CHEQUES", "VALES"]:
+            continue
         out.append({
             "id": str(mapping.id),
             "canal_key": mapping.canal_key,
@@ -4351,6 +4375,10 @@ async def list_payment_method_bank_mappings(db: AsyncSession, company_id: str) -
             "banco_nombre": bank.banco if bank else None,
             "numero_cuenta": bank.numero_cuenta if bank else None,
             "moneda": bank.moneda if bank else None,
+            "comision_porcentaje": float(mapping.comision_porcentaje or 0),
+            "comision_fija_gs": float(mapping.comision_fija_gs or 0),
+            "plazo_acreditacion_dias": int(mapping.plazo_acreditacion_dias if mapping.plazo_acreditacion_dias is not None else 1),
+            "tipo_plazo": mapping.tipo_plazo or "habiles",
             "activo": mapping.activo,
         })
     return out
@@ -4362,8 +4390,12 @@ async def update_payment_method_bank_mapping(
     canal_key: str,
     bank_account_id: str | None,
     activo: bool = True,
+    comision_porcentaje: Decimal | None = None,
+    comision_fija_gs: Decimal | None = None,
+    plazo_acreditacion_dias: int | None = None,
+    tipo_plazo: str | None = None,
 ) -> dict:
-    """Actualiza o asocia la cuenta bancaria de destino para un medio de pago electrónico."""
+    """Actualiza la cuenta bancaria, comisiones de procesadora y plazo de liquidación de un medio de pago."""
     cid = uuid.UUID(company_id)
     bid = uuid.UUID(bank_account_id) if bank_account_id else None
 
@@ -4381,12 +4413,24 @@ async def update_payment_method_bank_mapping(
             canal_key=canal_key,
             canal_label=lbl,
             bank_account_id=bid,
+            comision_porcentaje=comision_porcentaje or Decimal("0.00"),
+            comision_fija_gs=comision_fija_gs or Decimal("0"),
+            plazo_acreditacion_dias=plazo_acreditacion_dias if plazo_acreditacion_dias is not None else 1,
+            tipo_plazo=tipo_plazo or "habiles",
             activo=activo,
         )
         db.add(mapping)
     else:
         mapping.bank_account_id = bid
         mapping.activo = activo
+        if comision_porcentaje is not None:
+            mapping.comision_porcentaje = comision_porcentaje
+        if comision_fija_gs is not None:
+            mapping.comision_fija_gs = comision_fija_gs
+        if plazo_acreditacion_dias is not None:
+            mapping.plazo_acreditacion_dias = plazo_acreditacion_dias
+        if tipo_plazo is not None:
+            mapping.tipo_plazo = tipo_plazo
         mapping.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
@@ -4409,6 +4453,10 @@ async def update_payment_method_bank_mapping(
         "banco_nombre": banco_nombre,
         "numero_cuenta": num_cuenta,
         "moneda": moneda,
+        "comision_porcentaje": float(mapping.comision_porcentaje or 0),
+        "comision_fija_gs": float(mapping.comision_fija_gs or 0),
+        "plazo_acreditacion_dias": int(mapping.plazo_acreditacion_dias if mapping.plazo_acreditacion_dias is not None else 1),
+        "tipo_plazo": mapping.tipo_plazo or "habiles",
         "activo": mapping.activo,
     }
 
@@ -4567,10 +4615,32 @@ async def incorporate_session_to_vault_and_banks(
     bank_transactions_creadas = []
     fecha_trx = session_obj.fecha_cierre.date() if session_obj.fecha_cierre else date.today()
 
+    def _calcular_fecha_acreditacion(f_base: date, dias: int, tipo: str) -> date:
+        if dias <= 0:
+            return f_base
+        res = f_base
+        if (tipo or "habiles").lower() == "corridos":
+            return res + timedelta(days=dias)
+        # Días hábiles (Lunes a Viernes)
+        agregados = 0
+        while agregados < dias:
+            res += timedelta(days=1)
+            if res.weekday() < 5:
+                agregados += 1
+        return res
+
     for canal_key, map_info in mapping_by_key.items():
         v_info = summary_methods.get(canal_key, {})
         m_gs = Decimal(str(v_info.get("monto_gs") or 0))
         if m_gs > 0:
+            comis_pct = Decimal(str(map_info.get("comision_porcentaje") or 0))
+            comis_fija = Decimal(str(map_info.get("comision_fija_gs") or 0))
+            retencion_gs = round(m_gs * (comis_pct / Decimal("100"))) + comis_fija
+            monto_neto_gs = max(Decimal("0"), m_gs - retencion_gs)
+            plazo_d = int(map_info.get("plazo_acreditacion_dias") or 1)
+            tipo_plz = map_info.get("tipo_plazo") or "habiles"
+            fecha_acred = _calcular_fecha_acreditacion(fecha_trx, plazo_d, tipo_plz)
+
             ref_code = f"ARQUEO-{str(sid)[:8]}-{canal_key}"
             # Evitar duplicar BankTransaction si ya fue asentado
             chk_bt = await db.execute(
@@ -4580,14 +4650,15 @@ async def incorporate_session_to_vault_and_banks(
                 )
             )
             if not chk_bt.scalar_one_or_none():
+                desc_comis = f" (Bruto: {m_gs:,.0f} Gs. | Comis. {comis_pct:.2f}%: -{retencion_gs:,.0f} Gs.)" if retencion_gs > 0 else ""
                 bt = BankTransaction(
                     company_id=cid,
                     bank_account_id=uuid.UUID(map_info["bank_account_id"]),
-                    fecha=fecha_trx,
+                    fecha=fecha_acred,
                     tipo="ingreso",
-                    monto=m_gs,
+                    monto=monto_neto_gs,
                     moneda=map_info.get("moneda") or "PYG",
-                    descripcion=f"Recaudación {map_info['canal_label']} Turno {session_obj.cajero_nombre} ({reg.nombre})",
+                    descripcion=f"Recaudación {map_info['canal_label']}{desc_comis} Turno {session_obj.cajero_nombre} ({reg.nombre}) - Acred. est.: {fecha_acred.strftime('%d/%m/%Y')}",
                     referencia=ref_code,
                     contraparte=map_info["canal_label"],
                     conciliado=False,
@@ -4598,7 +4669,10 @@ async def incorporate_session_to_vault_and_banks(
                     "banco": map_info.get("banco_nombre"),
                     "cuenta": map_info.get("numero_cuenta"),
                     "canal": map_info["canal_label"],
-                    "monto_gs": float(m_gs),
+                    "monto_bruto_gs": float(m_gs),
+                    "comision_gs": float(retencion_gs),
+                    "monto_neto_gs": float(monto_neto_gs),
+                    "fecha_acreditacion": fecha_acred.isoformat(),
                     "referencia": ref_code,
                 })
 

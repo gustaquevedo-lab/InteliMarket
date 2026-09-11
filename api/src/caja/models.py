@@ -251,6 +251,10 @@ class PaymentMethodBankMapping(Base):
     canal_key = Column(String(50), nullable=False)  # TARJETA_BANCARD, TARJETA_DINELCO, BANCARD_QR, DINELCO_QR, PIX, TRANSFERENCIA
     canal_label = Column(String(100), nullable=False)
     bank_account_id = Column(UUID(as_uuid=True), ForeignKey("bank_accounts.id"), nullable=True)
+    comision_porcentaje = Column(Numeric(6, 4), default=0.0000)  # ej: 1.50% de comision procesadora
+    comision_fija_gs = Column(Numeric(12, 0), default=0)         # costo fijo por transaccion en Gs
+    plazo_acreditacion_dias = Column(Integer, default=1)         # ej: 0 (D+0), 1 (D+1), 2 (D+2), 30 (D+30)
+    tipo_plazo = Column(String(20), default="habiles")           # habiles o corridos
     activo = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

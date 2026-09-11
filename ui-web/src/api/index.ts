@@ -1258,9 +1258,28 @@ export const api = {
       delete: (sessionId: string, adjustmentId: string) => client.delete<any>(`/v1/cash-sessions/${sessionId}/punteo/ajustes/${adjustmentId}`),
     },
     bankMappings: {
-      list: () => client.get<{ id: string; canal_key: string; canal_label: string; bank_account_id?: string | null; banco_nombre?: string | null; numero_cuenta?: string | null; moneda?: string | null; activo: boolean }[]>("/v1/caja/config/bank-mappings"),
-      update: (canalKey: string, data: { bank_account_id?: string | null; activo?: boolean }) =>
-        client.put<any>(`/v1/caja/config/bank-mappings/${canalKey}`, data),
+      list: () => client.get<{
+        id: string
+        canal_key: string
+        canal_label: string
+        bank_account_id?: string | null
+        banco_nombre?: string | null
+        numero_cuenta?: string | null
+        moneda?: string | null
+        comision_porcentaje?: number
+        comision_fija_gs?: number
+        plazo_acreditacion_dias?: number
+        tipo_plazo?: string
+        activo: boolean
+      }[]>("/v1/caja/config/bank-mappings"),
+      update: (canalKey: string, data: {
+        bank_account_id?: string | null
+        comision_porcentaje?: number
+        comision_fija_gs?: number
+        plazo_acreditacion_dias?: number
+        tipo_plazo?: string
+        activo?: boolean
+      }) => client.put<any>(`/v1/caja/config/bank-mappings/${canalKey}`, data),
     },
     shortageConfig: {
       get: () => client.get<{ umbral_aprobacion_gs: number; requerir_aprobacion_siempre: boolean; permitir_cuotas: boolean; max_cuotas: number }>("/v1/caja/config/shortages"),

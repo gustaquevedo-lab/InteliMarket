@@ -51,6 +51,10 @@ interface BankMappingItem {
   banco_nombre?: string | null
   numero_cuenta?: string | null
   moneda?: string | null
+  comision_porcentaje?: number
+  comision_fija_gs?: number
+  plazo_acreditacion_dias?: number
+  tipo_plazo?: string
   activo: boolean
 }
 
@@ -392,6 +396,7 @@ export default function CajaPage() {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
   const [bankMappingsLoading, setBankMappingsLoading] = useState(false)
   const [savingMappingKey, setSavingMappingKey] = useState<string | null>(null)
+  const [editingMappings, setEditingMappings] = useState<Record<string, Partial<BankMappingItem>>>({})
 
   // ── Faltantes & SueldOK ──
   const [shortageConfig, setShortageConfig] = useState<ShortageConfigData | null>(null)
@@ -796,14 +801,26 @@ export default function CajaPage() {
     }
   }
 
-  const handleUpdateBankMapping = async (canalKey: string, bankAccountId: string | null, activo: boolean) => {
+  const handleUpdateBankMapping = async (
+    canalKey: string,
+    bankAccountId: string | null,
+    activo: boolean,
+    comisionPorcentaje?: number,
+    comisionFijaGs?: number,
+    plazoAcreditacionDias?: number,
+    tipoPlazo?: string,
+  ) => {
     setSavingMappingKey(canalKey)
     try {
       await api.caja.bankMappings.update(canalKey, {
         bank_account_id: bankAccountId || null,
         activo,
+        comision_porcentaje: comisionPorcentaje,
+        comision_fija_gs: comisionFijaGs,
+        plazo_acreditacion_dias: plazoAcreditacionDias,
+        tipo_plazo: tipoPlazo,
       })
-      toast.success("Mapeo Bancario Actualizado", `Canal ${canalKey} vinculado exitosamente.`)
+      toast.success("Mapeo Bancario Actualizado", `Canal ${canalKey} configurado exitosamente.`)
       fetchBankMappings()
     } catch (err: any) {
       toast.error("Error al actualizar mapeo", err?.message)
@@ -2855,13 +2872,13 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 </div>
                 <div>
                   <h2 className="text-lg font-black text-white flex items-center gap-2">
-                    Linkeo Bancario de Medios de Pago Electrónico
+                    Linkeo Bancario, Comisiones y Liquidación de Procesadoras
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                       Dinámico & Configurable
                     </span>
                   </h2>
                   <p className="text-xs text-slate-300">
-                    Asociá cada canal digital de cobro (POS Bancard, QR, POS Dinelco, PIX, Transferencias) a su cuenta bancaria correspondiente para conciliación automática inmediata.
+                    Asociá cada canal digital de cobro (POS Bancard, POS Dinelco, Pagos QR, PIX Brasil, SIPAP) a su cuenta bancaria de destino, fijá la comisión de la procesadora y el plazo de liquidación (D+N) para asientos bancarios netos y coherentes.
                   </p>
                 </div>
               </div>
@@ -2875,11 +2892,31 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               </button>
             </div>
 
-            {/* Aviso informativo de Extra Club */}
-            <div className="mt-4 p-3 rounded-xl bg-indigo-900/40 border border-indigo-500/30 text-xs text-indigo-200 flex items-start gap-2.5">
-              <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-              <div>
-                <b className="font-semibold text-white">Extra Club Mayorista:</b> Las ventas y vales de crédito de clientes fidelizados ya se registran automáticamente en el módulo de Cuentas Corrientes de Clientes (<code className="text-amber-300">credit_accounts</code>), sin requerir cuenta bancaria intermediaria.
+            {/* Avisos Operativos de Extra Club y Cheques en Bóveda */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+              {/* Tarjeta Cheques Físicos en Bóveda */}
+              <div className="p-3.5 rounded-xl bg-gradient-to-r from-amber-950/40 via-slate-900 to-amber-950/20 border border-amber-500/30 text-xs text-amber-200 flex items-start gap-2.5">
+                <Landmark className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <b className="font-semibold text-white flex items-center gap-1.5">
+                    <span>Cheques y Vales Físicos (Bóveda Central):</span>
+                    <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300">Sin linkeo directo</span>
+                  </b>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    Los cheques no se acreditan automáticamente a una cuenta bancaria fija. Ingresan formalmente a <b>Bóveda Central</b> en custodia física, y el <b>Tesorero dispone su depósito específico</b> mediante boleta de depósito bancario.
+                  </p>
+                </div>
+              </div>
+
+              {/* Tarjeta Extra Club */}
+              <div className="p-3.5 rounded-xl bg-gradient-to-r from-indigo-950/40 via-slate-900 to-indigo-950/20 border border-indigo-500/30 text-xs text-indigo-200 flex items-start gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <b className="font-semibold text-white">Extra Club Mayorista (Fidelización):</b>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    Las ventas a crédito y vales fidelizados se imputan de forma directa al módulo de Cuentas Corrientes de Clientes (<code className="text-amber-300 font-mono text-[10px]">credit_accounts</code>), sin intermediación bancaria automática.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -2891,10 +2928,21 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               <span>Cargando canales y cuentas bancarias...</span>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {bankMappings.map((m) => {
-                const currentAcc = bankAccounts.find(b => b.id === m.bank_account_id)
+                const draft = editingMappings[m.canal_key] || {}
+                const currentAccountId = draft.bank_account_id !== undefined ? draft.bank_account_id : (m.bank_account_id || null)
+                const currentAcc = bankAccounts.find(b => b.id === currentAccountId)
+                const currentComision = draft.comision_porcentaje !== undefined ? draft.comision_porcentaje : (m.comision_porcentaje || 0)
+                const currentPlazo = draft.plazo_acreditacion_dias !== undefined ? draft.plazo_acreditacion_dias : (m.plazo_acreditacion_dias !== undefined ? m.plazo_acreditacion_dias : 1)
+                const currentTipoPlazo = draft.tipo_plazo !== undefined ? draft.tipo_plazo : (m.tipo_plazo || "habiles")
+                const currentActivo = draft.activo !== undefined ? draft.activo : m.activo
                 const isSaving = savingMappingKey === m.canal_key
+
+                // Cálculo simulado sobre 1.000.000 Gs
+                const baseSimulacion = 1000000
+                const retencionSimulada = Math.round(baseSimulacion * (currentComision / 100))
+                const netoSimulado = baseSimulacion - retencionSimulada
 
                 return (
                   <div
@@ -2902,6 +2950,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     className="card p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm hover:border-indigo-500/40 transition-all flex flex-col justify-between space-y-4"
                   >
                     <div>
+                      {/* Cabecera del canal */}
                       <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
                         <div className="flex items-center gap-2.5">
                           <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-indigo-500">
@@ -2917,24 +2966,29 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           </div>
                         </div>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                          m.activo
+                          currentActivo
                             ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
                             : "bg-slate-500/10 text-slate-500 border border-slate-500/20"
                         }`}>
-                          {m.activo ? "Activo" : "Inactivo"}
+                          {currentActivo ? "Activo" : "Inactivo"}
                         </span>
                       </div>
 
-                      <div className="space-y-3 pt-3">
+                      {/* Controles de Configuración */}
+                      <div className="space-y-3.5 pt-3">
+                        {/* Selector de Cuenta Bancaria */}
                         <div>
                           <label className="input-label text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
                             Cuenta Bancaria Destino:
                           </label>
                           <select
-                            value={m.bank_account_id || ""}
+                            value={currentAccountId || ""}
                             onChange={(e) => {
                               const newId = e.target.value || null
-                              handleUpdateBankMapping(m.canal_key, newId, m.activo)
+                              setEditingMappings(prev => ({
+                                ...prev,
+                                [m.canal_key]: { ...prev[m.canal_key], bank_account_id: newId }
+                              }))
                             }}
                             disabled={isSaving}
                             className="input-field text-xs bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700"
@@ -2950,7 +3004,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
 
                         {/* Detalle visual de la cuenta */}
                         {currentAcc ? (
-                          <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 text-[11px] text-emerald-800 dark:text-emerald-300 space-y-1">
+                          <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 text-[11px] text-emerald-800 dark:text-emerald-300 space-y-0.5">
                             <div className="flex items-center justify-between font-bold">
                               <span>{currentAcc.banco}</span>
                               <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-emerald-200/50 dark:bg-emerald-900/50">
@@ -2962,33 +3016,169 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             </div>
                           </div>
                         ) : (
-                          <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 text-[11px] text-amber-700 dark:text-amber-400 flex items-center gap-2">
+                          <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 text-[10px] text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
                             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                             <span>Sin cuenta asignada: Las ventas en este canal no generarán transacciones bancarias automáticas.</span>
                           </div>
                         )}
+
+                        {/* Fila: Comisión % y Plazo D+N */}
+                        <div className="grid grid-cols-2 gap-2.5 pt-1">
+                          {/* Input Comisión % */}
+                          <div>
+                            <label className="input-label text-[10px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                              % Comisión Procesadora:
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                max="15"
+                                value={currentComision}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0
+                                  setEditingMappings(prev => ({
+                                    ...prev,
+                                    [m.canal_key]: { ...prev[m.canal_key], comision_porcentaje: val }
+                                  }))
+                                }}
+                                disabled={isSaving}
+                                className="input-field text-xs font-mono pr-7 bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700"
+                              />
+                              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                                %
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Selector Plazo de Acreditación */}
+                          <div>
+                            <label className="input-label text-[10px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                              Plazo Liquidación:
+                            </label>
+                            <select
+                              value={currentPlazo}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 0
+                                setEditingMappings(prev => ({
+                                  ...prev,
+                                  [m.canal_key]: { ...prev[m.canal_key], plazo_acreditacion_dias: val }
+                                }))
+                              }}
+                              disabled={isSaving}
+                              className="input-field text-xs font-mono bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700"
+                            >
+                              <option value="0">D+0 (Mismo día)</option>
+                              <option value="1">D+1 (24 horas)</option>
+                              <option value="2">D+2 (48 horas)</option>
+                              <option value="3">D+3 (72 horas)</option>
+                              <option value="5">D+5 (5 días)</option>
+                              <option value="15">D+15 (15 días)</option>
+                              <option value="30">D+30 (30 días)</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Tipo de Cómputo: Hábiles vs Corridos */}
+                        <div className="flex items-center justify-between text-[11px] px-1">
+                          <span className="text-slate-500 dark:text-slate-400 font-medium">Cómputo de Plazo:</span>
+                          <div className="flex items-center gap-2">
+                            <label className="flex items-center gap-1 cursor-pointer">
+                              <input
+                                type="radio"
+                                name={`tipo_plazo_${m.canal_key}`}
+                                value="habiles"
+                                checked={currentTipoPlazo === "habiles"}
+                                onChange={() => setEditingMappings(prev => ({
+                                  ...prev,
+                                  [m.canal_key]: { ...prev[m.canal_key], tipo_plazo: "habiles" }
+                                }))}
+                                disabled={isSaving}
+                                className="text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span className="text-[10px] text-slate-700 dark:text-slate-300 font-medium">Hábiles</span>
+                            </label>
+                            <label className="flex items-center gap-1 cursor-pointer">
+                              <input
+                                type="radio"
+                                name={`tipo_plazo_${m.canal_key}`}
+                                value="corridos"
+                                checked={currentTipoPlazo === "corridos"}
+                                onChange={() => setEditingMappings(prev => ({
+                                  ...prev,
+                                  [m.canal_key]: { ...prev[m.canal_key], tipo_plazo: "corridos" }
+                                }))}
+                                disabled={isSaving}
+                                className="text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span className="text-[10px] text-slate-700 dark:text-slate-300 font-medium">Corridos</span>
+                            </label>
+                          </div>
+                        </div>
+
+                        {/* Simulador Dinámico de Acreditación Neta */}
+                        <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 space-y-1 text-[10px]">
+                          <div className="flex items-center justify-between font-semibold text-slate-600 dark:text-slate-300">
+                            <span>Simulación por ₲ 1.000.000:</span>
+                            <span className="font-mono text-indigo-500 dark:text-indigo-400">
+                              D+{currentPlazo} ({currentTipoPlazo})
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                            <span>Comisión ({currentComision}%):</span>
+                            <span className="font-mono text-rose-500 font-bold">-₲ {formatPYG(retencionSimulada)}</span>
+                          </div>
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-emerald-400">
+                            <span>Neto Estimado en Banco:</span>
+                            <span className="font-mono text-xs">₲ {formatPYG(netoSimulado)}</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
+                    {/* Footer: Habilitar y Guardar */}
                     <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
                       <label className="flex items-center gap-2 cursor-pointer">
                         <input
                           type="checkbox"
-                          checked={m.activo}
-                          onChange={(e) => handleUpdateBankMapping(m.canal_key, m.bank_account_id || null, e.target.checked)}
+                          checked={currentActivo}
+                          onChange={(e) => {
+                            setEditingMappings(prev => ({
+                              ...prev,
+                              [m.canal_key]: { ...prev[m.canal_key], activo: e.target.checked }
+                            }))
+                          }}
                           disabled={isSaving}
                           className="rounded border-slate-600 text-indigo-600 focus:ring-indigo-500"
                         />
                         <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                          Habilitar Canal
+                          Habilitado
                         </span>
                       </label>
-                      {isSaving && (
-                        <div className="flex items-center gap-1 text-[11px] text-indigo-400 font-bold">
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                          <span>Guardando...</span>
-                        </div>
-                      )}
+
+                      <button
+                        onClick={() => handleUpdateBankMapping(
+                          m.canal_key,
+                          currentAccountId,
+                          currentActivo,
+                          currentComision,
+                          0,
+                          currentPlazo,
+                          currentTipoPlazo
+                        )}
+                        disabled={isSaving}
+                        className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                      >
+                        {isSaving ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            <span>Guardando...</span>
+                          </>
+                        ) : (
+                          <span>Guardar Parámetros</span>
+                        )}
+                      </button>
                     </div>
                   </div>
                 )

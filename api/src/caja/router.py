@@ -805,7 +805,7 @@ async def list_bank_mappings(
     return await service.list_payment_method_bank_mappings(db, user["company_id"])
 
 
-@router.put("/caja/config/bank-mappings/{canal_key}")
+@router.put("/caja/config/bank-mappings/{canal_key}", response_model=PaymentMethodBankMappingResponse)
 async def update_bank_mapping(
     canal_key: str,
     body: PaymentMethodBankMappingUpdate,
@@ -818,6 +818,10 @@ async def update_bank_mapping(
         canal_key,
         body.bank_account_id,
         body.activo if body.activo is not None else True,
+        comision_porcentaje=body.comision_porcentaje,
+        comision_fija_gs=body.comision_fija_gs,
+        plazo_acreditacion_dias=body.plazo_acreditacion_dias,
+        tipo_plazo=body.tipo_plazo,
     )
 
 
