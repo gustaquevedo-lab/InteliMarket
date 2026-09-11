@@ -21,7 +21,23 @@ import {
 } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG, formatDateTime, getTodayAsuncion, getAsuncionDateStr } from "../../utils/format"
+import { formatPYG, formatDateTime, getTodayAsuncion, getAsuncionDateStr, parseAsuncionDateStr } from "../../utils/format"
+
+// Sesiones del sistema legacy anterior (Supermer) o pruebas accidentales
+const LEGACY_SESSION_IDS = new Set([
+  "b3cf7fa8-dba3-4859-90d6-4bbac9e72f1c", // Liz Caja 2 legacy 31/08
+  "f8217bfa-484b-419f-a973-f627ad328d99", // Nilda Caja 2 legacy 31/08
+  "6552392f-6844-4ba7-9cce-ca792b52a41b", // Tomasa Caja 4 legacy 31/08
+  "e93a5246-d1de-4de2-b016-b9bb86de0a15", // Zunilda Caja 2 legacy 31/08
+  "0fca771a-860a-4e80-9513-d8ada4f7043d", // Tomasa Caja 2 apertura 29 seg
+])
+
+// Únicas cajas de producción oficiales de InteliMarket el 31/08/2026
+const INTELIMARKET_31_08_SESSION_IDS = new Set([
+  "c64d4688-9c20-45a6-8d45-97a4b6fcca7e", // Zunilda Rodriguez (Caja 3)
+  "914e7eaf-23c2-49e6-9ed0-6fa838b9d891", // Evelin Herrero (Caja 10 - Esquina)
+  "81225f58-1c20-43b6-9e28-4c5bc0ce6be1", // Tomasa (Caja 2)
+])
 
 const downloadPdf = (endpoint: string, filename: string) => downloadAuthenticated(endpoint, undefined, filename)
 
@@ -818,20 +834,37 @@ export default function CajaPage() {
   )
 
   const filteredSessions = sessions.filter(s =>
-    !search || (s.cajero_nombre || "").toLowerCase().includes(search.toLowerCase()) || (s.estado || "").toLowerCase().includes(search.toLowerCase())
+    !LEGACY_SESSION_IDS.has(s.id) &&
+    (!search || (s.cajero_nombre || "").toLowerCase().includes(search.toLowerCase()) || (s.estado || "").toLowerCase().includes(search.toLowerCase()))
   )
 
   const cajerosDisponibles = Array.from(
     new Set(
       [
-        ...historial.map(s => getCajero(s)),
-        ...sessions.map(s => s.cajero_nombre || ""),
+        ...historial.filter(s => !LEGACY_SESSION_IDS.has(s.id)).map(s => getCajero(s)),
+        ...sessions.filter(s => !LEGACY_SESSION_IDS.has(s.id)).map(s => s.cajero_nombre || ""),
         ...cajeroPerformance.map(c => c.cajero_nombre),
       ].filter(n => n && n !== "Cajero Asignado" && n !== "—")
     )
   ).sort()
 
   const filteredHistorial = historial.filter(s => {
+    // 1. Excluir sesiones del sistema legacy anterior o pruebas canceladas
+    if (LEGACY_SESSION_IDS.has(s.id)) return false
+
+    // 2. Extraer fecha local America/Asuncion (cumplimiento estricto Regla #5)
+    const sessionDate = parseAsuncionDateStr(s.fecha_apertura || s.fecha_cierre)
+    const cierreDate = parseAsuncionDateStr(s.fecha_cierre)
+
+    // 3. Regla estricta 31/08: Si la fecha es 31/08/2026, únicamente mostrar
+    // las 3 cajas oficiales de producción de InteliMarket (Zunilda, Evelin, Tomasa).
+    // Sesiones de meses anteriores cerradas de forma masiva o cajas de prueba quedan excluidas.
+    if (sessionDate === "2026-08-31" || cierreDate === "2026-08-31") {
+      if (!INTELIMARKET_31_08_SESSION_IDS.has(s.id)) {
+        return false
+      }
+    }
+
     const cajeroStr = getCajero(s).toLowerCase()
     const fechaStr = (s.fecha_cierre || s.fecha_apertura || "")
     const searchLower = search.toLowerCase()
@@ -846,18 +879,12 @@ export default function CajaPage() {
 
     let matchesFechaDesde = true
     if (historialFechaDesde) {
-      const fechaBase = s.fecha_cierre || s.fecha_apertura
-      if (fechaBase) {
-        matchesFechaDesde = fechaBase.slice(0, 10) >= historialFechaDesde
-      }
+      matchesFechaDesde = sessionDate ? sessionDate >= historialFechaDesde : true
     }
 
     let matchesFechaHasta = true
     if (historialFechaHasta) {
-      const fechaBase = s.fecha_cierre || s.fecha_apertura
-      if (fechaBase) {
-        matchesFechaHasta = fechaBase.slice(0, 10) <= historialFechaHasta
-      }
+      matchesFechaHasta = sessionDate ? sessionDate <= historialFechaHasta : true
     }
 
     return matchesSearch && matchesCajero && matchesFechaDesde && matchesFechaHasta

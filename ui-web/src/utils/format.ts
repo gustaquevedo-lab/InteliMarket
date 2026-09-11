@@ -86,6 +86,17 @@ export function getAsuncionDateStr(d: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Asuncion" }).format(d)
 }
 
+export function parseAsuncionDateStr(date: string | Date | null | undefined): string {
+  if (!date) return ""
+  try {
+    const d = typeof date === "string" ? new Date(date) : date
+    if (isNaN(d.getTime())) return ""
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Asuncion" }).format(d)
+  } catch {
+    return ""
+  }
+}
+
 
 export function formatNumber(value: number | string | null | undefined, decimals = 0): string {
   if (value == null) return "0"

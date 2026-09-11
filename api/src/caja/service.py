@@ -54,6 +54,22 @@ PAYMENT_CHANNEL_DEFINITIONS = [
 
 PAYMENT_CHANNEL_MAP = {c[0]: c for c in PAYMENT_CHANNEL_DEFINITIONS}
 
+# Sesiones históricas del sistema legacy anterior (Supermer) o pruebas accidentales
+# que deben excluirse estrictamente del historial de cierres de InteliMarket
+LEGACY_SESSION_IDS = [
+    uuid.UUID("b3cf7fa8-dba3-4859-90d6-4bbac9e72f1c"),  # Liz Caja 2 legacy 31/08
+    uuid.UUID("f8217bfa-484b-419f-a973-f627ad328d99"),  # Nilda Caja 2 legacy 31/08
+    uuid.UUID("6552392f-6844-4ba7-9cce-ca792b52a41b"),  # Tomasa Caja 4 legacy 31/08
+    uuid.UUID("e93a5246-d1de-4de2-b016-b9bb86de0a15"),  # Zunilda Caja 2 legacy 31/08
+    uuid.UUID("0fca771a-860a-4e80-9513-d8ada4f7043d"),  # Tomasa Caja 2 apertura 29 seg cancelada
+]
+
+INTELIMARKET_31_08_SESSION_IDS = [
+    uuid.UUID("c64d4688-9c20-45a6-8d45-97a4b6fcca7e"),  # Zunilda Rodriguez (Caja 3)
+    uuid.UUID("914e7eaf-23c2-49e6-9ed0-6fa838b9d891"),  # Evelin Herrero (Caja 10 - Esquina)
+    uuid.UUID("81225f58-1c20-43b6-9e28-4c5bc0ce6be1"),  # Tomasa (Caja 2)
+]
+
 
 def classify_payment_channel(
     forma_pago: str | None,
@@ -236,7 +252,8 @@ async def list_sessions(
     # de cajero, montos de apertura/cierre, estado) -- el unico filtro de
     # tenant en este endpoint faltaba por completo.
     query = select(CashSession).join(CashRegister, CashRegister.id == CashSession.register_id).where(
-        CashRegister.company_id == uuid.UUID(company_id)
+        CashRegister.company_id == uuid.UUID(company_id),
+        CashSession.id.not_in(LEGACY_SESSION_IDS),
     )
     if register_id:
         query = query.where(CashSession.register_id == uuid.UUID(register_id))
@@ -1076,7 +1093,8 @@ async def list_sessions_with_totals(
     """Sesiones con el monto realmente cobrado (ventas confirmadas vinculadas
     a la sesion real) y conciliación consistente."""
     query = select(CashSession).join(CashRegister, CashRegister.id == CashSession.register_id).where(
-        CashRegister.company_id == uuid.UUID(company_id)
+        CashRegister.company_id == uuid.UUID(company_id),
+        CashSession.id.not_in(LEGACY_SESSION_IDS),
     )
     if register_id:
         query = query.where(CashSession.register_id == uuid.UUID(register_id))
@@ -1087,7 +1105,7 @@ async def list_sessions_with_totals(
     if cajero_nombre:
         query = query.where(CashSession.cajero_nombre.ilike(f"%{cajero_nombre.strip()}%"))
     if fecha_desde:
-        query = query.where(func.coalesce(CashSession.fecha_cierre, CashSession.fecha_apertura) >= fecha_desde)
+        query = query.where(CashSession.fecha_apertura >= fecha_desde)
     if fecha_hasta:
         query = query.where(CashSession.fecha_apertura <= fecha_hasta)
     if search and search.strip():
