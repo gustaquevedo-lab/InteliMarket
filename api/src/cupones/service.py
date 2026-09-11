@@ -17,6 +17,7 @@ from google import genai
 from google.genai import types
 
 from api.src.config import settings
+from api.src.db import async_session_factory
 from api.src.cupones.models import CuponCliente, CuponTicket, CuponTicketItem, CuponConfig, SorteoCampana
 from api.src.cupones.schemas import (
     RegistrarCuponRequest, CuponClienteOut, CuponConfigUpdate,
@@ -648,7 +649,7 @@ async def sync_single_ticket(db: AsyncSession, company_id: UUID, ticket_id: UUID
         return {"success": False, "mensaje": "No se encontró una venta que coincida con el número de ticket"}
 
 
-async def run_sync_batch(db: AsyncSession, company_id: UUID, limite: int = 50, delay_ms: int = 200, force: bool = False):
+async def run_sync_batch(db_unused: Any, company_id: UUID, limite: int = 50, delay_ms: int = 200, force: bool = False):
     global _sync_batch_state
     if _sync_batch_state["activo"] and not force:
         raise ValueError("Ya hay un proceso de sincronización en ejecución")
@@ -666,31 +667,32 @@ async def run_sync_batch(db: AsyncSession, company_id: UUID, limite: int = 50, d
     }
 
     try:
-        query = select(CuponTicket).where(
-            CuponTicket.company_id == company_id,
-            CuponTicket.sincronizado == False
-        ).limit(limite)
-        res = await db.execute(query)
-        tickets = res.scalars().all()
-        _sync_batch_state["total"] = len(tickets)
+        async with async_session_factory() as db:
+            query = select(CuponTicket).where(
+                CuponTicket.company_id == company_id,
+                CuponTicket.sincronizado == False
+            ).limit(limite)
+            res = await db.execute(query)
+            tickets = res.scalars().all()
+            _sync_batch_state["total"] = len(tickets)
 
-        for t in tickets:
-            try:
-                r = await sync_single_ticket(db, company_id, t.id)
-                if r.get("success"):
-                    _sync_batch_state["exitos"] += 1
-                else:
+            for t in tickets:
+                try:
+                    r = await sync_single_ticket(db, company_id, t.id)
+                    if r.get("success"):
+                        _sync_batch_state["exitos"] += 1
+                    else:
+                        _sync_batch_state["fallas"] += 1
+                except Exception as e:
+                    logger.error(f"Error sincronizando ticket {t.id}: {e}")
                     _sync_batch_state["fallas"] += 1
-            except Exception as e:
-                logger.error(f"Error sincronizando ticket {t.id}: {e}")
-                _sync_batch_state["fallas"] += 1
 
-            _sync_batch_state["procesados"] += 1
-            if _sync_batch_state["total"] > 0:
-                _sync_batch_state["porcentaje"] = round((_sync_batch_state["procesados"] / _sync_batch_state["total"]) * 100, 1)
+                _sync_batch_state["procesados"] += 1
+                if _sync_batch_state["total"] > 0:
+                    _sync_batch_state["porcentaje"] = round((_sync_batch_state["procesados"] / _sync_batch_state["total"]) * 100, 1)
 
-            if delay_ms > 0:
-                await asyncio.sleep(delay_ms / 1000.0)
+                if delay_ms > 0:
+                    await asyncio.sleep(delay_ms / 1000.0)
 
     finally:
         _sync_batch_state["activo"] = False
@@ -1205,22 +1207,31 @@ async def registrar_cupones_multiples(
             tmpl = campana_obj.whatsapp_template if campana_obj and campana_obj.whatsapp_template else None
             premio_str = campana_obj.premio_destacado if campana_obj and campana_obj.premio_destacado else "Gran Sorteo"
 
-            async def _send_wa(t_id=ticket.id, t_cant=item_camp.cantidad, c_nombre=item_camp.campana_nombre, t_tmpl=tmpl, p_str=premio_str):
+            async def _send_wa(
+                t_id=ticket.id,
+                t_cant=item_camp.cantidad,
+                c_nombre=item_camp.campana_nombre,
+                t_tmpl=tmpl,
+                p_str=premio_str,
+                tel=cliente.telefono,
+                nom=cliente.nombre,
+                nro_ticket=data.nro_ticket
+            ):
                 try:
                     res_wa = await send_cupon_whatsapp_confirmation(
-                        telefono=cliente.telefono,
-                        nombre=cliente.nombre,
+                        telefono=tel,
+                        nombre=nom,
                         cantidad_cupones=t_cant,
-                        nro_ticket=data.nro_ticket,
+                        nro_ticket=nro_ticket,
                         template=t_tmpl,
                         sorteo_nombre=c_nombre
                     )
-                    async with db.begin_nested():
-                        t_db = await db.get(CuponTicket, t_id)
+                    async with async_session_factory() as bg_db:
+                        t_db = await bg_db.get(CuponTicket, t_id)
                         if t_db:
                             t_db.whatsapp_enviado = res_wa.get("success", False)
                             t_db.whatsapp_status = "enviado" if res_wa.get("success") else res_wa.get("error", "error")
-                            await db.commit()
+                            await bg_db.commit()
                 except Exception as wa_err:
                     logger.error(f"Error despachando WhatsApp para ticket {t_id}: {wa_err}")
 
