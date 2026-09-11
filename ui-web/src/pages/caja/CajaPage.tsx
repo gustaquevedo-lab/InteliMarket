@@ -1740,13 +1740,28 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   ))}
                 </div>
               </div>
-              <button
-                onClick={() => fetchHistorial()}
-                disabled={historialLoading}
-                className="btn-ghost text-xs flex items-center gap-1 self-start sm:self-auto"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${historialLoading ? "animate-spin" : ""}`} /> Refrescar
-              </button>
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const d = historialFechaDesde || getTodayAsuncion()
+                    const h = historialFechaHasta || getTodayAsuncion()
+                    await api.caja.downloadArqueoConsolidadoPdf(d, h)
+                  }}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 shadow-sm transition"
+                  title="Descargar Acta Consolidada de Movimientos (PDF Horizontal)"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>Acta Consolidada (PDF)</span>
+                </button>
+                <button
+                  onClick={() => fetchHistorial()}
+                  disabled={historialLoading}
+                  className="btn-ghost text-xs flex items-center gap-1"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${historialLoading ? "animate-spin" : ""}`} /> Refrescar
+                </button>
+              </div>
             </div>
 
             {/* Barra de Filtros: Cajera y Rango de Fechas */}
