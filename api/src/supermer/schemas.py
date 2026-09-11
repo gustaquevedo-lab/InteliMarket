@@ -146,6 +146,7 @@ class ProductionBatchResponse(BaseModel):
 
 class WasteLogCreate(BaseModel):
     area: str
+    warehouse_id: str
     producto_id: str
     cantidad: Decimal
     costo_unitario: Optional[Decimal] = None
@@ -153,9 +154,14 @@ class WasteLogCreate(BaseModel):
     motivo: Optional[str] = None
 
 
+class WasteLogRejectRequest(BaseModel):
+    motivo_rechazo: str
+
+
 class WasteLogResponse(BaseModel):
     id: UUID
     area: str
+    warehouse_id: Optional[UUID]
     producto_id: UUID
     cantidad: Decimal
     costo_unitario: Optional[Decimal]
@@ -165,6 +171,12 @@ class WasteLogResponse(BaseModel):
     fecha: datetime
     registrado_por: Optional[UUID]
     producto_nombre: Optional[str] = None
+    registrado_por_nombre: Optional[str] = None
+    estado: str
+    aprobado_por: Optional[UUID]
+    aprobado_por_nombre: Optional[str] = None
+    aprobado_at: Optional[datetime]
+    motivo_rechazo: Optional[str]
 
     model_config = ConfigDict(from_attributes=True)
 

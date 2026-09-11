@@ -16,7 +16,7 @@ from api.src.supermer.schemas import (
     RecipeCreate, RecipeUpdate, RecipeResponse,
     ProductionOrderCreate, ProductionOrderUpdate, ProductionOrderResponse,
     ProductionBatchCreate, ProductionBatchResponse,
-    WasteLogCreate, WasteLogResponse,
+    WasteLogCreate, WasteLogRejectRequest, WasteLogResponse,
     PerishableConfigCreate, PerishableConfigResponse,
     MarkdownLogCreate, MarkdownLogResponse,
     PurchaseForecastResponse, PurchaseSuggestionCreate, PurchaseSuggestionUpdate,
@@ -285,6 +285,7 @@ async def complete_order(
 async def list_waste(
     area: Optional[str] = Query(None),
     tipo_merma: Optional[str] = Query(None),
+    estado: Optional[str] = Query(None),
     desde: Optional[datetime] = Query(None),
     hasta: Optional[datetime] = Query(None),
     limit: int = Query(100, le=500),
@@ -292,17 +293,18 @@ async def list_waste(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.list_waste(db, user["company_id"], area, tipo_merma, desde, hasta, limit, offset)
+    return await service.list_waste(db, user["company_id"], area, tipo_merma, estado, desde, hasta, limit, offset)
 
 
 @router.get("/waste/by-area", response_model=list[WasteByArea])
 async def get_waste_by_area(
     desde: Optional[datetime] = Query(None),
     hasta: Optional[datetime] = Query(None),
+    estado: Optional[str] = Query("aprobada"),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.get_waste_by_area(db, user["company_id"], desde, hasta)
+    return await service.get_waste_by_area(db, user["company_id"], desde, hasta, estado)
 
 
 @router.post("/waste", response_model=WasteLogResponse, status_code=status.HTTP_201_CREATED)
@@ -313,6 +315,44 @@ async def create_waste(
     _=Depends(require_permission("salon:manage")),
 ):
     return await service.create_waste(db, user["company_id"], data, user["user_id"])
+
+
+async def _require_gerente(db: AsyncSession, user: dict):
+    """Autorización de merma: exige rol Gerente o Administrador.
+
+    A diferencia del resto del sistema (que usa require_permission con
+    bypass total para Administrador), acá el pedido del cliente fue
+    puntualmente "solo con autorización del gerente" -- se resuelve el rol
+    real vía rbac.get_user_roles() (mismo mecanismo que usan las
+    aprobaciones de caja/finanzas) en vez de un permiso RBAC genérico.
+    """
+    from api.src.rbac.service import get_user_roles
+    import uuid as _uuid
+
+    roles = {r["role_name"] for r in await get_user_roles(db, _uuid.UUID(user["user_id"]), _uuid.UUID(user["tenant_id"]))}
+    if not roles & {"Gerente", "Administrador"}:
+        raise HTTPException(403, "No autorizado: se requiere rol Gerente para aprobar o rechazar una merma")
+
+
+@router.post("/waste/{waste_id}/approve", response_model=WasteLogResponse)
+async def approve_waste(
+    waste_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    await _require_gerente(db, user)
+    return await service.approve_waste(db, user["company_id"], waste_id, user["user_id"])
+
+
+@router.post("/waste/{waste_id}/reject", response_model=WasteLogResponse)
+async def reject_waste(
+    waste_id: str,
+    data: WasteLogRejectRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    await _require_gerente(db, user)
+    return await service.reject_waste(db, user["company_id"], waste_id, user["user_id"], data.motivo_rechazo)
 
 
 # ============================================================

@@ -15,7 +15,7 @@ from api.src.supermer.models import (
     ButcheryTemplate, ButcheryTemplateCut,
     BakeryDailyPlan, BakeryPlanItem,
     ReceiveBatch, FreshnessAudit, SupplierScorecard,
-    ProductionOrderStatus, WasteType, ForecastStatus,
+    ProductionOrderStatus, WasteType, WasteStatus, ForecastStatus,
     ReceiveQualityGrade, FreshnessGrade,
 )
 from api.src.supermer.schemas import (
@@ -301,7 +301,8 @@ async def complete_order(
 
 async def list_waste(
     db: AsyncSession, company_id: str, area: Optional[str] = None,
-    tipo_merma: Optional[str] = None, desde: Optional[datetime] = None,
+    tipo_merma: Optional[str] = None, estado: Optional[str] = None,
+    desde: Optional[datetime] = None,
     hasta: Optional[datetime] = None, limit: int = 100, offset: int = 0,
 ) -> list[dict]:
     q = select(WasteLog).where(WasteLog.company_id == company_id)
@@ -309,6 +310,8 @@ async def list_waste(
         q = q.where(WasteLog.area == area)
     if tipo_merma:
         q = q.where(WasteLog.tipo_merma == tipo_merma)
+    if estado:
+        q = q.where(WasteLog.estado == estado)
     if desde:
         q = q.where(WasteLog.fecha >= desde)
     if hasta:
@@ -320,20 +323,32 @@ async def list_waste(
     result = []
     for w in logs:
         prod_nombre = await _get_product_name(db, w.producto_id)
+        registrado_nombre = await _get_user_name(db, w.registrado_por) if w.registrado_por else None
+        aprobado_nombre = await _get_user_name(db, w.aprobado_por) if w.aprobado_por else None
         result.append({
             **{c.name: getattr(w, c.name) for c in w.__table__.columns},
             "producto_nombre": prod_nombre,
+            "registrado_por_nombre": registrado_nombre,
+            "aprobado_por_nombre": aprobado_nombre,
         })
     return result
 
 
-async def get_waste_by_area(db: AsyncSession, company_id: str, desde: Optional[datetime] = None, hasta: Optional[datetime] = None) -> list[dict]:
+async def get_waste_by_area(
+    db: AsyncSession, company_id: str, desde: Optional[datetime] = None,
+    hasta: Optional[datetime] = None, estado: Optional[str] = "aprobada",
+) -> list[dict]:
+    # Por default solo cuenta mermas ya aprobadas: son las únicas que
+    # representan una pérdida real y confirmada (una "pendiente" todavía
+    # puede ser rechazada por el Gerente y nunca salir de stock).
     q = select(
         WasteLog.area,
         sa_func.sum(WasteLog.cantidad).label("total_cantidad"),
         sa_func.sum(WasteLog.costo_total).label("total_costo"),
         sa_func.count(WasteLog.id).label("cantidad_ordenes"),
     ).where(WasteLog.company_id == company_id)
+    if estado:
+        q = q.where(WasteLog.estado == estado)
     if desde:
         q = q.where(WasteLog.fecha >= desde)
     if hasta:
@@ -349,11 +364,14 @@ async def get_waste_by_area(db: AsyncSession, company_id: str, desde: Optional[d
 
 
 async def create_waste(db: AsyncSession, company_id: str, data: WasteLogCreate, user_id: str) -> dict:
+    from api.src.inteliaudit.service import record_audit_event
+
     costo_total = None
     if data.costo_unitario and data.cantidad:
         costo_total = data.costo_unitario * data.cantidad
     w = WasteLog(
         company_id=company_id,
+        warehouse_id=data.warehouse_id,
         area=data.area,
         producto_id=data.producto_id,
         cantidad=data.cantidad,
@@ -362,13 +380,141 @@ async def create_waste(db: AsyncSession, company_id: str, data: WasteLogCreate, 
         tipo_merma=data.tipo_merma,
         motivo=data.motivo,
         registrado_por=user_id,
+        estado=WasteStatus.pendiente,
     )
     db.add(w)
+    await db.flush()
+    await record_audit_event(db, {
+        "company_id": company_id,
+        "user_id": user_id,
+        "accion": "merma_registrada",
+        "entidad": "supermer_waste_log",
+        "entidad_id": str(w.id),
+        "datos_nuevos": {
+            "area": data.area, "producto_id": str(data.producto_id),
+            "cantidad": float(data.cantidad), "tipo_merma": data.tipo_merma,
+            "costo_total": float(costo_total) if costo_total else None,
+        },
+    })
     await db.commit()
+    prod_nombre = await _get_product_name(db, w.producto_id)
+    registrado_nombre = await _get_user_name(db, w.registrado_por)
+    return {
+        **{c.name: getattr(w, c.name) for c in w.__table__.columns},
+        "producto_nombre": prod_nombre,
+        "registrado_por_nombre": registrado_nombre,
+        "aprobado_por_nombre": None,
+    }
+
+
+async def approve_waste(db: AsyncSession, company_id: str, waste_id: str, approver_user_id: str) -> dict:
+    """Aprueba una merma pendiente: recién en este momento sale del stock.
+
+    Reusa el mismo patrón de descuento con SELECT ... FOR UPDATE que
+    inventory.service.record_quick_merma, para no introducir una segunda
+    forma de tocar Stock.cantidad con distinta protección de concurrencia.
+    """
+    from api.src.inventory.service import get_stock
+    from api.src.inventory.models import InventoryMovement, Stock
+    from api.src.inteliaudit.service import record_audit_event
+    from fastapi import HTTPException
+
+    r = await db.execute(select(WasteLog).where(WasteLog.id == waste_id, WasteLog.company_id == company_id))
+    w = r.scalar_one_or_none()
+    if not w:
+        raise HTTPException(404, "Merma no encontrada")
+    if w.estado != WasteStatus.pendiente:
+        raise HTTPException(400, f"La merma ya fue {w.estado.value if hasattr(w.estado, 'value') else w.estado}")
+    if not w.warehouse_id:
+        raise HTTPException(400, "La merma no tiene depósito asociado")
+
+    product = await db.get(Product, w.producto_id)
+    costo = float(w.costo_unitario or (product.costo_promedio if product else None) or (product.ultimo_costo if product else None) or 0)
+
+    stock = await get_stock(db, str(w.warehouse_id), str(w.producto_id))
+    stock_actual = float(stock.cantidad) if stock else 0.0
+    cantidad_merma = float(w.cantidad)
+    nuevo_stock = max(0.0, stock_actual - cantidad_merma)
+
+    movement = InventoryMovement(
+        company_id=company_id,
+        warehouse_id=w.warehouse_id,
+        product_id=w.producto_id,
+        tipo="merma",
+        cantidad=-cantidad_merma,
+        costo_unitario=costo,
+        referencia_type="supermer_waste_log",
+        referencia_id=w.id,
+        motivo=f"Merma {w.area.value if hasattr(w.area, 'value') else w.area} ({w.tipo_merma.value if hasattr(w.tipo_merma, 'value') else w.tipo_merma}): {w.motivo or ''}",
+        user_id=approver_user_id,
+    )
+    db.add(movement)
+
+    if stock:
+        stock.cantidad = nuevo_stock
+    else:
+        stock = Stock(warehouse_id=w.warehouse_id, product_id=w.producto_id, cantidad=nuevo_stock, costo_unitario=costo)
+        db.add(stock)
+
+    await db.flush()
+
+    w.estado = WasteStatus.aprobada
+    w.aprobado_por = approver_user_id
+    w.aprobado_at = datetime.utcnow()
+    w.movimiento_id = movement.id
+
+    await record_audit_event(db, {
+        "company_id": company_id,
+        "user_id": approver_user_id,
+        "accion": "merma_aprobada",
+        "entidad": "supermer_waste_log",
+        "entidad_id": str(w.id),
+        "datos_anteriores": {"estado": "pendiente", "stock_antes": stock_actual},
+        "datos_nuevos": {"estado": "aprobada", "stock_despues": nuevo_stock, "cantidad_descontada": cantidad_merma},
+    })
+    await db.commit()
+
     prod_nombre = await _get_product_name(db, w.producto_id)
     return {
         **{c.name: getattr(w, c.name) for c in w.__table__.columns},
         "producto_nombre": prod_nombre,
+        "registrado_por_nombre": await _get_user_name(db, w.registrado_por) if w.registrado_por else None,
+        "aprobado_por_nombre": await _get_user_name(db, w.aprobado_por),
+    }
+
+
+async def reject_waste(db: AsyncSession, company_id: str, waste_id: str, approver_user_id: str, motivo_rechazo: str) -> dict:
+    from api.src.inteliaudit.service import record_audit_event
+    from fastapi import HTTPException
+
+    r = await db.execute(select(WasteLog).where(WasteLog.id == waste_id, WasteLog.company_id == company_id))
+    w = r.scalar_one_or_none()
+    if not w:
+        raise HTTPException(404, "Merma no encontrada")
+    if w.estado != WasteStatus.pendiente:
+        raise HTTPException(400, f"La merma ya fue {w.estado.value if hasattr(w.estado, 'value') else w.estado}")
+
+    w.estado = WasteStatus.rechazada
+    w.aprobado_por = approver_user_id
+    w.aprobado_at = datetime.utcnow()
+    w.motivo_rechazo = motivo_rechazo
+
+    await record_audit_event(db, {
+        "company_id": company_id,
+        "user_id": approver_user_id,
+        "accion": "merma_rechazada",
+        "entidad": "supermer_waste_log",
+        "entidad_id": str(w.id),
+        "datos_nuevos": {"estado": "rechazada", "motivo_rechazo": motivo_rechazo},
+    })
+    await db.commit()
+
+    prod_nombre = await _get_product_name(db, w.producto_id)
+    return {
+        **{c.name: getattr(w, c.name) for c in w.__table__.columns},
+        "producto_nombre": prod_nombre,
+        "registrado_por_nombre": await _get_user_name(db, w.registrado_por) if w.registrado_por else None,
+        "aprobado_por_nombre": await _get_user_name(db, w.aprobado_por),
     }
 
 

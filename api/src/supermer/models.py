@@ -19,8 +19,15 @@ class ProductionArea(str, enum.Enum):
     carniceria = "carniceria"
     panaderia = "panaderia"
     rotiseria = "rotiseria"
+    verduleria = "verduleria"
     pre_pack = "pre_pack"
     otros = "otros"
+
+
+class WasteStatus(str, enum.Enum):
+    pendiente = "pendiente"
+    aprobada = "aprobada"
+    rechazada = "rechazada"
 
 
 class ProductionOrderStatus(str, enum.Enum):
@@ -159,6 +166,7 @@ class WasteLog(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    warehouse_id = Column(UUID(as_uuid=True), ForeignKey("warehouses.id"))
     area = Column(SAEnum(ProductionArea, native_enum=False, length=20), nullable=False)
     producto_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     cantidad = Column(Numeric(12, 3), nullable=False)
@@ -169,9 +177,20 @@ class WasteLog(Base):
     fecha = Column(DateTime(timezone=True), server_default=func.now())
     registrado_por = Column(UUID(as_uuid=True), ForeignKey("users.id"))
 
+    # Control de aprobación: una merma NO descuenta stock hasta que un
+    # Gerente/Administrador la aprueba (ver service.approve_waste). Antes de
+    # esto, create_waste() era un log puramente informativo sin ningún
+    # gate -- el pedido del cliente fue justamente cerrar ese hueco.
+    estado = Column(SAEnum(WasteStatus, native_enum=False, length=20), nullable=False, default=WasteStatus.pendiente, server_default="pendiente")
+    aprobado_por = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    aprobado_at = Column(DateTime(timezone=True))
+    motivo_rechazo = Column(Text)
+    movimiento_id = Column(UUID(as_uuid=True), ForeignKey("inventory_movements.id"))
+
     __table_args__ = (
         Index("ix_supermer_waste_company_area", "company_id", "area"),
         Index("ix_supermer_waste_fecha", "fecha"),
+        Index("ix_supermer_waste_estado", "company_id", "estado"),
     )
 
 
