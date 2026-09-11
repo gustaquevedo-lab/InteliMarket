@@ -270,10 +270,48 @@ export default function CajaPage() {
 
   // ── Conteo y Recepción de Efectivo en Tesorería ──
   const [efectivoRecibidoPyg, setEfectivoRecibidoPyg] = useState<number>(0)
+  const [efectivoRecibidoPygStr, setEfectivoRecibidoPygStr] = useState<string>("")
   const [efectivoRecibidoBrl, setEfectivoRecibidoBrl] = useState<number>(0)
+  const [efectivoRecibidoBrlStr, setEfectivoRecibidoBrlStr] = useState<string>("")
   const [efectivoRecibidoUsd, setEfectivoRecibidoUsd] = useState<number>(0)
+  const [efectivoRecibidoUsdStr, setEfectivoRecibidoUsdStr] = useState<string>("")
   const [efectivoObsTesoreria, setEfectivoObsTesoreria] = useState("")
   const [savingEfectivoReception, setSavingEfectivoReception] = useState(false)
+
+  const handlePygInputChange = (raw: string) => {
+    const digits = raw.replace(/\D/g, "")
+    if (!digits) {
+      setEfectivoRecibidoPygStr("")
+      setEfectivoRecibidoPyg(0)
+      return
+    }
+    const val = parseInt(digits, 10)
+    setEfectivoRecibidoPygStr(val.toLocaleString("es-PY"))
+    setEfectivoRecibidoPyg(val)
+  }
+
+  const handleDecimalInputChange = (
+    raw: string,
+    setStr: (s: string) => void,
+    setNum: (n: number) => void
+  ) => {
+    let clean = raw.replace(/[^\d,\.]/g, "").replace(".", ",")
+    const parts = clean.split(",")
+    if (parts.length > 2) {
+      clean = parts[0] + "," + parts.slice(1).join("")
+    }
+    const [intPart, decPart] = clean.split(",")
+    const digits = intPart ? intPart.replace(/\D/g, "") : ""
+    const intFmt = digits ? parseInt(digits, 10).toLocaleString("es-PY") : (clean.startsWith(",") ? "0" : "")
+    
+    let formatted = intFmt
+    if (clean.includes(",")) {
+      formatted += "," + (decPart !== undefined ? decPart.slice(0, 2) : "")
+    }
+    setStr(formatted)
+    const numVal = Number((digits || "0") + "." + (decPart ? decPart.slice(0, 2) : "0"))
+    setNum(isNaN(numVal) ? 0 : numVal)
+  }
 
   // ── Mapeos de Medios de Pago a Cuentas Bancarias ──
   const [bankMappings, setBankMappings] = useState<BankMappingItem[]>([])
@@ -352,13 +390,17 @@ export default function CajaPage() {
       }
       setPunteoStatuses(initStatuses)
 
+      const recon = data?.recon || data?.session_data?.recon || {}
       const handoff = data?.handoff || data?.session_data?.handoff
-      const declPyg = Number(handoff?.monto_confirmado_pyg ?? handoff?.monto_declarado_pyg ?? data?.session_data?.monto_cierre ?? 0)
-      const declBrl = Number(handoff?.monto_confirmado_brl ?? handoff?.monto_declarado_brl ?? data?.session_data?.monto_efectivo_brl ?? 0)
-      const declUsd = Number(handoff?.monto_confirmado_usd ?? handoff?.monto_declarado_usd ?? data?.session_data?.monto_efectivo_usd ?? 0)
+      const declPyg = Number(handoff?.monto_confirmado_pyg ?? handoff?.monto_declarado_pyg ?? recon?.contado_pyg ?? data?.session_data?.monto_cierre ?? 0)
+      const declBrl = Number(handoff?.monto_confirmado_brl ?? handoff?.monto_declarado_brl ?? recon?.contado_brl ?? data?.session_data?.monto_efectivo_brl ?? 0)
+      const declUsd = Number(handoff?.monto_confirmado_usd ?? handoff?.monto_declarado_usd ?? recon?.contado_usd ?? data?.session_data?.monto_efectivo_usd ?? 0)
       setEfectivoRecibidoPyg(declPyg)
+      setEfectivoRecibidoPygStr(declPyg ? declPyg.toLocaleString("es-PY") : "")
       setEfectivoRecibidoBrl(declBrl)
+      setEfectivoRecibidoBrlStr(declBrl ? declBrl.toLocaleString("es-PY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "")
       setEfectivoRecibidoUsd(declUsd)
+      setEfectivoRecibidoUsdStr(declUsd ? declUsd.toLocaleString("es-PY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "")
       setEfectivoObsTesoreria(handoff?.observaciones || "")
     } catch (err: any) {
       toast.error("Error al cargar planilla", err?.message || "No se pudo obtener el detalle de vouchers de la sesión.")
@@ -4430,29 +4472,52 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               <div className="flex-1 overflow-y-auto space-y-4 py-3 pr-1">
                 {/* 🌟 SECCIÓN 1: RECEPCIÓN Y CONTEO FÍSICO DE EFECTIVO EN TESORERÍA (DOBLE CONTROL) */}
                 {(() => {
+                  const recon = punteoData.recon || punteoData.session_data?.recon || {}
                   const handoff = punteoData.handoff || punteoData.session_data?.handoff
-                  const declPyg = Number(handoff?.monto_declarado_pyg ?? punteoData.session_data?.monto_cierre ?? 0)
-                  const declBrl = Number(handoff?.monto_declarado_brl ?? punteoData.session_data?.monto_efectivo_brl ?? 0)
-                  const declUsd = Number(handoff?.monto_declarado_usd ?? punteoData.session_data?.monto_efectivo_usd ?? 0)
-                  const espPyg = Number(punteoData.session_data?.monto_cierre_esperado ?? punteoData.session_data?.recon?.esperado_total_gs ?? 0)
 
-                  const tasaBrl = Number(punteoData.session_data?.recon?.tasa_brl || 1130)
-                  const tasaUsd = Number(punteoData.session_data?.recon?.tasa_usd || 5840)
+                  // 1. Conciliación de Efectivo Esperado (100% en Guaraníes, idéntica al PDF oficial)
+                  const totalFacturadoGs = Number(recon.total_cobrado_gs || punteoData.session_data?.total_ventas || 0)
+                  const ticketsCount = Number(recon.total_ventas_count || punteoData.session_data?.cantidad_ventas || 0)
+                  const mediosNoEfGs = Number(recon.total_no_efectivo_gs || 0)
+                  const ventasEfGs = Number(recon.ventas_ef_total_gs || Math.max(0, totalFacturadoGs - mediosNoEfGs))
+                  const dropsGs = Number(recon.total_drops_gs || 0)
+                  const espNetoGs = Number(recon.esperado_total_gs || Math.max(0, ventasEfGs - dropsGs))
 
+                  // Fondo de Custodia Permanente en Gaveta (Certificado por Supervisora)
+                  const fondoCertPyg = Number(recon.fondo_pyg ?? punteoData.session_data?.monto_apertura ?? 0)
+                  const fondoCertBrl = Number(recon.fondo_brl ?? punteoData.session_data?.monto_apertura_brl ?? 0)
+                  const fondoCertUsd = Number(recon.fondo_usd ?? punteoData.session_data?.monto_apertura_usd ?? 0)
+
+                  // Cotizaciones oficiales
+                  const tasaBrl = Number(recon.tasa_brl || 1130)
+                  const tasaUsd = Number(recon.tasa_usd || 5840)
+
+                  // 2. Efectivo Declarado por Cajera en Sobre (Neto a Rendir)
+                  const declPyg = Number(handoff?.monto_declarado_pyg ?? recon.contado_pyg ?? 0)
+                  const declBrl = Number(handoff?.monto_declarado_brl ?? recon.contado_brl ?? 0)
+                  const declUsd = Number(handoff?.monto_declarado_usd ?? recon.contado_usd ?? 0)
+                  const declTotalGs = declPyg + (declBrl * tasaBrl) + (declUsd * tasaUsd)
+                  const difDeclVsEsp = declTotalGs - espNetoGs
+
+                  // 3. Efectivo Recibido y Contado por Tesorería
                   const recPyg = Number(efectivoRecibidoPyg || 0)
                   const recBrl = Number(efectivoRecibidoBrl || 0)
                   const recUsd = Number(efectivoRecibidoUsd || 0)
-
-                  const difEntregaPyg = recPyg - declPyg
-                  const difEntregaBrl = recBrl - declBrl
-                  const difEntregaUsd = recUsd - declUsd
-
                   const recTotalGs = recPyg + (recBrl * tasaBrl) + (recUsd * tasaUsd)
-                  const declTotalGs = declPyg + (declBrl * tasaBrl) + (declUsd * tasaUsd)
-                  const difTotalGs = recTotalGs - declTotalGs
 
-                  const hasShortage = difTotalGs < -5000
-                  const hasSurplus = difTotalGs > 5000
+                  // Doble Control
+                  // A) Cotejo de Sobre: Recibido vs Declarado por Cajero/a
+                  const difSobrePyg = recPyg - declPyg
+                  const difSobreBrl = recBrl - declBrl
+                  const difSobreUsd = recUsd - declUsd
+                  const difSobreTotalGs = recTotalGs - declTotalGs
+
+                  // B) Conciliación Contable: Recibido vs Esperado del Sistema
+                  const difAuditoriaGs = recTotalGs - espNetoGs
+                  const estadoAuditoria = Math.abs(difAuditoriaGs) < 5000 ? "CUADRADO" : (difAuditoriaGs > 0 ? "SOBRANTE" : "FALTANTE")
+
+                  const hasShortageSobre = difSobreTotalGs < -5000
+                  const hasSurplusSobre = difSobreTotalGs > 5000
 
                   return (
                     <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 text-white border border-slate-700/80 shadow-xl space-y-4">
@@ -4474,7 +4539,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                               )}
                             </div>
                             <p className="text-xs text-slate-400 leading-tight mt-0.5">
-                              La cajera/supervisora remite el sobre de la caja. La Tesorera cuenta físicamente los billetes (Gs., R$, US$) y asienta si vino completo, faltante o sobrante.
+                              La cajera remite el sobre de efectivo. La Tesorera cuenta físicamente los billetes (Gs., R$, US$) con separadores de miles y certifica si coincide con el cierre.
                             </p>
                           </div>
                         </div>
@@ -4488,12 +4553,63 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                         )}
                       </div>
 
+                      {/* 📌 Banner de Conciliación Matemática (Fórmula Oficial) */}
+                      <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-700 text-xs grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
+                        <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800">
+                          <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Facturado</span>
+                          <span className="font-mono font-bold text-white text-xs">{formatPYG(totalFacturadoGs)}</span>
+                          <span className="text-[9px] text-slate-400 block">({ticketsCount} tickets)</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800">
+                          <span className="text-[10px] text-slate-400 uppercase font-bold block">(-) No Efectivo</span>
+                          <span className="font-mono font-bold text-rose-400 text-xs">-{formatPYG(mediosNoEfGs)}</span>
+                          <span className="text-[9px] text-slate-400 block">Tarjetas, QR, PIX</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800">
+                          <span className="text-[10px] text-slate-400 uppercase font-bold block">(=) Efectivo Ventas</span>
+                          <span className="font-mono font-bold text-emerald-400 text-xs">{formatPYG(ventasEfGs)}</span>
+                          <span className="text-[9px] text-slate-400 block">Cobrado en caja</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800">
+                          <span className="text-[10px] text-slate-400 uppercase font-bold block">(-) Retiros / Drops</span>
+                          <span className="font-mono font-bold text-amber-400 text-xs">-{formatPYG(dropsGs)}</span>
+                          <span className="text-[9px] text-slate-400 block">Sangrías confirmadas</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-emerald-950/40 border border-emerald-600/50 col-span-2 sm:col-span-1">
+                          <span className="text-[10px] text-emerald-300 uppercase font-black block">Esperado a Rendir</span>
+                          <span className="font-mono font-black text-emerald-300 text-sm">{formatPYG(espNetoGs)}</span>
+                          <span className="text-[9px] text-emerald-300/80 block font-bold">100% en Guaraníes</span>
+                        </div>
+                      </div>
+
+                      {/* Recuadro de Certificación de Custodia Permanente del Fondo */}
+                      <div className="px-3.5 py-2 rounded-xl bg-slate-800/40 border border-dashed border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span className="text-slate-300 font-bold">
+                            Fondo Fijo Certificado en Gaveta (Custodia Permanente):
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 font-mono text-xs">
+                          <span className="text-white font-bold">{formatPYG(fondoCertPyg)}</span>
+                          <span className="text-slate-600">|</span>
+                          <span className="text-amber-400 font-bold">{formatBRL(fondoCertBrl)}</span>
+                          {fondoCertUsd > 0 && (
+                            <>
+                              <span className="text-slate-600">|</span>
+                              <span className="text-blue-400 font-bold">{formatUSD(fondoCertUsd)}</span>
+                            </>
+                          )}
+                          <span className="text-[10px] text-slate-400">(Permanecen en gaveta, NO van a Tesorería)</span>
+                        </div>
+                      </div>
+
                       {/* Grid de 3 Tarjetas Comparativas */}
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-                        {/* Tarjeta 1: Declarado en Cierre */}
+                        {/* Tarjeta 1: Declarado por Cajera en Sobre */}
                         <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/80 space-y-2">
                           <div className="flex items-center justify-between text-xs text-slate-400 font-bold uppercase tracking-wider">
-                            <span>1. Declarado en Cierre</span>
+                            <span>1. Declarado en Sobre</span>
                             <span className="text-[10px] text-slate-500 font-mono">Por Cajero/a</span>
                           </div>
                           <div className="space-y-1">
@@ -4505,21 +4621,33 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                               <span className="text-xs text-slate-300">Efectivo R$:</span>
                               <span className="font-mono font-bold text-amber-400 text-sm">{formatBRL(declBrl)}</span>
                             </div>
+                            <div className="flex items-baseline justify-between text-[11px] text-slate-400 font-mono">
+                              <span>Equiv. Reales a Gs (1:{tasaBrl}):</span>
+                              <span>{formatPYG(declBrl * tasaBrl)}</span>
+                            </div>
                             {declUsd > 0 && (
-                              <div className="flex items-baseline justify-between">
-                                <span className="text-xs text-slate-300">Efectivo US$:</span>
-                                <span className="font-mono font-bold text-blue-400 text-sm">{formatUSD(declUsd)}</span>
-                              </div>
+                              <>
+                                <div className="flex items-baseline justify-between">
+                                  <span className="text-xs text-slate-300">Efectivo US$:</span>
+                                  <span className="font-mono font-bold text-blue-400 text-sm">{formatUSD(declUsd)}</span>
+                                </div>
+                                <div className="flex items-baseline justify-between text-[11px] text-slate-400 font-mono">
+                                  <span>Equiv. Dólares a Gs (1:{tasaUsd}):</span>
+                                  <span>{formatPYG(declUsd * tasaUsd)}</span>
+                                </div>
+                              </>
                             )}
                           </div>
-                          <div className="pt-2 border-t border-slate-700/60 space-y-0.5 text-[10px] text-slate-400">
+                          <div className="pt-2 border-t border-slate-700/60 space-y-1 text-xs">
                             <div className="flex items-center justify-between">
-                              <span>Total declarado equiv.:</span>
-                              <span className="font-mono font-bold text-white">{formatPYG(declTotalGs)}</span>
+                              <span className="text-slate-300 font-bold">Total Sobre Declarado:</span>
+                              <span className="font-mono font-black text-white">{formatPYG(declTotalGs)}</span>
                             </div>
-                            <div className="flex items-center justify-between">
-                              <span>Esperado sistema:</span>
-                              <span className="font-mono text-slate-300">{formatPYG(espPyg)}</span>
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="text-slate-400">Dif. vs Esperado ({formatPYG(espNetoGs)}):</span>
+                              <span className={`font-mono font-bold ${difDeclVsEsp >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                {difDeclVsEsp >= 0 ? `+${formatPYG(difDeclVsEsp)}` : formatPYG(difDeclVsEsp)}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -4528,7 +4656,21 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                         <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40 ring-1 ring-emerald-500/30 space-y-2.5">
                           <div className="flex items-center justify-between text-xs text-emerald-400 font-bold uppercase tracking-wider">
                             <span>2. Conteo Físico en Tesorería</span>
-                            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded font-mono">Editable</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEfectivoRecibidoPyg(declPyg)
+                                setEfectivoRecibidoPygStr(declPyg ? declPyg.toLocaleString("es-PY") : "")
+                                setEfectivoRecibidoBrl(declBrl)
+                                setEfectivoRecibidoBrlStr(declBrl ? declBrl.toLocaleString("es-PY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "")
+                                setEfectivoRecibidoUsd(declUsd)
+                                setEfectivoRecibidoUsdStr(declUsd ? declUsd.toLocaleString("es-PY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "")
+                              }}
+                              className="text-[10px] bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded font-mono font-bold transition border border-emerald-500/30"
+                              title="Copiar montos declarados por la cajera"
+                            >
+                              Copiar Declarado
+                            </button>
                           </div>
                           <div className="space-y-2">
                             <div>
@@ -4536,11 +4678,12 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                 Efectivo Contado en Guaraníes (₲):
                               </label>
                               <input
-                                type="number"
-                                value={efectivoRecibidoPyg}
-                                onChange={e => setEfectivoRecibidoPyg(Number(e.target.value))}
+                                type="text"
+                                inputMode="numeric"
+                                value={efectivoRecibidoPygStr}
+                                onChange={e => handlePygInputChange(e.target.value)}
                                 placeholder="0"
-                                className="w-full bg-slate-900 border border-emerald-500/60 rounded-lg px-3 py-1.5 text-base font-black font-mono text-emerald-300 outline-none focus:ring-2 focus:ring-emerald-400 text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                className="w-full bg-slate-900 border border-emerald-500/60 rounded-lg px-3 py-1.5 text-base font-black font-mono text-emerald-300 outline-none focus:ring-2 focus:ring-emerald-400 text-right"
                               />
                             </div>
                             <div>
@@ -4555,12 +4698,12 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                 )}
                               </div>
                               <input
-                                type="number"
-                                step="0.50"
-                                value={efectivoRecibidoBrl}
-                                onChange={e => setEfectivoRecibidoBrl(Number(e.target.value))}
-                                placeholder="0.00"
-                                className="w-full bg-slate-900 border border-amber-500/60 rounded-lg px-3 py-1.5 text-sm font-bold font-mono text-amber-300 outline-none focus:ring-2 focus:ring-amber-400 text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                type="text"
+                                inputMode="decimal"
+                                value={efectivoRecibidoBrlStr}
+                                onChange={e => handleDecimalInputChange(e.target.value, setEfectivoRecibidoBrlStr, setEfectivoRecibidoBrl)}
+                                placeholder="0,00"
+                                className="w-full bg-slate-900 border border-amber-500/60 rounded-lg px-3 py-1.5 text-sm font-bold font-mono text-amber-300 outline-none focus:ring-2 focus:ring-amber-400 text-right"
                               />
                             </div>
                             <div>
@@ -4575,99 +4718,114 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                 )}
                               </div>
                               <input
-                                type="number"
-                                step="1"
-                                value={efectivoRecibidoUsd}
-                                onChange={e => setEfectivoRecibidoUsd(Number(e.target.value))}
-                                placeholder="0.00"
-                                className="w-full bg-slate-900 border border-blue-500/60 rounded-lg px-3 py-1.5 text-sm font-bold font-mono text-blue-300 outline-none focus:ring-2 focus:ring-blue-400 text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                type="text"
+                                inputMode="decimal"
+                                value={efectivoRecibidoUsdStr}
+                                onChange={e => handleDecimalInputChange(e.target.value, setEfectivoRecibidoUsdStr, setEfectivoRecibidoUsd)}
+                                placeholder="0,00"
+                                className="w-full bg-slate-900 border border-blue-500/60 rounded-lg px-3 py-1.5 text-sm font-bold font-mono text-blue-300 outline-none focus:ring-2 focus:ring-blue-400 text-right"
                               />
                             </div>
                           </div>
+                          <div className="pt-2 border-t border-emerald-500/30 flex items-center justify-between text-xs">
+                            <span className="text-emerald-300 font-bold">Total Contado Tesorería:</span>
+                            <span className="font-mono font-black text-emerald-300 text-base">{formatPYG(recTotalGs)}</span>
+                          </div>
                         </div>
 
-                        {/* Tarjeta 3: Dictamen de Custodia y Diferencia de Entrega */}
-                        <div className={`p-3.5 rounded-xl border flex flex-col justify-between space-y-2 ${
-                          hasShortage
+                        {/* Tarjeta 3: Dictamen de Custodia y Comparativo Final */}
+                        <div className={`p-3.5 rounded-xl border flex flex-col justify-between space-y-2.5 ${
+                          hasShortageSobre
                             ? "bg-rose-950/40 border-rose-500/60 ring-1 ring-rose-500/30"
-                            : hasSurplus
+                            : hasSurplusSobre
                             ? "bg-blue-950/40 border-blue-500/60 ring-1 ring-blue-500/30"
                             : "bg-emerald-950/20 border-emerald-600/40"
                         }`}>
                           <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider">
-                            <span className={hasShortage ? "text-rose-300" : hasSurplus ? "text-blue-300" : "text-emerald-300"}>
-                              3. Comparativo de Entrega
+                            <span className={hasShortageSobre ? "text-rose-300" : hasSurplusSobre ? "text-blue-300" : "text-emerald-300"}>
+                              3. Comparativo y Auditoría
                             </span>
-                            <span className="text-[10px] text-slate-400 font-mono">Recibido - Declarado</span>
+                            <span className="text-[10px] text-slate-400 font-mono">Doble Control</span>
                           </div>
 
-                          <div className="space-y-1.5 my-auto">
-                            {/* Diferencia en Gs */}
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-slate-300">Diferencia Gs:</span>
-                              <span className={`font-mono font-black text-base ${
-                                difEntregaPyg === 0 ? "text-emerald-400" : difEntregaPyg < 0 ? "text-rose-400" : "text-blue-400"
-                              }`}>
-                                {difEntregaPyg !== 0 ? (difEntregaPyg > 0 ? `+${formatPYG(difEntregaPyg)}` : formatPYG(difEntregaPyg)) : "₲ 0 (Conforme)"}
-                              </span>
-                            </div>
-
-                            {/* Diferencia en R$ */}
-                            {(declBrl > 0 || recBrl > 0) && (
+                          <div className="space-y-2 my-auto text-xs">
+                            {/* Control A: Cotejo de Sobre */}
+                            <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800 space-y-1">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase block">A) Cotejo del Sobre (Recibido - Declarado)</span>
                               <div className="flex items-center justify-between">
-                                <span className="text-xs text-slate-300">Diferencia R$:</span>
-                                <span className={`font-mono font-bold text-sm ${
-                                  difEntregaBrl === 0 ? "text-emerald-400" : difEntregaBrl < 0 ? "text-rose-400" : "text-blue-400"
-                                }`}>
-                                  {difEntregaBrl !== 0 ? (difEntregaBrl > 0 ? `+${formatBRL(difEntregaBrl)}` : formatBRL(difEntregaBrl)) : "R$ 0,00 (Conforme)"}
+                                <span className="text-slate-300">Dif. Guaraníes:</span>
+                                <span className={`font-mono font-bold ${difSobrePyg === 0 ? "text-emerald-400" : difSobrePyg < 0 ? "text-rose-400" : "text-blue-400"}`}>
+                                  {difSobrePyg !== 0 ? (difSobrePyg > 0 ? `+${formatPYG(difSobrePyg)}` : formatPYG(difSobrePyg)) : "₲ 0 (Conforme)"}
                                 </span>
                               </div>
-                            )}
-
-                            {/* Diferencia en US$ */}
-                            {(declUsd > 0 || recUsd > 0) && (
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs text-slate-300">Diferencia US$:</span>
-                                <span className={`font-mono font-bold text-sm ${
-                                  difEntregaUsd === 0 ? "text-emerald-400" : difEntregaUsd < 0 ? "text-rose-400" : "text-blue-400"
-                                }`}>
-                                  {difEntregaUsd !== 0 ? (difEntregaUsd > 0 ? `+${formatUSD(difEntregaUsd)}` : formatUSD(difEntregaUsd)) : "US$ 0.00 (Conforme)"}
-                                </span>
-                              </div>
-                            )}
-
-                            {/* Total Consolidado en Gs */}
-                            <div className="pt-1.5 border-t border-slate-700/60 flex items-center justify-between">
-                              <span className="text-xs text-slate-300 font-bold">Total Rendido Gs:</span>
-                              <span className="font-mono font-black text-white text-sm">
-                                {formatPYG(recTotalGs)}
-                              </span>
+                              {(declBrl > 0 || recBrl > 0) && (
+                                <div className="flex items-center justify-between">
+                                  <span className="text-slate-300">Dif. Reales:</span>
+                                  <span className={`font-mono font-bold ${difSobreBrl === 0 ? "text-emerald-400" : difSobreBrl < 0 ? "text-rose-400" : "text-blue-400"}`}>
+                                    {difSobreBrl !== 0 ? (difSobreBrl > 0 ? `+${formatBRL(difSobreBrl)}` : formatBRL(difSobreBrl)) : "R$ 0,00 (Conforme)"}
+                                  </span>
+                                </div>
+                              )}
+                              {(declUsd > 0 || recUsd > 0) && (
+                                <div className="flex items-center justify-between">
+                                  <span className="text-slate-300">Dif. Dólares:</span>
+                                  <span className={`font-mono font-bold ${difSobreUsd === 0 ? "text-emerald-400" : difSobreUsd < 0 ? "text-rose-400" : "text-blue-400"}`}>
+                                    {difSobreUsd !== 0 ? (difSobreUsd > 0 ? `+${formatUSD(difSobreUsd)}` : formatUSD(difSobreUsd)) : "US$ 0,00 (Conforme)"}
+                                  </span>
+                                </div>
+                              )}
                             </div>
 
-                            {/* Banner de Estado */}
-                            <div className="pt-2">
-                              {hasShortage ? (
+                            {/* Control B: Conciliación Contable contra el Sistema */}
+                            <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800 space-y-1">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase block">B) Conciliación de Caja (Recibido - Esperado)</span>
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-300">Esperado Sistema:</span>
+                                <span className="font-mono text-slate-300">{formatPYG(espNetoGs)}</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-300 font-bold">Rendido Tesorería:</span>
+                                <span className="font-mono font-black text-white">{formatPYG(recTotalGs)}</span>
+                              </div>
+                              <div className="flex items-center justify-between pt-1 border-t border-slate-800">
+                                <span className="font-bold text-slate-200">Diferencia de Caja:</span>
+                                <span className={`font-mono font-black text-sm ${difAuditoriaGs >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                  {difAuditoriaGs >= 0 ? `+${formatPYG(difAuditoriaGs)}` : formatPYG(difAuditoriaGs)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Banner de Dictamen */}
+                            <div>
+                              {hasShortageSobre ? (
                                 <div className="p-2 rounded-lg bg-rose-900/60 border border-rose-500 text-rose-200 text-xs font-bold flex items-center gap-2">
                                   <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-                                  <span>🔴 FALTANTE EN ENTREGA: Vino MENOS efectivo del declarado ({formatPYG(difTotalGs)}).</span>
+                                  <span>🔴 FALTANTE EN SOBRE: Vino menos de lo declarado ({formatPYG(difSobreTotalGs)}).</span>
                                 </div>
-                              ) : hasSurplus ? (
+                              ) : hasSurplusSobre ? (
                                 <div className="p-2 rounded-lg bg-blue-900/60 border border-blue-500 text-blue-200 text-xs font-bold flex items-center gap-2">
                                   <Info className="w-4 h-4 text-blue-400 shrink-0" />
-                                  <span>🔵 SOBRANTE EN ENTREGA: Vino MÁS efectivo del declarado (+{formatPYG(difTotalGs)}).</span>
+                                  <span>🔵 SOBRANTE EN SOBRE: Vino más de lo declarado (+{formatPYG(difSobreTotalGs)}).</span>
                                 </div>
                               ) : (
                                 <div className="p-2 rounded-lg bg-emerald-900/60 border border-emerald-500 text-emerald-200 text-xs font-bold flex items-center gap-2">
                                   <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
-                                  <span>🟢 EFECTIVO CONFORME: El conteo coincide con lo declarado.</span>
+                                  <span>🟢 SOBRE CONFORME: El conteo físico coincide con lo declarado.</span>
                                 </div>
                               )}
                             </div>
                           </div>
 
-                          <p className="text-[10px] text-slate-400 pt-1 border-t border-slate-800">
-                            * A Bóveda Central ingresará el total contado por Tesorería ({formatPYG(recTotalGs)}).
-                          </p>
+                          <div className="pt-1.5 border-t border-slate-800 flex items-center justify-between text-[11px]">
+                            <span className="text-slate-400">Dictamen Oficial:</span>
+                            <span className={`px-2 py-0.5 rounded font-black tracking-wider ${
+                              estadoAuditoria === "CUADRADO" ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" :
+                              estadoAuditoria === "SOBRANTE" ? "bg-blue-500/20 text-blue-300 border border-blue-500/40" :
+                              "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                            }`}>
+                              {estadoAuditoria} ({difAuditoriaGs >= 0 ? `+${formatPYG(difAuditoriaGs)}` : formatPYG(difAuditoriaGs)})
+                            </span>
+                          </div>
                         </div>
                       </div>
 

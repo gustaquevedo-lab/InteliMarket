@@ -3310,16 +3310,27 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     }
     summary_final = summary_por_canal
 
+    recon = session_data.get("recon") or {}
+    contado_neto_pyg = float(recon.get("contado_pyg") if recon.get("contado_pyg") is not None else (session_data.get("monto_cierre") or 0))
+    contado_neto_brl = float(recon.get("contado_brl") if recon.get("contado_brl") is not None else (session_data.get("monto_efectivo_brl") or 0))
+    contado_neto_usd = float(recon.get("contado_usd") if recon.get("contado_usd") is not None else (session_data.get("monto_efectivo_usd") or 0))
+
     res_h = await db.execute(
         select(CashHandoff).where(CashHandoff.session_id == sid).order_by(CashHandoff.created_at.desc()).limit(1)
     )
     h_obj = res_h.scalar_one_or_none()
+
+    # El monto declarado para entrega en Tesorería es el efectivo neto tras certificar fondo en gaveta
+    decl_pyg = float(h_obj.monto_pyg) if (h_obj and h_obj.estado == "confirmado") else contado_neto_pyg
+    decl_brl = float(h_obj.monto_brl) if (h_obj and h_obj.estado == "confirmado" and h_obj.monto_brl is not None) else contado_neto_brl
+    decl_usd = float(h_obj.monto_usd) if (h_obj and h_obj.estado == "confirmado" and h_obj.monto_usd is not None) else contado_neto_usd
+
     handoff_dict = {
         "id": str(h_obj.id) if h_obj else None,
         "estado": h_obj.estado if h_obj else "pendiente",
-        "monto_declarado_pyg": float(h_obj.monto_pyg) if h_obj else float(session_data.get("monto_cierre") or 0),
-        "monto_declarado_brl": float(h_obj.monto_brl or 0) if h_obj else float(session_data.get("monto_efectivo_brl") or 0),
-        "monto_declarado_usd": float(h_obj.monto_usd or 0) if h_obj else float(session_data.get("monto_efectivo_usd") or 0),
+        "monto_declarado_pyg": decl_pyg,
+        "monto_declarado_brl": decl_brl,
+        "monto_declarado_usd": decl_usd,
         "monto_confirmado_pyg": float(h_obj.monto_confirmado_pyg) if h_obj and h_obj.monto_confirmado_pyg is not None else None,
         "monto_confirmado_brl": float(h_obj.monto_confirmado_brl) if h_obj and h_obj.monto_confirmado_brl is not None else None,
         "monto_confirmado_usd": float(h_obj.monto_confirmado_usd) if h_obj and h_obj.monto_confirmado_usd is not None else None,
@@ -3334,6 +3345,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
 
     return {
         "session_data": session_data,
+        "recon": recon,
         "handoff": handoff_dict,
         "summary_by_method": summary_final,
         "payments_breakdown": breakdown,
@@ -3374,28 +3386,34 @@ async def confirm_session_cash_reception(
     )
     handoff = res_h.scalar_one_or_none()
 
+    recon = await get_session_reconciliation_data(db, sid)
+    contado_neto_pyg = Decimal(str(recon["contado_pyg"])) if recon else Decimal(str(session_obj.monto_cierre or 0))
+    contado_neto_brl = Decimal(str(recon["contado_brl"])) if recon else Decimal("0")
+    contado_neto_usd = Decimal(str(recon["contado_usd"])) if recon else Decimal("0")
+
     if not handoff:
         count_res = await db.execute(
             select(CashCount).where(CashCount.session_id == sid).order_by(CashCount.created_at.desc()).limit(1)
         )
         count = count_res.scalar_one_or_none()
         count_id = count.id if count else session_obj.id
-        m_cierre_pyg = Decimal(str(session_obj.monto_cierre or 0))
-        m_cierre_brl = Decimal(str(count.monto_efectivo_brl or 0)) if count else Decimal("0")
-        m_cierre_usd = Decimal(str(count.monto_efectivo_usd or 0)) if count else Decimal("0")
         handoff = CashHandoff(
             company_id=cid,
             session_id=sid,
             cash_count_id=count_id,
             entregado_por=session_obj.user_id,
             entregado_por_nombre=session_obj.cajero_nombre,
-            monto_pyg=m_cierre_pyg,
-            monto_brl=m_cierre_brl,
-            monto_usd=m_cierre_usd,
+            monto_pyg=contado_neto_pyg,
+            monto_brl=contado_neto_brl,
+            monto_usd=contado_neto_usd,
             estado="pendiente",
         )
         db.add(handoff)
         await db.flush()
+    elif handoff.estado == "pendiente":
+        handoff.monto_pyg = contado_neto_pyg
+        handoff.monto_brl = contado_neto_brl
+        handoff.monto_usd = contado_neto_usd
 
     m_decl_pyg = Decimal(str(handoff.monto_pyg or 0))
     m_decl_brl = Decimal(str(handoff.monto_brl or 0))
