@@ -311,8 +311,9 @@ def _company_landscape_header(company: dict, styles, report_title: str, subtitle
     ]))
 
     # Accent bar horizontal de 273mm con fondo claro para impresión
+    bar_text = f"{report_title.upper()} — {subtitle.upper()}" if subtitle else report_title.upper()
     bar_p = Paragraph(
-        f"<b>{(subtitle or report_title).upper()}</b>",
+        f"<b>{bar_text}</b>",
         ParagraphStyle("EyebrowLandscape", fontName=FONT_BOLD, fontSize=8.5, leading=11, textColor=HexColor("#0F172A"))
     )
     accent_t = Table([[bar_p]], colWidths=[273 * mm])

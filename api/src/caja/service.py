@@ -2868,10 +2868,28 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
         if isinstance(r, dict):
             recon_by_session[s_obj.id] = r
 
+    # 3. Entregas físicas a tesorería (CashHandoffs) para tomar valores auditados y confirmados en Bóveda
+    handoff_res = await db.execute(
+        select(CashHandoff)
+        .where(CashHandoff.session_id.in_(session_ids))
+        .order_by(CashHandoff.created_at.desc())
+    )
+    handoffs_by_session: dict[uuid.UUID, CashHandoff] = {}
+    for h in handoff_res.scalars().all():
+        if h.session_id not in handoffs_by_session:
+            handoffs_by_session[h.session_id] = h
+
     out = []
     for session_obj, count, register_nombre in rows:
         pays = payments_by_session.get(session_obj.id, {})
         recon = recon_by_session.get(session_obj.id)
+        handoff = handoffs_by_session.get(session_obj.id)
+
+        tasa_brl = float(recon.get("tasa_brl") or 1130) if recon else 1130.0
+        tasa_usd = float(recon.get("tasa_usd") or 5840) if recon else 5840.0
+
+        is_verificada = session_obj.estado == "verificada" or (handoff and handoff.estado == "confirmado")
+        tiene_confirmacion_tesoreria = handoff and handoff.monto_confirmado_pyg is not None
 
         # Desglose por Procesador / Canal Operativo de Tesorería acordado
         m_bancard = float(pays.get("bancard", 0))
@@ -2887,31 +2905,45 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
         if legacy_tarjeta > 0 and (m_bancard + m_dinelco) == 0:
             m_bancard = legacy_tarjeta
 
-        if recon:
+        no_efectivo_pyg = m_bancard + m_dinelco + m_qr + m_pix + m_transf + m_extra_club + m_cheque + m_otro
+
+        # Efectivo Físico: si Tesorería ya punteó y confirmó el sobre en Bóveda, se toman sus datos oficiales
+        if tiene_confirmacion_tesoreria:
+            m_ef_pyg = float(handoff.monto_confirmado_pyg or 0)
+            m_ef_brl = float(handoff.monto_confirmado_brl or 0)
+            m_ef_usd = float(handoff.monto_confirmado_usd or 0)
+        elif recon:
             m_ef_pyg = float(recon["contado_pyg"])
             m_ef_brl = float(recon["contado_brl"])
             m_ef_usd = float(recon["contado_usd"])
-            monto_rendido_total = float(recon["contado_total_gs"])
-            monto_esperado_total = float(recon["esperado_total_gs"])
-            diferencia_gs = float(recon["diferencia_consolidada_gs"])
-            fondo_pyg = float(recon["fondo_pyg"])
-            fondo_brl = float(recon["fondo_brl"])
-            fondo_usd = float(recon["fondo_usd"])
-            total_facturado_pyg = float(recon.get("total_cobrado_gs") or 0)
-            no_efectivo_pyg = float(recon.get("total_no_efectivo_gs") or 0)
         else:
             m_ef_pyg = float(count.monto_efectivo or 0)
             m_ef_brl = float(count.monto_efectivo_brl or 0)
             m_ef_usd = float(count.monto_efectivo_usd or 0)
-            monto_electronico = m_bancard + m_dinelco + m_qr + m_pix + m_transf + m_extra_club + m_cheque + m_otro
-            monto_rendido_total = float(count.monto_total or 0)
-            diferencia_gs = float(count.diferencia or 0)
-            monto_esperado_total = monto_rendido_total - diferencia_gs
-            fondo_pyg = float(session_obj.monto_apertura or 0)
-            fondo_brl = float(session_obj.monto_apertura_brl or 0)
-            fondo_usd = float(session_obj.monto_apertura_usd or 0)
-            total_facturado_pyg = monto_esperado_total + monto_electronico
-            no_efectivo_pyg = monto_electronico
+
+        m_ef_brl_gs = m_ef_brl * tasa_brl
+        m_ef_usd_gs = m_ef_usd * tasa_usd
+        m_efectivo_total_gs = m_ef_pyg + m_ef_brl_gs + m_ef_usd_gs
+
+        # TOTALES GENERALES DE LA CAJA (Efectivo + No Efectivo)
+        # Total Rendido = Efectivo recibido + Vouchers no efectivo
+        monto_rendido_total = m_efectivo_total_gs + no_efectivo_pyg
+
+        # Total Esperado = Total facturado a justificar del turno = Efectivo neto esperado + No efectivo
+        if recon:
+            esp_ef_gs = float(recon.get("esperado_total_gs") or 0)
+            monto_esperado_total = esp_ef_gs + no_efectivo_pyg
+            total_facturado_pyg = float(recon.get("total_cobrado_gs") or 0)
+        else:
+            esp_ef_gs = max(0.0, float(count.monto_total or 0) - float(count.diferencia or 0) - no_efectivo_pyg)
+            monto_esperado_total = esp_ef_gs + no_efectivo_pyg
+            total_facturado_pyg = monto_esperado_total
+
+        diferencia_gs = monto_rendido_total - monto_esperado_total
+
+        fondo_pyg = float(recon.get("fondo_pyg") if recon else (session_obj.monto_apertura or 0))
+        fondo_brl = float(recon.get("fondo_brl") if recon else (session_obj.monto_apertura_brl or 0))
+        fondo_usd = float(recon.get("fondo_usd") if recon else (session_obj.monto_apertura_usd or 0))
 
         out.append({
             "session_id": str(session_obj.id),
@@ -2928,7 +2960,13 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             "no_efectivo_pyg": no_efectivo_pyg,
             "monto_efectivo": m_ef_pyg,
             "monto_efectivo_usd": m_ef_usd,
+            "monto_efectivo_usd_gs": m_ef_usd_gs,
             "monto_efectivo_brl": m_ef_brl,
+            "monto_efectivo_brl_gs": m_ef_brl_gs,
+            "monto_efectivo_total_gs": m_efectivo_total_gs,
+            "efectivo_esperado_gs": esp_ef_gs,
+            "tasa_brl": tasa_brl,
+            "tasa_usd": tasa_usd,
             "monto_bancard": m_bancard,
             "monto_dinelco": m_dinelco,
             "monto_qr": m_qr,
@@ -2942,8 +2980,10 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             "diferencia": diferencia_gs,
             "diferencia_usd": float(count.diferencia_usd or 0),
             "diferencia_brl": float(count.diferencia_brl or 0),
-            "requiere_revision": bool(count.requiere_revision or abs(diferencia_gs) > 0),
-            "estado": session_obj.estado,
+            "requiere_revision": bool(count.requiere_revision or abs(diferencia_gs) > 5000),
+            "estado": "verificada" if is_verificada else "cerrada",
+            "is_verificada": is_verificada,
+            "tesorera_nombre": handoff.recibido_por_nombre if handoff else None,
             "observaciones": count.observaciones or session_obj.observaciones or "",
         })
     return out

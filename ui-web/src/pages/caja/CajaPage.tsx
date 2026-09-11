@@ -2802,16 +2802,16 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   </div>
                   <div>
                     <h3 className="font-bold text-base text-gray-900 dark:text-white">
-                      Acta de Arqueo Consolidado (PDF Horizontal)
+                      Acta Consolidada de Movimientos (PDF Horizontal)
                     </h3>
                     <p className="text-xs text-gray-400">
-                      Documento formal en formato apaisado A4 con detalle de todas las terminales y horas de cierre
+                      Documento formal en formato apaisado A4 con terminales auditadas y canales con movimiento real
                     </p>
                   </div>
                 </div>
 
                 <p className="text-xs text-gray-500 leading-relaxed">
-                  Genera la planilla unificada que incluye todas las sesiones cerradas en el rango de fechas seleccionado (<b>{repFechaDesde}</b> al <b>{repFechaHasta}</b>), con el desglose de gaveta, fondos iniciales, canales de recaudación y espacio para las 3 firmas institucionales.
+                  Genera la planilla unificada que incluye todas las sesiones del período seleccionado (<b>{repFechaDesde}</b> al <b>{repFechaHasta}</b>), reflejando el conteo de gaveta certificado en bóveda, canales operativos con recaudación real y espacio para las 3 firmas institucionales.
                 </p>
 
                 <div className="pt-2">
@@ -2820,7 +2820,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     className="w-full btn-primary py-2.5 text-xs font-bold flex items-center justify-center gap-2 shadow-sm"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Descargar Acta de Arqueo Consolidado</span>
+                    <span>Descargar Acta Consolidada de Movimientos</span>
                   </button>
                 </div>
               </div>
