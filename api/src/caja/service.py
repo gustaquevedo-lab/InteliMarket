@@ -675,7 +675,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
 
     # Ventas totales y IDs
     sales_res = await db.execute(
-        select(Sale.id, Sale.total)
+        select(Sale.id, Sale.total, Sale.created_at)
         .where(
             Sale.session_id == session_obj.id,
             Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
@@ -720,13 +720,12 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
                 unlinked_plugs = list(unlinked_plug_res.scalars().all())
 
                 used_plug_ids = set(p.id for p in plug_map.values())
-                for s_obj in sales:
-                    if s_obj.id in plug_map:
+                for sid_item, stot_item, s_fecha in sales_rows:
+                    if sid_item in plug_map:
                         continue
-                    s_pays = [p for p in payments_rows if p.sale_id == s_obj.id and (p.forma_pago or "").upper() in ("QR", "PIX", "PLUGPAY_PIX", "PLUGPAY", "PLUG")]
+                    s_pays = [p for p in payments_rows if p.sale_id == sid_item and (p.forma_pago or "").upper() in ("QR", "PIX", "PLUGPAY_PIX", "PLUGPAY", "PLUG")]
                     for sp in s_pays:
                         sp_monto = Decimal(str(sp.monto or 0))
-                        s_fecha = s_obj.created_at
                         if s_fecha and s_fecha.tzinfo is None:
                             s_fecha = s_fecha.replace(tzinfo=timezone.utc)
 
@@ -746,10 +745,10 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
                                     best_plug = pl
 
                         if best_plug:
-                            plug_map[s_obj.id] = best_plug
+                            plug_map[sid_item] = best_plug
                             used_plug_ids.add(best_plug.id)
                             if best_plug.sale_id is None:
-                                best_plug.sale_id = s_obj.id
+                                best_plug.sale_id = sid_item
         except Exception:
             plug_map = {}
     else:
