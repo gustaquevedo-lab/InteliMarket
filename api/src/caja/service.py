@@ -891,14 +891,11 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     d_usd = sum(Decimal(str(d.monto_confirmado_usd or d.monto_usd or 0)) for d in drops if d.estado == "confirmado")
     total_drops_gs = d_pyg + (d_brl * tasa_brl) + (d_usd * tasa_usd)
 
-    # Reclasificaciones de pagos en Tesorería (ej: venta registrada en POS como Efectivo pero entregada como comprobante SIPAP/Tarjeta)
+    # Reclasificaciones de pagos en Tesorería (ej: venta registrada en POS como Efectivo pero entregada como comprobante SIPAP/Tarjeta, o corregida entre medios no efectivo)
     adj_res = await db.execute(
         select(CashSessionPaymentAdjustment).where(CashSessionPaymentAdjustment.session_id == session_obj.id)
     )
     adjustments_list = list(adj_res.scalars().all())
-    total_ajustes_efectivo_a_no_efectivo = sum(
-        Decimal(str(a.monto_gs or 0)) for a in adjustments_list if a.origen_forma_pago == "EFECTIVO"
-    )
 
     if adjustments_list:
         desglose_by_key = {d["clave"]: d for d in desglose_detallado}
@@ -906,6 +903,9 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
             d_key = a.destino_canal_key
             d_label = a.destino_canal_label
             m_gs_adj = Decimal(str(a.monto_gs or 0))
+            o_key = (a.origen_forma_pago or "EFECTIVO").upper()
+
+            # 1. Sumar al canal destino
             if d_key in desglose_by_key:
                 desglose_by_key[d_key]["cantidad"] += 1
                 desglose_by_key[d_key]["monto_gs"] += float(m_gs_adj)
@@ -927,10 +927,32 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
                 desglose_detallado.append(item_adj)
                 desglose_by_key[d_key] = item_adj
 
-        if "EFECTIVO_PYG" in desglose_by_key:
-            desglose_by_key["EFECTIVO_PYG"]["monto_gs"] = max(0.0, desglose_by_key["EFECTIVO_PYG"]["monto_gs"] - float(total_ajustes_efectivo_a_no_efectivo))
-            desglose_by_key["EFECTIVO_PYG"]["monto_orig"] = desglose_by_key["EFECTIVO_PYG"]["monto_gs"]
-            desglose_by_key["EFECTIVO_PYG"]["monto_formateado"] = f"{desglose_by_key['EFECTIVO_PYG']['monto_gs']:,.0f}".replace(",", ".") + " Gs."
+            # 2. Descontar del canal origen
+            if o_key in ["EFECTIVO", "EFECTIVO_PYG"]:
+                if "EFECTIVO_PYG" in desglose_by_key:
+                    desglose_by_key["EFECTIVO_PYG"]["monto_gs"] = max(0.0, desglose_by_key["EFECTIVO_PYG"]["monto_gs"] - float(m_gs_adj))
+                    desglose_by_key["EFECTIVO_PYG"]["monto_orig"] = desglose_by_key["EFECTIVO_PYG"]["monto_gs"]
+                    desglose_by_key["EFECTIVO_PYG"]["monto_formateado"] = f"{desglose_by_key['EFECTIVO_PYG']['monto_gs']:,.0f}".replace(",", ".") + " Gs."
+                efectivo_pyg = max(Decimal("0"), efectivo_pyg - m_gs_adj)
+            else:
+                # Buscar origen en desglose_by_key (coincidencia exacta o por alias)
+                matched_o = None
+                if o_key in desglose_by_key:
+                    matched_o = o_key
+                else:
+                    for k in desglose_by_key:
+                        if ("DINELCO" in o_key and "DINELCO" in k) or \
+                           ("BANCARD" in o_key and "BANCARD" in k) or \
+                           ("QR" in o_key and "QR" in k) or \
+                           ("PIX" in o_key and "PIX" in k) or \
+                           ("EXTRA_CLUB" in o_key and "EXTRA_CLUB" in k):
+                            matched_o = k
+                            break
+                if matched_o and matched_o in desglose_by_key:
+                    desglose_by_key[matched_o]["monto_gs"] = max(0.0, desglose_by_key[matched_o]["monto_gs"] - float(m_gs_adj))
+                    desglose_by_key[matched_o]["monto_orig"] = max(0.0, desglose_by_key[matched_o]["monto_orig"] - float(m_gs_adj))
+                    desglose_by_key[matched_o]["cantidad"] = max(0, desglose_by_key[matched_o]["cantidad"] - 1)
+                    desglose_by_key[matched_o]["monto_formateado"] = f"{desglose_by_key[matched_o]['monto_gs']:,.0f}".replace(",", ".") + " Gs."
 
     # Total recaudado por medios no efectivo desglosados (Tarjetas Débito/Crédito, QR, PIX, etc.)
     total_no_efectivo_gs = sum(
@@ -3508,12 +3530,13 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
 
         m_gs_adj = float(a.monto_gs or 0)
         c_key = a.destino_canal_key
+        o_key = (a.origen_forma_pago or "EFECTIVO").upper()
         voucher_adj = {
             "id": f"adj_{str(a.id)}",
             "adjustment_id": str(a.id),
             "sale_id": str(a.sale_id) if a.sale_id else None,
             "fecha": a.created_at.isoformat() if a.created_at else None,
-            "numero_ticket": a.ticket_numero or "Reclasif. Efectivo",
+            "numero_ticket": a.ticket_numero or ("Reclasif. Efectivo" if o_key in ["EFECTIVO", "EFECTIVO_PYG"] else f"Reclasif. {a.origen_forma_pago}"),
             "tipo_comprobante": "Reclasificación Tesorería",
             "medio_pago": a.destino_canal_label,
             "canal_key": c_key,
@@ -3546,6 +3569,30 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
                 "cantidad_esperada": 1,
                 "vouchers": [voucher_adj],
             }
+
+        # Si el origen es un medio no efectivo (ej: Dinelco), remover/descontar del canal origen
+        if o_key not in ["EFECTIVO", "EFECTIVO_PYG"]:
+            matched_o = None
+            if o_key in vouchers_by_channel:
+                matched_o = o_key
+            else:
+                for k in vouchers_by_channel:
+                    if ("DINELCO" in o_key and "DINELCO" in k) or \
+                       ("BANCARD" in o_key and "BANCARD" in k) or \
+                       ("QR" in o_key and "QR" in k) or \
+                       ("PIX" in o_key and "PIX" in k) or \
+                       ("EXTRA_CLUB" in o_key and "EXTRA_CLUB" in k):
+                        matched_o = k
+                        break
+            if matched_o and matched_o in vouchers_by_channel:
+                vouchers_by_channel[matched_o]["total_esperado_gs"] = max(0.0, vouchers_by_channel[matched_o]["total_esperado_gs"] - m_gs_adj)
+                vouchers_by_channel[matched_o]["cantidad_esperada"] = max(0, vouchers_by_channel[matched_o]["cantidad_esperada"] - 1)
+                for orig_v in list(vouchers_by_channel[matched_o]["vouchers"]):
+                    if not orig_v.get("es_reclasificado") and abs(float(orig_v.get("monto_gs", 0)) - m_gs_adj) < 1.0:
+                        vouchers_by_channel[matched_o]["vouchers"].remove(orig_v)
+                        if orig_v in vouchers:
+                            vouchers.remove(orig_v)
+                        break
 
     # 6. Enriquecer vouchers con Tipo de Instrumento y Ordenar
     for v in vouchers:

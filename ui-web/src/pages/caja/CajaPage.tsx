@@ -272,6 +272,7 @@ export default function CajaPage() {
 
   // ── Reclasificación de Comprobantes Manuales en Tesorería ──
   const [adjustmentModalOpen, setAdjustmentModalOpen] = useState(false)
+  const [adjOrigenCanal, setAdjOrigenCanal] = useState("EFECTIVO")
   const [adjDestinoCanal, setAdjDestinoCanal] = useState("TRANSFERENCIA")
   const [adjMontoGs, setAdjMontoGs] = useState<number>(0)
   const [adjMontoGsStr, setAdjMontoGsStr] = useState<string>("")
@@ -284,6 +285,7 @@ export default function CajaPage() {
   const [deletingAdjustmentId, setDeletingAdjustmentId] = useState<string | null>(null)
 
   const handleOpenAdjustmentModal = () => {
+    setAdjOrigenCanal("EFECTIVO")
     setAdjDestinoCanal("TRANSFERENCIA")
     setAdjMontoGs(0)
     setAdjMontoGsStr("")
@@ -304,16 +306,16 @@ export default function CajaPage() {
     try {
       setSavingAdjustment(true)
       await api.caja.paymentAdjustments.create(punteoData.session_data.id, {
-        origen_forma_pago: "EFECTIVO",
+        origen_forma_pago: adjOrigenCanal,
         destino_canal_key: adjDestinoCanal,
         monto_gs: adjMontoGs,
         nro_comprobante: adjNroComprobante.trim() || undefined,
         banco_entidad: adjBancoEntidad.trim() || undefined,
         titular: adjTitular.trim() || undefined,
         ticket_numero: adjTicketNumero.trim() || undefined,
-        motivo: adjMotivo.trim() || "Comprobante entregado en Tesorería registrado como Efectivo en POS",
+        motivo: adjMotivo.trim() || (adjOrigenCanal === "EFECTIVO" ? "Comprobante entregado en Tesorería registrado como Efectivo en POS" : `Reclasificación de ${adjOrigenCanal} a ${adjDestinoCanal}`),
       })
-      toast.success("Comprobante Reclasificado", "El comprobante fue imputado al canal respectivo y deducido del efectivo esperado.")
+      toast.success("Comprobante Reclasificado", "El comprobante fue imputado al canal respectivo y ajustado en el cuadre.")
       setAdjustmentModalOpen(false)
       await handleOpenPunteoModal(punteoData.session_data.id)
       fetchHistorial()
@@ -5117,7 +5119,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                       title="Registrar comprobante físico (SIPAP, Tarjeta Manual, PIX, Cheque) registrado erróneamente como Efectivo en el POS"
                     >
                       <ArrowLeftRight className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                      <span>+ Reclasificar Comprobante de Efectivo</span>
+                      <span>+ Reclasificar Comprobante</span>
                     </button>
                   </div>
                 </div>
@@ -5128,23 +5130,30 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-amber-800 dark:text-amber-200 flex items-center gap-1.5">
                         <ArrowLeftRight className="w-3.5 h-3.5 text-amber-600" />
-                        Comprobantes Reclasificados desde Efectivo ({punteoData.adjustments.length})
+                        Comprobantes Reclasificados ({punteoData.adjustments.length})
                       </span>
                       <span className="text-xs font-mono font-bold text-amber-900 dark:text-amber-100">
-                        Total Deducido del Efectivo: {formatPYG(punteoData.total_ajustes_gs || 0)}
+                        Total Reclasificado: {formatPYG(punteoData.total_ajustes_gs || 0)}
                       </span>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                       {punteoData.adjustments.map((a: any) => (
                         <div key={a.id} className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/50 text-xs flex items-center justify-between gap-2 shadow-sm">
                           <div className="min-w-0 space-y-0.5">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-slate-900 dark:text-white truncate">{a.destino_canal_label}</span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {a.origen_forma_pago && a.origen_forma_pago !== "EFECTIVO" ? (
+                                <span className="font-bold text-slate-900 dark:text-white truncate">
+                                  <span className="text-rose-600 dark:text-rose-400">{a.origen_forma_pago}</span> ➔ <span className="text-emerald-600 dark:text-emerald-400">{a.destino_canal_label}</span>
+                                </span>
+                              ) : (
+                                <span className="font-bold text-slate-900 dark:text-white truncate">{a.destino_canal_label}</span>
+                              )}
                               <span className="px-1 py-0.2 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 text-[9px] font-bold rounded">
                                 {a.nro_comprobante ? `#${a.nro_comprobante}` : "Comprobante"}
                               </span>
                             </div>
                             <div className="text-[10px] text-slate-500 truncate">
+                              {a.origen_forma_pago && a.origen_forma_pago !== "EFECTIVO" ? `(Reasignado desde ${a.origen_forma_pago}) ` : "(Deducido de Efectivo) "}
                               {a.banco_entidad ? `${a.banco_entidad} · ` : ""}{a.titular ? `${a.titular} · ` : ""}{a.motivo || "Ajuste manual"}
                             </div>
                           </div>
@@ -6168,45 +6177,69 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 Impacto en el Cierre y Bóveda:
               </p>
               <ul className="list-disc list-inside space-y-0.5 text-[11px] text-amber-800 dark:text-amber-300/90 pl-1">
-                <li>Deduce el monto del <b>Efectivo Esperado</b> para cuadrar la gaveta de billetes sin falso faltante.</li>
+                <li>Si el origen es <b>Efectivo</b>: deduce el monto del Efectivo Esperado sin generar falso faltante en gaveta.</li>
+                <li>Si el origen es <b>otro canal (ej. Dinelco a PIX)</b>: traslada el monto entre canales sin tocar el efectivo de gaveta.</li>
                 <li>Imputa el comprobante a su <b>canal operativo</b> para control y punteo físico en Tesorería.</li>
-                <li>Al asentar en Bóveda & Bancos, se acreditará en la <b>cuenta bancaria asignada</b>.</li>
               </ul>
             </div>
 
             <form onSubmit={(e) => { e.preventDefault(); handleSavePaymentAdjustment(); }} className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Medio de Pago / Instrumento Real *
-                </label>
-                <select
-                  value={adjDestinoCanal}
-                  onChange={(e) => setAdjDestinoCanal(e.target.value)}
-                  className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white px-3 py-2 focus:ring-2 focus:ring-amber-500"
-                  required
-                >
-                  <optgroup label="🌐 Transferencias Bancarias & PIX">
-                    <option value="TRANSFERENCIA">Transferencia Bancaria SIPAP</option>
-                    <option value="PLUGPAY_PIX">Plug Pay PIX Brasil</option>
-                    <option value="BANCARD_PIX">Bancard PIX</option>
-                    <option value="DINELCO_PIX">Dinelco PIX</option>
-                  </optgroup>
-                  <optgroup label="💳 Tarjetas de Débito y Crédito (POS)">
-                    <option value="BANCARD_DEBITO">Bancard Tarjeta de Débito</option>
-                    <option value="BANCARD_CREDITO">Bancard Tarjeta de Crédito</option>
-                    <option value="DINELCO_DEBITO">Dinelco Tarjeta de Débito</option>
-                    <option value="DINELCO_CREDITO">Dinelco Tarjeta de Crédito</option>
-                  </optgroup>
-                  <optgroup label="📱 Billeteras Digitales & QR">
-                    <option value="BANCARD_QR">Bancard QR</option>
-                    <option value="DINELCO_QR">Dinelco QR</option>
-                  </optgroup>
-                  <optgroup label="📄 Documentos de Valor">
-                    <option value="CHEQUES">Cheques / Vales</option>
-                    <option value="EXTRA_CLUB">Extra Club / Crédito</option>
-                    <option value="OTROS">Otros Medios</option>
-                  </optgroup>
-                </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Origen en POS (Cobrado como) *
+                  </label>
+                  <select
+                    value={adjOrigenCanal}
+                    onChange={(e) => setAdjOrigenCanal(e.target.value)}
+                    className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white px-3 py-2 focus:ring-2 focus:ring-amber-500 font-medium"
+                    required
+                  >
+                    <option value="EFECTIVO">💵 Efectivo en Gaveta (Deduce de Efectivo)</option>
+                    <option value="DINELCO_DEBITO">💳 Dinelco Tarjeta Débito / POS Dinelco</option>
+                    <option value="DINELCO_CREDITO">💳 Dinelco Tarjeta Crédito</option>
+                    <option value="BANCARD_DEBITO">💳 Bancard Tarjeta Débito</option>
+                    <option value="BANCARD_CREDITO">💳 Bancard Tarjeta Crédito</option>
+                    <option value="BANCARD_QR">📱 Bancard QR</option>
+                    <option value="PLUGPAY_PIX">🌐 Plug Pay PIX Brasil</option>
+                    <option value="EXTRA_CLUB">🏷️ Extra Club / Crédito Casa</option>
+                    <option value="OTROS">📄 Otros Canales</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Destino / Instrumento Real *
+                  </label>
+                  <select
+                    value={adjDestinoCanal}
+                    onChange={(e) => setAdjDestinoCanal(e.target.value)}
+                    className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white px-3 py-2 focus:ring-2 focus:ring-amber-500 font-medium"
+                    required
+                  >
+                    <optgroup label="🌐 Transferencias Bancarias & PIX">
+                      <option value="PLUGPAY_PIX">Plug Pay PIX Brasil</option>
+                      <option value="TRANSFERENCIA">Transferencia Bancaria SIPAP</option>
+                      <option value="BANCARD_PIX">Bancard PIX</option>
+                      <option value="DINELCO_PIX">Dinelco PIX</option>
+                    </optgroup>
+                    <optgroup label="💳 Tarjetas de Débito y Crédito (POS)">
+                      <option value="BANCARD_DEBITO">Bancard Tarjeta de Débito</option>
+                      <option value="BANCARD_CREDITO">Bancard Tarjeta de Crédito</option>
+                      <option value="DINELCO_DEBITO">Dinelco Tarjeta de Débito</option>
+                      <option value="DINELCO_CREDITO">Dinelco Tarjeta de Crédito</option>
+                    </optgroup>
+                    <optgroup label="📱 Billeteras Digitales & QR">
+                      <option value="BANCARD_QR">Bancard QR</option>
+                      <option value="DINELCO_QR">Dinelco QR</option>
+                    </optgroup>
+                    <optgroup label="📄 Documentos de Valor">
+                      <option value="CHEQUES">Cheques / Vales</option>
+                      <option value="EXTRA_CLUB">Extra Club / Crédito</option>
+                      <option value="OTROS">Otros Medios</option>
+                    </optgroup>
+                  </select>
+                </div>
               </div>
 
               <div>
