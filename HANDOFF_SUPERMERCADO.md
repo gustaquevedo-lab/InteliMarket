@@ -9,6 +9,22 @@
 
 ---
 
+## ⚖️ SESIÓN 2026-09-11 — Promociones de precio fijo no llegaban a la balanza (trigger SQL invisible para Python)
+
+Pedido del cliente: cualquier cambio de precio de venta confirmado, si el producto es pesable (tiene `plu_balanza`), se transmite solo a la balanza. Ya estaba cubierto para edición manual de producto, markdown dinámico y el cron de Ñemuha (ver sesión 27-ago). El cliente reportó un caso real que no andaba: creó la promo "PROMOCION COSTILLA DE PRIMERA" (precio fijo Gs 27.977), el precio ya se veía en InteliMarket, pero la balanza de Carnicería seguía mostrando Gs 34.777.
+
+**La causa era nueva**: las promos tipo `precio_fijo_oferta` con `producto_ids` explícitos no cambian `products.precio_venta` desde Python -- lo hace un **trigger de Postgres** (`trg_sync_promo_precio_fijo` sobre `promotions`, `AFTER INSERT OR UPDATE`) que pisa `precio_venta` directo en SQL (guardando el precio original en la columna `precio_regular`, y revirtiendo cuando la promo se desactiva). Como es un trigger, corre completamente fuera de cualquier código Python -- ninguno de los 3 hooks ya wireados podía verlo.
+
+**Arreglado**:
+- Nuevo helper `_sync_balanza_si_aplica()` en [`promotions/service.py`](api/src/promotions/service.py): si la promo es `precio_fijo_oferta` con `producto_ids`, reconsulta esos productos (ya con el precio post-trigger) y empuja a balanza los que tengan `plu_balanza`. Enganchado después de `db.refresh(promo)` en los 5 puntos que pueden activar/desactivar una promo de este tipo: `create_promotion`, `update_promotion`, `toggle_promotion_status`, `reactivate_promotion`, `approve_promotion_loss`.
+- [`scripts/expire_promotions.py`](scripts/expire_promotions.py) (cron diario 00:05, marca promos vencidas por fecha) también dispara el trigger en reversa mismo, sin ORM -- se le agregó un paso posterior que reconsulta los productos de las promos recién vencidas (tipo `precio_fijo_oferta`) y empuja el precio ya revertido.
+- Caso real de Costilla corregido a mano en el momento (confirmado por el cliente en el visor físico).
+
+**Patrón para recordar**: cuando se busque "¿dónde cambia `precio_venta`?" en el futuro, no alcanza con grep sobre código Python -- **hay al menos un trigger de Postgres que lo hace también** (`trg_sync_promo_precio_fijo`). Antes de asumir que un 4to/5to lugar nuevo está cubierto, revisar `pg_trigger`/`pg_proc` además del código.
+
+**No probado en vivo** (solo el caso real de Costilla, que ya estaba activo de antes): los 5 hooks nuevos en `promotions/service.py` y el de `expire_promotions.py` compilan y son lógicamente equivalentes al patrón ya probado, pero no se disparó ninguno de pasada por una promo nueva creada después del fix.
+
+
 ## 🖥️ SESIÓN 2026-09-08 — Bug visual Electron (header/modal), ahorro roto por sync Ñemuha, y PENDIENTE: migrar blindaje de modales
 
 ### 1. (✅ RESUELTO) Gap en el header + modal de Cobro no cubría toda la pantalla

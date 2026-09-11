@@ -1,4 +1,5 @@
 import io
+import logging
 import os
 import uuid
 from decimal import Decimal
@@ -30,7 +31,29 @@ from api.src.promotions.pdf_reports import (
     generate_promotion_products_pdf,
 )
 
+logger = logging.getLogger(__name__)
+
 PY_TZ = ZoneInfo("America/Asuncion")
+
+
+async def _sync_balanza_si_aplica(db: AsyncSession, promo: Promotion) -> None:
+    """Las promos tipo `precio_fijo_oferta` con `producto_ids` disparan el trigger
+    Postgres `trg_sync_promo_precio_fijo`, que pisa `products.precio_venta` directo
+    en SQL (ida al activar la promo, vuelta al desactivarla/vencer) -- por fuera de
+    cualquier código Python, así que nada le avisa a la balanza sola. Este helper
+    reconsulta los productos afectados (ya con el precio post-trigger) y empuja el
+    cambio a las balanzas para los que sean pesables."""
+    if promo.tipo != "precio_fijo_oferta" or not promo.producto_ids:
+        return
+    from api.src.integrations.scales import service as scales_service
+    r = await db.execute(select(Product).where(Product.id.in_(promo.producto_ids)))
+    for prod in r.scalars().all():
+        if not prod.plu_balanza:
+            continue
+        try:
+            await scales_service.auto_sync_product(db, str(promo.company_id), prod)
+        except Exception as e:  # noqa: BLE001 -- una balanza offline no debe bloquear la promo
+            logger.warning("Auto PLU sync (promo precio_fijo_oferta) fallo para producto %s: %s", prod.id, e)
 
 
 def _aplicar_terminacion_psicologica(precio: Decimal, terminacion: Optional[int]) -> Decimal:
@@ -183,6 +206,7 @@ async def create_promotion(db: AsyncSession, company_id: str, data: PromotionCre
     db.add(promo)
     await db.flush()
     await db.refresh(promo)
+    await _sync_balanza_si_aplica(db, promo)
     return promo
 
 
@@ -293,6 +317,7 @@ async def update_promotion(db: AsyncSession, promo_id: str, data: PromotionUpdat
 
     await db.flush()
     await db.refresh(promo)
+    await _sync_balanza_si_aplica(db, promo)
     return promo
 
 
@@ -300,16 +325,17 @@ async def toggle_promotion_status(db: AsyncSession, company_id: str, promo_id: s
     promo = await get_promotion(db, promo_id)
     if not promo or str(promo.company_id) != company_id:
         return None
-    
+
     if promo.activo:
         promo.activo = False
         promo.estado = "pausada"
     else:
         promo.activo = True
         promo.estado = "activa"
-    
+
     await db.flush()
     await db.refresh(promo)
+    await _sync_balanza_si_aplica(db, promo)
     return promo
 
 
@@ -331,6 +357,7 @@ async def reactivate_promotion(db: AsyncSession, company_id: str, promo_id: str,
 
     await db.flush()
     await db.refresh(promo)
+    await _sync_balanza_si_aplica(db, promo)
     return promo
 
 
@@ -338,14 +365,15 @@ async def approve_promotion_loss(db: AsyncSession, company_id: str, promo_id: st
     promo = await get_promotion(db, promo_id)
     if not promo or str(promo.company_id) != company_id:
         return None
-    
+
     promo.estado = "activa"
     promo.activo = True
     promo.aprobado_por = uuid.UUID(user_id) if user_id else None
     promo.fecha_aprobacion = datetime.now(timezone.utc)
-    
+
     await db.flush()
     await db.refresh(promo)
+    await _sync_balanza_si_aplica(db, promo)
     return promo
 
 
