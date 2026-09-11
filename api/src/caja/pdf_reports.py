@@ -467,10 +467,15 @@ def generate_cierre_sesion_individual_pdf(
     apertura_str = ap_local.strftime("%d/%m/%Y %H:%M:%S") if ap_local else "—"
     cierre_str = ci_local.strftime("%d/%m/%Y %H:%M:%S") if ci_local else "—"
     
+    recon = s.get("recon")
+    tot_facturado_gs = recon.get("total_cobrado_gs", 0) if recon else (s.get("efectivo_cobrado_pyg", 0) or 0)
+    cant_tickets = recon.get("total_ventas_count", 0) if recon else 0
+
     meta_data = [
         ["Cajero/a:", Paragraph(f"<b>{s.get('cajero_nombre') or '—'}</b>", styles["Normal"]), "Caja / Terminal:", Paragraph(f"<b>{s.get('register_nombre') or '—'}</b>", styles["Normal"])],
         ["Fecha Apertura:", apertura_str, "Fecha Cierre:", cierre_str],
         ["Estado Sesión:", s.get("estado", "cerrada").upper(), "ID Sesión:", str(s.get("id", "—"))[:8].upper()],
+        ["TOTAL FACTURADO:", Paragraph(f"<font color='#047857' size=8.5><b>{_fmt_gs(tot_facturado_gs)}</b></font> <font color='#475569'>({cant_tickets} tickets)</font>", styles["Normal"]), "Régimen Fiscal:", Paragraph("<b>Extra Supermercado (PYG)</b>", styles["Normal"])],
     ]
     t_meta = Table(meta_data, colWidths=[28 * mm, 64 * mm, 30 * mm, 64 * mm])
     t_meta.setStyle(TableStyle([
@@ -487,7 +492,6 @@ def generate_cierre_sesion_individual_pdf(
     elements.append(Paragraph("<b>1. ARQUEO Y CONCILIACIÓN DE EFECTIVO</b>", styles["Normal"]))
     elements.append(Spacer(1, 4))
 
-    recon = s.get("recon")
     if recon:
         f_pyg = recon.get("fondo_pyg", 0)
         f_brl = recon.get("fondo_brl", 0)
@@ -605,16 +609,17 @@ def generate_cierre_sesion_individual_pdf(
         txt_color = HexColor("#065F46") if estado_cuadre == "CUADRADO" else (HexColor("#92400E") if estado_cuadre == "SOBRANTE" else HexColor("#991B1B"))
         txt_color_hex = "#065F46" if estado_cuadre == "CUADRADO" else ("#92400E" if estado_cuadre == "SOBRANTE" else "#991B1B")
 
-        style_box_cell = ParagraphStyle("BoxCell", parent=styles["Normal"], alignment=TA_CENTER, leading=11)
+        style_box_cell = ParagraphStyle("BoxCell", parent=styles["Normal"], alignment=TA_CENTER, leading=10)
         resumen_box = [
             [
-                Paragraph(f"<font size=5.8 color='{txt_color_hex}'><b>TOTAL ESPERADO A RENDIR</b></font><br/><font size=9.5 color='{txt_color_hex}'><b>{_fmt_gs(recon.get('esperado_total_gs', 0))}</b></font>", style_box_cell),
-                Paragraph(f"<font size=5.8 color='{txt_color_hex}'><b>TOTAL RENDIDO A TESORERÍA</b></font><br/><font size=9.5 color='{txt_color_hex}'><b>{_fmt_gs(recon.get('contado_total_gs', 0))}</b></font>", style_box_cell),
-                Paragraph(f"<font size=5.8 color='{txt_color_hex}'><b>DIFERENCIA RENDICIÓN</b></font><br/><font size=9.5 color='{txt_color_hex}'><b>{signo_cons}{_fmt_gs(dif_consolidada)}</b></font>", style_box_cell),
-                Paragraph(f"<font size=5.8 color='{txt_color_hex}'><b>DICTAMEN DE ARQUEO</b></font><br/><font size=9.5 color='{txt_color_hex}'><b>{estado_cuadre}</b></font>", style_box_cell),
+                Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>TOTAL FACTURADO</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{_fmt_gs(recon.get('total_cobrado_gs', 0))}</b></font>", style_box_cell),
+                Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>TOTAL ESPERADO A RENDIR</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{_fmt_gs(recon.get('esperado_total_gs', 0))}</b></font>", style_box_cell),
+                Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>TOTAL RENDIDO A TESORERÍA</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{_fmt_gs(recon.get('contado_total_gs', 0))}</b></font>", style_box_cell),
+                Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>DIFERENCIA RENDICIÓN</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{signo_cons}{_fmt_gs(dif_consolidada)}</b></font>", style_box_cell),
+                Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>DICTAMEN DE ARQUEO</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{estado_cuadre}</b></font>", style_box_cell),
             ]
         ]
-        t_box = Table(resumen_box, colWidths=[46.5 * mm, 46.5 * mm, 46.5 * mm, 46.5 * mm])
+        t_box = Table(resumen_box, colWidths=[37.2 * mm, 37.2 * mm, 37.2 * mm, 37.2 * mm, 37.2 * mm])
         t_box.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), bg_color),
             ("BOX", (0, 0), (-1, -1), 1.0, txt_color),

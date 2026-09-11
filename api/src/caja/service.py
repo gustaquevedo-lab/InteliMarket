@@ -705,6 +705,51 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
                 select(PlugpayTransaction).where(PlugpayTransaction.sale_id.in_(sale_ids), PlugpayTransaction.exitosa == True)
             )
             plug_map = {r.sale_id: r for r in plug_res.scalars().all()}
+
+            # Buscar transacciones PlugPay no vinculadas dentro de la ventana de tiempo de la sesión
+            if session_obj and session_obj.fecha_apertura:
+                dt_start = session_obj.fecha_apertura - timedelta(minutes=15)
+                dt_end = (session_obj.fecha_cierre or datetime.now(timezone.utc)) + timedelta(minutes=15)
+                unlinked_plug_res = await db.execute(
+                    select(PlugpayTransaction).where(
+                        PlugpayTransaction.exitosa == True,
+                        PlugpayTransaction.created_at >= dt_start,
+                        PlugpayTransaction.created_at <= dt_end,
+                    ).order_by(PlugpayTransaction.created_at.asc())
+                )
+                unlinked_plugs = list(unlinked_plug_res.scalars().all())
+
+                used_plug_ids = set(p.id for p in plug_map.values())
+                for s_obj in sales:
+                    if s_obj.id in plug_map:
+                        continue
+                    s_pays = [p for p in payments_rows if p.sale_id == s_obj.id and (p.forma_pago or "").upper() in ("QR", "PIX", "PLUGPAY_PIX", "PLUGPAY", "PLUG")]
+                    for sp in s_pays:
+                        sp_monto = Decimal(str(sp.monto or 0))
+                        s_fecha = s_obj.created_at
+                        if s_fecha and s_fecha.tzinfo is None:
+                            s_fecha = s_fecha.replace(tzinfo=timezone.utc)
+
+                        best_plug = None
+                        best_plug_diff = None
+                        for pl in unlinked_plugs:
+                            if pl.id in used_plug_ids:
+                                continue
+                            pl_monto = Decimal(str(pl.monto_origen or 0))
+                            if abs(pl_monto - sp_monto) < Decimal("1.00"):
+                                pl_fecha = pl.created_at
+                                if pl_fecha and pl_fecha.tzinfo is None:
+                                    pl_fecha = pl_fecha.replace(tzinfo=timezone.utc)
+                                diff = abs((s_fecha - pl_fecha).total_seconds()) if s_fecha and pl_fecha else 9999
+                                if diff <= 300 and (best_plug_diff is None or diff < best_plug_diff):
+                                    best_plug_diff = diff
+                                    best_plug = pl
+
+                        if best_plug:
+                            plug_map[s_obj.id] = best_plug
+                            used_plug_ids.add(best_plug.id)
+                            if best_plug.sale_id is None:
+                                best_plug.sale_id = s_obj.id
         except Exception:
             plug_map = {}
     else:
@@ -3031,6 +3076,22 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     except Exception:
         qr_txns = []
 
+    plug_txns = []
+    try:
+        if session_obj and session_obj.fecha_apertura:
+            dt_start = session_obj.fecha_apertura - timedelta(minutes=60)
+            dt_end = (session_obj.fecha_cierre or datetime.now(timezone.utc)) + timedelta(minutes=60)
+            res_plug = await db.execute(
+                select(PlugpayTransaction).where(
+                    PlugpayTransaction.exitosa == True,
+                    PlugpayTransaction.created_at >= dt_start,
+                    PlugpayTransaction.created_at <= dt_end,
+                ).order_by(PlugpayTransaction.created_at.asc())
+            )
+            plug_txns = list(res_plug.scalars().all())
+    except Exception:
+        plug_txns = []
+
     vouchers = []
     vouchers_by_channel: dict[str, dict] = {
         ckey: {
@@ -3047,6 +3108,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
 
     used_pos_ids = set()
     used_qr_ids = set()
+    used_plug_ids = set()
     auto_linked_count = 0
 
     for row in rows:
@@ -3170,7 +3232,38 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
                 if payer:
                     titular = payer
 
-        # D. Fallback de cupón manual o comprobante escrito en observaciones:
+        # D. Si es Plug Pay (PIX) o si hay transacción PlugPay coincidente:
+        if (canal_key in ("PLUGPAY_PIX", "BANCARD_QR") or fp_raw in ("QR", "PIX", "PLUGPAY", "PLUGPAY_PIX")) and (not codigo_autorizacion or codigo_autorizacion == "—"):
+            best_plug = None
+            best_plug_diff = None
+            row_fecha = row.fecha
+            if row_fecha and row_fecha.tzinfo is None:
+                row_fecha = row_fecha.replace(tzinfo=timezone.utc)
+
+            for pl in plug_txns:
+                if pl.id in used_plug_ids:
+                    continue
+                pl_monto = Decimal(str(pl.monto_origen or 0))
+                if abs(pl_monto - m_dec) < Decimal("1.00"):
+                    pl_fecha = pl.created_at
+                    if pl_fecha and pl_fecha.tzinfo is None:
+                        pl_fecha = pl_fecha.replace(tzinfo=timezone.utc)
+                    diff = abs((pl_fecha - row_fecha).total_seconds()) if row_fecha and pl_fecha else 9999
+                    if diff <= 300 and (best_plug_diff is None or diff < best_plug_diff):
+                        best_plug_diff = diff
+                        best_plug = pl
+
+            if best_plug:
+                used_plug_ids.add(best_plug.id)
+                canal_key = "PLUGPAY_PIX"
+                medio_label = "Plug Pay PIX"
+                nro_boleta = str(best_plug.id_transacao or "")
+                codigo_autorizacion = best_plug.referencia_interna or str(best_plug.qr_code_id or "—")
+                tarjeta_marca = "Plug Pay (PIX Brasil)"
+                val_brl = best_plug.raw_response.get("valueBRL") if isinstance(best_plug.raw_response, dict) else None
+                titular = f"PIX R$ {val_brl}" if val_brl else "PIX Brasil"
+
+        # E. Fallback de cupón manual o comprobante escrito en observaciones:
         if not nro_boleta and row.sale_obs:
             m_cup = re.search(r'(?:cupon|cupón|voucher|boleta|comp|nro)[:\s#]*([a-zA-Z0-9\-_]+)', row.sale_obs, re.IGNORECASE)
             if m_cup:
