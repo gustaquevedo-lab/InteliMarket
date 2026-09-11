@@ -1797,8 +1797,8 @@ def generate_acta_verificacion_tesoreria_pdf(
         signo_ent = "+" if dif_entrega_gs > 0 else ""
         col_ent = "#059669" if dif_entrega_gs > 0 else "#DC2626"
         t_rec_data.append([
-            Paragraph("<i>Dif. Entrega vs Declarado Cajera:</i>", ParagraphStyle("TDE", parent=style_td_lbl, fontName=FONT_ITALIC, fontSize=6.0)),
-            Paragraph(f"<font color='{col_ent}'><i>{signo_ent}Gs. {_fmt_val(dif_entrega_gs)}</i></font>", ParagraphStyle("TDEV", parent=style_td_val, fontSize=6.0)),
+            Paragraph("<i>Dif. Entrega vs Declarado Cajera:</i>", ParagraphStyle("TDE", parent=style_td_lbl, fontName="Helvetica-Oblique", fontSize=6.0)),
+            Paragraph(f"<font color='{col_ent}'><i>{signo_ent}Gs. {_fmt_val(dif_entrega_gs)}</i></font>", ParagraphStyle("TDEV", parent=style_td_val, fontName="Helvetica-Oblique", fontSize=6.0)),
         ])
 
     t_rec = Table(t_rec_data, colWidths=[58 * mm, 33 * mm])
