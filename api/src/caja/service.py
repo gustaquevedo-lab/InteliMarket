@@ -896,6 +896,12 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         select(CashSessionPaymentAdjustment).where(CashSessionPaymentAdjustment.session_id == session_obj.id)
     )
     adjustments_list = list(adj_res.scalars().all())
+    total_ajustes_efectivo_a_no_efectivo = sum(
+        Decimal(str(a.monto_gs or 0)) for a in adjustments_list if (a.origen_forma_pago or "EFECTIVO").upper() in ["EFECTIVO", "EFECTIVO_PYG"]
+    )
+    total_ajustes_reclasificados_gs = sum(
+        Decimal(str(a.monto_gs or 0)) for a in adjustments_list
+    )
 
     if adjustments_list:
         desglose_by_key = {d["clave"]: d for d in desglose_detallado}
