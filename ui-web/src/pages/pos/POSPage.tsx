@@ -738,7 +738,7 @@ export default function POSPage() {
   const [verifyingSupervisor, setVerifyingSupervisor] = useState(false)
   const [supervisorReason, setSupervisorReason] = useState("Error de escaneo / digitación")
   const [pendingSupervisorAction, setPendingSupervisorAction] = useState<{
-    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "reopen_payment" | "use_label_weight" | "direct_discount"
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "otros_payment" | "reopen_invoice" | "reopen_payment" | "use_label_weight" | "direct_discount"
     itemId?: string
     delta?: number
     sale?: Sale
@@ -751,6 +751,9 @@ export default function POSPage() {
     discountType?: "percentage" | "fixed"
     discountValue?: number
     discountReason?: string
+    otrosSubtipo?: string
+    otrosComprobante?: string
+    otrosMonto?: number
   } | null>(null)
 
   const [showRemoteAuthModal, setShowRemoteAuthModal] = useState(false)
@@ -913,7 +916,8 @@ export default function POSPage() {
   // visible salvo en Efectivo); con 2+ activos, cada linea no-efectivo
   // muestra su propio campo de monto para dividir el cobro -- eso ES el
   // pago mixto, sin pantalla aparte.
-  const [activeMethods, setActiveMethods] = useState<Set<"cash" | "bancard" | "dinelco" | "qr" | "extra_club" | "plugpay_pix" | "plugpay_credito">>(new Set(["cash"]))
+  type PosPaymentMethodType = "cash" | "bancard" | "dinelco" | "plugpay" | "extra_club" | "otros" | "qr" | "plugpay_credito"
+  const [activeMethods, setActiveMethods] = useState<Set<PosPaymentMethodType>>(new Set(["cash"]))
   const isMultiPayment = activeMethods.size > 1
   // Por defecto un tap en un medio de pago REEMPLAZA la seleccion (un solo
   // medio activo a la vez, como espera cualquier cajero). Antes cada tap
@@ -922,7 +926,7 @@ export default function POSPage() {
   // forma obvia de volver atras. El pago dividido en varios medios sigue
   // existiendo, pero ahora requiere prender "Pago mixto" a proposito.
   const [allowMixedPayment, setAllowMixedPayment] = useState(false)
-  const toggleActiveMethod = (m: "cash" | "bancard" | "dinelco" | "qr" | "extra_club" | "plugpay_pix" | "plugpay_credito") => {
+  const toggleActiveMethod = (m: PosPaymentMethodType) => {
     // Solo resetear Bancard/Dinelco/QR/PlugPay cuando de verdad corresponde:
     // reemplazo total (modo no-mixto) o se está SACANDO un metodo del mix.
     // Agregar un metodo nuevo al pago mixto (el caso real de "Bancard +
@@ -953,6 +957,29 @@ export default function POSPage() {
     setPosVerifiedTxn(null)
     if (shouldReset) resetBancardFlow()
   }
+
+  // ── SUB-MÉTODOS UNIFICADOS (Bancard, Dinelco, PlugPay, Otros) ──────────
+  const [bancardSubMethod, setBancardSubMethod] = useState<"debito" | "credito" | "qr_zimple" | "qr_cloud">("debito")
+  const [dinelcoSubMethod, setDinelcoSubMethod] = useState<"debito" | "credito" | "social" | "qr" | "pix">("debito")
+  const [plugpaySubMethod, setPlugpaySubMethod] = useState<"pix" | "parcelado">("pix")
+  const [showPlugpayManualFallback, setShowPlugpayManualFallback] = useState(false)
+  const [plugpayManualComprobante, setPlugpayManualComprobante] = useState("")
+  const [plugpayManualAutorizacion, setPlugpayManualAutorizacion] = useState("")
+
+  // Otros (Transferencia Bancaria y Cheques)
+  const [otrosSubMethod, setOtrosSubMethod] = useState<"transferencia" | "cheque">("transferencia")
+  const [transfComprobante, setTransfComprobante] = useState("")
+  const [transfBancoOrigen, setTransfBancoOrigen] = useState("")
+  const [transfTitular, setTransfTitular] = useState("")
+  const [chequeBanco, setChequeBanco] = useState("")
+  const [chequeNumero, setChequeNumero] = useState("")
+  const [chequeFechaVenc, setChequeFechaVenc] = useState("")
+  const [chequeTitular, setChequeTitular] = useState("")
+  const [mixedPlugPayPyg, setMixedPlugPayPyg] = useState("")
+  const [mixedOtrosPyg, setMixedOtrosPyg] = useState("")
+  const mixedPlugPayPygInputRef = useRef<HTMLInputElement>(null)
+  const mixedOtrosPygInputRef = useRef<HTMLInputElement>(null)
+  const [otrosSupervisorApproved, setOtrosSupervisorApproved] = useState(false)
   
   const [qrSubMethod, setQrSubMethod] = useState<"zimple" | "pix" | "dinelco" | "bancard_cloud">("zimple")
   // QR Bancard "en pantalla" -- API HTTPS directa (generate-qr-express /
@@ -4345,6 +4372,12 @@ export default function POSPage() {
         }
         return `Pago Extra Club: ${nombre}${numero} · ${formatPYG(totalPyg)}${saldoTxt}`
       }
+      case "otros_payment": {
+        const sub = (action as any).otrosSubtipo || "Transferencia / Cheque"
+        const comp = (action as any).otrosComprobante ? ` - ${(action as any).otrosComprobante}` : ""
+        const m = (action as any).otrosMonto ? ` por ${formatPYG((action as any).otrosMonto)}` : ""
+        return `Autorizar cobro no habitual: ${sub}${comp}${m}`
+      }
       case "reopen_invoice": {
         const nombre = (action as any).customer?.nombre || "cliente"
         return `Agregar identificación a factura Nº ${(action as any).sale?.numero || ""}: ${nombre}`
@@ -4375,7 +4408,8 @@ export default function POSPage() {
       await submitDevolucion(resolverId, resolverNombre)
     } else if (action.type === "assign_terminal") {
       await submitAssignTerminal()
-    } else if (action.type === "extra_club_payment") {
+    } else if (action.type === "extra_club_payment" || action.type === "otros_payment") {
+      setOtrosSupervisorApproved(true)
       await handleProcessCheckout()
     } else if (action.type === "reopen_invoice") {
       await submitReabrirFactura(action.sale, action.customer, resolverId, resolverNombre)
@@ -4400,6 +4434,7 @@ export default function POSPage() {
     open_pos_config: { nivel: "MEDIO", categoria: "seguridad" },
     assign_terminal: { nivel: "MEDIO", categoria: "operativo" },
     extra_club_payment: { nivel: "ALTO", categoria: "financiero" },
+    otros_payment: { nivel: "ALTO", categoria: "financiero" },
     process_return: { nivel: "ALTO", categoria: "financiero" },
     reopen_invoice: { nivel: "ALTO", categoria: "fiscal" },
     reopen_payment: { nivel: "ALTO", categoria: "financiero" },
@@ -4428,7 +4463,7 @@ export default function POSPage() {
   }
 
   const requestSupervisorAuthorization = async (action: {
-    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "reopen_payment" | "use_label_weight" | "direct_discount",
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "otros_payment" | "reopen_invoice" | "reopen_payment" | "use_label_weight" | "direct_discount",
     itemId?: string,
     delta?: number,
     sale?: Sale,
@@ -4440,7 +4475,10 @@ export default function POSPage() {
     weightBalanzaKg?: number,
     discountType?: "percentage" | "fixed",
     discountValue?: number,
-    discountReason?: string
+    discountReason?: string,
+    otrosSubtipo?: string,
+    otrosComprobante?: string,
+    otrosMonto?: number,
   }) => {
     if (isSupervisorUser) {
       logSupervisorRiskEvent(action, user!.id, user?.nombre || "Supervisor")
@@ -4515,7 +4553,7 @@ export default function POSPage() {
   }, [showRemoteAuthModal, remoteAuthRequestId, pendingSupervisorAction])
 
   const executeSupervisorAction = (action: {
-    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "reopen_payment" | "use_label_weight" | "direct_discount",
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "otros_payment" | "reopen_invoice" | "reopen_payment" | "use_label_weight" | "direct_discount",
     itemId?: string,
     delta?: number,
     sale?: Sale,
@@ -4527,9 +4565,13 @@ export default function POSPage() {
     weightBalanzaKg?: number,
     discountType?: "percentage" | "fixed",
     discountValue?: number,
-    discountReason?: string
+    discountReason?: string,
+    otrosSubtipo?: string,
+    otrosComprobante?: string,
+    otrosMonto?: number,
   }, resolverId?: string, resolverNombre?: string) => {
-    if (action.type === "extra_club_payment") {
+    if (action.type === "extra_club_payment" || action.type === "otros_payment") {
+      setOtrosSupervisorApproved(true)
       handleProcessCheckout()
     } else if (action.type === "direct_discount") {
       const dType = action.discountType || "percentage"
@@ -4668,7 +4710,8 @@ export default function POSPage() {
           await submitDevolucion(res.id!, res.nombre || "Supervisor")
         } else if (pendingSupervisorAction.type === "assign_terminal") {
           await submitAssignTerminal()
-        } else if (pendingSupervisorAction.type === "extra_club_payment") {
+        } else if (pendingSupervisorAction.type === "extra_club_payment" || pendingSupervisorAction.type === "otros_payment") {
+          setOtrosSupervisorApproved(true)
           await handleProcessCheckout()
         } else if (pendingSupervisorAction.type === "reopen_invoice") {
           await submitReabrirFactura(pendingSupervisorAction.sale!, pendingSupervisorAction.customer!, res.id!, res.nombre || "Supervisor")
@@ -5415,11 +5458,14 @@ export default function POSPage() {
     if (activeMethods.has("qr")) {
       recibido += isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     }
-    if (activeMethods.has("plugpay_credito")) {
-      recibido += isMultiPayment ? parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    if (activeMethods.has("plugpay") || activeMethods.has("plugpay_credito")) {
+      recibido += isMultiPayment ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
     }
     if (activeMethods.has("extra_club")) {
       recibido += isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    }
+    if (activeMethods.has("otros")) {
+      recibido += isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     }
 
     // El guaraní no circula en billetes/monedas por debajo de ₲500 -- al
@@ -5439,7 +5485,7 @@ export default function POSPage() {
       saldoRestantePyg: Math.round(saldo),
       vueltoPyg: Math.round(vuelto)
     }
-  }, [activeMethods, isMultiPayment, payCashPyg, payCashBrl, payCashUsd, mixedCardPyg, mixedDinelcoPyg, mixedQrPyg, mixedParceladoPyg, mixedExtraClubPyg, totalPyg, rates])
+  }, [activeMethods, isMultiPayment, payCashPyg, payCashBrl, payCashUsd, mixedCardPyg, mixedDinelcoPyg, mixedQrPyg, mixedParceladoPyg, mixedPlugPayPyg, mixedExtraClubPyg, mixedOtrosPyg, totalPyg, rates])
 
   // ── Detección inteligente de redondeo para Centro Amor y Esperanza ("Abre tu corazón") ──
   const montoSugeridoDonacion = useMemo(() => {
@@ -5632,7 +5678,20 @@ export default function POSPage() {
     setMixedDinelcoPyg("")
     setMixedQrPyg("")
     setMixedParceladoPyg("")
+    setMixedPlugPayPyg("")
     setMixedExtraClubPyg("")
+    setMixedOtrosPyg("")
+    setTransfComprobante("")
+    setTransfBancoOrigen("")
+    setTransfTitular("")
+    setChequeBanco("")
+    setChequeNumero("")
+    setChequeFechaVenc("")
+    setChequeTitular("")
+    setOtrosSupervisorApproved(false)
+    setShowPlugpayManualFallback(false)
+    setPlugpayManualComprobante("")
+    setPlugpayManualAutorizacion("")
     setPosVerifyStatus("idle")
     setPosVerifyCandidates([])
     setPosVerifiedTxn(null)
@@ -5864,28 +5923,61 @@ export default function POSPage() {
         
         let cardMonto = 0
         let dinelcoMonto = 0
+        let plugpayMonto = 0
         let qrMonto = 0
         let parceladoMonto = 0
         let extraClubMonto = 0
+        let otrosMonto = 0
 
         if (activeMethods.has("bancard")) {
           cardMonto = isMultiPayment ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (cardMonto > 0) out.push({ forma_pago: "TARJETA_BANCARD", monto: cardMonto, moneda: "PYG" })
+          if (cardMonto > 0) {
+            let fp = "TARJETA_BANCARD"
+            if (bancardSubMethod === "debito") fp = "TARJETA DEBITO"
+            else if (bancardSubMethod === "credito") fp = "TARJETA CREDITO"
+            else if (bancardSubMethod === "qr_zimple" || bancardSubMethod === "qr_cloud") fp = "QR"
+            out.push({ forma_pago: fp, monto: cardMonto, moneda: "PYG" })
+          }
         }
         if (activeMethods.has("dinelco")) {
           dinelcoMonto = isMultiPayment ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (dinelcoMonto > 0) out.push({ forma_pago: "TARJETA_DINELCO", monto: dinelcoMonto, moneda: "PYG" })
+          if (dinelcoMonto > 0) {
+            let fp = "TARJETA_DINELCO"
+            if (dinelcoSubMethod === "debito") fp = "TARJETA DEBITO"
+            else if (dinelcoSubMethod === "credito") fp = "TARJETA CREDITO"
+            else if (dinelcoSubMethod === "qr") fp = "QR"
+            else if (dinelcoSubMethod === "pix") fp = "PIX"
+            out.push({ forma_pago: fp, monto: dinelcoMonto, moneda: "PYG" })
+          }
+        }
+        if (activeMethods.has("plugpay")) {
+          plugpayMonto = isMultiPayment ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
+          if (plugpayMonto > 0) {
+            let fp = plugpaySubMethod === "pix" ? "PIX" : "TARJETA CREDITO"
+            out.push({ forma_pago: fp, monto: plugpayMonto, moneda: "PYG" })
+          }
         }
         if (activeMethods.has("qr")) {
           qrMonto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (qrMonto > 0) out.push({ forma_pago: "QR", monto: qrMonto, moneda: "PYG" })
         }
+        if (activeMethods.has("plugpay_credito")) {
+          parceladoMonto = isMultiPayment ? parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (parceladoMonto > 0) out.push({ forma_pago: "TARJETA CREDITO", monto: parceladoMonto, moneda: "PYG" })
+        }
         if (activeMethods.has("extra_club")) {
           extraClubMonto = isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (extraClubMonto > 0) out.push({ forma_pago: "EXTRA_CLUB", monto: extraClubMonto, moneda: "PYG" })
         }
+        if (activeMethods.has("otros")) {
+          otrosMonto = isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (otrosMonto > 0) {
+            let fp = otrosSubMethod === "transferencia" ? "TRANF. BANCARIA" : "CHEQUES"
+            out.push({ forma_pago: fp, monto: otrosMonto, moneda: "PYG" })
+          }
+        }
         if (activeMethods.has("cash")) {
-          const otrosNonCash = cardMonto + dinelcoMonto + qrMonto + parceladoMonto + extraClubMonto
+          const otrosNonCash = cardMonto + dinelcoMonto + plugpayMonto + qrMonto + parceladoMonto + extraClubMonto + otrosMonto
           let remainingPyg = Math.max(0, totalPyg - otrosNonCash)
 
           const brlInput = parseFloat(payCashBrl.replace(",", ".")) || 0
@@ -5922,6 +6014,19 @@ export default function POSPage() {
         return out
       })()
 
+      const obsParts: string[] = []
+      if (appliedDiscount) obsParts.push(`Descuento directo autorizado por ${appliedDiscount.supervisorNombre} (${appliedDiscount.reason})`)
+      if (activeMethods.has("otros")) {
+        if (otrosSubMethod === "transferencia") {
+          obsParts.push(`Transferencia Bancaria: Comp #${transfComprobante}${transfBancoOrigen ? ` (${transfBancoOrigen})` : ""}${transfTitular ? ` - Titular: ${transfTitular}` : ""}`)
+        } else {
+          obsParts.push(`Cheque: #${chequeNumero} (${chequeBanco})${chequeTitular ? ` - Titular: ${chequeTitular}` : ""}${chequeFechaVenc ? ` - Venc: ${chequeFechaVenc}` : ""}`)
+        }
+      }
+      if (activeMethods.has("plugpay") && plugpayManualComprobante) {
+        obsParts.push(`PlugPay Manual: Comp #${plugpayManualComprobante}${plugpayManualAutorizacion ? ` Aut: ${plugpayManualAutorizacion}` : ""}`)
+      }
+
       const saleBasePayload = {
         company_id: COMPANY_ID,
         customer_id: customer.id,
@@ -5934,7 +6039,7 @@ export default function POSPage() {
         subtotal: totalBrutoPyg,
         descuento_total: descuentoTotalPyg,
         total: totalPyg,
-        observaciones: appliedDiscount ? `Descuento directo autorizado por ${appliedDiscount.supervisorNombre} (${appliedDiscount.reason})` : undefined,
+        observaciones: obsParts.length > 0 ? obsParts.join(" | ") : undefined,
         condicion: isClubMember ? "credito" : "contado",
         estado: "completada",
         items: saleItemsForCreate,
@@ -6665,12 +6770,18 @@ export default function POSPage() {
 
       if (e.key === "F12" || (e.code === "Space" && e.ctrlKey)) {
         e.preventDefault()
-        // Si el modal de cobro ya esta abierto, un F12 de mas (reflejo
-        // comun justo despues de abrirlo) no debe reiniciar handleOpenPayment
-        // -- eso borraba en silencio los montos que el cajero ya habia
-        // cargado en un pago dividido. Con el modal abierto, F12 no hace
-        // nada aca (el boton de Confirmar Cobro ya tiene su propio F12).
-        if (cart.length > 0 && !showPaymentModal) handleOpenPayment()
+        if (cart.length > 0 && !showPaymentModal) {
+          handleOpenPayment()
+        } else if (showPaymentModal) {
+          confirmCheckoutBtnRef.current?.click()
+        }
+      } else if (showPaymentModal && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName || "")) {
+        if (e.key === "1") { e.preventDefault(); toggleActiveMethod("cash") }
+        else if (e.key === "2") { e.preventDefault(); toggleActiveMethod("bancard") }
+        else if (e.key === "3") { e.preventDefault(); toggleActiveMethod("dinelco") }
+        else if (e.key === "4") { e.preventDefault(); toggleActiveMethod("plugpay") }
+        else if (e.key === "5") { e.preventDefault(); toggleActiveMethod("extra_club") }
+        else if (e.key === "6") { e.preventDefault(); toggleActiveMethod("otros") }
       } else if (e.key === "F2") {
         e.preventDefault()
         searchInputRef.current?.focus()
@@ -6683,10 +6794,6 @@ export default function POSPage() {
         setShowLostDemandModal(true)
       } else if (e.key === "F6") {
         e.preventDefault()
-        // Mismo motivo que F12 arriba: con el modal de cobro abierto, F6
-        // pausaba la venta (vaciando el carrito) sin cerrar el modal, que
-        // se quedaba mostrando un cobro de una venta que ya no estaba en
-        // curso.
         if (cart.length > 0 && !showPaymentModal) pauseCurrentSale()
       } else if (e.key === "F7") {
         e.preventDefault()
@@ -6709,7 +6816,7 @@ export default function POSPage() {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [cart, totalPyg, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, manualWeightInput, targetWeighProduct])
+  }, [cart, totalPyg, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, manualWeightInput, targetWeighProduct, toggleActiveMethod])
 
   // ── PALETA DE COLORES Y CONTRASTE DINÁMICO ────────────────────────────────
   const bgMain = dark ? "bg-slate-950 text-slate-100" : "bg-slate-100 text-slate-900"
@@ -8806,19 +8913,29 @@ export default function POSPage() {
                   if (!isDonacionOn) return null
 
                   return (
-                    <div className={`p-3 rounded-2xl border transition-all shadow-sm ${
+                    <div className={`p-3.5 rounded-2xl border-2 transition-all shadow-sm ${
                       donacionActiva
-                        ? "bg-gradient-to-br from-rose-50/90 to-amber-50/80 dark:from-rose-950/50 dark:to-amber-950/40 border-rose-400 dark:border-rose-600"
+                        ? "bg-gradient-to-br from-rose-50 via-rose-100/50 to-amber-50/80 dark:from-rose-950/70 dark:via-rose-900/40 dark:to-amber-950/50 border-rose-500 dark:border-rose-500 shadow-md shadow-rose-500/10"
                         : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
                     }`}>
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <Heart className={`w-4 h-4 shrink-0 ${donacionActiva ? "fill-rose-500 text-rose-500 animate-pulse" : "text-slate-400"}`} />
+                          <Heart className={`w-5 h-5 shrink-0 transition-transform ${donacionActiva ? "fill-rose-500 text-rose-500 animate-pulse scale-110" : "text-slate-400"}`} />
                           <div className="min-w-0">
-                            <span className="text-xs font-black text-slate-900 dark:text-white truncate block leading-tight">
-                              Abre tu corazón <span className="text-[10px] font-bold text-rose-500">(F8)</span>
-                            </span>
-                            <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 truncate">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm font-black text-slate-900 dark:text-white truncate block leading-tight">
+                                Abre tu corazón
+                              </span>
+                              <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-rose-500 text-white shadow-xs">
+                                F8
+                              </span>
+                              {donacionActiva && (
+                                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-200 dark:bg-rose-900/60 text-rose-800 dark:text-rose-200 border border-rose-300 dark:border-rose-700">
+                                  ACTIVO
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 truncate mt-0.5">
                               {campanaActivaDonacion?.ong_nombre || "Centro Amor y Esperanza"}
                             </p>
                           </div>
@@ -8826,18 +8943,18 @@ export default function POSPage() {
                         <button
                           type="button"
                           onClick={() => handleToggleDonacion(!donacionActiva)}
-                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-                            donacionActiva ? "bg-rose-600" : "bg-slate-300 dark:bg-slate-700"
+                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors shadow-inner ${
+                            donacionActiva ? "bg-rose-600 ring-2 ring-rose-400/40" : "bg-slate-300 dark:bg-slate-700"
                           }`}
                         >
-                          <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition ${
-                            donacionActiva ? "translate-x-4" : "translate-x-0"
+                          <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition ${
+                            donacionActiva ? "translate-x-5" : "translate-x-0"
                           }`} />
                         </button>
                       </div>
 
-                      {/* Chips de montos rápidos inteligentes */}
-                      <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-1 flex-wrap">
+                      {/* Chips de montos rápidos inteligentes con tipografía ampliada */}
+                      <div className="mt-2.5 pt-2.5 border-t border-slate-200 dark:border-slate-800/80 flex items-center gap-1.5 flex-wrap">
                         {(() => {
                           const vueltoSinDonar = vueltoPyg
                           const restoCompra = totalPyg % 1000
@@ -8872,10 +8989,10 @@ export default function POSPage() {
                                 key={idx}
                                 type="button"
                                 onClick={() => btn.live ? handleToggleDonacion(true) : handleToggleDonacion(true, btn.val)}
-                                className={`px-2 py-1 rounded-lg text-[10px] font-bold font-posMono tabular-nums transition-all cursor-pointer ${
+                                className={`px-2.5 py-1.5 rounded-xl text-xs font-black font-posMono tabular-nums transition-all cursor-pointer shadow-xs ${
                                   isSelected
-                                    ? "bg-rose-600 text-white shadow-sm font-black"
-                                    : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
+                                    ? "bg-rose-600 text-white shadow-md shadow-rose-600/30 ring-2 ring-rose-400 scale-[1.02]"
+                                    : "bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 hover:border-rose-400 hover:bg-rose-50/50 dark:hover:bg-slate-700/80"
                                 }`}
                               >
                                 {btn.label}
@@ -8886,24 +9003,28 @@ export default function POSPage() {
                       </div>
 
                       {/* Campo Manual de Donación */}
-                      <div className="mt-2 pt-2 border-t border-dashed border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
-                        <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 shrink-0">
-                          Monto Libre (₲):
+                      <div className="mt-2.5 pt-2.5 border-t border-dashed border-rose-200 dark:border-rose-900/60 flex items-center justify-between gap-2">
+                        <label className="text-[11px] font-black uppercase text-rose-700 dark:text-rose-300 shrink-0 flex items-center gap-1">
+                          <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" />
+                          <span>Monto Libre:</span>
                         </label>
-                        <input
-                          type="text"
-                          value={montoDonacionManual !== null ? montoDonacionManual.toLocaleString("es-PY") : ""}
-                          onChange={(e) => {
-                            const clean = e.target.value.replace(/\D/g, "")
-                            if (clean) {
-                              handleToggleDonacion(true, parseInt(clean, 10))
-                            } else {
-                              handleToggleDonacion(true, undefined)
-                            }
-                          }}
-                          placeholder={montoSugeridoDonacion.toLocaleString("es-PY")}
-                          className="w-32 bg-white dark:bg-slate-950 border border-rose-300 dark:border-rose-700/80 rounded-xl px-2.5 py-1 text-xs font-posMono font-black text-rose-600 dark:text-rose-400 text-right outline-none focus:border-rose-500 shadow-inner"
-                        />
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1.5 text-xs font-black text-rose-400">₲</span>
+                          <input
+                            type="text"
+                            value={montoDonacionManual !== null ? montoDonacionManual.toLocaleString("es-PY") : ""}
+                            onChange={(e) => {
+                              const clean = e.target.value.replace(/\D/g, "")
+                              if (clean) {
+                                handleToggleDonacion(true, parseInt(clean, 10))
+                              } else {
+                                handleToggleDonacion(true, undefined)
+                              }
+                            }}
+                            placeholder={montoSugeridoDonacion.toLocaleString("es-PY")}
+                            className="w-36 bg-white dark:bg-slate-950 border-2 border-rose-400 dark:border-rose-600 rounded-xl pl-6 pr-2.5 py-1.5 text-sm font-posMono font-black text-rose-600 dark:text-rose-400 text-right outline-none focus:border-rose-600 focus:ring-2 focus:ring-rose-400/30 shadow-sm"
+                          />
+                        </div>
                       </div>
                     </div>
                   )
@@ -8968,9 +9089,9 @@ export default function POSPage() {
                         { id: "cash", key: "1", label: "Efectivo", icon: Banknote, show: isEnabled("EFECTIVO") },
                         { id: "bancard", key: "2", label: "Bancard", icon: CreditCard, show: isEnabled("BANCARD") },
                         { id: "dinelco", key: "3", label: "Dinelco", icon: CreditCard, show: isEnabled("DINELCO") },
-                        { id: "qr", key: "4", label: "QR / PIX", icon: QrCode, show: isEnabled("QR") || isEnabled("PIX") },
-                        { id: "plugpay_credito", key: "5", label: "Crédito BRL", icon: CreditCard, show: true },
-                        { id: "extra_club", key: "6", label: "Extra Club", icon: Star, show: isExtraClubOn && isEnabled("EXTRA_CLUB") },
+                        { id: "plugpay", key: "4", label: "Plug Pay", icon: Smartphone, show: isEnabled("PLUGPAY") || isEnabled("PIX") },
+                        { id: "extra_club", key: "5", label: "Extra Club", icon: Star, show: isExtraClubOn && isEnabled("EXTRA_CLUB") },
+                        { id: "otros", key: "6", label: "Otros", icon: Receipt, show: isEnabled("OTROS") || isEnabled("TRANSFERENCIA") || isEnabled("CHEQUE") },
                       ]
 
                       return allTabs.filter(t => t.show).map((m) => {
@@ -9106,35 +9227,68 @@ export default function POSPage() {
                     </div>
                   )}
 
-                    {/* 2. POS BANCARD INFONET */}
+                    {/* 2. BANCARD (UNIFICADO: Débito, Crédito, QR Zimple, QR Bancard Cloud) */}
                     {activeMethods.has("bancard") && (
                       <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
-                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
                           <div className="flex items-center gap-2">
                             <CreditCard className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                             <span className="font-black text-xs text-slate-900 dark:text-white">Terminal POS Bancard Infonet</span>
                           </div>
-                          <div className="flex gap-1">
+                          
+                          {/* Segmented control de sub-métodos Bancard */}
+                          <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-xl gap-0.5 flex-wrap">
                             <button
                               type="button"
-                              onClick={() => { setPosCardType("debito"); setPosCardCuotas(1); }}
+                              onClick={() => { setBancardSubMethod("debito"); setPosCardType("debito"); setPosCardCuotas(1); }}
                               disabled={bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"}
-                              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${posCardType === "debito" ? "bg-blue-600 text-white shadow-xs" : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                bancardSubMethod === "debito"
+                                  ? "bg-blue-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
                             >
                               Débito
                             </button>
                             <button
                               type="button"
-                              onClick={() => setPosCardType("credito")}
+                              onClick={() => { setBancardSubMethod("credito"); setPosCardType("credito"); }}
                               disabled={bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"}
-                              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${posCardType === "credito" ? "bg-blue-600 text-white shadow-xs" : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                bancardSubMethod === "credito"
+                                  ? "bg-blue-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
                             >
                               Crédito
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBancardSubMethod("qr_zimple")}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                bancardSubMethod === "qr_zimple"
+                                  ? "bg-purple-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              QR Zimple
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBancardSubMethod("qr_cloud")}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                bancardSubMethod === "qr_cloud"
+                                  ? "bg-blue-700 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              QR Pantalla
                             </button>
                           </div>
                         </div>
 
-                        {posCardType === "credito" && (
+                        {/* Cuotas si es crédito */}
+                        {bancardSubMethod === "credito" && (
                           <div className="flex items-center gap-1.5 p-2 bg-blue-50/60 dark:bg-blue-950/30 rounded-xl border border-blue-200 dark:border-blue-800/60">
                             <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300 uppercase shrink-0">Cuotas:</span>
                             <div className="flex gap-1 flex-wrap">
@@ -9153,9 +9307,10 @@ export default function POSPage() {
                           </div>
                         )}
 
+                        {/* Monto de línea si es pago mixto */}
                         {isMultiPayment && (
                           <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto Bancard en esta línea (₲):</label>
                             <div className="flex gap-1">
                               <input
                                 ref={mixedCardPygInputRef}
@@ -9179,373 +9334,126 @@ export default function POSPage() {
                           </div>
                         )}
 
-                        {!activePosConfig.bancardIp && (
-                          <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
-                            No hay IP de terminal configurada para esta caja.{" "}
-                            <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
-                          </div>
-                        )}
+                        {/* SUB-MODALIDAD: DÉBITO O CRÉDITO */}
+                        {(bancardSubMethod === "debito" || bancardSubMethod === "credito") && (
+                          <>
+                            {!activePosConfig.bancardIp && (
+                              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
+                                No hay IP de terminal configurada para esta caja.{" "}
+                                <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
+                              </div>
+                            )}
 
-                        {bancardTxnState !== "aprobada" && (
-                          <button
-                            type="button"
-                            onClick={handleBancardCharge}
-                            disabled={!activePosConfig.bancardIp || bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 cursor-pointer shadow-md shadow-blue-600/20"
-                          >
-                            {(bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando") ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
-                            <span>
-                              {bancardTxnState === "esperando_tarjeta" ? "Presente la tarjeta en el terminal..."
-                                : bancardTxnState === "confirmando" ? "Confirmando con el terminal..."
-                                : "Cobrar con Bancard"}
-                            </span>
-                          </button>
-                        )}
+                            {bancardTxnState !== "aprobada" && (
+                              <button
+                                type="button"
+                                onClick={handleBancardCharge}
+                                disabled={!activePosConfig.bancardIp || bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 cursor-pointer shadow-md shadow-blue-600/20"
+                              >
+                                {(bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando") ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+                                <span>
+                                  {bancardTxnState === "esperando_tarjeta" ? "Presente la tarjeta en el terminal..."
+                                    : bancardTxnState === "confirmando" ? "Confirmando con el terminal..."
+                                    : `Cobrar con Bancard ${bancardSubMethod === "debito" ? "Débito" : "Crédito"}`}
+                                </span>
+                              </button>
+                            )}
 
-                        {bancardTxnState === "aprobada" && bancardTxnResult && (
-                          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 space-y-0.5">
-                            <div className="font-black">✓ {bancardTxnResult.mensajeDisplay || "Aprobada"}</div>
-                            {bancardTxnResult.nombreTarjeta && <div>{bancardTxnResult.nombreTarjeta}{bancardTxnResult.pan ? ` · **** ${bancardTxnResult.pan}` : ""}</div>}
-                            {bancardTxnResult.nombreCliente && <div>{bancardTxnResult.nombreCliente}</div>}
-                            <div className="font-posMono tabular-nums">Autorización {bancardTxnResult.codigoAutorizacion} · Boleta {bancardTxnResult.nroBoleta}</div>
-                          </div>
-                        )}
+                            {bancardTxnState === "aprobada" && bancardTxnResult && (
+                              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 space-y-0.5">
+                                <div className="font-black">✓ {bancardTxnResult.mensajeDisplay || "Aprobada"}</div>
+                                {bancardTxnResult.nombreTarjeta && <div>{bancardTxnResult.nombreTarjeta}{bancardTxnResult.pan ? ` · **** ${bancardTxnResult.pan}` : ""}</div>}
+                                {bancardTxnResult.nombreCliente && <div>{bancardTxnResult.nombreCliente}</div>}
+                                <div className="font-posMono tabular-nums">Autorización {bancardTxnResult.codigoAutorizacion} · Boleta {bancardTxnResult.nroBoleta}</div>
+                              </div>
+                            )}
 
-                        {bancardTxnState === "error_rechazo" && (
-                          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5">
-                            <div className="font-black">✕ {bancardTxnError}</div>
-                            <button type="button" onClick={handleBancardCharge} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
-                          </div>
-                        )}
+                            {bancardTxnState === "error_rechazo" && (
+                              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5">
+                                <div className="font-black">✕ {bancardTxnError}</div>
+                                <button type="button" onClick={handleBancardCharge} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                              </div>
+                            )}
 
-                        {bancardTxnState === "error_conexion" && (
-                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5">
-                            <div className="font-black">⚠ {bancardTxnError}</div>
-                            <button type="button" onClick={handleBancardCharge} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
-                          </div>
-                        )}
+                            {bancardTxnState === "error_conexion" && (
+                              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5">
+                                <div className="font-black">⚠ {bancardTxnError}</div>
+                                <button type="button" onClick={handleBancardCharge} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                              </div>
+                            )}
 
-                        {/* Respaldo manual */}
-                        {bancardTxnState !== "aprobada" && (
-                          <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
-                            <button
-                              type="button"
-                              onClick={() => setShowBancardManualFallback((v) => !v)}
-                              className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
-                            >
-                              {showBancardManualFallback ? "▾ Ocultar carga manual" : "▸ Cargar voucher manualmente"}
-                            </button>
+                            {/* Respaldo manual */}
+                            {bancardTxnState !== "aprobada" && (
+                              <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowBancardManualFallback((v) => !v)}
+                                  className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                                >
+                                  {showBancardManualFallback ? "▾ Ocultar carga manual" : "▸ Cargar voucher manualmente"}
+                                </button>
 
-                            {showBancardManualFallback && (
-                              <div className="mt-2 space-y-2">
-                                <div className="grid grid-cols-3 gap-2">
-                                  <div>
-                                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Terminal:</label>
-                                    <input
-                                      type="text"
-                                      value={posTerminalId}
-                                      onChange={(e) => setPosTerminalId(e.target.value)}
-                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-blue-600 dark:text-blue-400 font-bold outline-none"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Lote:</label>
-                                    <input
-                                      type="text"
-                                      value={posCardLote}
-                                      onChange={(e) => setPosCardLote(e.target.value)}
-                                      placeholder="001"
-                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs outline-none"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Voucher:</label>
-                                    <input
-                                      type="text"
-                                      value={posCardCupon}
-                                      onChange={(e) => setPosCardCupon(e.target.value)}
-                                      placeholder="123456"
-                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-emerald-600 dark:text-emerald-400 font-bold outline-none"
-                                    />
-                                  </div>
-                                </div>
-
-                                <div className="mt-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleVerifyPosTerminal("bancard")}
-                                    disabled={posVerifyStatus === "searching"}
-                                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-blue-600/10 text-blue-600 dark:text-blue-400 border border-blue-500/30 hover:bg-blue-600/20 disabled:opacity-60 cursor-pointer"
-                                  >
-                                    {posVerifyStatus === "searching" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                                    <span>{posVerifyStatus === "searching" ? "Buscando en terminal..." : "Verificar Transacción en Terminal"}</span>
-                                  </button>
-
-                                  {posVerifyStatus === "found" && posVerifiedTxn && (
-                                    <div className="mt-2 p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300">
-                                      ✓ Verificado: {posVerifiedTxn.tarjeta_marca} · {formatPYG(posVerifiedTxn.monto)} · Voucher {posVerifiedTxn.voucher}
+                                {showBancardManualFallback && (
+                                  <div className="mt-2 space-y-2">
+                                    <div className="grid grid-cols-3 gap-2">
+                                      <div>
+                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Terminal:</label>
+                                        <input
+                                          type="text"
+                                          value={posTerminalId}
+                                          onChange={(e) => setPosTerminalId(e.target.value)}
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-blue-600 dark:text-blue-400 font-bold outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Lote:</label>
+                                        <input
+                                          type="text"
+                                          value={posCardLote}
+                                          onChange={(e) => setPosCardLote(e.target.value)}
+                                          placeholder="001"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Voucher:</label>
+                                        <input
+                                          type="text"
+                                          value={posCardCupon}
+                                          onChange={(e) => setPosCardCupon(e.target.value)}
+                                          placeholder="123456"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-emerald-600 dark:text-emerald-400 font-bold outline-none"
+                                        />
+                                      </div>
                                     </div>
-                                  )}
-                                </div>
+
+                                    <div className="mt-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleVerifyPosTerminal("bancard")}
+                                        disabled={posVerifyStatus === "searching"}
+                                        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-blue-600/10 text-blue-600 dark:text-blue-400 border border-blue-500/30 hover:bg-blue-600/20 disabled:opacity-60 cursor-pointer"
+                                      >
+                                        {posVerifyStatus === "searching" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                                        <span>{posVerifyStatus === "searching" ? "Buscando en terminal..." : "Verificar Transacción en Terminal"}</span>
+                                      </button>
+
+                                      {posVerifyStatus === "found" && posVerifiedTxn && (
+                                        <div className="mt-2 p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300">
+                                          ✓ Verificado: {posVerifiedTxn.tarjeta_marca} · {formatPYG(posVerifiedTxn.monto)} · Voucher {posVerifiedTxn.voucher}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* 3. POS DINELCO BEPSA */}
-                    {activeMethods.has("dinelco") && (
-                      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
-                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
-                          <div className="flex items-center gap-2">
-                            <CreditCard className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                            <span className="font-black text-xs text-slate-900 dark:text-white">Terminal POS Dinelco (Ingenico AXIUM)</span>
-                          </div>
-                          <div className="flex gap-1">
-                            {(["debito", "credito", "social"] as const).map(t => (
-                              <button
-                                key={t}
-                                type="button"
-                                onClick={() => setDinelcoCardType(t)}
-                                disabled={dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando"}
-                                className={`px-2.5 py-1 rounded-xl text-xs font-bold uppercase transition-all ${dinelcoCardType === t ? "bg-purple-600 text-white shadow-xs" : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}
-                              >
-                                {t}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {dinelcoCardType === "credito" && (
-                          <div className="flex items-center gap-1.5 p-2 bg-purple-50/60 dark:bg-purple-950/30 rounded-xl border border-purple-200 dark:border-purple-800/60">
-                            <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300 uppercase shrink-0">Cuotas:</span>
-                            <div className="flex gap-1 flex-wrap">
-                              {[1, 2, 3, 6, 12, 18, 24].map((c) => (
-                                <button
-                                  key={c}
-                                  type="button"
-                                  onClick={() => setDinelcoCuotas(c)}
-                                  disabled={dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando"}
-                                  className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${dinelcoCuotas === c ? "bg-purple-600 text-white shadow-xs" : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700"}`}
-                                >
-                                  {c === 1 ? "1 (Directo)" : `${c}x`}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
+                          </>
                         )}
 
-                        {isMultiPayment && (
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
-                            <div className="flex gap-1">
-                              <input
-                                ref={mixedDinelcoPygInputRef}
-                                type="text"
-                                value={mixedDinelcoPyg}
-                                onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedDinelcoPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
-                                onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedDinelcoPyg)}
-                                onFocus={(e) => e.target.select()}
-                                placeholder="0"
-                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
-                              />
-                              <button
-                                type="button"
-                                title="Completar con el resto"
-                                onClick={() => setMixedDinelcoPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
-                                className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
-                              >
-                                Resto
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {!activePosConfig.dinelcoIp && (
-                          <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
-                            No hay IP de terminal Dinelco configurada para esta caja.{" "}
-                            <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
-                          </div>
-                        )}
-
-                        {activePosConfig.dinelcoIp && dinelcoTxnState !== "aprobada" && (
-                          <button
-                            type="button"
-                            onClick={handleDinelcoCharge}
-                            disabled={dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando"}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-md shadow-purple-600/20"
-                          >
-                            {(dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando") ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
-                            <span>
-                              {dinelcoTxnState === "esperando_tarjeta" ? "Presente la tarjeta en el terminal..."
-                                : dinelcoTxnState === "confirmando" ? "Confirmando con el terminal..."
-                                : "Cobrar con Dinelco"}
-                            </span>
-                          </button>
-                        )}
-
-                        {dinelcoTxnState === "aprobada" && dinelcoTxnResult && (
-                          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 space-y-0.5">
-                            <div className="font-black">✓ Aprobada</div>
-                            {dinelcoTxnResult.ultimos4 && <div>**** {dinelcoTxnResult.ultimos4}</div>}
-                            <div className="font-posMono tabular-nums">Autorización {dinelcoTxnResult.codigoAutorizacion} · Boleta {dinelcoTxnResult.nroBoleta}</div>
-                          </div>
-                        )}
-
-                        {dinelcoTxnState === "error_rechazo" && (
-                          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5">
-                            <div className="font-black">✕ {dinelcoTxnError}</div>
-                            <button type="button" onClick={handleDinelcoCharge} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
-                          </div>
-                        )}
-
-                        {dinelcoTxnState === "error_conexion" && (
-                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5">
-                            <div className="font-black">⚠ {dinelcoTxnError}</div>
-                            <button type="button" onClick={handleDinelcoCharge} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
-                          </div>
-                        )}
-
-                        {/* Respaldo manual -- cupon a mano + match contra la base legacy, igual que antes de tener el terminal en vivo */}
-                        {dinelcoTxnState !== "aprobada" && (
-                          <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
-                            <button
-                              type="button"
-                              onClick={() => setShowDinelcoManualFallback((v) => !v)}
-                              className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
-                            >
-                              {showDinelcoManualFallback ? "▾ Ocultar carga manual" : "▸ Cargar voucher manualmente"}
-                            </button>
-
-                            {showDinelcoManualFallback && (
-                              <div className="mt-2 space-y-2">
-                                <div className="grid grid-cols-3 gap-2">
-                                  <div>
-                                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Terminal:</label>
-                                    <input
-                                      type="text"
-                                      value={dinelcoTerminalId}
-                                      onChange={(e) => setDinelcoTerminalId(e.target.value)}
-                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Lote:</label>
-                                    <input
-                                      type="text"
-                                      value={dinelcoLote}
-                                      onChange={(e) => setDinelcoLote(e.target.value)}
-                                      placeholder="001"
-                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs outline-none"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Voucher:</label>
-                                    <input
-                                      type="text"
-                                      value={dinelcoCupon}
-                                      onChange={(e) => setDinelcoCupon(e.target.value)}
-                                      placeholder="654321"
-                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
-                                    />
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => handleVerifyPosTerminal("dinelco")}
-                                  disabled={posVerifyStatus === "searching"}
-                                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-purple-600/10 text-purple-600 dark:text-purple-400 border border-purple-500/30 hover:bg-purple-600/20 disabled:opacity-60 cursor-pointer"
-                                >
-                                  {posVerifyStatus === "searching" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                                  <span>{posVerifyStatus === "searching" ? "Buscando en terminal..." : "Verificar Transacción en Terminal"}</span>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* 4. QR / PIX (Bancard Zimple + PlugPay PIX) */}
-                    {activeMethods.has("qr") && (
-                      <div className="bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-2.5">
-                        {/* Subselector Segmented Control */}
-                        <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl gap-1 max-w-xs mx-auto">
-                          <button
-                            type="button"
-                            onClick={() => setQrSubMethod("zimple")}
-                            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                              qrSubMethod === "zimple"
-                                ? "bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-300 shadow-xs"
-                                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                            }`}
-                          >
-                            <FlagPY /> <span>QR Zimple</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setQrSubMethod("pix")}
-                            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                              qrSubMethod === "pix"
-                                ? "bg-white dark:bg-slate-900 text-orange-600 dark:text-orange-300 shadow-xs"
-                                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                            }`}
-                          >
-                            <FlagBR /> <span>PIX Brasil</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setQrSubMethod("dinelco")}
-                            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                              qrSubMethod === "dinelco"
-                                ? "bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-300 shadow-xs"
-                                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                            }`}
-                          >
-                            <QrCode className="w-3.5 h-3.5" /> <span>QR Dinelco</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setQrSubMethod("bancard_cloud")}
-                            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                              qrSubMethod === "bancard_cloud"
-                                ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-300 shadow-xs"
-                                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                            }`}
-                          >
-                            <QrCode className="w-3.5 h-3.5" /> <span>QR Bancard</span>
-                          </button>
-                        </div>
-
-                        {isMultiPayment && (
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
-                            <div className="flex gap-1">
-                              <input
-                                ref={mixedQrPygInputRef}
-                                type="text"
-                                value={mixedQrPyg}
-                                onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
-                                onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedQrPyg)}
-                                onFocus={(e) => e.target.select()}
-                                placeholder="0"
-                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500 text-center"
-                              />
-                              <button
-                                type="button"
-                                title="Completar con el resto"
-                                onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
-                                className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
-                              >
-                                Resto
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* SUB-PANEL 1: QR ZIMPLE */}
-                        {qrSubMethod === "zimple" && (
+                        {/* SUB-MODALIDAD: QR ZIMPLE */}
+                        {bancardSubMethod === "qr_zimple" && (
                           <div className="flex flex-col items-center text-center space-y-2.5 w-full">
                             <div className="flex items-center gap-2">
                               <QrCode className="w-7 h-7 text-purple-600" />
@@ -9658,21 +9566,438 @@ export default function POSPage() {
                           </div>
                         )}
 
-                        {/* SUB-PANEL 2: PIX BRASIL */}
-                        {qrSubMethod === "pix" && (
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-1.5">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-lg bg-orange-50 dark:bg-orange-950 flex items-center justify-center text-orange-600">
-                                  <Smartphone className="w-3.5 h-3.5" />
+                        {/* SUB-MODALIDAD: QR BANCARD EN PANTALLA (API DIRECTA) */}
+                        {bancardSubMethod === "qr_cloud" && (
+                          <div className="flex flex-col items-center text-center space-y-2.5 w-full">
+                            <div className="flex items-center gap-2">
+                              <QrCode className="w-7 h-7 text-blue-600" />
+                              <div className="text-left">
+                                <div className="font-bold text-xs text-slate-900 dark:text-white">QR Bancard (Pantalla API)</div>
+                                {!isMultiPayment && (
+                                  <div className="text-xs font-posMono tabular-nums font-black text-blue-600 dark:text-blue-400">
+                                    {formatPYG(totalPyg)}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {bancardCloudQrState === "idle" && (
+                              <button
+                                type="button"
+                                onClick={handleGenerateBancardCloudQr}
+                                className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow-sm shadow-blue-600/20"
+                              >
+                                <QrCode className="w-4 h-4" />
+                                <span>Generar QR Bancard</span>
+                              </button>
+                            )}
+
+                            {bancardCloudQrState === "generando" && (
+                              <div className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+                                <Loader2 className="w-4 h-4 animate-spin" /> Generando QR con Bancard...
+                              </div>
+                            )}
+
+                            {bancardCloudQrState === "esperando" && bancardCloudQrData && (
+                              <div className="w-full max-w-sm flex flex-col items-center gap-2">
+                                {bancardCloudQrData.qrUrl && (
+                                  <img src={bancardCloudQrData.qrUrl} alt="QR Bancard" className="w-48 h-48 rounded-xl border border-slate-200 dark:border-slate-700 bg-white p-2" />
+                                )}
+                                <div className="flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400">
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Esperando el pago del cliente...
                                 </div>
-                                <span className="font-bold text-xs text-slate-900 dark:text-white">PIX Brasil (PlugPay)</span>
+                                <button
+                                  type="button"
+                                  onClick={handleCancelBancardCloudQr}
+                                  className="text-[11px] font-bold text-rose-500 hover:text-rose-600 underline cursor-pointer"
+                                >
+                                  Cancelar QR
+                                </button>
                               </div>
-                              <div className="text-right">
-                                <span className="text-xs font-posMono font-black text-orange-600 dark:text-orange-400">
-                                  {plugpayBrlValue ? `R$ ${plugpayBrlValue.toFixed(2)}` : `Gs. ${formatPYG(isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg)}`}
+                            )}
+
+                            {bancardCloudQrState === "aprobada" && (
+                              <div className="w-full max-w-sm p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left">
+                                <div className="font-black">✓ Pago QR Bancard confirmado</div>
+                              </div>
+                            )}
+
+                            {bancardCloudQrState === "error" && (
+                              <div className="w-full max-w-sm p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
+                                <div className="font-black">✕ {bancardCloudQrError}</div>
+                                <button type="button" onClick={handleGenerateBancardCloudQr} className="text-xs font-bold underline cursor-pointer">Generar QR nuevamente</button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 3. DINELCO (UNIFICADO: Débito, Crédito, Social, QR Guaraníes, PIX Brasil) */}
+                    {activeMethods.has("dinelco") && (
+                      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                          <div className="flex items-center gap-2">
+                            <CreditCard className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                            <span className="font-black text-xs text-slate-900 dark:text-white">Terminal POS Dinelco (Ingenico AXIUM)</span>
+                          </div>
+                          
+                          {/* Segmented control de sub-métodos Dinelco */}
+                          <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-xl gap-0.5 flex-wrap">
+                            {(["debito", "credito", "social"] as const).map(t => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => { setDinelcoSubMethod(t); setDinelcoCardType(t); }}
+                                disabled={dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando"}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold uppercase transition-all cursor-pointer ${
+                                  dinelcoSubMethod === t
+                                    ? "bg-purple-600 text-white shadow-xs"
+                                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                                }`}
+                              >
+                                {t}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => { setDinelcoSubMethod("qr"); setDinelcoQrMode("qr"); }}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                dinelcoSubMethod === "qr"
+                                  ? "bg-purple-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              QR Gs.
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setDinelcoSubMethod("pix"); setDinelcoQrMode("pix"); }}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                dinelcoSubMethod === "pix"
+                                  ? "bg-orange-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              PIX BR
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Cuotas si es crédito */}
+                        {dinelcoSubMethod === "credito" && (
+                          <div className="flex items-center gap-1.5 p-2 bg-purple-50/60 dark:bg-purple-950/30 rounded-xl border border-purple-200 dark:border-purple-800/60">
+                            <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300 uppercase shrink-0">Cuotas:</span>
+                            <div className="flex gap-1 flex-wrap">
+                              {[1, 2, 3, 6, 12, 18, 24].map((c) => (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  onClick={() => setDinelcoCuotas(c)}
+                                  disabled={dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando"}
+                                  className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${dinelcoCuotas === c ? "bg-purple-600 text-white shadow-xs" : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700"}`}
+                                >
+                                  {c === 1 ? "1 (Directo)" : `${c}x`}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Monto de línea si es pago mixto */}
+                        {isMultiPayment && (
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto Dinelco en esta línea (₲):</label>
+                            <div className="flex gap-1">
+                              <input
+                                ref={mixedDinelcoPygInputRef}
+                                type="text"
+                                value={mixedDinelcoPyg}
+                                onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedDinelcoPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedDinelcoPyg)}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="0"
+                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                              />
+                              <button
+                                type="button"
+                                title="Completar con el resto"
+                                onClick={() => setMixedDinelcoPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                              >
+                                Resto
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* SUB-MODALIDAD: TARJETAS FÍSICAS (Débito / Crédito / Social) */}
+                        {(dinelcoSubMethod === "debito" || dinelcoSubMethod === "credito" || dinelcoSubMethod === "social") && (
+                          <>
+                            {!activePosConfig.dinelcoIp && (
+                              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
+                                No hay IP de terminal Dinelco configurada para esta caja.{" "}
+                                <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
+                              </div>
+                            )}
+
+                            {activePosConfig.dinelcoIp && dinelcoTxnState !== "aprobada" && (
+                              <button
+                                type="button"
+                                onClick={handleDinelcoCharge}
+                                disabled={dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando"}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-md shadow-purple-600/20"
+                              >
+                                {(dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando") ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+                                <span>
+                                  {dinelcoTxnState === "esperando_tarjeta" ? "Presente la tarjeta en el terminal..."
+                                    : dinelcoTxnState === "confirmando" ? "Confirmando con el terminal..."
+                                    : `Cobrar con Dinelco ${dinelcoSubMethod.toUpperCase()}`}
                                 </span>
+                              </button>
+                            )}
+
+                            {dinelcoTxnState === "aprobada" && dinelcoTxnResult && (
+                              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 space-y-0.5">
+                                <div className="font-black">✓ Aprobada</div>
+                                {dinelcoTxnResult.ultimos4 && <div>**** {dinelcoTxnResult.ultimos4}</div>}
+                                <div className="font-posMono tabular-nums">Autorización {dinelcoTxnResult.codigoAutorizacion} · Boleta {dinelcoTxnResult.nroBoleta}</div>
                               </div>
+                            )}
+
+                            {dinelcoTxnState === "error_rechazo" && (
+                              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5">
+                                <div className="font-black">✕ {dinelcoTxnError}</div>
+                                <button type="button" onClick={handleDinelcoCharge} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                              </div>
+                            )}
+
+                            {dinelcoTxnState === "error_conexion" && (
+                              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5">
+                                <div className="font-black">⚠ {dinelcoTxnError}</div>
+                                <button type="button" onClick={handleDinelcoCharge} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                              </div>
+                            )}
+
+                            {/* Respaldo manual */}
+                            {dinelcoTxnState !== "aprobada" && (
+                              <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowDinelcoManualFallback((v) => !v)}
+                                  className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                                >
+                                  {showDinelcoManualFallback ? "▾ Ocultar carga manual" : "▸ Cargar voucher manualmente"}
+                                </button>
+
+                                {showDinelcoManualFallback && (
+                                  <div className="mt-2 space-y-2">
+                                    <div className="grid grid-cols-3 gap-2">
+                                      <div>
+                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Terminal:</label>
+                                        <input
+                                          type="text"
+                                          value={dinelcoTerminalId}
+                                          onChange={(e) => setDinelcoTerminalId(e.target.value)}
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Lote:</label>
+                                        <input
+                                          type="text"
+                                          value={dinelcoLote}
+                                          onChange={(e) => setDinelcoLote(e.target.value)}
+                                          placeholder="001"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Voucher:</label>
+                                        <input
+                                          type="text"
+                                          value={dinelcoCupon}
+                                          onChange={(e) => setDinelcoCupon(e.target.value)}
+                                          placeholder="654321"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
+                                        />
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleVerifyPosTerminal("dinelco")}
+                                      disabled={posVerifyStatus === "searching"}
+                                      className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-purple-600/10 text-purple-600 dark:text-purple-400 border border-purple-500/30 hover:bg-purple-600/20 disabled:opacity-60 cursor-pointer"
+                                    >
+                                      {posVerifyStatus === "searching" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                                      <span>{posVerifyStatus === "searching" ? "Buscando en terminal..." : "Verificar Transacción en Terminal"}</span>
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {/* SUB-MODALIDAD: QR / PIX DINELCO */}
+                        {(dinelcoSubMethod === "qr" || dinelcoSubMethod === "pix") && (
+                          <div className="flex flex-col items-center text-center space-y-2.5 w-full">
+                            <div className="flex items-center gap-2">
+                              <QrCode className="w-7 h-7 text-purple-600" />
+                              <div className="text-left">
+                                <div className="font-bold text-xs text-slate-900 dark:text-white">Dinelco (Ingenico AXIUM) - {dinelcoSubMethod === "pix" ? "PIX Brasil" : "QR Guaraníes"}</div>
+                                {!isMultiPayment && (
+                                  <div className="text-xs font-posMono tabular-nums font-black text-purple-600 dark:text-purple-400">
+                                    {formatPYG(totalPyg)}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {!activePosConfig.dinelcoIp && (
+                              <div className="w-full max-w-sm p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
+                                No hay IP de terminal Dinelco configurada para esta caja.{" "}
+                                <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
+                              </div>
+                            )}
+
+                            {dinelcoSubMethod === "pix" && dinelcoQrState !== "aprobada" && (
+                              <div className="w-full max-w-md">
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF del comprador (11 dígitos):</label>
+                                <input
+                                  type="text"
+                                  value={dinelcoPixCpf}
+                                  onChange={(e) => setDinelcoPixCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
+                                  placeholder="52998224725"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-orange-500 text-center font-bold"
+                                />
+                              </div>
+                            )}
+
+                            {dinelcoQrState !== "aprobada" && (
+                              <button
+                                type="button"
+                                onClick={handleDinelcoQR}
+                                disabled={!activePosConfig.dinelcoIp || dinelcoQrState === "esperando"}
+                                className="w-full max-w-md flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-600/20"
+                              >
+                                {dinelcoQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
+                                <span>
+                                  {dinelcoQrState === "esperando"
+                                    ? "Esperando el pago del cliente..."
+                                    : dinelcoSubMethod === "pix" ? "Generar PIX en Terminal Dinelco" : "Generar QR en Terminal Dinelco"}
+                                </span>
+                              </button>
+                            )}
+
+                            {dinelcoQrState === "aprobada" && (
+                              <div className="w-full max-w-md p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left">
+                                <div className="font-black">✓ Transacción {dinelcoSubMethod === "pix" ? "PIX" : "QR"} Dinelco Aprobada</div>
+                              </div>
+                            )}
+
+                            {dinelcoQrState === "error_rechazo" && (
+                              <div className="w-full max-w-md p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
+                                <div className="font-black">✕ {dinelcoQrError}</div>
+                                <button type="button" onClick={handleDinelcoQR} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                              </div>
+                            )}
+
+                            {dinelcoQrState === "error_conexion" && (
+                              <div className="w-full max-w-md p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
+                                <div className="font-black">⚠ {dinelcoQrError}</div>
+                                <button type="button" onClick={handleDinelcoQR} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 4. PLUG PAY (UNIFICADO: PIX Brasil en Tiempo Real, Crédito Parcelado, y Procesado Manual) */}
+                    {(activeMethods.has("plugpay") || activeMethods.has("qr") || activeMethods.has("plugpay_credito")) && (
+                      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                          <div className="flex items-center gap-2">
+                            <Smartphone className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+                            <div>
+                              <span className="font-black text-xs text-slate-900 dark:text-white">Plug Pay Internacional</span>
+                              <span className="text-[10px] text-slate-400 block font-medium">PIX y Parcelado Brasil</span>
+                            </div>
+                          </div>
+
+                          {/* Sub-métodos Plug Pay */}
+                          <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-xl gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setPlugpaySubMethod("pix")}
+                              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                plugpaySubMethod === "pix"
+                                  ? "bg-orange-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              ⚡ PIX Brasil
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPlugpaySubMethod("parcelado")}
+                              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                plugpaySubMethod === "parcelado"
+                                  ? "bg-blue-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              💳 Crédito Parcelado
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Monto de línea si es pago mixto */}
+                        {isMultiPayment && (
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto Plug Pay en esta línea (₲):</label>
+                            <div className="flex gap-1">
+                              <input
+                                type="text"
+                                value={mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg}
+                                onChange={(e) => {
+                                  const clean = e.target.value.replace(/\D/g, "")
+                                  const val = clean ? parseInt(clean, 10).toLocaleString("es-PY") : ""
+                                  setMixedPlugPayPyg(val)
+                                  setMixedParceladoPyg(val)
+                                  setMixedQrPyg(val)
+                                }}
+                                onKeyDown={(e) => handleMixedFieldKeyDown(e, (v) => { setMixedPlugPayPyg(v); setMixedParceladoPyg(v); setMixedQrPyg(v); })}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="0"
+                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-orange-600 dark:text-orange-400 outline-none focus:border-orange-500"
+                              />
+                              <button
+                                type="button"
+                                title="Completar con el resto"
+                                onClick={() => {
+                                  const resto = Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY")
+                                  setMixedPlugPayPyg(resto)
+                                  setMixedParceladoPyg(resto)
+                                  setMixedQrPyg(resto)
+                                }}
+                                className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                              >
+                                Resto
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* SUB-MODALIDAD 1: PIX BRASIL TIEMPO REAL */}
+                        {plugpaySubMethod === "pix" && (
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Cobro PIX dinámico en Reales:</span>
+                              <span className="text-xs font-posMono font-black text-orange-600 dark:text-orange-400">
+                                {plugpayBrlValue ? `R$ ${plugpayBrlValue.toFixed(2)}` : `Gs. ${formatPYG(isMultiPayment ? parseInt((mixedPlugPayPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg)}`}
+                              </span>
                             </div>
 
                             {plugpayState === "idle" && (
@@ -9759,332 +10084,211 @@ export default function POSPage() {
                             )}
 
                             {plugpayState === "aprobada" && (
-                              <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
-                                <div className="font-black">✓ Transacción PIX Aprobada</div>
-                                <div>ID: {plugpayResult?.IdTransacao}</div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* SUB-PANEL 3: QR / PIX DINELCO */}
-                        {qrSubMethod === "dinelco" && (
-                          <div className="flex flex-col items-center text-center space-y-2.5 w-full">
-                            <div className="flex items-center gap-2">
-                              <QrCode className="w-7 h-7 text-purple-600" />
-                              <div className="text-left">
-                                <div className="font-bold text-xs text-slate-900 dark:text-white">Dinelco (Ingenico AXIUM)</div>
-                                {!isMultiPayment && (
-                                  <div className="text-xs font-posMono tabular-nums font-black text-purple-600 dark:text-purple-400">
-                                    {formatPYG(totalPyg)}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            {dinelcoQrState !== "aprobada" && (
-                              <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl gap-1 w-full max-w-xs">
-                                <button
-                                  type="button"
-                                  onClick={() => setDinelcoQrMode("qr")}
-                                  className={`flex-1 py-1 px-2 rounded-lg text-[11px] font-black transition-all cursor-pointer ${dinelcoQrMode === "qr" ? "bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-300 shadow-xs" : "text-slate-500 dark:text-slate-400"}`}
-                                >
-                                  QR Guaraníes
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setDinelcoQrMode("pix")}
-                                  className={`flex-1 py-1 px-2 rounded-lg text-[11px] font-black transition-all cursor-pointer ${dinelcoQrMode === "pix" ? "bg-white dark:bg-slate-900 text-orange-600 dark:text-orange-300 shadow-xs" : "text-slate-500 dark:text-slate-400"}`}
-                                >
-                                  PIX Brasil
-                                </button>
-                              </div>
-                            )}
-
-                            {!activePosConfig.dinelcoIp && (
-                              <div className="w-full max-w-sm p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
-                                No hay IP de terminal Dinelco configurada para esta caja.{" "}
-                                <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
-                              </div>
-                            )}
-
-                            {dinelcoQrMode === "pix" && dinelcoQrState !== "aprobada" && (
-                              <div className="w-full max-w-md">
-                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF del comprador (11 dígitos):</label>
-                                <input
-                                  type="text"
-                                  value={dinelcoPixCpf}
-                                  onChange={(e) => setDinelcoPixCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
-                                  placeholder="52998224725"
-                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-orange-500 text-center font-bold"
-                                />
-                              </div>
-                            )}
-
-                            {dinelcoQrState !== "aprobada" && (
-                              <button
-                                type="button"
-                                onClick={handleDinelcoQR}
-                                disabled={!activePosConfig.dinelcoIp || dinelcoQrState === "esperando"}
-                                className="w-full max-w-md flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-600/20"
-                              >
-                                {dinelcoQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
-                                <span>
-                                  {dinelcoQrState === "esperando"
-                                    ? "Esperando el pago del cliente..."
-                                    : dinelcoQrMode === "pix" ? "Generar PIX en Terminal Dinelco" : "Generar QR en Terminal Dinelco"}
-                                </span>
-                              </button>
-                            )}
-
-                            {dinelcoQrState === "aprobada" && (
-                              <div className="w-full max-w-md p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left">
-                                <div className="font-black">✓ Transacción {dinelcoQrMode === "pix" ? "PIX" : "QR"} Dinelco Aprobada</div>
-                              </div>
-                            )}
-
-                            {dinelcoQrState === "error_rechazo" && (
-                              <div className="w-full max-w-md p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
-                                <div className="font-black">✕ {dinelcoQrError}</div>
-                                <button type="button" onClick={handleDinelcoQR} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
-                              </div>
-                            )}
-
-                            {dinelcoQrState === "error_conexion" && (
-                              <div className="w-full max-w-md p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
-                                <div className="font-black">⚠ {dinelcoQrError}</div>
-                                <button type="button" onClick={handleDinelcoQR} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* SUB-PANEL 4: QR BANCARD EN PANTALLA (API HTTPS directa) */}
-                        {qrSubMethod === "bancard_cloud" && (
-                          <div className="flex flex-col items-center text-center space-y-2.5 w-full">
-                            <div className="flex items-center gap-2">
-                              <QrCode className="w-7 h-7 text-blue-600" />
-                              <div className="text-left">
-                                <div className="font-bold text-xs text-slate-900 dark:text-white">QR Bancard (pantalla)</div>
-                                {!isMultiPayment && (
-                                  <div className="text-xs font-posMono tabular-nums font-black text-blue-600 dark:text-blue-400">
-                                    {formatPYG(totalPyg)}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            {bancardCloudQrState === "idle" && (
-                              <button
-                                type="button"
-                                onClick={handleGenerateBancardCloudQr}
-                                className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow-sm shadow-blue-600/20"
-                              >
-                                <QrCode className="w-4 h-4" />
-                                <span>Generar QR Bancard</span>
-                              </button>
-                            )}
-
-                            {bancardCloudQrState === "generando" && (
-                              <div className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
-                                <Loader2 className="w-4 h-4 animate-spin" /> Generando QR con Bancard...
-                              </div>
-                            )}
-
-                            {bancardCloudQrState === "esperando" && bancardCloudQrData && (
-                              <div className="w-full max-w-sm flex flex-col items-center gap-2">
-                                {bancardCloudQrData.qrUrl && (
-                                  <img src={bancardCloudQrData.qrUrl} alt="QR Bancard" className="w-48 h-48 rounded-xl border border-slate-200 dark:border-slate-700 bg-white p-2" />
-                                )}
-                                <div className="flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400">
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Esperando el pago del cliente...
+                              <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
+                                <div className="font-black flex items-center gap-1.5">
+                                  <CheckCircle className="w-4 h-4 text-emerald-600" />
+                                  <span>✓ Transacción PIX Aprobada</span>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={handleCancelBancardCloudQr}
-                                  className="text-[11px] font-bold text-rose-500 hover:text-rose-600 underline cursor-pointer"
-                                >
-                                  Cancelar QR
-                                </button>
-                              </div>
-                            )}
-
-                            {bancardCloudQrState === "aprobada" && (
-                              <div className="w-full max-w-sm p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left">
-                                <div className="font-black">✓ Pago QR Bancard confirmado</div>
-                              </div>
-                            )}
-
-                            {bancardCloudQrState === "error" && (
-                              <div className="w-full max-w-sm p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
-                                <div className="font-black">✕ {bancardCloudQrError}</div>
-                                <button type="button" onClick={handleGenerateBancardCloudQr} className="text-xs font-bold underline cursor-pointer">Generar QR nuevamente</button>
+                                <div>ID Transacción: {plugpayResult?.IdTransacao || plugpayResult?.serialNumber}</div>
                               </div>
                             )}
                           </div>
                         )}
-                      </div>
-                    )}
 
-                    {/* 5. CRÉDITO BRASIL (PlugPay) */}
-                    {activeMethods.has("plugpay_credito") && (
-                      <div className="bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-2.5">
-                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-950 flex items-center justify-center text-blue-600">
-                              <CreditCard className="w-4 h-4" />
-                            </div>
-                            <div>
-                              <span className="font-black text-xs text-slate-900 dark:text-white">Crédito Brasil (PlugPay)</span>
-                              <span className="text-[10px] text-slate-400 block font-normal">Cobro parcelado internacional</span>
-                            </div>
-                          </div>
-                          {plugpayBrlValue && (
-                            <div className="text-right">
-                              <div className="text-[9px] text-slate-400 uppercase font-bold">Total a Financiar</div>
-                              <div className="text-xs font-posMono font-black text-blue-600 dark:text-blue-400">
-                                R$ {plugpayBrlValue.toFixed(2)}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {isMultiPayment && (
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
-                            <div className="flex gap-1">
-                              <input
-                                type="text"
-                                value={mixedParceladoPyg}
-                                onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedParceladoPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
-                                onFocus={(e) => e.target.select()}
-                                placeholder="0"
-                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500 text-center"
-                              />
-                              <button
-                                type="button"
-                                title="Completar con el resto"
-                                onClick={() => setMixedParceladoPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
-                                className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
-                              >
-                                Resto
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {plugpayState === "idle" && (
+                        {/* SUB-MODALIDAD 2: CRÉDITO PARCELADO BRASIL */}
+                        {plugpaySubMethod === "parcelado" && (
                           <div className="space-y-2.5">
-                            <div className="grid grid-cols-3 gap-2">
-                              <div>
-                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF (11 dígitos):</label>
-                                <input
-                                  type="text"
-                                  value={plugpayCpf}
-                                  onChange={(e) => setPlugpayCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
-                                  placeholder="52998224725"
-                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-blue-500 text-center font-bold"
-                                />
+                            {plugpayBrlValue && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Total a Financiar en BRL:</span>
+                                <span className="text-xs font-posMono font-black text-blue-600 dark:text-blue-400">
+                                  R$ {plugpayBrlValue.toFixed(2)}
+                                </span>
                               </div>
-                              <div>
-                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">WhatsApp:</label>
-                                <input
-                                  type="text"
-                                  value={plugpayPhone}
-                                  onChange={(e) => setPlugpayPhone(e.target.value.replace(/\D/g, ""))}
-                                  placeholder="48999999999"
-                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-blue-500 text-center font-bold"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">Cuotas:</label>
-                                <select
-                                  value={plugpayCuotas}
-                                  onChange={(e) => setPlugpayCuotas(Number(e.target.value))}
-                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs outline-none focus:border-blue-500 font-bold"
-                                >
-                                  {[1, 2, 3, 4, 5, 6, 9, 12, 18, 24].map((c) => (
-                                    <option key={c} value={c}>{c === 1 ? "1 pago directo" : `${c} cuotas`}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={handlePlugpayParcelado}
-                              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-xl transition cursor-pointer shadow-sm shadow-blue-600/20 flex items-center justify-center gap-2"
-                            >
-                              <CreditCard className="w-4 h-4" />
-                              <span>Iniciar Crédito Parcelado</span>
-                            </button>
-                          </div>
-                        )}
+                            )}
 
-                        {plugpayState === "esperando" && (
-                          <div className="p-3 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-800 space-y-2.5">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-1.5 text-xs font-bold text-blue-700 dark:text-blue-300">
-                                <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-                                <span>Esperando cobro con tarjeta...</span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={resetBancardFlow}
-                                className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer"
-                              >
-                                Cancelar
-                              </button>
-                            </div>
-
-                            {plugpayResult?.UrlPaymentForm && (
-                              <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-blue-200 dark:border-blue-800 flex items-center justify-between gap-2">
-                                <div className="text-[11px] text-slate-600 dark:text-slate-300">
-                                  <span className="font-bold block text-xs text-slate-900 dark:text-white">Pasarela de Pago Segura</span>
-                                  {plugpayCuotas} cuotas de R$ {(plugpayBrlValue ? (plugpayBrlValue / plugpayCuotas).toFixed(2) : "0.00")}
+                            {plugpayState === "idle" && (
+                              <div className="space-y-2.5">
+                                <div className="grid grid-cols-3 gap-2">
+                                  <div>
+                                    <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF (11 dígitos):</label>
+                                    <input
+                                      type="text"
+                                      value={plugpayCpf}
+                                      onChange={(e) => setPlugpayCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
+                                      placeholder="52998224725"
+                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-blue-500 text-center font-bold"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">WhatsApp:</label>
+                                    <input
+                                      type="text"
+                                      value={plugpayPhone}
+                                      onChange={(e) => setPlugpayPhone(e.target.value.replace(/\D/g, ""))}
+                                      placeholder="48999999999"
+                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-blue-500 text-center font-bold"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">Cuotas:</label>
+                                    <select
+                                      value={plugpayCuotas}
+                                      onChange={(e) => setPlugpayCuotas(Number(e.target.value))}
+                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs outline-none focus:border-blue-500 font-bold"
+                                    >
+                                      {[1, 2, 3, 4, 5, 6, 9, 12, 18, 24].map((c) => (
+                                        <option key={c} value={c}>{c === 1 ? "1 pago directo" : `${c} cuotas`}</option>
+                                      ))}
+                                    </select>
+                                  </div>
                                 </div>
-                                <a
-                                  href={plugpayResult.UrlPaymentForm}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg flex items-center gap-1 shrink-0 shadow-sm cursor-pointer"
+                                <button
+                                  type="button"
+                                  onClick={handlePlugpayParcelado}
+                                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-xl transition cursor-pointer shadow-sm shadow-blue-600/20 flex items-center justify-center gap-2"
                                 >
-                                  <span>Abrir Pasarela</span>
-                                  <ExternalLink className="w-3.5 h-3.5" />
-                                </a>
+                                  <CreditCard className="w-4 h-4" />
+                                  <span>Iniciar Crédito Parcelado</span>
+                                </button>
+                              </div>
+                            )}
+
+                            {plugpayState === "esperando" && (
+                              <div className="p-3 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-800 space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5 text-xs font-bold text-blue-700 dark:text-blue-300">
+                                    <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                                    <span>Esperando cobro con tarjeta...</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={resetBancardFlow}
+                                    className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+
+                                {plugpayResult?.UrlPaymentForm && (
+                                  <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-blue-200 dark:border-blue-800 flex items-center justify-between gap-2">
+                                    <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                                      <span className="font-bold block text-xs text-slate-900 dark:text-white">Pasarela de Pago Segura</span>
+                                      {plugpayCuotas} cuotas de R$ {(plugpayBrlValue ? (plugpayBrlValue / plugpayCuotas).toFixed(2) : "0.00")}
+                                    </div>
+                                    <a
+                                      href={plugpayResult.UrlPaymentForm}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg flex items-center gap-1 shrink-0 shadow-sm cursor-pointer"
+                                    >
+                                      <span>Abrir Pasarela</span>
+                                      <ExternalLink className="w-3.5 h-3.5" />
+                                    </a>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {plugpayState === "aprobada" && (
+                              <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
+                                <div className="font-black flex items-center gap-1.5">
+                                  <CheckCircle className="w-4 h-4 text-emerald-500" />
+                                  <span>✓ Crédito Parcelado Aprobado</span>
+                                </div>
+                                <div className="text-[11px] opacity-90">Autorización / Serial: {plugpayResult?.serialNumber || plugpayResult?.SerialNumber || plugpayResult?.IdInitialTransaction}</div>
+                              </div>
+                            )}
+
+                            {plugpayState === "error" && (
+                              <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 text-left space-y-1.5">
+                                <div className="font-bold flex items-center gap-1">
+                                  <AlertCircle className="w-4 h-4 text-rose-500" />
+                                  <span>Error en PlugPay: {plugpayError || "Transacción cancelada o fallida"}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => { setPlugpayState("idle"); setPlugpayError("") }}
+                                  className="px-2.5 py-1 bg-rose-600 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                                >
+                                  Reintentar
+                                </button>
                               </div>
                             )}
                           </div>
                         )}
 
-                        {plugpayState === "aprobada" && (
-                          <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
-                            <div className="font-black flex items-center gap-1.5">
-                              <CheckCircle className="w-4 h-4 text-emerald-500" />
-                              <span>✓ Crédito Parcelado Aprobado</span>
-                            </div>
-                            <div className="text-[11px] opacity-90">Autorización / Serial: {plugpayResult?.serialNumber || plugpayResult?.SerialNumber || plugpayResult?.IdInitialTransaction}</div>
-                          </div>
-                        )}
-
-                        {plugpayState === "error" && (
-                          <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 text-left space-y-1.5">
-                            <div className="font-bold flex items-center gap-1">
-                              <AlertCircle className="w-4 h-4 text-rose-500" />
-                              <span>Error en PlugPay: {plugpayError || "Transacción cancelada o fallida"}</span>
-                            </div>
+                        {/* CARGA / PROCESADO MANUAL DE RESPALDO PLUG PAY */}
+                        {plugpayState !== "aprobada" && (
+                          <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
                             <button
                               type="button"
-                              onClick={() => { setPlugpayState("idle"); setPlugpayError("") }}
-                              className="px-2.5 py-1 bg-rose-600 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                              onClick={() => setShowPlugpayManualFallback((v) => !v)}
+                              className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer flex items-center gap-1"
                             >
-                              Reintentar
+                              <span>{showPlugpayManualFallback ? "▾ Ocultar carga manual Plug Pay" : "▸ Carga / Procesado Manual Plug Pay (Comprobante de respaldo)"}</span>
                             </button>
+
+                            {showPlugpayManualFallback && (
+                              <div className="mt-2 p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                                  Si el cobro se procesó por fuera de la integración o se dispone del comprobante manual de la pasarela:
+                                </p>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                      Nº Comprobante / Transacción (*):
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={plugpayManualComprobante}
+                                      onChange={(e) => setPlugpayManualComprobante(e.target.value)}
+                                      placeholder="Ej: PIX-948210"
+                                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-xs font-bold outline-none focus:border-orange-500"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                      Autorización / Serial:
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={plugpayManualAutorizacion}
+                                      onChange={(e) => setPlugpayManualAutorizacion(e.target.value)}
+                                      placeholder="Ej: 004819"
+                                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-xs outline-none focus:border-orange-500"
+                                    />
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!plugpayManualComprobante.trim()) {
+                                      toast.warning("Falta Comprobante", "Ingrese el número de comprobante o transacción de Plug Pay.")
+                                      return
+                                    }
+                                    setPlugpayState("aprobada")
+                                    setPlugpayResult({
+                                      IdTransacao: plugpayManualComprobante.trim(),
+                                      serialNumber: plugpayManualAutorizacion.trim() || plugpayManualComprobante.trim(),
+                                      manual: true,
+                                      valueBRL: plugpayBrlValue ? plugpayBrlValue.toFixed(2) : undefined
+                                    } as any)
+                                    toast.success("Comprobante Guardado", "Pago manual de Plug Pay validado.")
+                                  }}
+                                  className="w-full py-2 px-3 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-xs font-black transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                                >
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                  <span>Validar Comprobante Manual Plug Pay</span>
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
                     )}
 
-                    {/* 7. EXTRA CLUB */}
+                    {/* 5. EXTRA CLUB */}
                     {activeMethods.has("extra_club") && (
                       <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
                         {(!customer || customer.id === DEFAULT_CUSTOMER.id) ? (
@@ -10176,6 +10380,226 @@ export default function POSPage() {
                       </div>
                     )}
 
+                    {/* 6. OTROS (TRANSFERENCIAS Y CHEQUES) CON AUTORIZACIÓN OBLIGATORIA */}
+                    {activeMethods.has("otros") && (
+                      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                          <div className="flex items-center gap-2">
+                            <Receipt className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                            <div>
+                              <span className="font-black text-xs text-slate-900 dark:text-white">Otros Medios de Pago</span>
+                              <span className="text-[10px] text-slate-400 block font-medium">Transferencia Bancaria & Cheques</span>
+                            </div>
+                          </div>
+
+                          {/* Segmented control Transferencia / Cheque */}
+                          <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-xl gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setOtrosSubMethod("transferencia")}
+                              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                otrosSubMethod === "transferencia"
+                                  ? "bg-blue-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              🏛️ Transferencia
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setOtrosSubMethod("cheque")}
+                              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                otrosSubMethod === "cheque"
+                                  ? "bg-amber-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              📄 Cheque / Vale
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Banner de Autorización de Supervisor Obligatoria */}
+                        {otrosSupervisorApproved ? (
+                          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-700 dark:text-emerald-300 flex items-center justify-between">
+                            <div className="flex items-center gap-2 font-black">
+                              <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                              <span>✓ Operación Autorizada por Supervisor</span>
+                            </div>
+                            <span className="text-[10px] bg-emerald-600 text-white font-black px-2 py-0.5 rounded-full uppercase">
+                              Aprobado
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-800 dark:text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                              <div>
+                                <span className="font-black block">Requiere Autorización Obligatoria</span>
+                                <span className="text-[10px] opacity-80">
+                                  Cualquier cobro con {otrosSubMethod === "transferencia" ? "Transferencia" : "Cheque"} requiere confirmación de supervisor.
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (otrosSubMethod === "transferencia" && !transfComprobante.trim()) {
+                                  toast.warning("Falta Nº de Comprobante", "Ingrese el número de comprobante antes de solicitar autorización.")
+                                  return
+                                }
+                                if (otrosSubMethod === "cheque" && (!chequeBanco.trim() || !chequeNumero.trim())) {
+                                  toast.warning("Faltan Datos del Cheque", "Ingrese el banco emisor y número de cheque antes de solicitar autorización.")
+                                  return
+                                }
+                                requestSupervisorAuthorization({
+                                  type: "otros_payment",
+                                  otrosSubtipo: otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque",
+                                  otrosComprobante: otrosSubMethod === "transferencia" ? transfComprobante : `${chequeBanco} #${chequeNumero}`,
+                                  otrosMonto: isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg,
+                                  motivo: `Cobro con ${otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque"}: ${formatPYG(isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg)}`
+                                })
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-black text-xs cursor-pointer shadow-xs shrink-0 self-end sm:self-center"
+                            >
+                              Pedir Autorización
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Monto de línea si es pago mixto */}
+                        {isMultiPayment && (
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
+                            <div className="flex gap-1">
+                              <input
+                                type="text"
+                                value={mixedOtrosPyg}
+                                onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedOtrosPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedOtrosPyg)}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="0"
+                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-amber-600 dark:text-amber-400 outline-none focus:border-amber-500"
+                              />
+                              <button
+                                type="button"
+                                title="Completar con el resto"
+                                onClick={() => setMixedOtrosPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                              >
+                                Resto
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* PESTAÑA TRANSFERENCIA */}
+                        {otrosSubMethod === "transferencia" && (
+                          <div className="space-y-2.5">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                  Nº Comprobante / Transacción (*):
+                                </label>
+                                <input
+                                  type="text"
+                                  value={transfComprobante}
+                                  onChange={(e) => setTransfComprobante(e.target.value)}
+                                  placeholder="Ej: 9912048"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs font-bold outline-none focus:border-blue-500 text-blue-600 dark:text-blue-400"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                  Banco Origen (Opcional):
+                                </label>
+                                <input
+                                  type="text"
+                                  value={transfBancoOrigen}
+                                  onChange={(e) => setTransfBancoOrigen(e.target.value)}
+                                  placeholder="Ej: Itaú / Ueno / Continental"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                  Titular Transferencia:
+                                </label>
+                                <input
+                                  type="text"
+                                  value={transfTitular}
+                                  onChange={(e) => setTransfTitular(e.target.value)}
+                                  placeholder="Nombre o RUC del pagador"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs outline-none focus:border-blue-500"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="p-2 rounded-xl bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50 text-[10px] text-blue-700 dark:text-blue-300">
+                              ℹ️ <strong>Cuenta Destino Única:</strong> Los fondos ingresan a la cuenta habilitada de GRUPO SANTA TERESA E.A.S.
+                            </div>
+                          </div>
+                        )}
+
+                        {/* PESTAÑA CHEQUE */}
+                        {otrosSubMethod === "cheque" && (
+                          <div className="space-y-2.5">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                  Banco Emisor (*):
+                                </label>
+                                <input
+                                  type="text"
+                                  value={chequeBanco}
+                                  onChange={(e) => setChequeBanco(e.target.value)}
+                                  placeholder="Ej: Banco Familiar / Atlas / GNB"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-bold outline-none focus:border-amber-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                  Nº de Cheque (*):
+                                </label>
+                                <input
+                                  type="text"
+                                  value={chequeNumero}
+                                  onChange={(e) => setChequeNumero(e.target.value)}
+                                  placeholder="Ej: 00123849"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs font-bold outline-none focus:border-amber-500 text-amber-600 dark:text-amber-400"
+                                />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                  Fecha de Cobro / Vencimiento:
+                                </label>
+                                <input
+                                  type="date"
+                                  value={chequeFechaVenc}
+                                  onChange={(e) => setChequeFechaVenc(e.target.value)}
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-bold outline-none focus:border-amber-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                  Titular / RUC del Cheque:
+                                </label>
+                                <input
+                                  type="text"
+                                  value={chequeTitular}
+                                  onChange={(e) => setChequeTitular(e.target.value)}
+                                  placeholder="Nombre o RUC del librador"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs outline-none focus:border-amber-500"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                   </div>
                 </div>
               </div>
@@ -10195,22 +10619,38 @@ export default function POSPage() {
                 <button
                   ref={confirmCheckoutBtnRef}
                   onClick={() => {
-                    if (activeMethods.has("bancard") && bancardTxnState !== "aprobada" && !posCardCupon.trim()) {
-                      toast.warning("Bancard sin confirmar", "Cobrá con el terminal o cargá el cupón manualmente antes de continuar.")
+                    if (activeMethods.has("bancard") && bancardTxnState !== "aprobada" && !posCardCupon.trim() && !bancardQrManualConfirm && bancardCloudQrState !== "aprobada") {
+                      toast.warning("Bancard sin confirmar", "Cobrá con el terminal o cargá el cupón/voucher manualmente antes de continuar.")
                       return
                     }
-                    if (activeMethods.has("dinelco") && dinelcoTxnState !== "aprobada" && !dinelcoCupon.trim()) {
+                    if (activeMethods.has("dinelco") && dinelcoTxnState !== "aprobada" && !dinelcoCupon.trim() && dinelcoQrState !== "aprobada") {
                       toast.warning("Dinelco sin confirmar", "Cobrá con el terminal o cargá el cupón manualmente antes de continuar.")
                       return
                     }
-                    if (activeMethods.has("qr") && !bancardQrManualConfirm) {
-                      const qrConfirmado =
-                        (qrSubMethod === "zimple" && bancardQrState === "aprobada") ||
-                        (qrSubMethod === "pix" && plugpayState === "aprobada") ||
-                        (qrSubMethod === "dinelco" && dinelcoQrState === "aprobada") ||
-                        (qrSubMethod === "bancard_cloud" && bancardCloudQrState === "aprobada")
-                      if (!qrConfirmado) {
-                        toast.warning("QR sin confirmar", "Generá el QR y esperá el pago, o marcá que ya cobraste por fuera del sistema.")
+                    if (activeMethods.has("plugpay") && plugpayState !== "aprobada" && !plugpayManualComprobante.trim()) {
+                      toast.warning("Plug Pay sin confirmar", "Generá el cobro o cargá el comprobante manual de respaldo antes de continuar.")
+                      return
+                    }
+                    if (activeMethods.has("otros")) {
+                      if (otrosSubMethod === "transferencia") {
+                        if (!transfComprobante.trim()) {
+                          toast.warning("Falta Nº de Comprobante", "Ingrese el número de comprobante o transacción de la transferencia.")
+                          return
+                        }
+                      } else {
+                        if (!chequeBanco.trim() || !chequeNumero.trim()) {
+                          toast.warning("Faltan Datos del Cheque", "Ingrese el banco emisor y número de cheque.")
+                          return
+                        }
+                      }
+                      if (!otrosSupervisorApproved) {
+                        requestSupervisorAuthorization({
+                          type: "otros_payment",
+                          otrosSubtipo: otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque",
+                          otrosComprobante: otrosSubMethod === "transferencia" ? transfComprobante : `${chequeBanco} #${chequeNumero}`,
+                          otrosMonto: isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg,
+                          motivo: `Cobro con ${otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque"}: ${formatPYG(isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg)}`
+                        })
                         return
                       }
                     }
