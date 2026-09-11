@@ -31,7 +31,7 @@ class ProductCreate(BaseModel):
     company_id: UUID
     categoria_id: Optional[UUID] = None
     supplier_id: Optional[UUID] = None
-    sku: str = Field(min_length=1, max_length=50)
+    sku: Optional[str] = Field(default=None, max_length=50)
     codigo_barra: Optional[str] = Field(default=None, max_length=50)
     nombre: str = Field(min_length=1, max_length=200)
     descripcion: Optional[str] = None

@@ -95,11 +95,21 @@ async def upload_product_image(
     return {"url": image_url, "filename": filename}
 
 
+@router.get("/products/next-sku")
+async def get_next_sku(
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+):
+    next_sku = await service.get_next_sku(db, company_id)
+    return {"next_sku": next_sku}
+
+
 @router.post("/products", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
 async def create_product(body: ProductCreate, db: AsyncSession = Depends(get_db)):
-    existing = await service.get_product_by_sku(db, str(body.company_id), body.sku)
-    if existing:
-        raise HTTPException(status_code=400, detail="Ya existe un producto con ese SKU")
+    if body.sku and body.sku.strip().upper() not in ("", "AUTO"):
+        existing = await service.get_product_by_sku(db, str(body.company_id), body.sku)
+        if existing:
+            raise HTTPException(status_code=400, detail="Ya existe un producto con ese SKU")
     return await service.create_product(db, body)
 
 

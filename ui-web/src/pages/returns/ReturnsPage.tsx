@@ -724,64 +724,73 @@ export default function ReturnsPage() {
                     <th className="p-4">Proveedor</th>
                     <th className="p-4">Factura Origen</th>
                     <th className="p-4">Concepto / Motivo</th>
-                    <th className="p-4 text-right">Monto Acreditado</th>
+                    <th className="p-4 text-right">Monto Total</th>
+                    <th className="p-4 text-right">Saldo Remanente</th>
                     <th className="p-4 text-center">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
                   {loadingNc ? (
                     <tr>
-                      <td colSpan={7} className="p-12 text-center text-slate-400">
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
                         <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-rose-500" />
                         <span>Cargando notas de crédito de proveedores...</span>
                       </td>
                     </tr>
                   ) : filteredCreditNotes.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-12 text-center text-slate-400">
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
                         No se encontraron notas de crédito de proveedores.
                       </td>
                     </tr>
                   ) : (
-                    filteredCreditNotes.map((nc) => (
-                      <tr key={nc.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                        <td className="p-4 font-mono font-bold text-slate-900 dark:text-white">
-                          <div className="flex items-center gap-1.5">
-                            <FileText className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>{nc.numero || "NC-" + nc.id.slice(0, 8)}</span>
-                          </div>
-                        </td>
-                        <td className="p-4 text-slate-500 font-mono text-[11px]">
-                          {nc.fecha ? formatDate(nc.fecha) : "—"}
-                        </td>
-                        <td className="p-4 font-bold text-slate-800 dark:text-slate-200 max-w-[200px] truncate">
-                          {nc.supplier_nombre || "Proveedor"}
-                        </td>
-                        <td className="p-4 font-mono text-slate-500 text-[11px]">
-                          {nc.numero_factura_origen ? `#${nc.numero_factura_origen}` : "—"}
-                        </td>
-                        <td className="p-4 text-slate-600 dark:text-slate-300">
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                            {(nc.motivo || "CREDITO").replace(/_/g, " ")}
-                          </span>
-                          {nc.observaciones && (
-                            <p className="text-[10px] text-slate-400 truncate max-w-[180px] mt-0.5">{nc.observaciones}</p>
-                          )}
-                        </td>
-                        <td className="p-4 text-right font-mono font-black text-emerald-600 dark:text-emerald-400">
-                          {formatPYG(Number(nc.monto || 0))}
-                        </td>
-                        <td className="p-4 text-center">
-                          <button
-                            onClick={() => setViewingNc(nc)}
-                            className="p-2 text-slate-400 hover:text-emerald-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                            title="Ver Detalle NC"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                    filteredCreditNotes.map((nc) => {
+                      const saldo = Number((nc as any).saldo_disponible ?? nc.monto ?? 0)
+                      return (
+                        <tr key={nc.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="p-4 font-mono font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-1.5">
+                              <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>{nc.numero || "NC-" + nc.id.slice(0, 8)}</span>
+                            </div>
+                          </td>
+                          <td className="p-4 text-slate-500 font-mono text-[11px]">
+                            {nc.fecha ? formatDate(nc.fecha) : "—"}
+                          </td>
+                          <td className="p-4 font-bold text-slate-800 dark:text-slate-200 max-w-[200px] truncate">
+                            {nc.supplier_nombre || "Proveedor"}
+                          </td>
+                          <td className="p-4 font-mono text-slate-500 text-[11px]">
+                            {nc.numero_factura_origen ? `#${nc.numero_factura_origen}` : "—"}
+                          </td>
+                          <td className="p-4 text-slate-600 dark:text-slate-300">
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                              {(nc.motivo || "CREDITO").replace(/_/g, " ")}
+                            </span>
+                            {nc.observaciones && (
+                              <p className="text-[10px] text-slate-400 truncate max-w-[180px] mt-0.5">{nc.observaciones}</p>
+                            )}
+                          </td>
+                          <td className="p-4 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                            {formatPYG(Number(nc.monto || 0))}
+                          </td>
+                          <td className="p-4 text-right font-mono font-black">
+                            <span className={saldo > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400 line-through"}>
+                              {formatPYG(saldo)}
+                            </span>
+                          </td>
+                          <td className="p-4 text-center">
+                            <button
+                              onClick={() => setViewingNc(nc)}
+                              className="p-2 text-slate-400 hover:text-emerald-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                              title="Ver Detalle NC"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })
                   )}
                 </tbody>
               </table>
@@ -1120,21 +1129,32 @@ export default function ReturnsPage() {
             </div>
 
             <div className="space-y-2 text-xs">
-              <div className="p-4 bg-slate-50 dark:bg-slate-800/70 rounded-2xl space-y-1.5">
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/70 rounded-2xl space-y-2">
                 <div className="flex justify-between"><span className="text-slate-400">Proveedor:</span><strong className="text-slate-900 dark:text-white">{viewingNc.supplier_nombre}</strong></div>
                 <div className="flex justify-between"><span className="text-slate-400">Factura Afectada:</span><span className="font-mono text-slate-700 dark:text-slate-300">#{viewingNc.numero_factura_origen || "—"}</span></div>
-                <div className="flex justify-between"><span className="text-slate-400">Fecha:</span><span className="font-mono text-slate-700 dark:text-slate-300">{formatDate(viewingNc.fecha)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-400">Motivo:</span><span className="font-bold text-emerald-600">{viewingNc.motivo}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Fecha de Emisión:</span><span className="font-mono text-slate-700 dark:text-slate-300">{formatDate(viewingNc.fecha)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Motivo Comercial:</span><span className="font-bold text-emerald-600">{viewingNc.motivo}</span></div>
                 {viewingNc.observaciones && (
-                  <div className="pt-2 border-t border-slate-200 dark:border-slate-700 text-slate-500 italic">
+                  <div className="pt-2 border-t border-slate-200 dark:border-slate-700 text-slate-500 italic text-[11px]">
                     "{viewingNc.observaciones}"
                   </div>
                 )}
               </div>
 
-              <div className="flex justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-sm font-black">
-                <span>Monto a Favor:</span>
-                <span className="font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(Number(viewingNc.monto || 0))}</span>
+              <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-500">Monto Acreditado Original:</span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{formatPYG(Number(viewingNc.monto || 0))}</span>
+                </div>
+                <div className="flex justify-between text-sm font-black pt-1.5 border-t border-emerald-500/20">
+                  <span className="text-emerald-900 dark:text-emerald-300">Saldo Remanente Disponible:</span>
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                    {formatPYG(Number((viewingNc as any).saldo_disponible ?? viewingNc.monto ?? 0))}
+                  </span>
+                </div>
+                <p className="text-[10px] text-emerald-700 dark:text-emerald-400 leading-snug">
+                  Este crédito está disponible para amortizar saldos en Facturas Proveedores (Procure-to-Pay) o futuras compras.
+                </p>
               </div>
             </div>
 

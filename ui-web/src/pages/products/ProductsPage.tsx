@@ -11,6 +11,7 @@ import {
 } from "lucide-react"
 import {
   api,
+  COMPANY_ID,
   type Product,
   type Category,
   type ProductVariant,
@@ -369,6 +370,16 @@ export default function ProductsPage() {
   const [costoUnlocked, setCostoUnlocked] = useState(false)
   const [formTab, setFormTab] = useState<"general" | "empaque" | "precios" | "inventario">("general")
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  interface LocalProductTier {
+    id?: string
+    min_qty: number
+    max_qty: number | null
+    precio_unitario: number
+    isNew?: boolean
+    isDeleted?: boolean
+  }
+  const [productTiers, setProductTiers] = useState<LocalProductTier[]>([])
+  const [loadingTiers, setLoadingTiers] = useState(false)
   const [form, setForm] = useState({
     sku: "",
     nombre: "",
@@ -740,6 +751,35 @@ export default function ProductsPage() {
         }
       }
 
+      // Sincronizar escalas de precios mayoristas (Tiered Prices)
+      if (targetProductId && productTiers.length > 0) {
+        for (const tier of productTiers) {
+          try {
+            if (tier.isDeleted && tier.id) {
+              await api.smartPricing.deleteTieredPrice(tier.id)
+            } else if (tier.isNew && !tier.isDeleted && tier.min_qty > 0 && tier.precio_unitario > 0) {
+              await api.smartPricing.createTieredPrice({
+                company_id: COMPANY_ID,
+                product_id: targetProductId,
+                min_qty: Number(tier.min_qty),
+                max_qty: tier.max_qty ? Number(tier.max_qty) : null,
+                precio_unitario: Number(tier.precio_unitario),
+                moneda: "PYG",
+                activo: true,
+              })
+            } else if (!tier.isNew && !tier.isDeleted && tier.id && tier.min_qty > 0 && tier.precio_unitario > 0) {
+              await api.smartPricing.updateTieredPrice(tier.id, {
+                min_qty: Number(tier.min_qty),
+                max_qty: tier.max_qty ? Number(tier.max_qty) : null,
+                precio_unitario: Number(tier.precio_unitario),
+              })
+            }
+          } catch (tErr) {
+            console.warn("Error guardando escala:", tErr)
+          }
+        }
+      }
+
       setShowForm(false)
       setEditingProduct(null)
       fetchData()
@@ -830,13 +870,35 @@ export default function ProductsPage() {
         }))
       }
     }).catch(() => {})
+
+    // Cargar escalas mayoristas (Tiered Prices)
+    setLoadingTiers(true)
+    api.smartPricing.listTieredPrices(COMPANY_ID, p.id).then((tiers: any[]) => {
+      setProductTiers((tiers || []).map(t => ({
+        id: t.id,
+        min_qty: Number(t.min_qty),
+        max_qty: t.max_qty ? Number(t.max_qty) : null,
+        precio_unitario: Number(t.precio_unitario),
+        isNew: false,
+        isDeleted: false,
+      })))
+    }).catch(() => setProductTiers([])).finally(() => setLoadingTiers(false))
   }
 
-  const handleNewClick = () => {
+  const handleNewClick = async () => {
     setEditingProduct(null)
     setCostoUnlocked(true)
+    setProductTiers([])
+    let nextSku = "126595"
+    try {
+      const skuRes = await api.products.getNextSku()
+      if (skuRes?.next_sku) nextSku = skuRes.next_sku
+    } catch (e) {
+      console.warn("No se pudo obtener el siguiente sku correlativo:", e)
+    }
+
     setForm({
-      sku: "",
+      sku: nextSku,
       nombre: "",
       codigo_barra: "",
       categoria_id: "",
@@ -2967,17 +3029,29 @@ export default function ProductsPage() {
               <div className="bg-slate-50/80 dark:bg-slate-800/40 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                      SKU / Código Interno *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={form.sku}
-                      onChange={(e) => setForm({ ...form, sku: e.target.value })}
-                      className="input-field w-full text-xs font-mono font-bold"
-                      placeholder="Ej. 120550"
-                    />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>SKU / Código Interno *</span>
+                      </label>
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center gap-1">
+                        🔒 Secuencia Ñemuha
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={form.sku}
+                        className="input-field w-full text-xs font-mono font-black bg-slate-100 dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 cursor-not-allowed pl-8"
+                        placeholder="Generando..."
+                      />
+                      <Lock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Correlativo numérico protegido para preservar la integridad con el sistema Ñemuha.
+                    </p>
                   </div>
 
                   <div>
@@ -3552,6 +3626,147 @@ export default function ProductsPage() {
                     </div>
                   )
                 })()}
+
+                {/* ── ESCALAS DE PRECIOS MAYORISTAS (TIERED PRICING) ── */}
+                <div className="bg-slate-50/80 dark:bg-slate-900/60 rounded-2xl p-4 border border-indigo-200/60 dark:border-indigo-900/40 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                        <TrendingDown className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                          <span>Escalas de Precios Mayoristas (Venta por Volumen)</span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                            Fardos / Cajas / Mayorista
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Precios diferenciados aplicables automáticamente en POS según la cantidad llevada por el cliente.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProductTiers(prev => {
+                          const active = prev.filter(t => !t.isDeleted)
+                          const nextMin = active.length > 0 ? (Math.max(...active.map(t => Number(t.max_qty || t.min_qty))) + 1) : 6
+                          return [
+                            ...prev,
+                            {
+                              min_qty: nextMin,
+                              max_qty: null,
+                              precio_unitario: form.precio_venta > 0 ? Math.round(form.precio_venta * 0.95) : 0,
+                              isNew: true,
+                              isDeleted: false,
+                            }
+                          ]
+                        })
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-sm transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Añadir Escala</span>
+                    </button>
+                  </div>
+
+                  {loadingTiers ? (
+                    <div className="p-4 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
+                      <span>Cargando escalas de precios...</span>
+                    </div>
+                  ) : productTiers.filter(t => !t.isDeleted).length === 0 ? (
+                    <div className="p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400">
+                      No hay escalas mayoristas configuradas. Se aplica únicamente el Precio Venta Minorista ({formatPYG(form.precio_venta)}).
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-slate-100 dark:bg-slate-800/80 text-[10px] font-bold uppercase text-slate-500">
+                          <tr>
+                            <th className="p-2.5 rounded-l-xl">Desde (Mín. Cant.)</th>
+                            <th className="p-2.5">Hasta (Máx. Cant.)</th>
+                            <th className="p-2.5 text-right">Precio Mayorista (Gs.)</th>
+                            <th className="p-2.5 text-center">Descuento vs Minorista</th>
+                            <th className="p-2.5 text-center rounded-r-xl">Acción</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {productTiers.map((tier, idx) => {
+                            if (tier.isDeleted) return null
+                            const descPct = form.precio_venta > 0 && tier.precio_unitario > 0
+                              ? Math.max(0, ((form.precio_venta - tier.precio_unitario) / form.precio_venta) * 100)
+                              : 0
+
+                            return (
+                              <tr key={tier.id || `new-${idx}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-850">
+                                <td className="p-2.5">
+                                  <input
+                                    type="number"
+                                    min="2"
+                                    value={tier.min_qty}
+                                    onChange={(e) => {
+                                      const val = Math.max(1, parseInt(e.target.value, 10) || 1)
+                                      setProductTiers(prev => prev.map((t, i) => i === idx ? { ...t, min_qty: val } : t))
+                                    }}
+                                    className="input-field w-24 text-xs font-mono font-bold"
+                                  />
+                                </td>
+                                <td className="p-2.5">
+                                  <input
+                                    type="number"
+                                    min={tier.min_qty}
+                                    placeholder="Sin límite (+)"
+                                    value={tier.max_qty ?? ""}
+                                    onChange={(e) => {
+                                      const val = e.target.value === "" ? null : parseInt(e.target.value, 10)
+                                      setProductTiers(prev => prev.map((t, i) => i === idx ? { ...t, max_qty: val } : t))
+                                    }}
+                                    className="input-field w-28 text-xs font-mono"
+                                  />
+                                </td>
+                                <td className="p-2.5 text-right">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="100"
+                                    value={tier.precio_unitario}
+                                    onChange={(e) => {
+                                      const val = Math.max(0, parseFloat(e.target.value) || 0)
+                                      setProductTiers(prev => prev.map((t, i) => i === idx ? { ...t, precio_unitario: val } : t))
+                                    }}
+                                    className="input-field w-32 text-xs font-mono font-bold text-right text-indigo-600 dark:text-indigo-400"
+                                  />
+                                </td>
+                                <td className="p-2.5 text-center">
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                    descPct > 0 ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800" : "text-slate-400"
+                                  }`}>
+                                    {descPct > 0 ? `-${descPct.toFixed(1)}%` : "0%"}
+                                  </span>
+                                </td>
+                                <td className="p-2.5 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setProductTiers(prev => prev.map((t, i) => i === idx ? { ...t, isDeleted: true } : t))
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-rose-500 rounded-lg transition"
+                                    title="Eliminar escala"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

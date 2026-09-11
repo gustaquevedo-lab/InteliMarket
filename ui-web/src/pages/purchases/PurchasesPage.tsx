@@ -351,6 +351,26 @@ export default function PurchasesPage() {
   })
   const [savingReq, setSavingReq] = useState(false)
 
+  // Alta y filtro de Proveedores (Nacional vs BR)
+  const [showCreateSupplierModal, setShowCreateSupplierModal] = useState(false)
+  const [savingSupplier, setSavingSupplier] = useState(false)
+  const [supplierFilterType, setSupplierFilterType] = useState<"todos" | "nacional" | "brasilero">("todos")
+  const [newSupplierForm, setNewSupplierForm] = useState({
+    razon_social: "",
+    nombre_fantasia: "",
+    ruc: "",
+    tipo_proveedor: "nacional",
+    moneda_default: "PYG",
+    telefono: "",
+    email: "",
+    contacto_nombre: "",
+    contacto_telefono: "",
+    plazo_pago_dias: 30,
+    direccion: "",
+    ciudad: "",
+    tipo_persona: "juridica",
+  })
+
   // Estado para Eliminación de Órdenes de Compra
   const [poToDelete, setPoToDelete] = useState<PurchaseOrder | null>(null)
   const [forceDeletePO, setForceDeletePO] = useState(false)
@@ -1571,11 +1591,20 @@ export default function PurchasesPage() {
   // Filtrado y Paginación de Proveedores
   const filteredSuppliers = useMemo(() => {
     return suppliers.filter(s => {
-      return !searchSupplier ||
+      const matchSearch = !searchSupplier ||
         (s.razon_social && s.razon_social.toLowerCase().includes(searchSupplier.toLowerCase())) ||
         (s.ruc && s.ruc.toLowerCase().includes(searchSupplier.toLowerCase()))
+
+      const isBr = s.tipo_proveedor === "brasilero" || s.tipo_proveedor === "br" || (s as any).moneda_default === "BRL"
+      const matchType = supplierFilterType === "todos"
+        ? true
+        : supplierFilterType === "brasilero"
+        ? isBr
+        : !isBr
+
+      return matchSearch && matchType
     })
-  }, [suppliers, searchSupplier])
+  }, [suppliers, searchSupplier, supplierFilterType])
 
   const paginatedSuppliers = useMemo(() => {
     const start = (pageSupplier - 1) * pageSizeSupplier
@@ -3980,64 +4009,125 @@ export default function PurchasesPage() {
       ────────────────────────────────────────────────────────────────────────── */}
       {tab === "proveedores" && (
         <div className="space-y-5">
-          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-indigo-500" />
                 Directorio de Proveedores & Scorecard OTIF ({suppliers.length} Proveedores)
               </h3>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Plazos comerciales, cumplimiento de entrega, condiciones de pago y contacto.
+                Gestión de proveedores nacionales y de importación directa de Brasil (Reales R$).
               </p>
             </div>
 
-            <div className="relative w-full sm:w-72">
-              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Buscar por nombre o RUC..."
-                value={searchSupplier}
-                onChange={(e) => { setSearchSupplier(e.target.value); setPageSupplier(1); }}
-                className="input-field pl-9 w-full text-xs"
-              />
+            <div className="flex items-center gap-2.5 flex-wrap">
+              {/* Filtro Nacional vs Brasil */}
+              <div className="flex items-center bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+                <button
+                  type="button"
+                  onClick={() => { setSupplierFilterType("todos"); setPageSupplier(1); }}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition ${
+                    supplierFilterType === "todos"
+                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  Todos ({suppliers.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSupplierFilterType("nacional"); setPageSupplier(1); }}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                    supplierFilterType === "nacional"
+                      ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  <span>🇵🇾 Nacional</span>
+                  <span className="text-[10px] opacity-70">
+                    ({suppliers.filter(s => s.tipo_proveedor !== "brasilero" && s.tipo_proveedor !== "br" && (s as any).moneda_default !== "BRL").length})
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSupplierFilterType("brasilero"); setPageSupplier(1); }}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                    supplierFilterType === "brasilero"
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  <span>🇧🇷 Brasil (BR)</span>
+                  <span className="text-[10px] opacity-90">
+                    ({suppliers.filter(s => s.tipo_proveedor === "brasilero" || s.tipo_proveedor === "br" || (s as any).moneda_default === "BRL").length})
+                  </span>
+                </button>
+              </div>
+
+              <div className="relative w-full sm:w-64">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por nombre o RUC/CNPJ..."
+                  value={searchSupplier}
+                  onChange={(e) => { setSearchSupplier(e.target.value); setPageSupplier(1); }}
+                  className="input-field pl-9 w-full text-xs"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowCreateSupplierModal(true)}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-sm transition"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ Registrar Proveedor</span>
+              </button>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {paginatedSuppliers.map(s => (
-              <div key={s.id} className="card p-5 hover:shadow-md transition-shadow space-y-3 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <h4 className="font-bold text-sm text-gray-900 dark:text-white line-clamp-1" title={s.razon_social}>
-                      {s.razon_social}
-                    </h4>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 shrink-0">
-                      Activo
-                    </span>
-                  </div>
-                  <div className="text-xs text-gray-400 space-y-1 font-mono">
-                    <div>RUC: <strong className="text-gray-700 dark:text-gray-300">{s.ruc || "—"}</strong></div>
-                    <div>Plazo de Pago: <strong className="text-indigo-600">{s.plazo_pago_dias || 30} Días</strong></div>
-                    {s.telefono && <div className="flex items-center gap-1 text-[11px]"><Phone className="w-3 h-3" /> {s.telefono}</div>}
-                  </div>
-                </div>
-
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between">
+            {paginatedSuppliers.map(s => {
+              const isBr = s.tipo_proveedor === "brasilero" || s.tipo_proveedor === "br" || (s as any).moneda_default === "BRL"
+              return (
+                <div key={s.id} className="card p-5 hover:shadow-md transition-shadow space-y-3 flex flex-col justify-between">
                   <div>
-                    <span className="text-[11px] font-bold text-gray-500">Scorecard: </span>
-                    <span className="font-bold font-mono text-emerald-600 text-xs">
-                      {s.rating ? `${Number(s.rating).toFixed(1)} ★` : "4.8 ★"}
-                    </span>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <h4 className="font-bold text-sm text-gray-900 dark:text-white line-clamp-1" title={s.razon_social}>
+                        {s.razon_social}
+                      </h4>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-wide shrink-0 flex items-center gap-1 ${
+                        isBr
+                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                          : "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/30"
+                      }`}>
+                        {isBr ? "🇧🇷 BR · Reales (R$)" : "🇵🇾 PY · Nacional (₲)"}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-400 space-y-1 font-mono">
+                      <div>{isBr ? "CNPJ / Doc:" : "RUC:"} <strong className="text-gray-700 dark:text-gray-300">{s.ruc || "—"}</strong></div>
+                      <div>Plazo de Pago: <strong className="text-indigo-600">{s.plazo_pago_dias || 30} Días</strong></div>
+                      {s.telefono && <div className="flex items-center gap-1 text-[11px]"><Phone className="w-3 h-3" /> {s.telefono}</div>}
+                    </div>
                   </div>
-                  <button
-                    onClick={() => openSupplier360(s)}
-                    className="px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors flex items-center gap-1"
-                  >
-                    <Eye className="w-3.5 h-3.5" /> Ficha 360°
-                  </button>
+
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] font-bold text-gray-500">Scorecard: </span>
+                      <span className="font-bold font-mono text-emerald-600 text-xs">
+                        {s.rating ? `${Number(s.rating).toFixed(1)} ★` : "4.8 ★"}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => openSupplier360(s)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors flex items-center gap-1"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> Ficha 360°
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
 
           <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex items-center justify-between text-xs">
@@ -5040,6 +5130,38 @@ export default function PurchasesPage() {
             </div>
 
             <form onSubmit={handleSaveReceipt} className="space-y-4">
+              {/* Selector de Orden de Compra que arriba al muelle */}
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-indigo-500" />
+                    <span>Orden de Compra a Recepcionar en Muelle *</span>
+                  </label>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    Cambiar la OC recarga automáticamente los renglones pendientes
+                  </span>
+                </div>
+                <select
+                  value={receiptForm.purchase_order_id}
+                  onChange={async (e) => {
+                    const selId = e.target.value
+                    const target = orders.find(o => o.id === selId)
+                    if (target) {
+                      await handleOpenReceiptModal(target)
+                    }
+                  }}
+                  className="input-field w-full text-xs font-mono font-bold bg-white dark:bg-slate-800"
+                  required
+                >
+                  <option value="">-- Seleccionar Orden de Compra arribada --</option>
+                  {orders.filter(o => !["cancelado"].includes(o.estado || "")).map(o => (
+                    <option key={o.id} value={o.id}>
+                      OC #{o.numero} — {o.supplier?.razon_social || (suppliers.find(s => s.id === o.supplier_id)?.razon_social) || "Proveedor"} ({o.fecha ? formatDate(o.fecha) : "Sin fecha"}) [{o.estado?.toUpperCase()}]
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
@@ -6969,6 +7091,285 @@ export default function PurchasesPage() {
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: ALTA DE PROVEEDOR (NACIONAL vs BRASIL / BR)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showCreateSupplierModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                    Registrar Nuevo Proveedor
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Definición comercial, moneda de compra y origen fiscal
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowCreateSupplierModal(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                if (!newSupplierForm.razon_social.trim()) {
+                  toast.error("Razón Social obligatoria", "Indique el nombre o razón social.")
+                  return
+                }
+                setSavingSupplier(true)
+                try {
+                  const payload = {
+                    company_id: "00000000-0000-0000-0000-000000000001",
+                    razon_social: newSupplierForm.razon_social.trim(),
+                    nombre_fantasia: newSupplierForm.nombre_fantasia.trim() || newSupplierForm.razon_social.trim(),
+                    ruc: newSupplierForm.ruc.trim(),
+                    tipo_proveedor: newSupplierForm.tipo_proveedor,
+                    moneda_default: newSupplierForm.moneda_default,
+                    telefono: newSupplierForm.telefono.trim(),
+                    email: newSupplierForm.email.trim(),
+                    contacto_nombre: newSupplierForm.contacto_nombre.trim(),
+                    contacto_telefono: newSupplierForm.contacto_telefono.trim(),
+                    plazo_pago_dias: Number(newSupplierForm.plazo_pago_dias) || 30,
+                    direccion: newSupplierForm.direccion.trim(),
+                    ciudad: newSupplierForm.ciudad.trim(),
+                    tipo_persona: newSupplierForm.tipo_persona || "juridica",
+                  }
+                  const created = await api.purchases.createSupplier(payload)
+                  toast.success("Proveedor Registrado", `${created.razon_social} fue dado de alta exitosamente.`)
+                  setShowCreateSupplierModal(false)
+                  setNewSupplierForm({
+                    razon_social: "",
+                    nombre_fantasia: "",
+                    ruc: "",
+                    tipo_proveedor: "nacional",
+                    moneda_default: "PYG",
+                    telefono: "",
+                    email: "",
+                    contacto_nombre: "",
+                    contacto_telefono: "",
+                    plazo_pago_dias: 30,
+                    direccion: "",
+                    ciudad: "",
+                    tipo_persona: "juridica",
+                  })
+                  fetchAll()
+                } catch (err: any) {
+                  toast.error("Error al registrar proveedor", err.message)
+                } finally {
+                  setSavingSupplier(false)
+                }
+              }}
+              className="space-y-4"
+            >
+              {/* TOGGLE VISUAL: NACIONAL (PY) vs BRASIL (BR) */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                  Origen y Tipo de Proveedor *
+                </label>
+                <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-100 dark:bg-slate-850 rounded-2xl border border-slate-200 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setNewSupplierForm(prev => ({
+                      ...prev,
+                      tipo_proveedor: "nacional",
+                      moneda_default: "PYG",
+                    }))}
+                    className={`p-3 rounded-xl flex items-center gap-3 transition text-left border ${
+                      newSupplierForm.tipo_proveedor === "nacional"
+                        ? "bg-white dark:bg-slate-800 border-indigo-500/50 shadow-md"
+                        : "border-transparent opacity-60 hover:opacity-100"
+                    }`}
+                  >
+                    <span className="text-2xl">🇵🇾</span>
+                    <div>
+                      <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <span>Nacional (PY)</span>
+                        {newSupplierForm.tipo_proveedor === "nacional" && (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono">
+                        RUC Paraguay · Compra en Guaraníes (₲)
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setNewSupplierForm(prev => ({
+                      ...prev,
+                      tipo_proveedor: "brasilero",
+                      moneda_default: "BRL",
+                    }))}
+                    className={`p-3 rounded-xl flex items-center gap-3 transition text-left border ${
+                      newSupplierForm.tipo_proveedor === "brasilero"
+                        ? "bg-emerald-500/10 dark:bg-emerald-950/40 border-emerald-500/60 shadow-md"
+                        : "border-transparent opacity-60 hover:opacity-100"
+                    }`}
+                  >
+                    <span className="text-2xl">🇧🇷</span>
+                    <div>
+                      <div className="text-xs font-bold text-emerald-900 dark:text-emerald-300 flex items-center gap-1.5">
+                        <span>Brasil (BR)</span>
+                        {newSupplierForm.tipo_proveedor === "brasilero" && (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        )}
+                      </div>
+                      <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-mono">
+                        CNPJ Brasil · Importación en Reales (R$)
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Razón Social y Nombre Fantasía */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                    Razón Social / Empresa *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newSupplierForm.razon_social}
+                    onChange={(e) => setNewSupplierForm(prev => ({ ...prev, razon_social: e.target.value }))}
+                    placeholder={newSupplierForm.tipo_proveedor === "brasilero" ? "Ej: JBS Aves do Brasil Ltda." : "Ej: Frigorífico Concepción S.A."}
+                    className="input-field w-full text-xs font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                    Nombre Fantasía / Comercial
+                  </label>
+                  <input
+                    type="text"
+                    value={newSupplierForm.nombre_fantasia}
+                    onChange={(e) => setNewSupplierForm(prev => ({ ...prev, nombre_fantasia: e.target.value }))}
+                    placeholder="Ej. Seara / Friboi / Lactolanda"
+                    className="input-field w-full text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* RUC / CNPJ y Moneda */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                    {newSupplierForm.tipo_proveedor === "brasilero" ? "CNPJ / CPF Brasilero *" : "RUC con Dígito Verificador (DV) *"}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newSupplierForm.ruc}
+                    onChange={(e) => setNewSupplierForm(prev => ({ ...prev, ruc: e.target.value }))}
+                    placeholder={newSupplierForm.tipo_proveedor === "brasilero" ? "Ej: 02.916.265/0001-60" : "Ej: 80012345-6"}
+                    className="input-field w-full text-xs font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                    Moneda de Liquidación
+                  </label>
+                  <select
+                    value={newSupplierForm.moneda_default}
+                    onChange={(e) => setNewSupplierForm(prev => ({ ...prev, moneda_default: e.target.value }))}
+                    className="input-field w-full text-xs font-bold font-mono"
+                  >
+                    <option value="PYG">₲ PYG (Guaraní)</option>
+                    <option value="BRL">R$ BRL (Real Brasileño)</option>
+                    <option value="USD">US$ USD (Dólar)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Plazo de Pago y Contacto */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                    Plazo de Pago (Días)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={newSupplierForm.plazo_pago_dias}
+                    onChange={(e) => setNewSupplierForm(prev => ({ ...prev, plazo_pago_dias: Number(e.target.value) || 0 }))}
+                    className="input-field w-full text-xs font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                    Teléfono / WhatsApp
+                  </label>
+                  <input
+                    type="text"
+                    value={newSupplierForm.telefono}
+                    onChange={(e) => setNewSupplierForm(prev => ({ ...prev, telefono: e.target.value }))}
+                    placeholder={newSupplierForm.tipo_proveedor === "brasilero" ? "+55 45 9999-0000" : "0981 123 456"}
+                    className="input-field w-full text-xs font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                    Ciudad / Origen
+                  </label>
+                  <input
+                    type="text"
+                    value={newSupplierForm.ciudad}
+                    onChange={(e) => setNewSupplierForm(prev => ({ ...prev, ciudad: e.target.value }))}
+                    placeholder={newSupplierForm.tipo_proveedor === "brasilero" ? "Foz do Iguaçu / Cascavel" : "Ciudad del Este / Asunción"}
+                    className="input-field w-full text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Acciones */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateSupplierModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingSupplier}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-md shadow-indigo-600/20 disabled:opacity-50 transition"
+                >
+                  {savingSupplier ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Registrando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Guardar Proveedor</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

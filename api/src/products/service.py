@@ -66,8 +66,28 @@ async def get_category(db: AsyncSession, category_id: str) -> ProductCategory | 
 #  PRODUCTOS
 # ═══════════════════════════════════════════════════════════════
 
+async def get_next_sku(db: AsyncSession, company_id: str) -> str:
+    """Calcula el próximo SKU numérico correlativo asegurando la secuencia de Ñemuha (mínimo 126595)."""
+    result = await db.execute(
+        text("""
+            SELECT COALESCE(MAX(CAST(sku AS BIGINT)), 126594)
+            FROM products
+            WHERE company_id = :company_id AND sku ~ '^[0-9]+$'
+        """),
+        {"company_id": company_id}
+    )
+    max_val = result.scalar() or 126594
+    if max_val < 126594:
+        max_val = 126594
+    return str(max_val + 1)
+
+
 async def create_product(db: AsyncSession, data: ProductCreate) -> Product:
-    product = Product(**data.model_dump())
+    dump = data.model_dump()
+    if not dump.get("sku") or str(dump.get("sku")).strip().upper() in ("", "AUTO"):
+        dump["sku"] = await get_next_sku(db, str(data.company_id))
+
+    product = Product(**dump)
     db.add(product)
     await db.flush()
     await db.refresh(product)
