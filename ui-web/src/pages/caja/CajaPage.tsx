@@ -353,6 +353,7 @@ export default function CajaPage() {
   const [historialCajeroFilter, setHistorialCajeroFilter] = useState("")
   const [historialFechaDesde, setHistorialFechaDesde] = useState("")
   const [historialFechaHasta, setHistorialFechaHasta] = useState("")
+  const [historialEstadoFilter, setHistorialEstadoFilter] = useState("")
 
   const handleOpenSessionSalesModal = async (sessionId: string) => {
     setSelectedSalesSessionId(sessionId)
@@ -501,7 +502,12 @@ export default function CajaPage() {
         observaciones_efectivo: efectivoObsTesoreria.trim() || undefined,
       })
 
-      toast.success("Auditoría Asentada", "Dictamen de control de comprobantes y recuento de efectivo guardados correctamente.")
+      setPunteoData((prev: any) => prev ? {
+        ...prev,
+        session_data: { ...prev.session_data, estado: "verificada" }
+      } : prev)
+
+      toast.success("Caja Verificada con Éxito", "El estado de la caja pasó a VERIFICADA. Valores recibidos y asumidos en Bóveda.")
       fetchData()
       fetchHistorial()
     } catch (err: any) {
@@ -935,7 +941,9 @@ export default function CajaPage() {
       matchesFechaHasta = sessionDate ? sessionDate <= historialFechaHasta : true
     }
 
-    return matchesSearch && matchesCajero && matchesFechaDesde && matchesFechaHasta
+    const matchesEstado = !historialEstadoFilter || (s.estado || "").toLowerCase() === historialEstadoFilter.toLowerCase()
+
+    return matchesSearch && matchesCajero && matchesFechaDesde && matchesFechaHasta && matchesEstado
   })
 
   // Totales en vivo
@@ -1670,6 +1678,20 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 </select>
               </div>
 
+              {/* Filtro por Estado */}
+              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/80 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
+                <select
+                  value={historialEstadoFilter}
+                  onChange={(e) => setHistorialEstadoFilter(e.target.value)}
+                  className="text-xs font-semibold bg-transparent text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+                >
+                  <option value="" className="dark:bg-slate-800">Todos los estados</option>
+                  <option value="verificada" className="dark:bg-slate-800">✓ Verificadas en Bóveda</option>
+                  <option value="cerrada" className="dark:bg-slate-800">⏳ Cerradas (Pend. Verif.)</option>
+                </select>
+              </div>
+
               {/* Rango de Fechas */}
               <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/80 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
                 <Calendar className="w-3.5 h-3.5 text-slate-400" />
@@ -1734,13 +1756,14 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 >
                   Últimos 7d
                 </button>
-                {(historialCajeroFilter || historialFechaDesde || historialFechaHasta) && (
+                {(historialCajeroFilter || historialFechaDesde || historialFechaHasta || historialEstadoFilter) && (
                   <button
                     type="button"
                     onClick={() => {
                       setHistorialCajeroFilter("")
                       setHistorialFechaDesde("")
                       setHistorialFechaHasta("")
+                      setHistorialEstadoFilter("")
                       fetchHistorial(undefined, { fecha_desde: "", fecha_hasta: "", cajero: "" })
                     }}
                     className="px-2 py-1 rounded-lg text-[11px] font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
@@ -1787,7 +1810,18 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           {formatDateTime(s.fecha_cierre || s.fecha_apertura)}
                         </td>
                         <td className="p-3.5 font-bold text-gray-900 dark:text-white">
-                          <div className="text-xs font-bold">{getCajero(s)}</div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <div className="text-xs font-bold">{getCajero(s)}</div>
+                            {s.estado === "verificada" ? (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                                ✓ Verificada
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                                Cerrada
+                              </span>
+                            )}
+                          </div>
                           {s.handoff ? (
                             <div className="mt-1">
                               {s.handoff.estado === "confirmado" ? (
@@ -1867,6 +1901,24 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             >
                               <FileText className="w-3.5 h-3.5" />
                               PDF
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  const safeCajero = (s.cajero_nombre || "caja").replace(/\s+/g, "_")
+                                  const safeFecha = (s.fecha_apertura || "").slice(0, 10) || "sesion"
+                                  await api.caja.downloadActaVerificacionPdf(s.id, `acta_verificacion_${safeCajero}_${safeFecha}.pdf`)
+                                  toast.success("Acta de Verificación descargada", `Acta de Tesorería de ${s.cajero_nombre || "caja"} descargada con éxito.`)
+                                } catch {
+                                  toast.error("Error", "No se pudo generar el acta de verificación de tesorería.")
+                                }
+                              }}
+                              title="Descargar Acta Oficial de Verificación y Recepción de Tesorería en PDF"
+                              className="p-1.5 rounded-lg border border-teal-300 dark:border-teal-800 text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/30 hover:bg-teal-100 dark:hover:bg-teal-900/50 inline-flex items-center gap-1 font-bold text-[11px] transition-colors whitespace-nowrap shadow-sm"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                              Acta Verif.
                             </button>
                             <button
                               type="button"
@@ -4438,22 +4490,42 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               </div>
               <div className="flex items-center gap-2">
                 {punteoData?.session_data && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        await api.caja.downloadSessionPunteoPdf(punteoData.session_data.id)
-                        toast.success("Planilla Descargada", "PDF oficial de punteo generado con éxito.")
-                      } catch {
-                        toast.error("Error", "No se pudo generar el PDF de punteo.")
-                      }
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-purple-600/30 whitespace-nowrap"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Descargar Planilla PDF</span>
-                    <span className="sm:hidden">PDF</span>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const safeCajero = (punteoData.session_data.cajero_nombre || "caja").replace(/\s+/g, "_")
+                          await api.caja.downloadActaVerificacionPdf(punteoData.session_data.id, `acta_verificacion_${safeCajero}.pdf`)
+                          toast.success("Acta Descargada", "Acta Oficial de Verificación y Recepción en Bóveda descargada.")
+                        } catch {
+                          toast.error("Error", "No se pudo generar el acta de verificación.")
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-teal-600/30 whitespace-nowrap"
+                      title="Descargar Acta de Verificación y Recepción de Tesorería (PDF)"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Acta Verificación PDF</span>
+                      <span className="sm:hidden">Acta PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await api.caja.downloadSessionPunteoPdf(punteoData.session_data.id)
+                          toast.success("Planilla Descargada", "PDF oficial de punteo generado con éxito.")
+                        } catch {
+                          toast.error("Error", "No se pudo generar el PDF de punteo.")
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-purple-600/30 whitespace-nowrap"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Descargar Planilla PDF</span>
+                      <span className="sm:hidden">PDF</span>
+                    </button>
+                  </>
                 )}
                 <button
                   onClick={() => setPunteoModalOpen(false)}
@@ -5265,12 +5337,12 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     {savingPunteoAudit ? (
                       <>
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Asentando...</span>
+                        <span>Verificando y Asentando...</span>
                       </>
                     ) : (
                       <>
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Guardar Auditoría</span>
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Asentar Dictamen y Verificar Caja</span>
                       </>
                     )}
                   </button>

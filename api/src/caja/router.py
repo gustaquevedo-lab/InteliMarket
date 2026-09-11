@@ -380,6 +380,29 @@ async def export_punteo_sesion_pdf(
     return _pdf_response(pdf_bytes, f"planilla_punteo_{session_id[:8]}.pdf")
 
 
+@router.get("/cash-sessions/{session_id}/export/acta-verificacion.pdf")
+async def export_acta_verificacion_sesion_pdf(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    data = await service.get_session_acta_verificacion_data(db, session_id, user["company_id"])
+    if not data:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada o no pertenece a su empresa")
+
+    company = await _get_company_info(db, user["company_id"])
+    auditor_nombre = user.get("user_nombre") or user.get("user_email") or "Tesorería Central"
+    pdf_bytes = pdf_reports.generate_acta_verificacion_tesoreria_pdf(
+        company,
+        data["session_data"],
+        data["recon"],
+        data["punteo_data"],
+        auditor_nombre,
+    )
+    safe_cajero = (data["session_data"].get("cajero_nombre") or "caja").replace(" ", "_")
+    return _pdf_response(pdf_bytes, f"acta_verificacion_{safe_cajero}_{session_id[:8]}.pdf")
+
+
 @router.post("/cash-sessions/{session_id}/punteo/asentar")
 async def save_session_punteo_audit(
     session_id: str,

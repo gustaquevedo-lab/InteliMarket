@@ -1238,8 +1238,8 @@ async def list_sessions_with_totals(
     cobrado_res = await db.execute(cobrado_query)
     cobrado_map = {row[0]: float(row[1]) for row in cobrado_res.all()}
 
-    # Batch 2: Último CashCount de cada sesión cerrada (1 sola query con DISTINCT ON)
-    closed_session_ids = [s.id for s in sessions if s.estado == "cerrada"]
+    # Batch 2: Último CashCount de cada sesión cerrada o verificada (1 sola query con DISTINCT ON)
+    closed_session_ids = [s.id for s in sessions if s.estado in ("cerrada", "verificada")]
     counts_map = {}
     handoffs_map = {}
     if closed_session_ids:
@@ -1263,7 +1263,7 @@ async def list_sessions_with_totals(
         for h in handoffs_res.scalars().all():
             handoffs_map[h.session_id] = h
 
-    # Reconciliación oficial en paralelo para todas las sesiones cerradas del listado
+    # Reconciliación oficial en paralelo para todas las sesiones cerradas o verificadas del listado
     recon_map = {}
     if closed_session_ids:
         recon_tasks = [get_session_reconciliation_data(db, sid) for sid in closed_session_ids]
@@ -1316,7 +1316,7 @@ async def list_sessions_with_totals(
         monto_cierre_declarado = None
         recon_obj = recon_map.get(s.id)
 
-        if s.estado == "cerrada":
+        if s.estado in ("cerrada", "verificada"):
             if recon_obj:
                 monto_cierre_esperado = float(recon_obj["esperado_total_gs"])
                 monto_cierre_declarado = float(recon_obj["contado_total_gs"])
@@ -1373,7 +1373,7 @@ async def list_sessions_with_totals(
             "monto_apertura": float(s.monto_apertura or 0),
             "monto_apertura_brl": float(s.monto_apertura_brl or 0),
             "monto_apertura_usd": float(s.monto_apertura_usd or 0),
-            "monto_cierre": monto_cierre_declarado if s.estado == "cerrada" else (float(s.monto_cierre) if s.monto_cierre is not None else None),
+            "monto_cierre": monto_cierre_declarado if s.estado in ("cerrada", "verificada") else (float(s.monto_cierre) if s.monto_cierre is not None else None),
             "monto_cierre_esperado": monto_cierre_esperado,
             "diferencia": diferencia,
             "diferencia_usd": diferencia_usd,
@@ -2640,7 +2640,8 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
         .join(User, User.id == CashSession.user_id)
         .where(
             CashRegister.company_id == uuid.UUID(company_id),
-            CashSession.estado == "cerrada",
+            CashSession.estado.in_(["cerrada", "verificada"]),
+            CashSession.id.not_in(LEGACY_SESSION_IDS),
             CashSession.fecha_cierre >= fecha_desde,
             CashSession.fecha_cierre <= fecha_hasta,
             or_(
@@ -2724,9 +2725,18 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             else:
                 payments_by_session[sid]["otro"] += m
 
+    # 2. Reconciliaciones oficiales en paralelo
+    recon_tasks = [get_session_reconciliation_data(db, s_obj.id) for s_obj, _, _ in rows]
+    recon_results = await asyncio.gather(*recon_tasks, return_exceptions=True)
+    recon_by_session = {}
+    for (s_obj, _, _), r in zip(rows, recon_results):
+        if isinstance(r, dict):
+            recon_by_session[s_obj.id] = r
+
     out = []
     for session_obj, count, register_nombre in rows:
         pays = payments_by_session.get(session_obj.id, {})
+        recon = recon_by_session.get(session_obj.id)
 
         # Desglose por Procesador / Canal Operativo de Tesorería acordado
         m_bancard = float(pays.get("bancard", 0))
@@ -2738,23 +2748,35 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
         m_cheque = float(count.monto_cheque or 0) or float(pays.get("cheque", 0))
         m_otro = float(count.monto_otro or 0) or float(pays.get("otro", 0))
 
-        # Compatibilidad con cierres donde la cajera digitó manualmente count.monto_tarjeta
         legacy_tarjeta = float(count.monto_tarjeta or 0)
         if legacy_tarjeta > 0 and (m_bancard + m_dinelco) == 0:
             m_bancard = legacy_tarjeta
 
-        # Efectivo contado en gaveta
-        m_ef_pyg = float(count.monto_efectivo or 0)
-        m_ef_brl = float(count.monto_efectivo_brl or 0)
-        m_ef_usd = float(count.monto_efectivo_usd or 0)
-
-        # Monto total declarado de la sesión: Efectivo físico contado en gaveta (PYG + divisas) + Medios electrónicos certificados por el POS
-        monto_electronico = m_bancard + m_dinelco + m_qr + m_pix + m_transf + m_extra_club + m_cheque + m_otro
-        efectivo_total_contado = float(count.monto_total or 0)
-        monto_declarado_total = efectivo_total_contado + monto_electronico
-
-        diferencia_gs = float(count.diferencia) if count.diferencia is not None else 0.0
-        monto_cierre_esperado = monto_declarado_total - diferencia_gs
+        if recon:
+            m_ef_pyg = float(recon["contado_pyg"])
+            m_ef_brl = float(recon["contado_brl"])
+            m_ef_usd = float(recon["contado_usd"])
+            monto_rendido_total = float(recon["contado_total_gs"])
+            monto_esperado_total = float(recon["esperado_total_gs"])
+            diferencia_gs = float(recon["diferencia_consolidada_gs"])
+            fondo_pyg = float(recon["fondo_pyg"])
+            fondo_brl = float(recon["fondo_brl"])
+            fondo_usd = float(recon["fondo_usd"])
+            total_facturado_pyg = float(recon["total_cobrado_gs"])
+            no_efectivo_pyg = float(recon["no_efectivo_gs"])
+        else:
+            m_ef_pyg = float(count.monto_efectivo or 0)
+            m_ef_brl = float(count.monto_efectivo_brl or 0)
+            m_ef_usd = float(count.monto_efectivo_usd or 0)
+            monto_electronico = m_bancard + m_dinelco + m_qr + m_pix + m_transf + m_extra_club + m_cheque + m_otro
+            monto_rendido_total = float(count.monto_total or 0)
+            diferencia_gs = float(count.diferencia or 0)
+            monto_esperado_total = monto_rendido_total - diferencia_gs
+            fondo_pyg = float(session_obj.monto_apertura or 0)
+            fondo_brl = float(session_obj.monto_apertura_brl or 0)
+            fondo_usd = float(session_obj.monto_apertura_usd or 0)
+            total_facturado_pyg = monto_esperado_total + monto_electronico
+            no_efectivo_pyg = monto_electronico
 
         out.append({
             "session_id": str(session_obj.id),
@@ -2762,9 +2784,13 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             "register_nombre": register_nombre or "Caja",
             "fecha_apertura": session_obj.fecha_apertura,
             "fecha_cierre": session_obj.fecha_cierre,
-            "monto_apertura": float(session_obj.monto_apertura or 0),
-            "monto_cierre_esperado": monto_cierre_esperado,
-            "monto_cierre": monto_declarado_total,
+            "monto_apertura": fondo_pyg,
+            "monto_apertura_brl": fondo_brl,
+            "monto_apertura_usd": fondo_usd,
+            "monto_cierre_esperado": monto_esperado_total,
+            "monto_cierre": monto_rendido_total,
+            "total_facturado_pyg": total_facturado_pyg,
+            "no_efectivo_pyg": no_efectivo_pyg,
             "monto_efectivo": m_ef_pyg,
             "monto_efectivo_usd": m_ef_usd,
             "monto_efectivo_brl": m_ef_brl,
@@ -2776,13 +2802,13 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             "monto_extra_club": m_extra_club,
             "monto_cheque": m_cheque,
             "monto_otro": m_otro,
-            # Campos retrocompatibles
             "monto_tarjeta": m_bancard + m_dinelco,
-            "monto_total": monto_declarado_total,
+            "monto_total": monto_rendido_total,
             "diferencia": diferencia_gs,
             "diferencia_usd": float(count.diferencia_usd or 0),
             "diferencia_brl": float(count.diferencia_brl or 0),
-            "requiere_revision": bool(count.requiere_revision or diferencia_gs != 0),
+            "requiere_revision": bool(count.requiere_revision or abs(diferencia_gs) > 0),
+            "estado": session_obj.estado,
             "observaciones": count.observaciones or session_obj.observaciones or "",
         })
     return out
@@ -3402,6 +3428,19 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     }
 
 
+async def get_session_acta_verificacion_data(db: AsyncSession, session_id: str, company_id: str) -> dict | None:
+    """Obtiene los datos integrales para el Acta de Verificación y Recepción de Tesorería."""
+    punteo = await get_session_punteo_data(db, session_id, company_id)
+    if not punteo:
+        return None
+    recon = punteo.get("recon") or await get_session_reconciliation_data(db, session_id)
+    return {
+        "session_data": punteo["session_data"],
+        "recon": recon,
+        "punteo_data": punteo,
+    }
+
+
 async def confirm_session_cash_reception(
     db: AsyncSession,
     session_id: str,
@@ -3582,6 +3621,7 @@ async def save_session_punteo_audit(
         nota_audit += f" Detalle: {observaciones_dictamen.strip()}"
 
     session_obj.observaciones = (session_obj.observaciones or "") + nota_audit
+    session_obj.estado = "verificada"
 
     await db.commit()
     await db.refresh(session_obj)
@@ -3589,6 +3629,7 @@ async def save_session_punteo_audit(
     return {
         "status": "ok",
         "session_id": str(sid),
+        "nuevo_estado": "verificada",
         "estado_dictamen": estado_dictamen,
         "conformes": len(conformes),
         "faltantes": len(faltantes),

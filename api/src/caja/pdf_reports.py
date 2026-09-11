@@ -247,12 +247,18 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
         dif = s.get("diferencia") if s.get("diferencia") is not None else (cont - esp)
         req_rev = bool(s.get("requiere_revision") or dif != 0)
 
+        is_verificada = s.get("estado") == "verificada"
         dif_txt = _fmt_dif(dif)
-        estado_badge = "REVISIÓN" if req_rev else "CONFORME"
-        badge_color = "#DC2626" if req_rev else "#059669"
+        if is_verificada:
+            estado_badge = "✓ VERIFICADA" if not req_rev else "VERIF. C/DIF"
+            badge_color = "#059669" if not req_rev else "#D97706"
+        else:
+            estado_badge = "REVISIÓN" if req_rev else "CONFORME"
+            badge_color = "#DC2626" if req_rev else "#059669"
 
         caja_cell = Paragraph(f"<b>{s.get('register_nombre') or 'Caja'}</b>", cell_bold)
-        cajero_cell = Paragraph(f"{s.get('cajero_nombre') or '—'}", cell_text)
+        cajero_txt = f"{s.get('cajero_nombre') or '—'}" + (" <font color='#059669' size=5.5><b>✓VERIF</b></font>" if is_verificada else "")
+        cajero_cell = Paragraph(cajero_txt, cell_text)
         hora_cell = Paragraph(f"<font color='#475569'>{fc_str}</font>", styles.get("CellHeadCenter", styles["Normal"]))
         fondo_cell = Paragraph(_fmt_val(fondo), cell_num)
         ef_pyg_cell = Paragraph(_fmt_val(m_ef_pyg), cell_num)
@@ -1628,6 +1634,289 @@ def generate_session_sales_pdf(
 
     _build(doc, elements)
     return buffer.getvalue()
+
+
+def generate_acta_verificacion_tesoreria_pdf(
+    company: dict,
+    session_data: dict,
+    recon: dict,
+    punteo_data: dict,
+    auditor_nombre: str = "",
+) -> bytes:
+    """Acta Oficial de Verificación, Recepción y Conformidad de Tesorería.
+    Emitida en 1 sola página cuando la Tesorera coteja los comprobantes, cuenta el efectivo
+    físico y asume formalmente la custodia y responsabilidad patrimonial en Bóveda Central."""
+    buffer = io.BytesIO()
+    doc, styles = _base_doc(buffer, "Acta de Verificación y Recepción de Tesorería", company, auditor_nombre)
+    s = session_data
+    apertura_dt = s.get("fecha_apertura")
+    cierre_dt = s.get("fecha_cierre")
+    turno_id = str(s.get("id", ""))[:8].upper()
+    caja_nombre = s.get("register_nombre") or "Caja"
+    cajero_nombre = s.get("cajero_nombre") or "—"
+    
+    subtitulo = f"Caja: {caja_nombre}  |  Turno: {turno_id}  |  CONFORMIDAD Y ASUNCIÓN EN BÓVEDA"
+    elements = _company_header(
+        company, styles, "ACTA DE VERIFICACIÓN Y RECEPCIÓN DE TESORERÍA",
+        subtitulo,
+        auditor_nombre or "Tesorería Central",
+    )
+
+    ap_local = _to_asuncion_tz(apertura_dt)
+    ci_local = _to_asuncion_tz(cierre_dt)
+    apertura_str = ap_local.strftime("%d/%m/%Y %H:%M") if ap_local else "—"
+    cierre_str = ci_local.strftime("%d/%m/%Y %H:%M") if ci_local else "—"
+    
+    handoff = punteo_data.get("handoff") or {}
+    fecha_verif_str = handoff.get("fecha_confirmacion") or datetime.now(TZ_ASUNCION).strftime("%d/%m/%Y %H:%M")
+    tesorera_nombre = handoff.get("recibido_por_nombre") or auditor_nombre or "Tesorería Bóveda Central"
+
+    tot_facturado = recon.get("total_cobrado_gs", 0)
+    cant_tickets = recon.get("total_ventas_count", 0)
+
+    # 1. METADATOS DE VERIFICACIÓN
+    meta_data = [
+        ["Cajero/a:", Paragraph(f"<b>{cajero_nombre}</b>", styles["Normal"]), "Caja / Terminal:", Paragraph(f"<b>{caja_nombre}</b>", styles["Normal"])],
+        ["Turno / ID:", Paragraph(f"<b>{turno_id}</b>", styles["Normal"]), "Estado:", Paragraph("<font color='#047857'><b>✓ VERIFICADA EN BÓVEDA</b></font>", styles["Normal"])],
+        ["Apertura / Cierre:", f"{apertura_str} a {cierre_str}", "Fecha Verificación:", f"{fecha_verif_str} (PYT)"],
+        ["Tesorera Actuante:", Paragraph(f"<b>{tesorera_nombre}</b>", styles["Normal"]), "Régimen:", Paragraph("<b>Extra Supermercado (PYG)</b>", styles["Normal"])],
+    ]
+    t_meta = Table(meta_data, colWidths=[28 * mm, 64 * mm, 30 * mm, 64 * mm])
+    t_meta.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (0, -1), FONT_BOLD),
+        ("FONTNAME", (2, 0), (2, -1), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+    ]))
+    elements.append(t_meta)
+    elements.append(Spacer(1, 5))
+
+    # 2. DECLARACIÓN DE ASUNCIÓN DE CUSTODIA (BÓVEDA)
+    clausula_texto = (
+        f"<b>DECLARACIÓN DE RECEPCIÓN Y CUSTODIA EN BÓVEDA:</b> Por la presente, el Departamento de Tesorería de "
+        f"<b>{company.get('nombre_fantasia', 'Extra Supermercado')}</b> certifica haber realizado el recuento físico "
+        f"de los fondos rendidos y el cotejo del 100% de los comprobantes de pago no efectivo correspondientes a este turno. "
+        f"Con la firma de este documento, Tesorería <b>asume formalmente la custodia y responsabilidad patrimonial</b> "
+        f"de los valores detallados a continuación, deslindando al cajero/a de los fondos entregados conforme."
+    )
+    t_clausula = Table([[Paragraph(clausula_texto, ParagraphStyle("Clausula", parent=styles["Normal"], fontSize=6.8, leading=8.5, textColor=HexColor("#065F46")))]], colWidths=[186 * mm])
+    t_clausula.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#ECFDF5")),
+        ("BOX", (0, 0), (-1, -1), 0.75, HexColor("#A7F3D0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(t_clausula)
+    elements.append(Spacer(1, 6))
+
+    # 3. CONCILIACIÓN DE EFECTIVO RENDIDO Y ASUMIDO EN BÓVEDA
+    elements.append(Paragraph("<b>1. CONCILIACIÓN Y RECEPCIÓN FÍSICA DE EFECTIVO EN BÓVEDA</b>", styles["Normal"]))
+    elements.append(Spacer(1, 3))
+
+    tot_no_ef = recon.get("total_no_efectivo_gs", 0)
+    ventas_ef_total = recon.get("ventas_ef_total_gs", max(0, tot_facturado - tot_no_ef))
+    drops_total = recon.get("total_drops_gs", 0)
+    esp_total = recon.get("esperado_total_gs", max(0, ventas_ef_total - drops_total))
+
+    c_pyg = recon.get("contado_pyg", 0)
+    c_brl = recon.get("contado_brl", 0)
+    c_usd = recon.get("contado_usd", 0)
+    tasa_brl = recon.get("tasa_brl", 1130)
+    tasa_usd = recon.get("tasa_usd", 5840.1)
+    c_brl_gs = recon.get("contado_brl_gs", c_brl * tasa_brl)
+    c_usd_gs = recon.get("contado_usd_gs", c_usd * tasa_usd)
+    c_total = recon.get("contado_total_gs", c_pyg + c_brl_gs + c_usd_gs)
+
+    dif_consolidada = recon.get("diferencia_consolidada_gs", c_total - esp_total)
+    estado_cuadre = "CONFORME (SIN DIFERENCIA)" if abs(dif_consolidada) < 1000 else ("SOBRANTE" if dif_consolidada > 0 else "FALTANTE")
+    signo_cons = "+" if dif_consolidada >= 0 else ""
+    dif_color_hex = "#059669" if dif_consolidada >= 0 else "#DC2626"
+
+    style_th = ParagraphStyle("TH_V", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=7.2, leading=8.5, textColor=HexColor("#0F172A"))
+    style_td_lbl = ParagraphStyle("TDL_V", parent=styles["Normal"], fontSize=6.8, leading=8.0, textColor=HexColor("#334155"))
+    style_td_val = ParagraphStyle("TDV_V", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=6.8, leading=8.0, alignment=TA_RIGHT, textColor=HexColor("#0F172A"))
+
+    t_esp_data = [
+        [Paragraph("<b>1.A CONCILIACIÓN EFECTIVO ESPERADO (₲)</b>", style_th), ""],
+        [Paragraph(f"Total Ventas Facturadas ({cant_tickets} tickets):", style_td_lbl), Paragraph(f"Gs. {_fmt_val(tot_facturado)}", style_td_val)],
+        [Paragraph("(-) Medios No Efectivo (Tarjetas, QR, PIX):", style_td_lbl), Paragraph(f"-Gs. {_fmt_val(tot_no_ef)}", ParagraphStyle("RedV", parent=style_td_val, textColor=HexColor("#DC2626")))],
+        [Paragraph("(=) Efectivo Total por Ventas:", ParagraphStyle("B1_V", parent=style_td_lbl, fontName=FONT_BOLD)), Paragraph(f"Gs. {_fmt_val(ventas_ef_total)}", style_td_val)],
+        [Paragraph("(-) Retiros / Cash Drops Confirmados:", style_td_lbl), Paragraph(f"-Gs. {_fmt_val(drops_total)}" if drops_total > 0 else "0 Gs.", style_td_val)],
+        [Paragraph("<b>(=) TOTAL ESPERADO A RENDIR:</b>", ParagraphStyle("B2_V", parent=style_td_lbl, fontName=FONT_BOLD, textColor=HexColor("#0369A1"))),
+         Paragraph(f"<font color='#0369A1'><b>Gs. {_fmt_val(esp_total)}</b></font>", style_td_val)],
+    ]
+    t_esp = Table(t_esp_data, colWidths=[60 * mm, 31 * mm])
+    t_esp.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.3, HexColor("#E2E8F0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.8),
+        ("BACKGROUND", (0, -1), (-1, -1), HexColor("#E0F2FE")),
+    ]))
+
+    t_rec_data = [
+        [Paragraph("<b>1.B EFECTIVO FÍSICO ASUMIDO EN BÓVEDA</b>", style_th), ""],
+        [Paragraph("Efectivo Guaraníes (PYG):", style_td_lbl), Paragraph(f"Gs. {_fmt_val(c_pyg)}", style_td_val)],
+        [Paragraph(f"Efectivo Reales (R$ {_fmt_val(c_brl, is_divisa=True)} x {_fmt_val(tasa_brl)}):", style_td_lbl), Paragraph(f"Gs. {_fmt_val(c_brl_gs)}", style_td_val)],
+        [Paragraph(f"Efectivo Dólares (US$ {_fmt_val(c_usd, is_divisa=True)} x {_fmt_val(tasa_usd)}):", style_td_lbl), Paragraph(f"Gs. {_fmt_val(c_usd_gs)}", style_td_val)],
+        [Paragraph("<b>TOTAL RECIBIDO EN BÓVEDA:</b>", ParagraphStyle("B3_V", parent=style_td_lbl, fontName=FONT_BOLD, textColor=HexColor("#047857"))),
+         Paragraph(f"<font color='#047857'><b>Gs. {_fmt_val(c_total)}</b></font>", style_td_val)],
+        [Paragraph("<b>DIFERENCIA (Recibido - Esperado):</b>", ParagraphStyle("B4_V", parent=style_td_lbl, fontName=FONT_BOLD, textColor=HexColor(dif_color_hex))),
+         Paragraph(f"<font color='{dif_color_hex}'><b>{signo_cons}Gs. {_fmt_val(dif_consolidada)} ({estado_cuadre})</b></font>", style_td_val)],
+    ]
+    t_rec = Table(t_rec_data, colWidths=[58 * mm, 33 * mm])
+    t_rec.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.3, HexColor("#E2E8F0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.8),
+        ("BACKGROUND", (0, -2), (-1, -2), HexColor("#DCFCE7")),
+        ("BACKGROUND", (0, -1), (-1, -1), HexColor("#FEF2F2" if dif_consolidada < 0 else "#F0FDF4")),
+    ]))
+
+    t_bloque_ef = Table([[t_esp, t_rec]], colWidths=[92 * mm, 92 * mm])
+    t_bloque_ef.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    elements.append(t_bloque_ef)
+    elements.append(Spacer(1, 4))
+
+    # Recuadro Fondo Fijo en Gaveta
+    f_pyg = recon.get("fondo_pyg", 0)
+    f_brl = recon.get("fondo_brl", 0)
+    f_usd = recon.get("fondo_usd", 0)
+    txt_fondo = (
+        f"<b>CUSTODIA PERMANENTE DE FONDO EN GAVETA:</b> Fondo Fijo Certificado: <b>Gs. {_fmt_val(f_pyg)}</b> | "
+        f"<b>R$ {_fmt_val(f_brl, is_divisa=True)}</b> | <b>US$ {_fmt_val(f_usd, is_divisa=True)}</b>. "
+        f"Verificado físicamente en gaveta por Supervisora. Este fondo <b>NO ingresó a Tesorería</b>; "
+        f"permanece bajo custodia permanente de la cajera para la apertura del siguiente turno."
+    )
+    t_fondo = Table([[Paragraph(txt_fondo, ParagraphStyle("FondoV", parent=styles["Normal"], fontSize=6.5, leading=8.0, textColor=HexColor("#475569")))]], colWidths=[186 * mm])
+    t_fondo.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F8FAFC")),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(t_fondo)
+    elements.append(Spacer(1, 6))
+
+    # 4. COTEJO FÍSICO DE COMPROBANTES NO EFECTIVO
+    elements.append(Paragraph("<b>2. COTEJO FÍSICO DE COMPROBANTES DE PAGO NO EFECTIVO (VOUCHERS ARCHIVADOS EN TESORERÍA)</b>", styles["Normal"]))
+    elements.append(Spacer(1, 3))
+
+    grupos = punteo_data.get("grupos_comprobantes") or []
+    t_vouch_rows = [
+        [
+            Paragraph("<b>Medio de Pago / Canal Operativo</b>", style_th),
+            Paragraph("<b>Tipo Canal</b>", style_th),
+            Paragraph("<b>Vouchers Cotejados</b>", ParagraphStyle("TH_C", parent=style_th, alignment=TA_CENTER)),
+            Paragraph("<b>Total Comprobantes (₲)</b>", ParagraphStyle("TH_R", parent=style_th, alignment=TA_RIGHT)),
+            Paragraph("<b>Dictamen Cotejo</b>", ParagraphStyle("TH_C2", parent=style_th, alignment=TA_CENTER)),
+        ]
+    ]
+
+    total_cant_vouchers = 0
+    total_monto_vouchers = 0
+    for g in grupos:
+        cant = g.get("cantidad_esperada", 0)
+        tot_g = g.get("total_monto_gs", 0)
+        total_cant_vouchers += cant
+        total_monto_vouchers += tot_g
+        tipo_label = "Tarjeta POS" if "TARJETA" in g.get("canal_key", "") or "BANCARD" in g.get("canal_key", "") else ("Billetera / QR" if "QR" in g.get("canal_key", "") else ("PIX Brasil" if "PIX" in g.get("canal_key", "") else "Crédito"))
+        t_vouch_rows.append([
+            Paragraph(f"<b>{g.get('label', 'Comprobante')}</b>", style_td_lbl),
+            Paragraph(tipo_label, style_td_lbl),
+            Paragraph(f"{cant} comprobantes", ParagraphStyle("TC", parent=style_td_lbl, alignment=TA_CENTER)),
+            Paragraph(f"Gs. {_fmt_val(tot_g)}", style_td_val),
+            Paragraph("<font color='#059669'><b>✓ CONFORME</b></font>", ParagraphStyle("TCD", parent=style_td_lbl, alignment=TA_CENTER)),
+        ])
+
+    if not grupos:
+        t_vouch_rows.append([
+            Paragraph("No se registraron ventas no efectivo en esta sesión.", style_td_lbl),
+            "", "", "", ""
+        ])
+
+    # Fila total
+    t_vouch_rows.append([
+        Paragraph("<b>TOTAL COMPROBANTES RECEPCIONADOS Y ARCHIVADOS EN TESORERÍA</b>", ParagraphStyle("BTV", parent=style_td_lbl, fontName=FONT_BOLD)),
+        "",
+        Paragraph(f"<b>{total_cant_vouchers} vouchers</b>", ParagraphStyle("TCB", parent=style_td_lbl, fontName=FONT_BOLD, alignment=TA_CENTER)),
+        Paragraph(f"<b>Gs. {_fmt_val(total_monto_vouchers)}</b>", ParagraphStyle("TVB", parent=style_td_val, fontName=FONT_BOLD, textColor=HexColor("#1E40AF"))),
+        Paragraph("<font color='#059669'><b>✓ AUDITADO</b></font>", ParagraphStyle("TCD2", parent=style_td_lbl, fontName=FONT_BOLD, alignment=TA_CENTER)),
+    ])
+
+    t_vouchers = Table(t_vouch_rows, colWidths=[65 * mm, 30 * mm, 30 * mm, 35 * mm, 26 * mm])
+    t_vouchers.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.3, HexColor("#E2E8F0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("BACKGROUND", (0, -1), (-1, -1), HexColor("#F8FAFC")),
+        ("LINEABOVE", (0, -1), (-1, -1), 0.8, HexColor("#94A3B8")),
+    ]))
+    elements.append(t_vouchers)
+    elements.append(Spacer(1, 6))
+
+    # 5. DICTAMEN AUDITORÍA Y NOTAS DE TESORERÍA
+    obs_dictamen = handoff.get("observaciones") or s.get("observaciones") or ""
+    txt_dictamen = (
+        f"<b>DICTAMEN DE CONFORMIDAD DE TESORERÍA:</b> "
+        f"Valores recepcionados conforme a planilla de recuento físico. "
+        f"Efectivo asumido en Bóveda: <b>Gs. {_fmt_val(c_total)}</b>. Comprobantes archivados: <b>{total_cant_vouchers} vouchers (Gs. {_fmt_val(total_monto_vouchers)})</b>. "
+        f"Dictamen general: <b>{estado_cuadre}</b> ({signo_cons}Gs. {_fmt_val(dif_consolidada)}). "
+    )
+    if obs_dictamen:
+        txt_dictamen += f"<i>Observaciones de Tesorería: {obs_dictamen.strip()}</i>"
+
+    t_dictamen = Table([[Paragraph(txt_dictamen, ParagraphStyle("DictV", parent=styles["Normal"], fontSize=6.5, leading=8.2, textColor=HexColor("#1E293B")))]], colWidths=[186 * mm])
+    t_dictamen.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F8FAFC")),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#94A3B8")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(t_dictamen)
+    elements.append(Spacer(1, 10))
+
+    # 6. FIRMAS DE RESPONSABILIDAD
+    firmas_data = [
+        ["_________________________________________", "_________________________________________"],
+        ["ENTREGA CONFORME (CAJERO/A)", "RECEPCIÓN Y ASUNCIÓN EN BÓVEDA (TESORERÍA)"],
+        [f"Cajero/a: {cajero_nombre}", f"Tesorera / Custodio Bóveda: {tesorera_nombre}"],
+        ["Entregué efectivo y comprobantes según detalle", "Recibí y asumí formalmente la custodia de los valores"],
+        ["Fecha: ____/____/________   Hora: ____:____", f"Fecha Verificación: {fecha_verif_str}"],
+    ]
+    t_firmas = Table(firmas_data, colWidths=[93 * mm, 93 * mm])
+    t_firmas.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTNAME", (0, 1), (-1, 1), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.0),
+        ("TEXTCOLOR", (0, 1), (-1, 1), HexColor("#0F172A")),
+        ("TEXTCOLOR", (0, 3), (-1, 3), HexColor("#64748B")),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.2),
+    ]))
+    elements.append(KeepTogether([t_firmas]))
+
+    _build(doc, elements)
+    return buffer.getvalue()
+
 
 
 

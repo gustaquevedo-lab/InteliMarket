@@ -1239,6 +1239,8 @@ export const api = {
       client.post<any>(`/v1/cash-sessions/${sessionId}/confirm-cash-reception`, data),
     downloadSessionPunteoPdf: (sessionId: string) =>
       downloadAuthenticated(`/v1/cash-sessions/${sessionId}/export/punteo.pdf`, undefined, `planilla_punteo_${sessionId.slice(0, 8)}.pdf`),
+    downloadActaVerificacionPdf: (sessionId: string, filename?: string) =>
+      downloadAuthenticated(`/v1/cash-sessions/${sessionId}/export/acta-verificacion.pdf`, undefined, filename || `acta_verificacion_${sessionId.slice(0, 8)}.pdf`),
     bankMappings: {
       list: () => client.get<{ id: string; canal_key: string; canal_label: string; bank_account_id?: string | null; banco_nombre?: string | null; numero_cuenta?: string | null; moneda?: string | null; activo: boolean }[]>("/v1/caja/config/bank-mappings"),
       update: (canalKey: string, data: { bank_account_id?: string | null; activo?: boolean }) =>
