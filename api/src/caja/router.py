@@ -23,6 +23,7 @@ from api.src.caja.schemas import (
     CashShortageConfigUpdate, CashShortageConfigResponse,
     ResolveCashShortageRequest, IncorporateSessionVaultAndBanksRequest,
     ConfirmSessionCashReceptionRequest,
+    CreatePaymentAdjustmentRequest, PaymentAdjustmentResponse,
 )
 from api.src.caja import service
 from api.src.caja import pdf_reports
@@ -891,5 +892,53 @@ async def resolve_cash_shortage(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Reclasificación de Comprobantes Manuales en Tesorería ──────────────
+
+@router.post("/cash-sessions/{session_id}/punteo/ajustes")
+async def create_payment_adjustment(
+    session_id: str,
+    body: CreatePaymentAdjustmentRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_nombre = user.get("user_nombre") or user.get("user_email") or "Tesorería Central"
+    user_id = user.get("id") or str(uuid.uuid4())
+    try:
+        return await service.create_payment_adjustment(
+            db,
+            session_id,
+            user["company_id"],
+            user_id,
+            user_nombre,
+            body.model_dump(),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/cash-sessions/{session_id}/punteo/ajustes")
+async def list_payment_adjustments(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_payment_adjustments(db, session_id, user["company_id"])
+
+
+@router.delete("/cash-sessions/{session_id}/punteo/ajustes/{adjustment_id}")
+async def delete_payment_adjustment(
+    session_id: str,
+    adjustment_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        await service.delete_payment_adjustment(db, adjustment_id, session_id, user["company_id"])
+        return {"ok": True, "message": "Reclasificación eliminada con éxito"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 

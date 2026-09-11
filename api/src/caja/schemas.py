@@ -255,3 +255,38 @@ class IncorporateSessionVaultAndBanksRequest(BaseModel):
     observaciones: Optional[str] = None
 
 
+class CreatePaymentAdjustmentRequest(BaseModel):
+    origen_forma_pago: str = "EFECTIVO"
+    destino_canal_key: str
+    monto_gs: Decimal
+    nro_comprobante: Optional[str] = None
+    banco_entidad: Optional[str] = None
+    titular: Optional[str] = None
+    codigo_autorizacion: Optional[str] = None
+    ticket_numero: Optional[str] = None
+    sale_id: Optional[str] = None
+    motivo: Optional[str] = None
+
+
+class PaymentAdjustmentResponse(BaseModel):
+    id: str
+    company_id: str
+    session_id: str
+    sale_id: Optional[str] = None
+    ticket_numero: Optional[str] = None
+    origen_forma_pago: str
+    destino_canal_key: str
+    destino_canal_label: str
+    monto_gs: float
+    moneda: str
+    nro_comprobante: Optional[str] = None
+    banco_entidad: Optional[str] = None
+    titular: Optional[str] = None
+    codigo_autorizacion: Optional[str] = None
+    motivo: Optional[str] = None
+    registrado_por_id: Optional[str] = None
+    registrado_por_nombre: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+

@@ -5,7 +5,8 @@ import {
   Settings, X, ShieldCheck, Clock, EyeOff, Calculator, FileText, Download,
   Layers, Users, RefreshCw, Printer, Check, ChevronRight, Activity, ShieldAlert,
   Coins, Sparkles, Building2, Store, Lock, KeyRound, Heart, FileSpreadsheet,
-  BarChart3, Calendar, Filter, PieChart, Receipt, ClipboardCheck, Info
+  BarChart3, Calendar, Filter, PieChart, Receipt, ClipboardCheck, Info,
+  ArrowLeftRight, Trash2, Landmark, FilePlus2
 } from "lucide-react"
 import {
   api,
@@ -268,6 +269,76 @@ export default function CajaPage() {
   const [punteoSearch, setPunteoSearch] = useState("")
   const [punteoObsDictamen, setPunteoObsDictamen] = useState("")
   const [savingPunteoAudit, setSavingPunteoAudit] = useState(false)
+
+  // ── Reclasificación de Comprobantes Manuales en Tesorería ──
+  const [adjustmentModalOpen, setAdjustmentModalOpen] = useState(false)
+  const [adjDestinoCanal, setAdjDestinoCanal] = useState("TRANSFERENCIA")
+  const [adjMontoGs, setAdjMontoGs] = useState<number>(0)
+  const [adjMontoGsStr, setAdjMontoGsStr] = useState<string>("")
+  const [adjNroComprobante, setAdjNroComprobante] = useState("")
+  const [adjBancoEntidad, setAdjBancoEntidad] = useState("")
+  const [adjTitular, setAdjTitular] = useState("")
+  const [adjTicketNumero, setAdjTicketNumero] = useState("")
+  const [adjMotivo, setAdjMotivo] = useState("")
+  const [savingAdjustment, setSavingAdjustment] = useState(false)
+  const [deletingAdjustmentId, setDeletingAdjustmentId] = useState<string | null>(null)
+
+  const handleOpenAdjustmentModal = () => {
+    setAdjDestinoCanal("TRANSFERENCIA")
+    setAdjMontoGs(0)
+    setAdjMontoGsStr("")
+    setAdjNroComprobante("")
+    setAdjBancoEntidad("")
+    setAdjTitular("")
+    setAdjTicketNumero("")
+    setAdjMotivo("")
+    setAdjustmentModalOpen(true)
+  }
+
+  const handleSavePaymentAdjustment = async () => {
+    if (!punteoData?.session_data?.id) return
+    if (!adjMontoGs || adjMontoGs <= 0) {
+      toast.error("Monto inválido", "Ingrese un monto mayor a 0 Gs.")
+      return
+    }
+    try {
+      setSavingAdjustment(true)
+      await api.caja.paymentAdjustments.create(punteoData.session_data.id, {
+        origen_forma_pago: "EFECTIVO",
+        destino_canal_key: adjDestinoCanal,
+        monto_gs: adjMontoGs,
+        nro_comprobante: adjNroComprobante.trim() || undefined,
+        banco_entidad: adjBancoEntidad.trim() || undefined,
+        titular: adjTitular.trim() || undefined,
+        ticket_numero: adjTicketNumero.trim() || undefined,
+        motivo: adjMotivo.trim() || "Comprobante entregado en Tesorería registrado como Efectivo en POS",
+      })
+      toast.success("Comprobante Reclasificado", "El comprobante fue imputado al canal respectivo y deducido del efectivo esperado.")
+      setAdjustmentModalOpen(false)
+      await handleOpenPunteoModal(punteoData.session_data.id)
+      fetchHistorial()
+    } catch (err: any) {
+      toast.error("Error al reclasificar", err?.message || "No se pudo guardar la reclasificación.")
+    } finally {
+      setSavingAdjustment(false)
+    }
+  }
+
+  const handleDeletePaymentAdjustment = async (adjustmentId: string) => {
+    if (!punteoData?.session_data?.id) return
+    if (!confirm("¿Desea eliminar esta reclasificación y reintegrar el monto al efectivo esperado?")) return
+    try {
+      setDeletingAdjustmentId(adjustmentId)
+      await api.caja.paymentAdjustments.delete(punteoData.session_data.id, adjustmentId)
+      toast.success("Reclasificación Eliminada", "El monto volvió a considerarse en el esperado en efectivo.")
+      await handleOpenPunteoModal(punteoData.session_data.id)
+      fetchHistorial()
+    } catch (err: any) {
+      toast.error("Error al eliminar", err?.message || "No se pudo eliminar la reclasificación.")
+    } finally {
+      setDeletingAdjustmentId(null)
+    }
+  }
 
   // ── Conteo y Recepción de Efectivo en Tesorería ──
   const [efectivoRecibidoPyg, setEfectivoRecibidoPyg] = useState<number>(0)
@@ -4937,58 +5008,171 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 })()}
 
                 {/* 🌟 SECCIÓN 2: COMPROBANTES DE PAGO NO EFECTIVO */}
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-xs font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
-                    <ClipboardCheck className="w-4 h-4" /> Comprobantes y Vouchers a Puntear (Medios No Efectivo)
-                  </span>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
-                    Total comprobantes: <b>{punteoData.vouchers?.length || 0}</b>
-                  </span>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
+                      <ClipboardCheck className="w-4 h-4" /> Comprobantes y Vouchers Físicos (Ordenados por Instrumento)
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                      (Total: <b>{punteoData.vouchers?.length || 0}</b> comprobantes)
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleOpenAdjustmentModal}
+                      className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 text-xs font-bold transition flex items-center gap-1.5 shadow-sm whitespace-nowrap"
+                      title="Registrar comprobante físico (SIPAP, Tarjeta Manual, PIX, Cheque) registrado erróneamente como Efectivo en el POS"
+                    >
+                      <ArrowLeftRight className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                      <span>+ Reclasificar Comprobante de Efectivo</span>
+                    </button>
+                  </div>
                 </div>
 
-                {/* 1. Resumen de Comprobantes por Medio de Pago */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
-                  {Object.entries(punteoData.summary_by_method || {}).map(([key, val]: [string, any]) => {
-                    const cant = val.cantidad || 0
-                    const monto = Number(val.monto_gs || 0)
-                    if (cant === 0 && monto === 0) return null
+                {/* 🏷️ PANEL DE RECLASIFICACIONES REGISTRADAS */}
+                {punteoData.adjustments && punteoData.adjustments.length > 0 && (
+                  <div className="p-3 bg-amber-500/10 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800/60 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-800 dark:text-amber-200 flex items-center gap-1.5">
+                        <ArrowLeftRight className="w-3.5 h-3.5 text-amber-600" />
+                        Comprobantes Reclasificados desde Efectivo ({punteoData.adjustments.length})
+                      </span>
+                      <span className="text-xs font-mono font-bold text-amber-900 dark:text-amber-100">
+                        Total Deducido del Efectivo: {formatPYG(punteoData.total_ajustes_gs || 0)}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                      {punteoData.adjustments.map((a: any) => (
+                        <div key={a.id} className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/50 text-xs flex items-center justify-between gap-2 shadow-sm">
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-slate-900 dark:text-white truncate">{a.destino_canal_label}</span>
+                              <span className="px-1 py-0.2 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 text-[9px] font-bold rounded">
+                                {a.nro_comprobante ? `#${a.nro_comprobante}` : "Comprobante"}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-500 truncate">
+                              {a.banco_entidad ? `${a.banco_entidad} · ` : ""}{a.titular ? `${a.titular} · ` : ""}{a.motivo || "Ajuste manual"}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="font-mono font-bold text-slate-900 dark:text-white">{formatPYG(a.monto_gs)}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePaymentAdjustment(a.id)}
+                              disabled={deletingAdjustmentId === a.id}
+                              className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-50 dark:hover:bg-rose-950/30 transition"
+                              title="Eliminar reclasificación y devolver al esperado en efectivo"
+                            >
+                              {deletingAdjustmentId === a.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-                    // Calcular comprobantes presentes y faltantes de este medio
-                    const vouchersDelCanal = (punteoData.vouchers || []).filter((v: any) => v.canal_key === key || val.label?.includes(v.medio_pago))
-                    const conformes = vouchersDelCanal.filter((v: any) => (punteoStatuses[v.id] || "conforme") === "conforme").length
-                    const faltantes = vouchersDelCanal.filter((v: any) => punteoStatuses[v.id] === "faltante").length
-
-                    return (
-                      <div
-                        key={key}
-                        onClick={() => setPunteoFilterCanal(punteoFilterCanal === key ? "todos" : key)}
-                        className={`p-2.5 rounded-xl border text-xs space-y-1.5 cursor-pointer transition-all ${
-                          punteoFilterCanal === key
-                            ? "bg-purple-50 dark:bg-purple-950/50 border-purple-500 ring-2 ring-purple-500/40"
-                            : "bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/70 hover:border-purple-300 dark:hover:border-slate-600"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-1.5 min-w-0">
-                          <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 truncate block" title={val.label || key}>
-                            {val.label || key}
+                {/* 1. Resumen de Comprobantes Agrupado por Tipo de Instrumento */}
+                {punteoData.grupos_por_instrumento && punteoData.grupos_por_instrumento.length > 0 ? (
+                  <div className="space-y-3">
+                    {punteoData.grupos_por_instrumento.map((grp: any) => (
+                      <div key={grp.instrumento_key} className="space-y-1.5">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 uppercase tracking-wide">
+                            <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                            {grp.label}
                           </span>
-                          {faltantes > 0 && (
-                            <span className="px-1.5 py-0.5 bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 text-[9px] font-bold rounded border border-rose-200 dark:border-rose-800 shrink-0 whitespace-nowrap">
-                              {faltantes} faltante{faltantes !== 1 ? "s" : ""}
-                            </span>
-                          )}
+                          <span className="text-[10px] text-slate-500 font-mono">
+                            {grp.total_vouchers} voucher{grp.total_vouchers !== 1 ? "s" : ""} · <b>{formatPYG(grp.total_gs)}</b>
+                          </span>
                         </div>
-                        <div className="font-mono font-black text-slate-900 dark:text-white text-xs">
-                          {formatPYG(monto)}
-                        </div>
-                        <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between whitespace-nowrap">
-                          <span>{cant} voucher{cant !== 1 ? "s" : ""}</span>
-                          <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">{conformes} ✓</span>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                          {grp.canales.map((val: any) => {
+                            const key = val.canal_key
+                            const cant = val.cantidad || 0
+                            const monto = Number(val.monto_gs || 0)
+                            const vouchersDelCanal = (punteoData.vouchers || []).filter((v: any) => v.canal_key === key)
+                            const conformes = vouchersDelCanal.filter((v: any) => (punteoStatuses[v.id] || "conforme") === "conforme").length
+                            const faltantes = vouchersDelCanal.filter((v: any) => punteoStatuses[v.id] === "faltante").length
+
+                            return (
+                              <div
+                                key={key}
+                                onClick={() => setPunteoFilterCanal(punteoFilterCanal === key ? "todos" : key)}
+                                className={`p-2.5 rounded-xl border text-xs space-y-1.5 cursor-pointer transition-all ${
+                                  punteoFilterCanal === key
+                                    ? "bg-purple-50 dark:bg-purple-950/50 border-purple-500 ring-2 ring-purple-500/40"
+                                    : "bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/70 hover:border-purple-300 dark:hover:border-slate-600"
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-1.5 min-w-0">
+                                  <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 truncate block" title={val.label || key}>
+                                    {val.label || key}
+                                  </span>
+                                  {faltantes > 0 && (
+                                    <span className="px-1.5 py-0.5 bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 text-[9px] font-bold rounded border border-rose-200 dark:border-rose-800 shrink-0 whitespace-nowrap">
+                                      {faltantes} f.
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="font-mono font-black text-slate-900 dark:text-white text-xs">
+                                  {formatPYG(monto)}
+                                </div>
+                                <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between whitespace-nowrap">
+                                  <span>{cant} v.</span>
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">{conformes} ✓</span>
+                                </div>
+                              </div>
+                            )
+                          })}
                         </div>
                       </div>
-                    )
-                  })}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
+                    {Object.entries(punteoData.summary_by_method || {}).map(([key, val]: [string, any]) => {
+                      const cant = val.cantidad || 0
+                      const monto = Number(val.monto_gs || 0)
+                      if (cant === 0 && monto === 0) return null
+                      const vouchersDelCanal = (punteoData.vouchers || []).filter((v: any) => v.canal_key === key || val.label?.includes(v.medio_pago))
+                      const conformes = vouchersDelCanal.filter((v: any) => (punteoStatuses[v.id] || "conforme") === "conforme").length
+                      const faltantes = vouchersDelCanal.filter((v: any) => punteoStatuses[v.id] === "faltante").length
+
+                      return (
+                        <div
+                          key={key}
+                          onClick={() => setPunteoFilterCanal(punteoFilterCanal === key ? "todos" : key)}
+                          className={`p-2.5 rounded-xl border text-xs space-y-1.5 cursor-pointer transition-all ${
+                            punteoFilterCanal === key
+                              ? "bg-purple-50 dark:bg-purple-950/50 border-purple-500 ring-2 ring-purple-500/40"
+                              : "bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/70 hover:border-purple-300 dark:hover:border-slate-600"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1.5 min-w-0">
+                            <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 truncate block" title={val.label || key}>
+                              {val.label || key}
+                            </span>
+                            {faltantes > 0 && (
+                              <span className="px-1.5 py-0.5 bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 text-[9px] font-bold rounded border border-rose-200 dark:border-rose-800 shrink-0 whitespace-nowrap">
+                                {faltantes} faltante{faltantes !== 1 ? "s" : ""}
+                              </span>
+                            )}
+                          </div>
+                          <div className="font-mono font-black text-slate-900 dark:text-white text-xs">
+                            {formatPYG(monto)}
+                          </div>
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between whitespace-nowrap">
+                            <span>{cant} voucher{cant !== 1 ? "s" : ""}</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">{conformes} ✓</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
 
                 {/* 2. Balance Global y Cuadre de Comprobantes Físicos */}
                 {(() => {
@@ -5118,17 +5302,30 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           onChange={e => setPunteoFilterCanal(e.target.value)}
                           className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500 shrink-0"
                         >
-                          <option value="todos">Todos los Canales ({allV.length})</option>
-                          <option value="TARJETA_BANCARD">Bancard Tarjeta</option>
-                          <option value="TARJETA_DINELCO">Dinelco Tarjeta</option>
-                          <option value="BANCARD_QR">Bancard QR</option>
-                          <option value="DINELCO_QR">Dinelco QR</option>
-                          <option value="PIX">PIX Brasil</option>
-                          <option value="TRANSFERENCIA">Transferencia SIPAP</option>
-                          <option value="EXTRA_CLUB">Extra Club</option>
-                          <option value="VALES">Vales & Cheques</option>
-                          <option value="EFECTIVO">Efectivo Físico</option>
-                          <option value="OTROS">Otros</option>
+                          <option value="todos">Todos los Instrumentos y Canales ({allV.length})</option>
+                          <optgroup label="💳 Tarjetas de Débito y Crédito (POS)">
+                            <option value="BANCARD_DEBITO">Bancard Débito</option>
+                            <option value="BANCARD_CREDITO">Bancard Crédito</option>
+                            <option value="DINELCO_DEBITO">Dinelco Débito</option>
+                            <option value="DINELCO_CREDITO">Dinelco Crédito</option>
+                          </optgroup>
+                          <optgroup label="📱 Billeteras Digitales y Pagos QR">
+                            <option value="BANCARD_QR">Bancard QR</option>
+                            <option value="DINELCO_QR">Dinelco QR</option>
+                          </optgroup>
+                          <optgroup label="🌐 Transferencias SIPAP & PIX Brasil">
+                            <option value="TRANSFERENCIA">Transferencia SIPAP</option>
+                            <option value="PLUGPAY_PIX">Plug Pay PIX (Brasil)</option>
+                            <option value="BANCARD_PIX">Bancard PIX</option>
+                            <option value="DINELCO_PIX">Dinelco PIX</option>
+                          </optgroup>
+                          <optgroup label="🏷️ Crédito de la Casa y Fidelización">
+                            <option value="EXTRA_CLUB">Extra Club</option>
+                          </optgroup>
+                          <optgroup label="📄 Documentos de Valor y Cheques">
+                            <option value="CHEQUES">Cheques / Vales</option>
+                            <option value="OTROS">Otros Medios</option>
+                          </optgroup>
                         </select>
                       </div>
 
@@ -5175,7 +5372,14 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                       {v.fecha ? new Date(v.fecha).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}
                                     </td>
                                     <td className="p-2.5 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
-                                      {v.numero_ticket}
+                                      <div className="flex items-center gap-1.5">
+                                        <span>{v.numero_ticket}</span>
+                                        {v.es_reclasificado && (
+                                          <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 text-[9px] font-bold border border-amber-300 dark:border-amber-700/70 flex items-center gap-1 shrink-0" title="Reclasificado en Tesorería desde Efectivo">
+                                            <ArrowLeftRight className="w-2.5 h-2.5 text-amber-600" /> Reclasif.
+                                          </span>
+                                        )}
+                                      </div>
                                     </td>
                                     <td className="p-2.5 whitespace-nowrap">
                                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${
@@ -5838,6 +6042,200 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔄 MODAL: RECLASIFICACIÓN DE COMPROBANTE MANUAL EN TESORERÍA */}
+      {adjustmentModalOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[70] flex items-center justify-center p-3 sm:p-5 animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-lg p-5 sm:p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center border border-amber-300 dark:border-amber-700/50">
+                  <ArrowLeftRight className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white">Reclasificar Comprobante de Efectivo</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Registrar comprobante físico ingresado por error como Efectivo en POS
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setAdjustmentModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+              <p className="font-bold flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                Impacto en el Cierre y Bóveda:
+              </p>
+              <ul className="list-disc list-inside space-y-0.5 text-[11px] text-amber-800 dark:text-amber-300/90 pl-1">
+                <li>Deduce el monto del <b>Efectivo Esperado</b> para cuadrar la gaveta de billetes sin falso faltante.</li>
+                <li>Imputa el comprobante a su <b>canal operativo</b> para control y punteo físico en Tesorería.</li>
+                <li>Al asentar en Bóveda & Bancos, se acreditará en la <b>cuenta bancaria asignada</b>.</li>
+              </ul>
+            </div>
+
+            <form onSubmit={(e) => { e.preventDefault(); handleSavePaymentAdjustment(); }} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Medio de Pago / Instrumento Real *
+                </label>
+                <select
+                  value={adjDestinoCanal}
+                  onChange={(e) => setAdjDestinoCanal(e.target.value)}
+                  className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white px-3 py-2 focus:ring-2 focus:ring-amber-500"
+                  required
+                >
+                  <optgroup label="🌐 Transferencias Bancarias & PIX">
+                    <option value="TRANSFERENCIA">Transferencia Bancaria SIPAP</option>
+                    <option value="PLUGPAY_PIX">Plug Pay PIX Brasil</option>
+                    <option value="BANCARD_PIX">Bancard PIX</option>
+                    <option value="DINELCO_PIX">Dinelco PIX</option>
+                  </optgroup>
+                  <optgroup label="💳 Tarjetas de Débito y Crédito (POS)">
+                    <option value="BANCARD_DEBITO">Bancard Tarjeta de Débito</option>
+                    <option value="BANCARD_CREDITO">Bancard Tarjeta de Crédito</option>
+                    <option value="DINELCO_DEBITO">Dinelco Tarjeta de Débito</option>
+                    <option value="DINELCO_CREDITO">Dinelco Tarjeta de Crédito</option>
+                  </optgroup>
+                  <optgroup label="📱 Billeteras Digitales & QR">
+                    <option value="BANCARD_QR">Bancard QR</option>
+                    <option value="DINELCO_QR">Dinelco QR</option>
+                  </optgroup>
+                  <optgroup label="📄 Documentos de Valor">
+                    <option value="CHEQUES">Cheques / Vales</option>
+                    <option value="EXTRA_CLUB">Extra Club / Crédito</option>
+                    <option value="OTROS">Otros Medios</option>
+                  </optgroup>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Monto del Comprobante (Guaraníes ₲) *
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="ej. 150.000"
+                  value={adjMontoGsStr}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, "")
+                    if (!digits) {
+                      setAdjMontoGsStr("")
+                      setAdjMontoGs(0)
+                    } else {
+                      const v = parseInt(digits, 10)
+                      setAdjMontoGsStr(v.toLocaleString("es-PY"))
+                      setAdjMontoGs(v)
+                    }
+                  }}
+                  className="w-full text-sm font-mono font-bold rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white px-3 py-2 focus:ring-2 focus:ring-amber-500"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Nro. Comprobante / SIPAP / Boleta
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="ej. 883921"
+                    value={adjNroComprobante}
+                    onChange={(e) => setAdjNroComprobante(e.target.value)}
+                    className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Banco / Entidad
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="ej. Banco Continental"
+                    value={adjBancoEntidad}
+                    onChange={(e) => setAdjBancoEntidad(e.target.value)}
+                    className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white px-3 py-2"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Titular / Nombre
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="ej. Juan Perez"
+                    value={adjTitular}
+                    onChange={(e) => setAdjTitular(e.target.value)}
+                    className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Ticket Asociado (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="ej. 001-015-0002280"
+                    value={adjTicketNumero}
+                    onChange={(e) => setAdjTicketNumero(e.target.value)}
+                    className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white px-3 py-2"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Motivo / Observaciones
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Detalle de la corrección..."
+                  value={adjMotivo}
+                  onChange={(e) => setAdjMotivo(e.target.value)}
+                  className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white px-3 py-2 resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setAdjustmentModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingAdjustment}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-amber-500/20"
+                >
+                  {savingAdjustment ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Guardando Reclasificación...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Confirmar Reclasificación</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

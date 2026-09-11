@@ -531,14 +531,22 @@ def generate_cierre_sesion_individual_pdf(
         # Tabla Izquierda: Conciliación Efectivo Esperado (100% en Guaraníes)
         cant_tickets = recon.get("total_ventas_count", 0)
         drops_p_str = f"-{_fmt_gs(drops_total)}" if drops_total > 0 else "0 Gs."
+        tot_ajustes = float(recon.get("total_ajustes_reclasificados_gs") or 0)
         esp_rows = [
             [Paragraph("<b>1.A CONCILIACIÓN EFECTIVO ESPERADO (₲)</b>", style_th), ""],
             [Paragraph(f"Total Ventas Facturadas ({cant_tickets} tickets):", style_tl), Paragraph(f"{_fmt_gs(tot_facturado)}", style_tr_num)],
             [Paragraph("(-) Medios No Efectivo (Tarjetas, QR, PIX):", style_tl), Paragraph(f"-{_fmt_gs(tot_no_ef)}", style_tr_num)],
+        ]
+        if tot_ajustes > 0:
+            esp_rows.append([
+                Paragraph("(-) Reclasif. Tesorería (Efectivo a No Ef.):", style_tl),
+                Paragraph(f"-{_fmt_gs(tot_ajustes)}", style_tr_num)
+            ])
+        esp_rows.extend([
             [Paragraph("(=) Efectivo Total por Ventas:", style_tl), Paragraph(f"{_fmt_gs(ventas_ef_total)}", style_tr_num)],
             [Paragraph("(-) Retiros / Cash Drops Confirmados:", style_tl), Paragraph(drops_p_str, style_tr_num)],
             [Paragraph("<b>(=) TOTAL ESPERADO A RENDIR:</b>", style_th), Paragraph(f"<b>{_fmt_gs(esp_total)}</b>", style_tr)],
-        ]
+        ])
         t_esp = Table(esp_rows, colWidths=[58 * mm, 33 * mm])
         t_esp.setStyle(TableStyle([
             ("SPAN", (0, 0), (1, 0)),

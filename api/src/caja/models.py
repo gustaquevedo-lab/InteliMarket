@@ -295,3 +295,38 @@ class CashShortageConfig(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class CashSessionPaymentAdjustment(Base):
+    """Reclasificación o ajuste de comprobantes en Tesorería.
+    Casos de salón: un pago fue registrado por la cajera en el POS como 'EFECTIVO',
+    pero en Tesorería se entrega un comprobante físico real (Transferencia SIPAP, Voucher POS
+    manual/contingencia, PIX Brasil, Cheque, etc.).
+    
+    Efecto:
+    1. Deduce el monto del Efectivo Esperado a Rendir en billetes de la sesión.
+    2. Suma el comprobante al canal operativo correspondiente para su punteo y custodia.
+    3. Al incorporar a Bóveda & Bancos, genera el crédito (BankTransaction) en la cuenta bancaria respectiva.
+    """
+    __tablename__ = "cash_session_payment_adjustments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("cash_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    sale_id = Column(UUID(as_uuid=True), nullable=True)
+    ticket_numero = Column(String(50))
+    origen_forma_pago = Column(String(50), nullable=False, default="EFECTIVO")
+    destino_canal_key = Column(String(50), nullable=False)
+    destino_canal_label = Column(String(100), nullable=False)
+    monto_gs = Column(Numeric(15, 0), nullable=False)
+    moneda = Column(String(3), default="PYG")
+    monto_original = Column(Numeric(15, 2))
+    nro_comprobante = Column(String(100))
+    banco_entidad = Column(String(100))
+    titular = Column(String(150))
+    codigo_autorizacion = Column(String(100))
+    motivo = Column(Text)
+    registrado_por_id = Column(UUID(as_uuid=True))
+    registrado_por_nombre = Column(String(100))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+

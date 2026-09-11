@@ -25,6 +25,7 @@ from api.src.caja.models import (
     VaultEntry, VaultDepositApprovalRequest, CashDropRequest,
     TreasuryRemittance, TreasuryRemittanceItem,
     PaymentMethodBankMapping, CashShortageDeductionRequest, CashShortageConfig,
+    CashSessionPaymentAdjustment,
 )
 from api.src.sales.models import Sale, SalePayment
 from api.src.pos_terminal_transactions.models import PosTerminalTransaction
@@ -54,6 +55,50 @@ PAYMENT_CHANNEL_DEFINITIONS = [
 ]
 
 PAYMENT_CHANNEL_MAP = {c[0]: c for c in PAYMENT_CHANNEL_DEFINITIONS}
+
+# 🏛️ Familias / Tipos de Instrumentos Financieros de Tesorería
+INSTRUMENT_TYPE_ORDER = [
+    ("POS_TARJETAS", "Tarjetas de Débito y Crédito (POS Físicos)", "credit-card", 1),
+    ("QR_BILLETERAS", "Billeteras Digitales y Pagos QR", "qr-code", 2),
+    ("TRANSFERENCIAS_PIX", "Transferencias SIPAP y PIX Brasil", "landmark", 3),
+    ("CREDITO_CASA", "Crédito de la Casa y Fidelización", "award", 4),
+    ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-check", 5),
+    ("EFECTIVO", "Efectivo Físico en Gaveta", "banknote", 6),
+]
+
+CHANNEL_TO_INSTRUMENT_TYPE = {
+    "BANCARD_DEBITO": ("POS_TARJETAS", "Tarjetas de Débito y Crédito (POS Físicos)", "credit-card", 1),
+    "BANCARD_CREDITO": ("POS_TARJETAS", "Tarjetas de Débito y Crédito (POS Físicos)", "credit-card", 1),
+    "DINELCO_DEBITO": ("POS_TARJETAS", "Tarjetas de Débito y Crédito (POS Físicos)", "credit-card", 1),
+    "DINELCO_CREDITO": ("POS_TARJETAS", "Tarjetas de Débito y Crédito (POS Físicos)", "credit-card", 1),
+    "TARJETA_BANCARD": ("POS_TARJETAS", "Tarjetas de Débito y Crédito (POS Físicos)", "credit-card", 1),
+    "TARJETA_DINELCO": ("POS_TARJETAS", "Tarjetas de Débito y Crédito (POS Físicos)", "credit-card", 1),
+    "TARJETA": ("POS_TARJETAS", "Tarjetas de Débito y Crédito (POS Físicos)", "credit-card", 1),
+
+    "BANCARD_QR": ("QR_BILLETERAS", "Billeteras Digitales y Pagos QR", "qr-code", 2),
+    "DINELCO_QR": ("QR_BILLETERAS", "Billeteras Digitales y Pagos QR", "qr-code", 2),
+    "QR": ("QR_BILLETERAS", "Billeteras Digitales y Pagos QR", "qr-code", 2),
+
+    "PLUGPAY_PIX": ("TRANSFERENCIAS_PIX", "Transferencias SIPAP y PIX Brasil", "landmark", 3),
+    "BANCARD_PIX": ("TRANSFERENCIAS_PIX", "Transferencias SIPAP y PIX Brasil", "landmark", 3),
+    "DINELCO_PIX": ("TRANSFERENCIAS_PIX", "Transferencias SIPAP y PIX Brasil", "landmark", 3),
+    "PIX": ("TRANSFERENCIAS_PIX", "Transferencias SIPAP y PIX Brasil", "landmark", 3),
+    "TRANSFERENCIA": ("TRANSFERENCIAS_PIX", "Transferencias SIPAP y PIX Brasil", "landmark", 3),
+    "SIPAP_TRANSF": ("TRANSFERENCIAS_PIX", "Transferencias SIPAP y PIX Brasil", "landmark", 3),
+
+    "EXTRA_CLUB": ("CREDITO_CASA", "Crédito de la Casa y Fidelización", "award", 4),
+    "PLUGPAY_CREDITO": ("CREDITO_CASA", "Crédito de la Casa y Fidelización", "award", 4),
+    "CREDITO_CLIENTE": ("CREDITO_CASA", "Crédito de la Casa y Fidelización", "award", 4),
+
+    "CHEQUES": ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-check", 5),
+    "VALES": ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-check", 5),
+    "OTROS": ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-check", 5),
+
+    "EFECTIVO_PYG": ("EFECTIVO", "Efectivo Físico en Gaveta", "banknote", 6),
+    "EFECTIVO_BRL": ("EFECTIVO", "Efectivo Físico en Gaveta", "banknote", 6),
+    "EFECTIVO_USD": ("EFECTIVO", "Efectivo Físico en Gaveta", "banknote", 6),
+}
+
 
 # Sesiones históricas del sistema legacy anterior (Supermer) o pruebas accidentales
 # que deben excluirse estrictamente del historial de cierres de InteliMarket
@@ -846,6 +891,47 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     d_usd = sum(Decimal(str(d.monto_confirmado_usd or d.monto_usd or 0)) for d in drops if d.estado == "confirmado")
     total_drops_gs = d_pyg + (d_brl * tasa_brl) + (d_usd * tasa_usd)
 
+    # Reclasificaciones de pagos en Tesorería (ej: venta registrada en POS como Efectivo pero entregada como comprobante SIPAP/Tarjeta)
+    adj_res = await db.execute(
+        select(CashSessionPaymentAdjustment).where(CashSessionPaymentAdjustment.session_id == session_obj.id)
+    )
+    adjustments_list = list(adj_res.scalars().all())
+    total_ajustes_efectivo_a_no_efectivo = sum(
+        Decimal(str(a.monto_gs or 0)) for a in adjustments_list if a.origen_forma_pago == "EFECTIVO"
+    )
+
+    if adjustments_list:
+        desglose_by_key = {d["clave"]: d for d in desglose_detallado}
+        for a in adjustments_list:
+            d_key = a.destino_canal_key
+            d_label = a.destino_canal_label
+            m_gs_adj = Decimal(str(a.monto_gs or 0))
+            if d_key in desglose_by_key:
+                desglose_by_key[d_key]["cantidad"] += 1
+                desglose_by_key[d_key]["monto_gs"] += float(m_gs_adj)
+                desglose_by_key[d_key]["monto_orig"] += float(m_gs_adj)
+                desglose_by_key[d_key]["monto_formateado"] = f"{desglose_by_key[d_key]['monto_gs']:,.0f}".replace(",", ".") + " Gs."
+            else:
+                inst_info = CHANNEL_TO_INSTRUMENT_TYPE.get(d_key, ("DOCUMENTOS_VALOR", "Documentos de Pago", "file-check", 5))
+                item_adj = {
+                    "clave": d_key,
+                    "label": d_label,
+                    "tipo": inst_info[0].lower(),
+                    "icon": inst_info[2],
+                    "cantidad": 1,
+                    "monto_orig": float(m_gs_adj),
+                    "monto_gs": float(m_gs_adj),
+                    "monto_formateado": f"{float(m_gs_adj):,.0f}".replace(",", ".") + " Gs.",
+                    "moneda": "PYG",
+                }
+                desglose_detallado.append(item_adj)
+                desglose_by_key[d_key] = item_adj
+
+        if "EFECTIVO_PYG" in desglose_by_key:
+            desglose_by_key["EFECTIVO_PYG"]["monto_gs"] = max(0.0, desglose_by_key["EFECTIVO_PYG"]["monto_gs"] - float(total_ajustes_efectivo_a_no_efectivo))
+            desglose_by_key["EFECTIVO_PYG"]["monto_orig"] = desglose_by_key["EFECTIVO_PYG"]["monto_gs"]
+            desglose_by_key["EFECTIVO_PYG"]["monto_formateado"] = f"{desglose_by_key['EFECTIVO_PYG']['monto_gs']:,.0f}".replace(",", ".") + " Gs."
+
     # Total recaudado por medios no efectivo desglosados (Tarjetas Débito/Crédito, QR, PIX, etc.)
     total_no_efectivo_gs = sum(
         Decimal(str(d["monto_gs"]))
@@ -1007,6 +1093,22 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         "diferencia_consolidada_gs": float(diferencia_consolidada_gs),
         "total_ventas_count": total_ventas_count,
         "total_cobrado_gs": float(total_cobrado_gs),
+        "total_ajustes_reclasificados_gs": float(total_ajustes_efectivo_a_no_efectivo),
+        "ajustes_comprobantes": [
+            {
+                "id": str(a.id),
+                "destino_canal_key": a.destino_canal_key,
+                "destino_canal_label": a.destino_canal_label,
+                "monto_gs": float(a.monto_gs),
+                "nro_comprobante": a.nro_comprobante,
+                "banco_entidad": a.banco_entidad,
+                "titular": a.titular,
+                "ticket_numero": a.ticket_numero,
+                "motivo": a.motivo,
+                "registrado_por_nombre": a.registrado_por_nombre,
+            }
+            for a in adjustments_list
+        ],
         "terminales_operadas": terminales_operadas,
         "medios_pago_detallados": desglose_detallado,
         "desglose_detallado": desglose_detallado,
@@ -3370,6 +3472,91 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         except Exception:
             pass
 
+    # 5. Inyectar comprobantes reclasificados en Tesorería (Efectivo a Medios No Efectivo)
+    adj_res = await db.execute(
+        select(CashSessionPaymentAdjustment).where(CashSessionPaymentAdjustment.session_id == sid).order_by(CashSessionPaymentAdjustment.created_at.asc())
+    )
+    adjustments = list(adj_res.scalars().all())
+    adjustments_out = []
+    for a in adjustments:
+        adj_item = {
+            "id": str(a.id),
+            "company_id": str(a.company_id),
+            "session_id": str(a.session_id),
+            "sale_id": str(a.sale_id) if a.sale_id else None,
+            "ticket_numero": a.ticket_numero,
+            "origen_forma_pago": a.origen_forma_pago,
+            "destino_canal_key": a.destino_canal_key,
+            "destino_canal_label": a.destino_canal_label,
+            "monto_gs": float(a.monto_gs),
+            "moneda": a.moneda or "PYG",
+            "nro_comprobante": a.nro_comprobante,
+            "banco_entidad": a.banco_entidad,
+            "titular": a.titular,
+            "codigo_autorizacion": a.codigo_autorizacion,
+            "motivo": a.motivo,
+            "registrado_por_id": str(a.registrado_por_id) if a.registrado_por_id else None,
+            "registrado_por_nombre": a.registrado_por_nombre,
+            "created_at": _to_asuncion_tz(a.created_at).strftime("%d/%m/%Y %H:%M") if a.created_at else None,
+        }
+        adjustments_out.append(adj_item)
+
+        m_gs_adj = float(a.monto_gs or 0)
+        c_key = a.destino_canal_key
+        voucher_adj = {
+            "id": f"adj_{str(a.id)}",
+            "adjustment_id": str(a.id),
+            "sale_id": str(a.sale_id) if a.sale_id else None,
+            "fecha": a.created_at.isoformat() if a.created_at else None,
+            "numero_ticket": a.ticket_numero or "Reclasif. Efectivo",
+            "tipo_comprobante": "Reclasificación Tesorería",
+            "medio_pago": a.destino_canal_label,
+            "canal_key": c_key,
+            "moneda": a.moneda or "PYG",
+            "monto_original": m_gs_adj,
+            "monto_gs": m_gs_adj,
+            "nro_boleta": a.nro_comprobante or "—",
+            "codigo_autorizacion": a.codigo_autorizacion or "—",
+            "nsu": "—",
+            "tarjeta_marca": a.banco_entidad or "Tesorería / Manual",
+            "tarjeta_pan": "—",
+            "titular": a.titular or "—",
+            "es_reclasificado": True,
+            "origen_forma_pago": a.origen_forma_pago,
+            "banco_entidad": a.banco_entidad,
+            "motivo": a.motivo,
+        }
+        vouchers.append(voucher_adj)
+        if c_key in vouchers_by_channel:
+            vouchers_by_channel[c_key]["total_esperado_gs"] += m_gs_adj
+            vouchers_by_channel[c_key]["cantidad_esperada"] += 1
+            vouchers_by_channel[c_key]["vouchers"].append(voucher_adj)
+        else:
+            inst_info = CHANNEL_TO_INSTRUMENT_TYPE.get(c_key, ("DOCUMENTOS_VALOR", "Documentos de Pago", "file-check", 5))
+            vouchers_by_channel[c_key] = {
+                "canal_key": c_key,
+                "canal_label": a.destino_canal_label,
+                "icon": inst_info[2],
+                "total_esperado_gs": m_gs_adj,
+                "cantidad_esperada": 1,
+                "vouchers": [voucher_adj],
+            }
+
+    # 6. Enriquecer vouchers con Tipo de Instrumento y Ordenar
+    for v in vouchers:
+        ck = v.get("canal_key") or "OTROS"
+        inst = CHANNEL_TO_INSTRUMENT_TYPE.get(ck, ("DOCUMENTOS_VALOR", "Documentos Físicos y Cheques", "file-check", 5))
+        v["tipo_instrumento_key"] = inst[0]
+        v["tipo_instrumento_label"] = inst[1]
+        v["tipo_instrumento_icon"] = inst[2]
+        v["tipo_instrumento_orden"] = inst[3]
+
+    vouchers.sort(key=lambda v: (
+        v.get("tipo_instrumento_orden", 99),
+        v.get("canal_key", ""),
+        v.get("fecha") or "",
+    ))
+
     summary_por_canal = {
         k: {
             "canal_key": v["canal_key"],
@@ -3377,11 +3564,33 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             "cantidad": v["cantidad_esperada"],
             "monto_gs": v["total_esperado_gs"],
             "icon": v["icon"],
+            "tipo_instrumento_key": CHANNEL_TO_INSTRUMENT_TYPE.get(k, ("DOCUMENTOS_VALOR", "Documentos de Pago", "file-check", 5))[0],
+            "tipo_instrumento_label": CHANNEL_TO_INSTRUMENT_TYPE.get(k, ("DOCUMENTOS_VALOR", "Documentos de Pago", "file-check", 5))[1],
+            "tipo_instrumento_orden": CHANNEL_TO_INSTRUMENT_TYPE.get(k, ("DOCUMENTOS_VALOR", "Documentos de Pago", "file-check", 5))[3],
         }
         for k, v in vouchers_by_channel.items()
         if v["cantidad_esperada"] > 0
     }
     summary_final = summary_por_canal
+
+    # 7. Construir estructura agrupada por Tipo de Instrumento
+    grupos_por_instrumento = []
+    for inst_key, inst_label, inst_icon, inst_orden in INSTRUMENT_TYPE_ORDER:
+        if inst_key == "EFECTIVO":
+            continue
+        canales_del_inst = [c for c in summary_por_canal.values() if c.get("tipo_instrumento_key") == inst_key]
+        if canales_del_inst:
+            tot_inst_gs = sum(c["monto_gs"] for c in canales_del_inst)
+            tot_inst_cant = sum(c["cantidad"] for c in canales_del_inst)
+            grupos_por_instrumento.append({
+                "instrumento_key": inst_key,
+                "label": inst_label,
+                "icon": inst_icon,
+                "orden": inst_orden,
+                "total_gs": tot_inst_gs,
+                "total_vouchers": tot_inst_cant,
+                "canales": canales_del_inst,
+            })
 
     recon = session_data.get("recon") or {}
     contado_neto_pyg = float(recon.get("contado_pyg") if recon.get("contado_pyg") is not None else (session_data.get("monto_cierre") or 0))
@@ -3393,7 +3602,6 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     )
     h_obj = res_h.scalar_one_or_none()
 
-    # El monto declarado para entrega en Tesorería es el efectivo neto tras certificar fondo en gaveta
     decl_pyg = float(h_obj.monto_pyg) if (h_obj and h_obj.estado == "confirmado") else contado_neto_pyg
     decl_brl = float(h_obj.monto_brl) if (h_obj and h_obj.estado == "confirmado" and h_obj.monto_brl is not None) else contado_neto_brl
     decl_usd = float(h_obj.monto_usd) if (h_obj and h_obj.estado == "confirmado" and h_obj.monto_usd is not None) else contado_neto_usd
@@ -3421,6 +3629,9 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         "recon": recon,
         "handoff": handoff_dict,
         "summary_by_method": summary_final,
+        "grupos_por_instrumento": grupos_por_instrumento,
+        "adjustments": adjustments_out,
+        "total_ajustes_gs": sum(a["monto_gs"] for a in adjustments_out),
         "payments_breakdown": breakdown,
         "vouchers": vouchers,
         "grupos_comprobantes": canales_activos,
@@ -3439,6 +3650,138 @@ async def get_session_acta_verificacion_data(db: AsyncSession, session_id: str, 
         "recon": recon,
         "punteo_data": punteo,
     }
+
+
+async def create_payment_adjustment(
+    db: AsyncSession,
+    session_id: str,
+    company_id: str,
+    user_id: str,
+    user_nombre: str,
+    data: dict,
+) -> dict:
+    """Registra una reclasificación en Tesorería: un pago cobrado como efectivo en el POS
+    que físicamente se rindió con un comprobante (Transferencia SIPAP, Voucher POS, etc.)."""
+    cid = uuid.UUID(company_id)
+    sid = uuid.UUID(session_id)
+
+    res = await db.execute(
+        select(CashSession, CashRegister)
+        .join(CashRegister, CashRegister.id == CashSession.register_id)
+        .where(CashSession.id == sid, CashRegister.company_id == cid)
+    )
+    row = res.first()
+    if not row:
+        raise ValueError("Sesión de caja no encontrada")
+
+    d_key = data["destino_canal_key"]
+    d_label = data.get("destino_canal_label")
+    if not d_label:
+        matched = PAYMENT_CHANNEL_MAP.get(d_key)
+        d_label = matched[1] if matched else d_key.replace("_", " ").title()
+
+    m_gs = Decimal(str(data.get("monto_gs") or 0))
+    if m_gs <= 0:
+        raise ValueError("El monto de la reclasificación debe ser mayor a 0 Gs.")
+
+    adj = CashSessionPaymentAdjustment(
+        company_id=cid,
+        session_id=sid,
+        sale_id=uuid.UUID(data["sale_id"]) if data.get("sale_id") else None,
+        ticket_numero=data.get("ticket_numero"),
+        origen_forma_pago=data.get("origen_forma_pago") or "EFECTIVO",
+        destino_canal_key=d_key,
+        destino_canal_label=d_label,
+        monto_gs=m_gs,
+        moneda=data.get("moneda") or "PYG",
+        nro_comprobante=data.get("nro_comprobante"),
+        banco_entidad=data.get("banco_entidad"),
+        titular=data.get("titular"),
+        codigo_autorizacion=data.get("codigo_autorizacion"),
+        motivo=data.get("motivo"),
+        registrado_por_id=uuid.UUID(user_id) if user_id else None,
+        registrado_por_nombre=user_nombre,
+    )
+    db.add(adj)
+    await db.commit()
+    await db.refresh(adj)
+
+    return {
+        "id": str(adj.id),
+        "company_id": str(adj.company_id),
+        "session_id": str(adj.session_id),
+        "sale_id": str(adj.sale_id) if adj.sale_id else None,
+        "ticket_numero": adj.ticket_numero,
+        "origen_forma_pago": adj.origen_forma_pago,
+        "destino_canal_key": adj.destino_canal_key,
+        "destino_canal_label": adj.destino_canal_label,
+        "monto_gs": float(adj.monto_gs),
+        "moneda": adj.moneda,
+        "nro_comprobante": adj.nro_comprobante,
+        "banco_entidad": adj.banco_entidad,
+        "titular": adj.titular,
+        "codigo_autorizacion": adj.codigo_autorizacion,
+        "motivo": adj.motivo,
+        "registrado_por_id": str(adj.registrado_por_id) if adj.registrado_por_id else None,
+        "registrado_por_nombre": adj.registrado_por_nombre,
+        "created_at": _to_asuncion_tz(adj.created_at).strftime("%d/%m/%Y %H:%M") if adj.created_at else None,
+    }
+
+
+async def list_payment_adjustments(db: AsyncSession, session_id: str, company_id: str) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    sid = uuid.UUID(session_id)
+    res = await db.execute(
+        select(CashSessionPaymentAdjustment)
+        .where(CashSessionPaymentAdjustment.session_id == sid, CashSessionPaymentAdjustment.company_id == cid)
+        .order_by(CashSessionPaymentAdjustment.created_at.asc())
+    )
+    adjustments = res.scalars().all()
+    return [
+        {
+            "id": str(a.id),
+            "company_id": str(a.company_id),
+            "session_id": str(a.session_id),
+            "sale_id": str(a.sale_id) if a.sale_id else None,
+            "ticket_numero": a.ticket_numero,
+            "origen_forma_pago": a.origen_forma_pago,
+            "destino_canal_key": a.destino_canal_key,
+            "destino_canal_label": a.destino_canal_label,
+            "monto_gs": float(a.monto_gs),
+            "moneda": a.moneda,
+            "nro_comprobante": a.nro_comprobante,
+            "banco_entidad": a.banco_entidad,
+            "titular": a.titular,
+            "codigo_autorizacion": a.codigo_autorizacion,
+            "motivo": a.motivo,
+            "registrado_por_id": str(a.registrado_por_id) if a.registrado_por_id else None,
+            "registrado_por_nombre": a.registrado_por_nombre,
+            "created_at": _to_asuncion_tz(a.created_at).strftime("%d/%m/%Y %H:%M") if a.created_at else None,
+        }
+        for a in adjustments
+    ]
+
+
+async def delete_payment_adjustment(db: AsyncSession, adjustment_id: str, session_id: str, company_id: str) -> bool:
+    cid = uuid.UUID(company_id)
+    sid = uuid.UUID(session_id)
+    aid = uuid.UUID(adjustment_id)
+    res = await db.execute(
+        select(CashSessionPaymentAdjustment)
+        .where(
+            CashSessionPaymentAdjustment.id == aid,
+            CashSessionPaymentAdjustment.session_id == sid,
+            CashSessionPaymentAdjustment.company_id == cid,
+        )
+    )
+    adj = res.scalar_one_or_none()
+    if not adj:
+        raise ValueError("Ajuste de reclasificación no encontrado")
+
+    await db.delete(adj)
+    await db.commit()
+    return True
+
 
 
 async def confirm_session_cash_reception(

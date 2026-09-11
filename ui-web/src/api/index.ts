@@ -1241,6 +1241,22 @@ export const api = {
       downloadAuthenticated(`/v1/cash-sessions/${sessionId}/export/punteo.pdf`, undefined, `planilla_punteo_${sessionId.slice(0, 8)}.pdf`),
     downloadActaVerificacionPdf: (sessionId: string, filename?: string) =>
       downloadAuthenticated(`/v1/cash-sessions/${sessionId}/export/acta-verificacion.pdf`, undefined, filename || `acta_verificacion_${sessionId.slice(0, 8)}.pdf`),
+    paymentAdjustments: {
+      create: (sessionId: string, data: {
+        origen_forma_pago?: string
+        destino_canal_key: string
+        monto_gs: number
+        nro_comprobante?: string
+        banco_entidad?: string
+        titular?: string
+        codigo_autorizacion?: string
+        ticket_numero?: string
+        sale_id?: string
+        motivo?: string
+      }) => client.post<any>(`/v1/cash-sessions/${sessionId}/punteo/ajustes`, data),
+      list: (sessionId: string) => client.get<any[]>(`/v1/cash-sessions/${sessionId}/punteo/ajustes`),
+      delete: (sessionId: string, adjustmentId: string) => client.delete<any>(`/v1/cash-sessions/${sessionId}/punteo/ajustes/${adjustmentId}`),
+    },
     bankMappings: {
       list: () => client.get<{ id: string; canal_key: string; canal_label: string; bank_account_id?: string | null; banco_nombre?: string | null; numero_cuenta?: string | null; moneda?: string | null; activo: boolean }[]>("/v1/caja/config/bank-mappings"),
       update: (canalKey: string, data: { bank_account_id?: string | null; activo?: boolean }) =>
