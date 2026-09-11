@@ -192,10 +192,11 @@ async def count_accounts_receivable(db: AsyncSession, company_id: str, customer_
 async def create_accounts_receivable_for_sale(
     db: AsyncSession, company_id: str, customer_id: str, sale_id: str,
     total: Decimal, numero: str, fecha_vencimiento: date | None = None,
-    tipo: str = "factura",
+    tipo: str = "factura", fecha_emision: datetime | None = None,
 ) -> None:
     if not fecha_vencimiento:
-        fecha_vencimiento = date.today() + timedelta(days=30)
+        base_date = fecha_emision.date() if fecha_emision else date.today()
+        fecha_vencimiento = base_date + timedelta(days=30)
 
     await db.execute(
         text("""
@@ -203,7 +204,7 @@ async def create_accounts_receivable_for_sale(
                 (company_id, customer_id, sale_id, numero_documento, fecha_emision,
                  fecha_vencimiento, moneda, monto_original, saldo_pendiente, tipo, estado)
             VALUES
-                (:company_id, :customer_id, :sale_id, :numero_documento, NOW(),
+                (:company_id, :customer_id, :sale_id, :numero_documento, COALESCE(:fecha_emision, NOW()),
                  :fecha_vencimiento, 'PYG', :monto, :monto, :tipo, 'pendiente')
         """),
         {
@@ -211,6 +212,7 @@ async def create_accounts_receivable_for_sale(
             "customer_id": customer_id,
             "sale_id": sale_id,
             "numero_documento": numero,
+            "fecha_emision": fecha_emision,
             "fecha_vencimiento": fecha_vencimiento,
             "monto": float(total),
             "tipo": tipo,

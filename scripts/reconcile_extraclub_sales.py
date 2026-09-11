@@ -36,6 +36,7 @@ async def reconcile(apply_changes: bool = False):
                 s.condicion,
                 s.total,
                 s.estado,
+                s.fecha,
                 s.created_at,
                 COALESCE(c.razon_social, c.nombre_fantasia, c.ruc) AS customer_nombre,
                 c.ruc AS customer_ruc,
@@ -74,9 +75,9 @@ async def reconcile(apply_changes: bool = False):
             customer_id = r.customer_id
             monto_credito = Decimal(str(r.payment_monto))
             numero = r.numero
-            fecha_emision = r.created_at
+            fecha_emision = r.fecha or r.created_at
 
-            print(f"-> Venta {numero} ({r.created_at.strftime('%Y-%m-%d %H:%M')}) | Cliente: {r.customer_nombre} | ₲ {monto_credito:,.0f}")
+            print(f"-> Venta {numero} ({fecha_emision.strftime('%Y-%m-%d %H:%M')}) | Cliente: {r.customer_nombre} | ₲ {monto_credito:,.0f}")
 
             if not customer_id:
                 print(f"   [AVISO] Venta {numero} no tiene customer_id, omitiendo...")
@@ -89,7 +90,7 @@ async def reconcile(apply_changes: bool = False):
                     {"sid": sale_id}
                 )
 
-                # 2. Crear cuenta por cobrar usando la función oficial del sistema
+                # 2. Crear cuenta por cobrar usando la función oficial del sistema preservando la fecha de emisión original
                 fecha_venc = fecha_emision.date() + timedelta(days=30)
                 await create_accounts_receivable_for_sale(
                     db=db,
@@ -99,6 +100,7 @@ async def reconcile(apply_changes: bool = False):
                     total=monto_credito,
                     numero=numero,
                     fecha_vencimiento=fecha_venc,
+                    fecha_emision=fecha_emision,
                 )
                 accounts_created += 1
 
@@ -128,6 +130,7 @@ async def reconcile(apply_changes: bool = False):
                         referencia_type="sale",
                         referencia_id=sale_id,
                         observaciones=f"Regularizacion venta {numero}",
+                        created_at=fecha_emision,
                     )
                     db.add(mov)
                     credit_movements_created += 1
