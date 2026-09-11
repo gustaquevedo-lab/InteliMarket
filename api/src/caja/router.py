@@ -391,6 +391,14 @@ async def export_acta_verificacion_sesion_pdf(
     if not data:
         raise HTTPException(status_code=404, detail="Sesión no encontrada o no pertenece a su empresa")
 
+    sess_estado = data["session_data"].get("estado")
+    handoff_estado = (data.get("punteo_data", {}).get("handoff") or {}).get("estado")
+    if sess_estado != "verificada" and handoff_estado != "confirmado":
+        raise HTTPException(
+            status_code=400,
+            detail="El Acta Oficial de Verificación solo se emite cuando la sesión ha sido punteada y los valores confirmados por Tesorería.",
+        )
+
     company = await _get_company_info(db, user["company_id"])
     auditor_nombre = user.get("user_nombre") or user.get("user_email") or "Tesorería Central"
     pdf_bytes = pdf_reports.generate_acta_verificacion_tesoreria_pdf(

@@ -511,6 +511,7 @@ export default function CajaPage() {
           handoff: nextHandoff,
           session_data: {
             ...prev.session_data,
+            estado: "verificada",
             handoff: nextHandoff,
           },
         }
@@ -1973,24 +1974,26 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                               <FileText className="w-3.5 h-3.5" />
                               PDF
                             </button>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  const safeCajero = (s.cajero_nombre || "caja").replace(/\s+/g, "_")
-                                  const safeFecha = (s.fecha_apertura || "").slice(0, 10) || "sesion"
-                                  await api.caja.downloadActaVerificacionPdf(s.id, `acta_verificacion_${safeCajero}_${safeFecha}.pdf`)
-                                  toast.success("Acta de Verificación descargada", `Acta de Tesorería de ${s.cajero_nombre || "caja"} descargada con éxito.`)
-                                } catch {
-                                  toast.error("Error", "No se pudo generar el acta de verificación de tesorería.")
-                                }
-                              }}
-                              title="Descargar Acta Oficial de Verificación y Recepción de Tesorería en PDF"
-                              className="p-1.5 rounded-lg border border-teal-300 dark:border-teal-800 text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/30 hover:bg-teal-100 dark:hover:bg-teal-900/50 inline-flex items-center gap-1 font-bold text-[11px] transition-colors whitespace-nowrap shadow-sm"
-                            >
-                              <ShieldCheck className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                              Acta Verif.
-                            </button>
+                            {s.estado === "verificada" && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    const safeCajero = (s.cajero_nombre || "caja").replace(/\s+/g, "_")
+                                    const safeFecha = (s.fecha_apertura || "").slice(0, 10) || "sesion"
+                                    await api.caja.downloadActaVerificacionPdf(s.id, `acta_verificacion_${safeCajero}_${safeFecha}.pdf`)
+                                    toast.success("Acta de Verificación descargada", `Acta de Tesorería de ${s.cajero_nombre || "caja"} descargada con éxito.`)
+                                  } catch {
+                                    toast.error("Error", "No se pudo generar el acta de verificación de tesorería.")
+                                  }
+                                }}
+                                title="Descargar Acta Oficial de Verificación y Recepción de Tesorería en PDF"
+                                className="p-1.5 rounded-lg border border-teal-300 dark:border-teal-800 text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/30 hover:bg-teal-100 dark:hover:bg-teal-900/50 inline-flex items-center gap-1 font-bold text-[11px] transition-colors whitespace-nowrap shadow-sm"
+                              >
+                                <ShieldCheck className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                                Acta Verif.
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => handleOpenPunteoModal(s.id)}
@@ -4562,24 +4565,26 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               <div className="flex items-center gap-2">
                 {punteoData?.session_data && (
                   <>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          const safeCajero = (punteoData.session_data.cajero_nombre || "caja").replace(/\s+/g, "_")
-                          await api.caja.downloadActaVerificacionPdf(punteoData.session_data.id, `acta_verificacion_${safeCajero}.pdf`)
-                          toast.success("Acta Descargada", "Acta Oficial de Verificación y Recepción en Bóveda descargada.")
-                        } catch {
-                          toast.error("Error", "No se pudo generar el acta de verificación.")
-                        }
-                      }}
-                      className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-teal-600/30 whitespace-nowrap"
-                      title="Descargar Acta de Verificación y Recepción de Tesorería (PDF)"
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Acta Verificación PDF</span>
-                      <span className="sm:hidden">Acta PDF</span>
-                    </button>
+                    {(punteoData.session_data.estado === "verificada" || punteoData.handoff?.estado === "confirmado") && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const safeCajero = (punteoData.session_data.cajero_nombre || "caja").replace(/\s+/g, "_")
+                            await api.caja.downloadActaVerificacionPdf(punteoData.session_data.id, `acta_verificacion_${safeCajero}.pdf`)
+                            toast.success("Acta Descargada", "Acta Oficial de Verificación y Recepción en Bóveda descargada.")
+                          } catch {
+                            toast.error("Error", "No se pudo generar el acta de verificación.")
+                          }
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-teal-600/30 whitespace-nowrap"
+                        title="Descargar Acta de Verificación y Recepción de Tesorería (PDF)"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Acta Verificación PDF</span>
+                        <span className="sm:hidden">Acta PDF</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={async () => {

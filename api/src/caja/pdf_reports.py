@@ -1729,16 +1729,33 @@ def generate_acta_verificacion_tesoreria_pdf(
     drops_total = recon.get("total_drops_gs", 0)
     esp_total = recon.get("esperado_total_gs", max(0, ventas_ef_total - drops_total))
 
-    c_pyg = recon.get("contado_pyg", 0)
-    c_brl = recon.get("contado_brl", 0)
-    c_usd = recon.get("contado_usd", 0)
+    # Priorizar montos físicamente contados y confirmados por Tesorería en Bóveda
+    handoff = punteo_data.get("handoff") or {}
     tasa_brl = recon.get("tasa_brl", 1130)
     tasa_usd = recon.get("tasa_usd", 5840.1)
-    c_brl_gs = recon.get("contado_brl_gs", c_brl * tasa_brl)
-    c_usd_gs = recon.get("contado_usd_gs", c_usd * tasa_usd)
-    c_total = recon.get("contado_total_gs", c_pyg + c_brl_gs + c_usd_gs)
 
-    dif_consolidada = recon.get("diferencia_consolidada_gs", c_total - esp_total)
+    tiene_confirmacion_tesoreria = handoff.get("monto_confirmado_pyg") is not None
+    if tiene_confirmacion_tesoreria:
+        c_pyg = float(handoff.get("monto_confirmado_pyg") or 0)
+        c_brl = float(handoff.get("monto_confirmado_brl") or 0)
+        c_usd = float(handoff.get("monto_confirmado_usd") or 0)
+    else:
+        c_pyg = float(recon.get("contado_pyg", 0))
+        c_brl = float(recon.get("contado_brl", 0))
+        c_usd = float(recon.get("contado_usd", 0))
+
+    c_decl_pyg = float(handoff.get("monto_declarado_pyg") if handoff.get("monto_declarado_pyg") is not None else (recon.get("contado_pyg") or 0))
+    c_decl_brl = float(handoff.get("monto_declarado_brl") if handoff.get("monto_declarado_brl") is not None else (recon.get("contado_brl") or 0))
+    c_decl_usd = float(handoff.get("monto_declarado_usd") if handoff.get("monto_declarado_usd") is not None else (recon.get("contado_usd") or 0))
+
+    c_brl_gs = round(c_brl * tasa_brl)
+    c_usd_gs = round(c_usd * tasa_usd)
+    c_total = round(c_pyg + c_brl_gs + c_usd_gs)
+
+    c_decl_total = round(c_decl_pyg + (c_decl_brl * tasa_brl) + (c_decl_usd * tasa_usd))
+    dif_entrega_gs = c_total - c_decl_total
+
+    dif_consolidada = c_total - esp_total
     estado_cuadre = "CONFORME (SIN DIFERENCIA)" if abs(dif_consolidada) < 1000 else ("SOBRANTE" if dif_consolidada > 0 else "FALTANTE")
     signo_cons = "+" if dif_consolidada >= 0 else ""
     dif_color_hex = "#059669" if dif_consolidada >= 0 else "#DC2626"
@@ -1776,6 +1793,14 @@ def generate_acta_verificacion_tesoreria_pdf(
         [Paragraph("<b>DIFERENCIA (Recibido - Esperado):</b>", ParagraphStyle("B4_V", parent=style_td_lbl, fontName=FONT_BOLD, textColor=HexColor(dif_color_hex))),
          Paragraph(f"<font color='{dif_color_hex}'><b>{signo_cons}Gs. {_fmt_val(dif_consolidada)} ({estado_cuadre})</b></font>", style_td_val)],
     ]
+    if dif_entrega_gs != 0:
+        signo_ent = "+" if dif_entrega_gs > 0 else ""
+        col_ent = "#059669" if dif_entrega_gs > 0 else "#DC2626"
+        t_rec_data.append([
+            Paragraph("<i>Dif. Entrega vs Declarado Cajera:</i>", ParagraphStyle("TDE", parent=style_td_lbl, fontName=FONT_ITALIC, fontSize=6.0)),
+            Paragraph(f"<font color='{col_ent}'><i>{signo_ent}Gs. {_fmt_val(dif_entrega_gs)}</i></font>", ParagraphStyle("TDEV", parent=style_td_val, fontSize=6.0)),
+        ])
+
     t_rec = Table(t_rec_data, colWidths=[58 * mm, 33 * mm])
     t_rec.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
@@ -1783,8 +1808,8 @@ def generate_acta_verificacion_tesoreria_pdf(
         ("INNERGRID", (0, 0), (-1, -1), 0.3, HexColor("#E2E8F0")),
         ("TOPPADDING", (0, 0), (-1, -1), 1.8),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 1.8),
-        ("BACKGROUND", (0, -2), (-1, -2), HexColor("#DCFCE7")),
-        ("BACKGROUND", (0, -1), (-1, -1), HexColor("#FEF2F2" if dif_consolidada < 0 else "#F0FDF4")),
+        ("BACKGROUND", (0, 4), (-1, 4), HexColor("#DCFCE7")),
+        ("BACKGROUND", (0, 5), (-1, 5), HexColor("#FEF2F2" if dif_consolidada < 0 else "#F0FDF4")),
     ]))
 
     t_bloque_ef = Table([[t_esp, t_rec]], colWidths=[92 * mm, 92 * mm])
@@ -1828,7 +1853,7 @@ def generate_acta_verificacion_tesoreria_pdf(
     t_vouch_rows = [
         [
             Paragraph("<b>Medio de Pago / Canal Operativo</b>", style_th),
-            Paragraph("<b>Tipo Canal</b>", style_th),
+            Paragraph("<b>Tipo Instrumento</b>", style_th),
             Paragraph("<b>Vouchers Cotejados</b>", ParagraphStyle("TH_C", parent=style_th, alignment=TA_CENTER)),
             Paragraph("<b>Total Comprobantes (₲)</b>", ParagraphStyle("TH_R", parent=style_th, alignment=TA_RIGHT)),
             Paragraph("<b>Dictamen Cotejo</b>", ParagraphStyle("TH_C2", parent=style_th, alignment=TA_CENTER)),
@@ -1838,20 +1863,33 @@ def generate_acta_verificacion_tesoreria_pdf(
     total_cant_vouchers = 0
     total_monto_vouchers = 0
     for g in grupos:
-        cant = g.get("cantidad_esperada", 0)
-        tot_g = g.get("total_monto_gs", 0)
+        cant = g.get("cantidad_esperada") or g.get("cantidad") or len(g.get("vouchers", []))
+        tot_g = g.get("total_esperado_gs") or g.get("monto_gs") or sum(float(v.get("monto_gs") or 0) for v in g.get("vouchers", []))
+        canal_lbl = g.get("canal_label") or g.get("label") or "Comprobante"
         total_cant_vouchers += cant
         total_monto_vouchers += tot_g
-        tipo_label = "Tarjeta POS" if "TARJETA" in g.get("canal_key", "") or "BANCARD" in g.get("canal_key", "") else ("Billetera / QR" if "QR" in g.get("canal_key", "") else ("PIX Brasil" if "PIX" in g.get("canal_key", "") else "Crédito"))
+        tipo_label = g.get("tipo_instrumento_label") or ("Tarjeta POS" if "TARJETA" in g.get("canal_key", "") or "BANCARD" in g.get("canal_key", "") else ("Billetera / QR" if "QR" in g.get("canal_key", "") else ("PIX Brasil" if "PIX" in g.get("canal_key", "") else "Crédito")))
         t_vouch_rows.append([
-            Paragraph(f"<b>{g.get('label', 'Comprobante')}</b>", style_td_lbl),
+            Paragraph(f"<b>{canal_lbl}</b>", style_td_lbl),
             Paragraph(tipo_label, style_td_lbl),
             Paragraph(f"{cant} comprobantes", ParagraphStyle("TC", parent=style_td_lbl, alignment=TA_CENTER)),
             Paragraph(f"Gs. {_fmt_val(tot_g)}", style_td_val),
             Paragraph("<font color='#059669'><b>✓ CONFORME</b></font>", ParagraphStyle("TCD", parent=style_td_lbl, alignment=TA_CENTER)),
         ])
 
-    if not grupos:
+    # Reclasificaciones si las hubiere
+    adjustments = punteo_data.get("adjustments") or []
+    if adjustments:
+        tot_adj = sum(float(a.get("monto_gs") or 0) for a in adjustments)
+        t_vouch_rows.append([
+            Paragraph("<b>Reclasificación de Efectivo en Tesorería</b>", style_td_lbl),
+            Paragraph("Documento de Valor", style_td_lbl),
+            Paragraph(f"{len(adjustments)} docs", ParagraphStyle("TC_A", parent=style_td_lbl, alignment=TA_CENTER)),
+            Paragraph(f"Gs. {_fmt_val(tot_adj)}", style_td_val),
+            Paragraph("<font color='#0284C7'><b>✓ RECLASIFICADO</b></font>", ParagraphStyle("TCD_A", parent=style_td_lbl, alignment=TA_CENTER)),
+        ])
+
+    if not grupos and not adjustments:
         t_vouch_rows.append([
             Paragraph("No se registraron ventas no efectivo en esta sesión.", style_td_lbl),
             "", "", "", ""
@@ -1880,7 +1918,7 @@ def generate_acta_verificacion_tesoreria_pdf(
     elements.append(Spacer(1, 6))
 
     # 5. DICTAMEN AUDITORÍA Y NOTAS DE TESORERÍA
-    obs_dictamen = handoff.get("observaciones") or s.get("observaciones") or ""
+    obs_dictamen = handoff.get("observaciones") or ""
     txt_dictamen = (
         f"<b>DICTAMEN DE CONFORMIDAD DE TESORERÍA:</b> "
         f"Valores recepcionados conforme a planilla de recuento físico. "

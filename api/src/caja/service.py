@@ -1283,7 +1283,12 @@ async def list_sessions_with_totals(
     if register_id:
         query = query.where(CashSession.register_id == uuid.UUID(register_id))
     if estado:
-        query = query.where(CashSession.estado == estado)
+        if estado == "cerrada":
+            query = query.where(CashSession.estado.in_(["cerrada", "verificada"]))
+        elif "," in estado:
+            query = query.where(CashSession.estado.in_([e.strip() for e in estado.split(",") if e.strip()]))
+        else:
+            query = query.where(CashSession.estado == estado)
     if user_id:
         query = query.where(CashSession.user_id == uuid.UUID(user_id))
     if cajero_nombre:
@@ -3866,6 +3871,7 @@ async def confirm_session_cash_reception(
     handoff.fecha_confirmacion = datetime.now(timezone.utc)
     handoff.observaciones = observaciones
     handoff.estado = "confirmado"
+    session_obj.estado = "verificada"
 
     now_py = datetime.now(TZ_ASUNCION).strftime("%d/%m/%Y %H:%M")
     if dif_pyg == 0 and dif_brl == 0:
