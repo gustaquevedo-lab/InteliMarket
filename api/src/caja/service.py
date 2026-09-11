@@ -2762,8 +2762,8 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             fondo_pyg = float(recon["fondo_pyg"])
             fondo_brl = float(recon["fondo_brl"])
             fondo_usd = float(recon["fondo_usd"])
-            total_facturado_pyg = float(recon["total_cobrado_gs"])
-            no_efectivo_pyg = float(recon["no_efectivo_gs"])
+            total_facturado_pyg = float(recon.get("total_cobrado_gs") or 0)
+            no_efectivo_pyg = float(recon.get("total_no_efectivo_gs") or 0)
         else:
             m_ef_pyg = float(count.monto_efectivo or 0)
             m_ef_brl = float(count.monto_efectivo_brl or 0)
