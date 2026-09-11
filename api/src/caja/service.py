@@ -599,16 +599,15 @@ def generate_cierre_escpos(recon: dict) -> dict:
     lines.append(f"DICTAMEN AUDITORIA: {estado_cuadre}".center(W))
     lines.append("=" * W)
 
-    # Detalle de compensación por moneda
-    dif_mon_pyg = recon.get('dif_mon_pyg', recon['contado_pyg'] - esp_pyg)
-    dif_mon_brl = recon.get('dif_mon_brl', recon['contado_brl'] - recon.get('esp_brl', 0))
-    comp_brl_gs = dif_mon_brl * recon['tasa_brl']
-    lines.append("Detalle por Moneda:")
-    signo_p = "+" if dif_mon_pyg >= 0 else ""
-    signo_b = "+" if dif_mon_brl >= 0 else ""
-    signo_cb = "+" if comp_brl_gs >= 0 else ""
-    lines.append(f"  • Guaraníes: {signo_p}{dif_mon_pyg:,.0f} Gs.")
-    lines.append(f"  • Reales:    {signo_b}{dif_mon_brl:,.2f} R$ ({signo_cb}{comp_brl_gs:,.0f} Gs.)")
+    # Detalle de composición de efectivo rendido
+    lines.append("Composicion de Efectivo Rendido:")
+    lines.append(f"  * Guaranies: {recon['contado_pyg']:,.0f} Gs.")
+    if recon.get('contado_brl', 0) > 0:
+        brl_fmt = f"{recon['contado_brl']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        lines.append(f"  * Reales:    R$ {brl_fmt} ({recon['contado_brl_gs']:,.0f} Gs.)")
+    if recon.get('contado_usd', 0) > 0:
+        usd_fmt = f"{recon['contado_usd']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        lines.append(f"  * Dolares:   US$ {usd_fmt} ({recon['contado_usd_gs']:,.0f} Gs.)")
     lines.append("-" * W)
     lines.append("")
     lines.append("")
