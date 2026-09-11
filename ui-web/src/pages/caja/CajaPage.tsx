@@ -4654,16 +4654,50 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   const recUsd = Number(efectivoRecibidoUsd || 0)
                   const recTotalGs = recPyg + (recBrl * tasaBrl) + (recUsd * tasaUsd)
 
-                  // Doble Control
-                  // A) Cotejo de Sobre: Recibido vs Declarado por Cajero/a
+                  // 4. Comprobantes No Efectivo (Vouchers) dinámicos según estado de punteo
+                  const allV = punteoData.vouchers || []
+                  let totVouchersEsperadoGs = 0
+                  let totVouchersFisicoGs = 0
+                  let countVouchersConformes = 0
+                  let countVouchersFaltantes = 0
+                  let countVouchersDiscrepantes = 0
+
+                  allV.forEach((v: any) => {
+                    totVouchersEsperadoGs += Number(v.monto_gs || 0)
+                    const st = punteoStatuses[v.id] || "conforme"
+                    if (st === "conforme") {
+                      totVouchersFisicoGs += Number(v.monto_gs || 0)
+                      countVouchersConformes++
+                    } else if (st === "faltante") {
+                      countVouchersFaltantes++
+                    } else if (st === "discrepante") {
+                      const m = punteoDiscrepanciasMonto[v.id] !== undefined ? Number(punteoDiscrepanciasMonto[v.id]) : Number(v.monto_gs || 0)
+                      totVouchersFisicoGs += m
+                      countVouchersDiscrepantes++
+                    }
+                  })
+
+                  const difVouchersGs = totVouchersFisicoGs - totVouchersEsperadoGs
+
+                  // 5. Doble Control y Conciliación Integral
+                  // A) Cotejo de Sobre de Efectivo: Recibido vs Declarado por Cajero/a
                   const difSobrePyg = recPyg - declPyg
                   const difSobreBrl = recBrl - declBrl
                   const difSobreUsd = recUsd - declUsd
                   const difSobreTotalGs = recTotalGs - declTotalGs
 
-                  // B) Conciliación Contable: Recibido vs Esperado del Sistema
-                  const difAuditoriaGs = recTotalGs - espNetoGs
-                  const estadoAuditoria = Math.abs(difAuditoriaGs) < 5000 ? "CUADRADO" : (difAuditoriaGs > 0 ? "SOBRANTE" : "FALTANTE")
+                  // B) Conciliación de Efectivo en Gaveta
+                  const difEfectivoGs = recTotalGs - espNetoGs
+
+                  // C) Conciliación Total de Caja (Efectivo Gaveta + Comprobantes Físicos)
+                  const totalEsperadoCajaGs = espNetoGs + totVouchersEsperadoGs
+                  const totalRendidoCajaGs = recTotalGs + totVouchersFisicoGs
+                  const difTotalCajaGs = totalRendidoCajaGs - totalEsperadoCajaGs
+
+                  // Dictamen Oficial Integrado (Considera Efectivo Y Comprobantes Faltantes)
+                  const hasFaltante = difTotalCajaGs < -5000 || countVouchersFaltantes > 0 || difVouchersGs < -5000 || difEfectivoGs < -5000
+                  const hasSobrante = difTotalCajaGs > 5000 && countVouchersFaltantes === 0 && difVouchersGs >= 0
+                  const estadoAuditoria = hasFaltante ? "FALTANTE" : hasSobrante ? "SOBRANTE" : "CUADRADO"
 
                   const hasShortageSobre = difSobreTotalGs < -5000
                   const hasSurplusSobre = difSobreTotalGs > 5000
@@ -4725,9 +4759,9 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           <span className="text-[9px] text-slate-400 block">Sangrías confirmadas</span>
                         </div>
                         <div className="p-2 rounded-lg bg-emerald-950/40 border border-emerald-600/50 col-span-2 sm:col-span-1">
-                          <span className="text-[10px] text-emerald-300 uppercase font-black block">Esperado a Rendir</span>
+                          <span className="text-[10px] text-emerald-300 uppercase font-black block">Efectivo Esperado (Gaveta)</span>
                           <span className="font-mono font-black text-emerald-300 text-sm">{formatPYG(espNetoGs)}</span>
-                          <span className="text-[9px] text-emerald-300/80 block font-bold">100% en Guaraníes</span>
+                          <span className="text-[9px] text-emerald-300/80 block font-bold">Neto en Guaraníes</span>
                         </div>
                       </div>
 
@@ -4884,14 +4918,14 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
 
                         {/* Tarjeta 3: Dictamen de Custodia y Comparativo Final */}
                         <div className={`p-3.5 rounded-xl border flex flex-col justify-between space-y-2.5 ${
-                          hasShortageSobre
+                          hasFaltante || hasShortageSobre
                             ? "bg-rose-950/40 border-rose-500/60 ring-1 ring-rose-500/30"
-                            : hasSurplusSobre
+                            : hasSobrante || hasSurplusSobre
                             ? "bg-blue-950/40 border-blue-500/60 ring-1 ring-blue-500/30"
                             : "bg-emerald-950/20 border-emerald-600/40"
                         }`}>
                           <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider">
-                            <span className={hasShortageSobre ? "text-rose-300" : hasSurplusSobre ? "text-blue-300" : "text-emerald-300"}>
+                            <span className={hasFaltante || hasShortageSobre ? "text-rose-300" : hasSobrante || hasSurplusSobre ? "text-blue-300" : "text-emerald-300"}>
                               3. Comparativo y Auditoría
                             </span>
                             <span className="text-[10px] text-slate-400 font-mono">Doble Control</span>
@@ -4925,41 +4959,94 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                               )}
                             </div>
 
-                            {/* Control B: Conciliación Contable contra el Sistema */}
-                            <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800 space-y-1">
-                              <span className="text-[10px] font-bold text-slate-400 uppercase block">B) Conciliación de Caja (Recibido - Esperado)</span>
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-300">Esperado Sistema:</span>
-                                <span className="font-mono text-slate-300">{formatPYG(espNetoGs)}</span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-300 font-bold">Rendido Tesorería:</span>
-                                <span className="font-mono font-black text-white">{formatPYG(recTotalGs)}</span>
-                              </div>
-                              <div className="flex items-center justify-between pt-1 border-t border-slate-800">
-                                <span className="font-bold text-slate-200">Diferencia de Caja:</span>
-                                <span className={`font-mono font-black text-sm ${difAuditoriaGs >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                                  {difAuditoriaGs >= 0 ? `+${formatPYG(difAuditoriaGs)}` : formatPYG(difAuditoriaGs)}
+                            {/* Control B: Conciliación de Valores vs Sistema */}
+                            <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800 space-y-1.5">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase block">B) Conciliación de Valores vs Sistema</span>
+                              
+                              {/* Sub-bloque 1: Efectivo Gaveta */}
+                              <div className="flex items-center justify-between text-[11px] pb-1 border-b border-slate-800/80">
+                                <div>
+                                  <span className="text-slate-300">Efectivo en Gaveta:</span>
+                                  <span className="text-[9px] text-slate-400 block">Esp: {formatPYG(espNetoGs)} | Rend: {formatPYG(recTotalGs)}</span>
+                                </div>
+                                <span className={`font-mono font-bold ${Math.abs(difEfectivoGs) < 5000 ? "text-emerald-400" : difEfectivoGs < 0 ? "text-rose-400" : "text-blue-400"}`}>
+                                  {difEfectivoGs !== 0 ? (difEfectivoGs > 0 ? `+${formatPYG(difEfectivoGs)}` : formatPYG(difEfectivoGs)) : "₲ 0 (Conforme)"}
                                 </span>
+                              </div>
+
+                              {/* Sub-bloque 2: Comprobantes No Efectivo */}
+                              <div className="flex items-center justify-between text-[11px] pb-1 border-b border-slate-800/80">
+                                <div>
+                                  <span className="text-slate-300">Comprobantes (Vouchers):</span>
+                                  <span className="text-[9px] text-slate-400 block">
+                                    Esp: {formatPYG(totVouchersEsperadoGs)} | Físico: {formatPYG(totVouchersFisicoGs)}
+                                  </span>
+                                </div>
+                                <div className="text-right">
+                                  <span className={`font-mono font-bold block ${difVouchersGs === 0 && countVouchersFaltantes === 0 ? "text-emerald-400" : difVouchersGs < 0 ? "text-rose-400" : "text-amber-400"}`}>
+                                    {difVouchersGs !== 0 ? (difVouchersGs > 0 ? `+${formatPYG(difVouchersGs)}` : formatPYG(difVouchersGs)) : "₲ 0 (Conforme)"}
+                                  </span>
+                                  {countVouchersFaltantes > 0 && (
+                                    <span className="text-[9px] text-rose-400 font-bold block">
+                                      ✕ {countVouchersFaltantes} faltante{countVouchersFaltantes !== 1 ? "s" : ""}
+                                    </span>
+                                  )}
+                                  {countVouchersDiscrepantes > 0 && (
+                                    <span className="text-[9px] text-amber-400 font-bold block">
+                                      ≠ {countVouchersDiscrepantes} discrep.
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Sub-bloque 3: Total Turno a Rendir */}
+                              <div className="pt-0.5 space-y-1">
+                                <div className="flex items-center justify-between text-slate-300">
+                                  <span>Esperado Total Turno:</span>
+                                  <span className="font-mono font-bold text-white">{formatPYG(totalEsperadoCajaGs)}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-slate-300">
+                                  <span>Total Físico Auditado:</span>
+                                  <span className="font-mono font-bold text-white">{formatPYG(totalRendidoCajaGs)}</span>
+                                </div>
+                                <div className="flex items-center justify-between pt-1 border-t border-slate-700/80">
+                                  <span className="font-bold text-slate-200">Diferencia Total Caja:</span>
+                                  <span className={`font-mono font-black text-sm ${Math.abs(difTotalCajaGs) < 5000 && countVouchersFaltantes === 0 ? "text-emerald-400" : difTotalCajaGs < 0 || countVouchersFaltantes > 0 ? "text-rose-400" : "text-blue-400"}`}>
+                                    {difTotalCajaGs >= 0 ? `+${formatPYG(difTotalCajaGs)}` : formatPYG(difTotalCajaGs)}
+                                  </span>
+                                </div>
                               </div>
                             </div>
 
                             {/* Banner de Dictamen */}
                             <div>
-                              {hasShortageSobre ? (
+                              {hasFaltante ? (
+                                <div className="p-2 rounded-lg bg-rose-900/60 border border-rose-500 text-rose-200 text-xs font-bold flex items-start gap-2">
+                                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                                  <div>
+                                    <span className="block font-black">🔴 FALTANTE EN CAJA / COMPROBANTES</span>
+                                    <span className="text-[11px] font-normal leading-tight block text-rose-300">
+                                      {countVouchersFaltantes > 0 ? `${countVouchersFaltantes} comprobante(s) faltante(s) (${formatPYG(difVouchersGs)}). ` : ""}
+                                      {difEfectivoGs < -5000 ? `Efectivo en gaveta faltante (${formatPYG(difEfectivoGs)}). ` : ""}
+                                      {hasShortageSobre ? `Faltante en sobre físico (${formatPYG(difSobreTotalGs)}). ` : ""}
+                                      Diferencia Total: <strong>{difTotalCajaGs >= 0 ? `+${formatPYG(difTotalCajaGs)}` : formatPYG(difTotalCajaGs)}</strong>
+                                    </span>
+                                  </div>
+                                </div>
+                              ) : hasSobrante ? (
+                                <div className="p-2 rounded-lg bg-blue-900/60 border border-blue-500 text-blue-200 text-xs font-bold flex items-center gap-2">
+                                  <Info className="w-4 h-4 text-blue-400 shrink-0" />
+                                  <span>🔵 SOBRANTE EN CAJA: +{formatPYG(difTotalCajaGs)}.</span>
+                                </div>
+                              ) : hasShortageSobre ? (
                                 <div className="p-2 rounded-lg bg-rose-900/60 border border-rose-500 text-rose-200 text-xs font-bold flex items-center gap-2">
                                   <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
                                   <span>🔴 FALTANTE EN SOBRE: Vino menos de lo declarado ({formatPYG(difSobreTotalGs)}).</span>
                                 </div>
-                              ) : hasSurplusSobre ? (
-                                <div className="p-2 rounded-lg bg-blue-900/60 border border-blue-500 text-blue-200 text-xs font-bold flex items-center gap-2">
-                                  <Info className="w-4 h-4 text-blue-400 shrink-0" />
-                                  <span>🔵 SOBRANTE EN SOBRE: Vino más de lo declarado (+{formatPYG(difSobreTotalGs)}).</span>
-                                </div>
                               ) : (
                                 <div className="p-2 rounded-lg bg-emerald-900/60 border border-emerald-500 text-emerald-200 text-xs font-bold flex items-center gap-2">
                                   <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
-                                  <span>🟢 SOBRE CONFORME: El conteo físico coincide con lo declarado.</span>
+                                  <span>🟢 CAJA Y COMPROBANTES CONFORMES: Conteo físico coincide plenamente con el sistema.</span>
                                 </div>
                               )}
                             </div>
@@ -4972,7 +5059,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                               estadoAuditoria === "SOBRANTE" ? "bg-blue-500/20 text-blue-300 border border-blue-500/40" :
                               "bg-rose-500/20 text-rose-300 border border-rose-500/40"
                             }`}>
-                              {estadoAuditoria} ({difAuditoriaGs >= 0 ? `+${formatPYG(difAuditoriaGs)}` : formatPYG(difAuditoriaGs)})
+                              {estadoAuditoria} ({difTotalCajaGs >= 0 ? `+${formatPYG(difTotalCajaGs)}` : formatPYG(difTotalCajaGs)})
                             </span>
                           </div>
                         </div>
