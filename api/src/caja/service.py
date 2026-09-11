@@ -1,6 +1,6 @@
 """Caja (Cash Register) service"""
 
-from sqlalchemy import select, func, text, or_
+from sqlalchemy import select, func, text, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timezone, date, timedelta, time
@@ -27,8 +27,127 @@ from api.src.caja.models import (
 )
 from api.src.sales.models import Sale, SalePayment
 from api.src.pos_terminal_transactions.models import PosTerminalTransaction
+from api.src.plugpay.models import PlugpayTransaction
 from api.src.financial.models import BankAccount, BankTransaction
 from api.src.auth.models import User
+
+# Canales de pago oficiales desglosados aceptados en Extra Supermercado
+PAYMENT_CHANNEL_DEFINITIONS = [
+    ("EFECTIVO_PYG", "Efectivo Gs.", "efectivo", "banknote"),
+    ("EFECTIVO_BRL", "Efectivo R$", "efectivo", "banknote"),
+    ("EFECTIVO_USD", "Efectivo USD", "efectivo", "banknote"),
+    ("BANCARD_DEBITO", "Bancard Tarjeta de Débito", "tarjeta", "credit-card"),
+    ("BANCARD_CREDITO", "Bancard Tarjeta de Crédito", "tarjeta", "credit-card"),
+    ("BANCARD_QR", "Bancard QR", "qr", "qr-code"),
+    ("BANCARD_PIX", "Bancard PIX", "pix", "smartphone"),
+    ("DINELCO_DEBITO", "Dinelco Tarjeta de Débito", "tarjeta", "credit-card"),
+    ("DINELCO_CREDITO", "Dinelco Tarjeta de Crédito", "tarjeta", "credit-card"),
+    ("DINELCO_QR", "Dinelco QR", "qr", "qr-code"),
+    ("DINELCO_PIX", "Dinelco PIX", "pix", "smartphone"),
+    ("PLUGPAY_PIX", "Plug Pay PIX", "pix", "smartphone"),
+    ("PLUGPAY_CREDITO", "Plug Pay Crédito Parcelado", "credito_parcelado", "calendar"),
+    ("EXTRA_CLUB", "Extra Club", "credito", "award"),
+    ("TRANSFERENCIA", "Transferencia Bancaria", "transferencia", "landmark"),
+    ("CHEQUES", "Cheques / Vales", "cheque", "file-check"),
+    ("OTROS", "Otros Medios", "otros", "file-text"),
+]
+
+PAYMENT_CHANNEL_MAP = {c[0]: c for c in PAYMENT_CHANNEL_DEFINITIONS}
+
+
+def classify_payment_channel(
+    forma_pago: str | None,
+    moneda: str | None,
+    pos_op: str | None = None,
+    pos_nombre: str | None = None,
+    plug_op: str | None = None,
+) -> tuple[str, str, str, str]:
+    """Clasifica un cobro en su canal específico según la taxonomía oficial de canales de pago.
+    Retorna (canal_key, canal_label, tipo_categoria, icon).
+    """
+    fp = (forma_pago or "").upper().strip()
+    mon = (moneda or "PYG").upper().strip()
+    pos = (pos_op or "").lower().strip()
+    plug = (plug_op or "").lower().strip()
+
+    if fp in ("EFECTIVO", "CASH") or "EFECTIVO" in fp:
+        if mon == "PYG":
+            return PAYMENT_CHANNEL_MAP["EFECTIVO_PYG"]
+        elif mon == "BRL":
+            return PAYMENT_CHANNEL_MAP["EFECTIVO_BRL"]
+        elif mon == "USD":
+            return PAYMENT_CHANNEL_MAP["EFECTIVO_USD"]
+        return PAYMENT_CHANNEL_MAP["EFECTIVO_PYG"]
+
+    # 1. Transacciones PlugPay directas
+    if plug == "credito_parcelado" or "PLUGPAY_CREDITO" in fp or "PARCELADO" in fp:
+        return PAYMENT_CHANNEL_MAP["PLUGPAY_CREDITO"]
+    if plug == "pix" or "PLUGPAY_PIX" in fp:
+        return PAYMENT_CHANNEL_MAP["PLUGPAY_PIX"]
+
+    # 2. Transacciones POS Terminal registradas (Bancard / Dinelco)
+    if pos:
+        if pos == "dinelco_pix":
+            return PAYMENT_CHANNEL_MAP["DINELCO_PIX"]
+        elif pos == "dinelco_qr":
+            return PAYMENT_CHANNEL_MAP["DINELCO_QR"]
+        elif pos in ("dinelco_venta_debito", "dinelco_venta_social"):
+            return PAYMENT_CHANNEL_MAP["DINELCO_DEBITO"]
+        elif pos in ("dinelco_venta_credito",):
+            return PAYMENT_CHANNEL_MAP["DINELCO_CREDITO"]
+        elif pos == "venta_qr_pix":
+            return PAYMENT_CHANNEL_MAP["BANCARD_PIX"]
+        elif pos in ("venta_qr", "venta_qr_hub", "venta_qr_arg"):
+            return PAYMENT_CHANNEL_MAP["BANCARD_QR"]
+        elif pos == "venta_debito":
+            return PAYMENT_CHANNEL_MAP["BANCARD_DEBITO"]
+        elif pos in ("venta_credito", "venta_credito_3cuotas", "venta_credito_12cuotas"):
+            return PAYMENT_CHANNEL_MAP["BANCARD_CREDITO"]
+
+    # 3. Clasificación por forma de pago declarada en venta
+    if "EXTRA_CLUB" in fp or "CLUB" in fp:
+        return PAYMENT_CHANNEL_MAP["EXTRA_CLUB"]
+
+    if "DINELCO" in fp:
+        if "PIX" in fp:
+            return PAYMENT_CHANNEL_MAP["DINELCO_PIX"]
+        elif "QR" in fp:
+            return PAYMENT_CHANNEL_MAP["DINELCO_QR"]
+        elif "CREDITO" in fp:
+            return PAYMENT_CHANNEL_MAP["DINELCO_CREDITO"]
+        else:
+            return PAYMENT_CHANNEL_MAP["DINELCO_DEBITO"]
+
+    if "BANCARD" in fp:
+        if "PIX" in fp:
+            return PAYMENT_CHANNEL_MAP["BANCARD_PIX"]
+        elif "QR" in fp:
+            return PAYMENT_CHANNEL_MAP["BANCARD_QR"]
+        elif "CREDITO" in fp:
+            return PAYMENT_CHANNEL_MAP["BANCARD_CREDITO"]
+        else:
+            return PAYMENT_CHANNEL_MAP["BANCARD_DEBITO"]
+
+    if "PIX" in fp:
+        return PAYMENT_CHANNEL_MAP["PLUGPAY_PIX"]
+
+    if "QR" in fp:
+        return PAYMENT_CHANNEL_MAP["BANCARD_QR"]
+
+    if "CREDITO" in fp:
+        return PAYMENT_CHANNEL_MAP["BANCARD_CREDITO"]
+
+    if "DEBITO" in fp or "TARJETA" in fp:
+        return PAYMENT_CHANNEL_MAP["BANCARD_DEBITO"]
+
+    if "TRANSFERENCIA" in fp or "TRANF" in fp or "SIPAP" in fp:
+        return PAYMENT_CHANNEL_MAP["TRANSFERENCIA"]
+
+    if "CHEQUE" in fp or "VALE" in fp:
+        return PAYMENT_CHANNEL_MAP["CHEQUES"]
+
+    return PAYMENT_CHANNEL_MAP["OTROS"]
+
 
 
 async def list_registers(db: AsyncSession, company_id: str, branch_id: str | None = None) -> list[CashRegister]:
@@ -368,8 +487,8 @@ async def get_effective_exchange_rates_for_session(db: AsyncSession, session_id:
 def _format_two_col(left: str, right: str, width: int = 42) -> str:
     space = width - len(left) - len(right)
     if space < 1:
-        left = left[:max(1, width - len(right) - 1)]
-        space = 1
+        indent = " " * max(0, width - len(right))
+        return f"{left}\n{indent}{right}"
     return left + (" " * space) + right
 
 
@@ -411,13 +530,15 @@ def generate_cierre_escpos(recon: dict) -> dict:
         lines.append(_format_two_col("  Fondo Inicial US$:", f"US$ {recon['fondo_usd']:,.2f}", W))
     lines.append("-" * W)
 
-    # 2. Comprobantes de Pago No Efectivo (para cotejo físico)
+    # 2. Comprobantes de Pago No Efectivo (para cotejo físico individual)
     lines.append("[2. COMPROBANTES DE PAGO NO EFECTIVO]")
     medios_no_ef = [item for item in recon.get("medios_pago_detallados", []) if "EFECTIVO" not in item.get("clave", "")]
     tot_no_ef_gs = sum(item["monto_gs"] for item in medios_no_ef)
     if medios_no_ef:
         for item in medios_no_ef:
-            lines.append(_format_two_col(f"  {item['label']}:", item['monto_formateado'], W))
+            cant = item.get("cantidad", 0)
+            cant_str = f" ({cant})" if cant > 0 else ""
+            lines.append(_format_two_col(f"  {item['label']}{cant_str}:", item['monto_formateado'], W))
         lines.append("-" * W)
         lines.append(_format_two_col("  Total Comprobantes:", f"{tot_no_ef_gs:,.0f} Gs.", W))
     else:
@@ -532,133 +653,127 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     # Tasas efectivas
     tasa_brl, tasa_usd = await get_effective_exchange_rates_for_session(db, session_obj.id, session_obj.fecha_apertura)
 
-    # Ventas totales
+    # Ventas totales y IDs
     sales_res = await db.execute(
-        select(
-            func.count(Sale.id).label("total_ventas"),
-            func.coalesce(func.sum(Sale.total), 0).label("total_cobrado"),
-            func.coalesce(func.sum(Sale.monto_donacion), 0).label("total_donaciones"),
-        ).where(
-            Sale.session_id == session_obj.id,
-            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
-        )
-    )
-    sales_row = sales_res.first()
-
-    # Formas de pago
-    payments_res = await db.execute(
-        select(
-            SalePayment.forma_pago,
-            SalePayment.moneda,
-            func.count().label("cantidad"),
-            func.coalesce(func.sum(SalePayment.monto), 0).label("monto"),
-        )
-        .select_from(SalePayment)
-        .join(Sale, Sale.id == SalePayment.sale_id)
+        select(Sale.id, Sale.total)
         .where(
             Sale.session_id == session_obj.id,
             Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
         )
-        .group_by(SalePayment.forma_pago, SalePayment.moneda)
-        .order_by(func.sum(SalePayment.monto).desc())
     )
-    payments_rows = payments_res.all()
+    sales_rows = sales_res.all()
+    sale_ids = [r[0] for r in sales_rows]
+    total_cobrado_gs = sum(Decimal(str(r[1] or 0)) for r in sales_rows)
+    total_ventas_count = len(sales_rows)
 
-    # Clasificación individualizada
+    # Formas de pago y transacciones vinculadas
+    if sale_ids:
+        payments_res = await db.execute(
+            select(SalePayment)
+            .where(SalePayment.sale_id.in_(sale_ids))
+            .order_by(SalePayment.fecha.asc())
+        )
+        payments_rows = list(payments_res.scalars().all())
+
+        pos_res = await db.execute(
+            select(PosTerminalTransaction).where(PosTerminalTransaction.sale_id.in_(sale_ids), PosTerminalTransaction.exitosa == True)
+        )
+        pos_map = {r.sale_id: r for r in pos_res.scalars().all()}
+
+        try:
+            plug_res = await db.execute(
+                select(PlugpayTransaction).where(PlugpayTransaction.sale_id.in_(sale_ids), PlugpayTransaction.exitosa == True)
+            )
+            plug_map = {r.sale_id: r for r in plug_res.scalars().all()}
+        except Exception:
+            plug_map = {}
+    else:
+        payments_rows = []
+        pos_map = {}
+        plug_map = {}
+
+    # Acumuladores de canales desglosados
+    channels_accum = {
+        ckey: {
+            "clave": ckey,
+            "label": clabel,
+            "tipo": ctipo,
+            "icon": cicon,
+            "cantidad": 0,
+            "monto_orig": Decimal("0"),
+            "monto_gs": Decimal("0"),
+            "moneda": "PYG" if "PYG" in ckey else ("BRL" if "BRL" in ckey else ("USD" if "USD" in ckey else "PYG")),
+        }
+        for ckey, clabel, ctipo, cicon in PAYMENT_CHANNEL_DEFINITIONS
+    }
+
     efectivo_pyg = Decimal("0")
     efectivo_brl = Decimal("0")
     efectivo_usd = Decimal("0")
-    
-    medios_individuales = {
-        "TARJETA_BANCARD": {"label": "Bancard Tarjeta", "cantidad": 0, "monto_gs": Decimal("0")},
-        "TARJETA_DINELCO": {"label": "Dinelco Tarjeta", "cantidad": 0, "monto_gs": Decimal("0")},
-        "BANCARD_QR": {"label": "Bancard QR", "cantidad": 0, "monto_gs": Decimal("0")},
-        "DINELCO_QR": {"label": "Dinelco QR", "cantidad": 0, "monto_gs": Decimal("0")},
-        "PIX": {"label": "PIX Brasil", "cantidad": 0, "monto_gs": Decimal("0")},
-        "EXTRA_CLUB": {"label": "Extra Club (Crédito)", "cantidad": 0, "monto_gs": Decimal("0")},
-        "VALES": {"label": "Vales / Cheques", "cantidad": 0, "monto_gs": Decimal("0")},
-        "TRANSFERENCIA": {"label": "Transferencia Bancaria", "cantidad": 0, "monto_gs": Decimal("0")},
-        "OTROS": {"label": "Otros Medios", "cantidad": 0, "monto_gs": Decimal("0")},
-    }
 
-    desglose_detallado = []
+    for p in payments_rows:
+        pos = pos_map.get(p.sale_id)
+        plug = plug_map.get(p.sale_id)
+        pos_op = pos.tipo_operacion if pos else None
+        pos_nombre = pos.nombre_tarjeta if pos else None
+        plug_op = plug.tipo_operacion if plug else None
 
-    for fp_raw, mon, cant, m in payments_rows:
-        fp_upper = (fp_raw or "").upper()
-        m_dec = Decimal(str(m))
+        ckey, clabel, ctipo, cicon = classify_payment_channel(p.forma_pago, p.moneda, pos_op, pos_nombre, plug_op)
+        m_dec = Decimal(str(p.monto or 0))
+        mon = (p.moneda or "PYG").upper()
 
-        if fp_upper == "EFECTIVO":
-            if mon == "PYG":
-                efectivo_pyg += m_dec
-            elif mon == "BRL":
-                efectivo_brl += m_dec
-            elif mon == "USD":
-                efectivo_usd += m_dec
-            continue
+        if ckey == "EFECTIVO_PYG":
+            efectivo_pyg += m_dec
+        elif ckey == "EFECTIVO_BRL":
+            efectivo_brl += m_dec
+        elif ckey == "EFECTIVO_USD":
+            efectivo_usd += m_dec
 
-        # Convertir a Gs si el medio estuviera en divisa
         m_gs = m_dec * tasa_brl if mon == "BRL" else (m_dec * tasa_usd if mon == "USD" else m_dec)
 
-        if "DINELCO" in fp_upper and ("QR" in fp_upper):
-            medios_individuales["DINELCO_QR"]["cantidad"] += cant
-            medios_individuales["DINELCO_QR"]["monto_gs"] += m_gs
-        elif "QR" in fp_upper:
-            medios_individuales["BANCARD_QR"]["cantidad"] += cant
-            medios_individuales["BANCARD_QR"]["monto_gs"] += m_gs
-        elif "DINELCO" in fp_upper:
-            medios_individuales["TARJETA_DINELCO"]["cantidad"] += cant
-            medios_individuales["TARJETA_DINELCO"]["monto_gs"] += m_gs
-        elif "BANCARD" in fp_upper or "TARJETA" in fp_upper or "DEBITO" in fp_upper or "CREDITO" in fp_upper:
-            medios_individuales["TARJETA_BANCARD"]["cantidad"] += cant
-            medios_individuales["TARJETA_BANCARD"]["monto_gs"] += m_gs
-        elif "PIX" in fp_upper:
-            medios_individuales["PIX"]["cantidad"] += cant
-            medios_individuales["PIX"]["monto_gs"] += m_gs
-        elif "EXTRA_CLUB" in fp_upper:
-            medios_individuales["EXTRA_CLUB"]["cantidad"] += cant
-            medios_individuales["EXTRA_CLUB"]["monto_gs"] += m_gs
-        elif "VALE" in fp_upper or "CHEQUE" in fp_upper:
-            medios_individuales["VALES"]["cantidad"] += cant
-            medios_individuales["VALES"]["monto_gs"] += m_gs
-        elif "TRANSFERENCIA" in fp_upper:
-            medios_individuales["TRANSFERENCIA"]["cantidad"] += cant
-            medios_individuales["TRANSFERENCIA"]["monto_gs"] += m_gs
+        if ckey not in channels_accum:
+            channels_accum[ckey] = {
+                "clave": ckey,
+                "label": clabel,
+                "tipo": ctipo,
+                "icon": cicon,
+                "cantidad": 0,
+                "monto_orig": Decimal("0"),
+                "monto_gs": Decimal("0"),
+                "moneda": mon,
+            }
+
+        channels_accum[ckey]["cantidad"] += 1
+        channels_accum[ckey]["monto_orig"] += m_dec
+        channels_accum[ckey]["monto_gs"] += m_gs
+
+    # Desglose detallado: SOLO canales con movimientos ("Si no hay movimientos en los medios de pago, no se listan y punto")
+    desglose_detallado = []
+    for ckey, clabel, ctipo, cicon in PAYMENT_CHANNEL_DEFINITIONS:
+        data = channels_accum.get(ckey)
+        if not data or (data["cantidad"] == 0 and data["monto_gs"] == 0):
+            continue
+
+        if ckey == "EFECTIVO_PYG":
+            fmt = f"{data['monto_gs']:,.0f} Gs."
+        elif ckey == "EFECTIVO_BRL":
+            fmt = f"R$ {data['monto_orig']:,.2f} ({data['monto_gs']:,.0f} Gs.)"
+        elif ckey == "EFECTIVO_USD":
+            fmt = f"US$ {data['monto_orig']:,.2f} ({data['monto_gs']:,.0f} Gs.)"
         else:
-            medios_individuales["OTROS"]["cantidad"] += cant
-            medios_individuales["OTROS"]["monto_gs"] += m_gs
+            fmt = f"{data['monto_gs']:,.0f} Gs."
 
-    # Agregar efectivo a la lista de presentación
-    desglose_detallado.append({
-        "clave": "EFECTIVO_PYG",
-        "label": "Efectivo Gs.",
-        "monto_formateado": f"{efectivo_pyg:,.0f} Gs.",
-        "monto_gs": float(efectivo_pyg),
-    })
-    if efectivo_brl > 0:
-        brl_gs = efectivo_brl * tasa_brl
         desglose_detallado.append({
-            "clave": "EFECTIVO_BRL",
-            "label": "Efectivo R$",
-            "monto_formateado": f"R$ {efectivo_brl:,.2f} ({brl_gs:,.0f} Gs.)",
-            "monto_gs": float(brl_gs),
+            "clave": ckey,
+            "label": clabel,
+            "tipo": ctipo,
+            "icon": cicon,
+            "cantidad": data["cantidad"],
+            "monto_orig": float(data["monto_orig"]),
+            "monto_gs": float(data["monto_gs"]),
+            "monto_formateado": fmt,
+            "moneda": data["moneda"],
         })
-    if efectivo_usd > 0:
-        usd_gs = efectivo_usd * tasa_usd
-        desglose_detallado.append({
-            "clave": "EFECTIVO_USD",
-            "label": "Efectivo US$",
-            "monto_formateado": f"US$ {efectivo_usd:,.2f} ({usd_gs:,.0f} Gs.)",
-            "monto_gs": float(usd_gs),
-        })
-
-    for k, v in medios_individuales.items():
-        if v["monto_gs"] > 0 or v["cantidad"] > 0:
-            desglose_detallado.append({
-                "clave": k,
-                "label": f"{v['label']} ({v['cantidad']})",
-                "monto_formateado": f"{v['monto_gs']:,.0f} Gs.",
-                "monto_gs": float(v["monto_gs"]),
-            })
 
     # Drops confirmados
     drops_res = await db.execute(
@@ -670,12 +785,12 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     d_usd = sum(Decimal(str(d.monto_confirmado_usd or d.monto_usd or 0)) for d in drops if d.estado == "confirmado")
     total_drops_gs = d_pyg + (d_brl * tasa_brl) + (d_usd * tasa_usd)
 
-    # Total recaudado por medios no efectivo (Tarjetas, QR, Extra Club, etc.)
-    total_no_efectivo_gs = sum(v["monto_gs"] for v in medios_individuales.values())
-    total_cobrado_gs = Decimal(str(sales_row.total_cobrado or 0))
-
-    # Ventas en efectivo netas consolidadas (el efectivo neto que ingresó a la gaveta por ventas,
-    # compensando automáticamente cualquier vuelto entregado en Guaraníes por cobros en divisa)
+    # Total recaudado por medios no efectivo desglosados (Tarjetas Débito/Crédito, QR, PIX, etc.)
+    total_no_efectivo_gs = sum(
+        Decimal(str(d["monto_gs"]))
+        for d in desglose_detallado
+        if "EFECTIVO" not in d["clave"]
+    )
     ventas_ef_total_gs = max(Decimal("0"), total_cobrado_gs - total_no_efectivo_gs)
 
     # Fondos iniciales (Regla inmutable: cajera no supervisora siempre abre con Gs. 500.000 y R$ 300; supervisoras abren sin inicial)
@@ -795,8 +910,8 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         "contado_usd_gs": float(contado_usd_gs),
         "contado_total_gs": float(contado_total_gs),
         "diferencia_consolidada_gs": float(diferencia_consolidada_gs),
-        "total_ventas_count": sales_row.total_ventas if sales_row else 0,
-        "total_cobrado_gs": float(sales_row.total_cobrado if sales_row else 0),
+        "total_ventas_count": total_ventas_count,
+        "total_cobrado_gs": float(total_cobrado_gs),
         "terminales_operadas": terminales_operadas,
         "medios_pago_detallados": desglose_detallado,
         "desglose_detallado": desglose_detallado,
@@ -1322,45 +1437,40 @@ async def get_session_sales_detail(db: AsyncSession, session_id: str, company_id
 
 
 async def get_session_payment_breakdown(db: AsyncSession, session_id: str) -> dict:
-    """Desglose por forma de pago. Se separa PYG (base de los % mostrados) de
-    otras monedas (USD/BRL) — mezclarlas en un mismo total daria un porcentaje
-    sin sentido, ya que el legado tampoco convierte esos montos."""
-    result = await db.execute(
-        select(
-            SalePayment.forma_pago,
-            SalePayment.moneda,
-            func.count().label("cantidad"),
-            func.sum(SalePayment.monto).label("monto"),
-        )
-        .select_from(SalePayment)
-        .join(Sale, Sale.id == SalePayment.sale_id)
-        .where(Sale.session_id == uuid.UUID(session_id))
-        .group_by(SalePayment.forma_pago, SalePayment.moneda)
-        .order_by(func.sum(SalePayment.monto).desc())
-    )
-    rows = result.all()
-    pyg_rows = [r for r in rows if r.moneda == "PYG"]
-    otras_rows = [r for r in rows if r.moneda != "PYG"]
-    total_pyg = float(sum(r.monto for r in pyg_rows)) or 1
+    """Desglose por canal de pago individualizado según la taxonomía oficial de Extra Supermercado.
+    Excluye canales sin movimientos."""
+    recon = await get_session_reconciliation_data(db, session_id)
+    if not recon:
+        return {"pyg": [], "otras_monedas": []}
+
+    medios = recon.get("medios_pago_detallados", [])
+    tot_gs = float(recon.get("total_cobrado_gs") or 1)
+
+    pyg_list = []
+    otras_list = []
+
+    for m in medios:
+        mon = m.get("moneda", "PYG")
+        m_gs = float(m.get("monto_gs") or 0)
+        pct = round((m_gs / tot_gs) * 100, 1) if tot_gs > 0 else 0.0
+
+        item = {
+            "forma_pago": m.get("label"),
+            "clave": m.get("clave"),
+            "cantidad": m.get("cantidad", 0),
+            "monto": m_gs,
+            "porcentaje": pct,
+        }
+        if mon == "PYG":
+            pyg_list.append(item)
+        else:
+            item["monto_original"] = float(m.get("monto_orig") or 0)
+            item["moneda"] = mon
+            otras_list.append(item)
+
     return {
-        "pyg": [
-            {
-                "forma_pago": r.forma_pago,
-                "cantidad": r.cantidad,
-                "monto": float(r.monto),
-                "porcentaje": round((float(r.monto) / total_pyg) * 100, 1),
-            }
-            for r in pyg_rows
-        ],
-        "otras_monedas": [
-            {
-                "forma_pago": r.forma_pago,
-                "moneda": r.moneda,
-                "cantidad": r.cantidad,
-                "monto": float(r.monto),
-            }
-            for r in otras_rows
-        ],
+        "pyg": pyg_list,
+        "otras_monedas": otras_list,
     }
 
 
@@ -2802,16 +2912,19 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             Sale.tipo_comprobante,
             Sale.observaciones.label("sale_obs"),
             PosTerminalTransaction.id.label("pos_txn_id"),
+            PosTerminalTransaction.tipo_operacion.label("pos_tipo_operacion"),
             PosTerminalTransaction.codigo_autorizacion,
             PosTerminalTransaction.nsu,
             PosTerminalTransaction.nombre_tarjeta,
             PosTerminalTransaction.pan,
             PosTerminalTransaction.nombre_cliente,
             PosTerminalTransaction.raw_response,
+            PlugpayTransaction.tipo_operacion.label("plug_tipo_operacion"),
         )
         .select_from(SalePayment)
         .join(Sale, Sale.id == SalePayment.sale_id)
-        .outerjoin(PosTerminalTransaction, PosTerminalTransaction.sale_id == Sale.id)
+        .outerjoin(PosTerminalTransaction, and_(PosTerminalTransaction.sale_id == Sale.id, PosTerminalTransaction.exitosa == True))
+        .outerjoin(PlugpayTransaction, and_(PlugpayTransaction.sale_id == Sale.id, PlugpayTransaction.exitosa == True))
         .where(
             Sale.session_id == sid,
             Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
@@ -2864,15 +2977,16 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
 
     vouchers = []
     vouchers_by_channel: dict[str, dict] = {
-        "TARJETA_BANCARD": {"canal_key": "TARJETA_BANCARD", "canal_label": "Tarjetas Bancard POS", "icon": "credit-card", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
-        "TARJETA_DINELCO": {"canal_key": "TARJETA_DINELCO", "canal_label": "Tarjetas Dinelco POS", "icon": "credit-card", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
-        "BANCARD_QR": {"canal_key": "BANCARD_QR", "canal_label": "Bancard QR", "icon": "qr-code", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
-        "DINELCO_QR": {"canal_key": "DINELCO_QR", "canal_label": "Dinelco QR", "icon": "qr-code", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
-        "PIX": {"canal_key": "PIX", "canal_label": "PIX Brasil", "icon": "smartphone", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
-        "TRANSFERENCIA": {"canal_key": "TRANSFERENCIA", "canal_label": "Transferencias SIPAP", "icon": "landmark", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
-        "EXTRA_CLUB": {"canal_key": "EXTRA_CLUB", "canal_label": "Crédito Extra Club", "icon": "award", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
-        "VALES": {"canal_key": "VALES", "canal_label": "Vales & Cheques", "icon": "file-check", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
-        "OTROS": {"canal_key": "OTROS", "canal_label": "Otros Comprobantes", "icon": "file-text", "total_esperado_gs": 0.0, "cantidad_esperada": 0, "vouchers": []},
+        ckey: {
+            "canal_key": ckey,
+            "canal_label": clabel,
+            "icon": cicon,
+            "total_esperado_gs": 0.0,
+            "cantidad_esperada": 0,
+            "vouchers": [],
+        }
+        for ckey, clabel, ctipo, cicon in PAYMENT_CHANNEL_DEFINITIONS
+        if "EFECTIVO" not in ckey
     }
 
     used_pos_ids = set()
@@ -2889,33 +3003,10 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         mon = (row.moneda or "PYG").upper()
         m_dec = Decimal(str(row.monto or 0))
 
-        if "DINELCO" in fp_raw and "QR" in fp_raw:
-            medio_label = "Dinelco QR"
-            canal_key = "DINELCO_QR"
-        elif "QR" in fp_raw:
-            medio_label = "Bancard QR"
-            canal_key = "BANCARD_QR"
-        elif "DINELCO" in fp_raw:
-            medio_label = "Tarjeta Dinelco"
-            canal_key = "TARJETA_DINELCO"
-        elif "BANCARD" in fp_raw or "TARJETA" in fp_raw or "DEBITO" in fp_raw or "CREDITO" in fp_raw:
-            medio_label = "Tarjeta Bancard"
-            canal_key = "TARJETA_BANCARD"
-        elif "PIX" in fp_raw:
-            medio_label = "PIX Brasil"
-            canal_key = "PIX"
-        elif "EXTRA_CLUB" in fp_raw:
-            medio_label = "Extra Club (Crédito)"
-            canal_key = "EXTRA_CLUB"
-        elif "VALE" in fp_raw or "CHEQUE" in fp_raw:
-            medio_label = "Vale / Cheque"
-            canal_key = "VALES"
-        elif "TRANSFERENCIA" in fp_raw:
-            medio_label = "Transferencia Bancaria"
-            canal_key = "TRANSFERENCIA"
-        else:
-            medio_label = row.forma_pago
-            canal_key = "OTROS"
+        pos_op = getattr(row, "pos_tipo_operacion", None)
+        pos_nom = getattr(row, "nombre_tarjeta", None)
+        plug_op = getattr(row, "plug_tipo_operacion", None)
+        canal_key, medio_label, _, _ = classify_payment_channel(fp_raw, row.moneda, pos_op, pos_nom, plug_op)
 
         if mon == "PYG":
             m_gs = m_dec
@@ -2976,6 +3067,8 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
                 tarjeta_marca = best_match.nombre_tarjeta or tarjeta_marca
                 tarjeta_pan = best_match.pan or tarjeta_pan
                 titular = best_match.nombre_cliente or titular
+                if best_match.tipo_operacion:
+                    canal_key, medio_label, _, _ = classify_payment_channel(fp_raw, row.moneda, best_match.tipo_operacion, best_match.nombre_tarjeta)
                 if best_match.raw_response and isinstance(best_match.raw_response, dict):
                     raw = best_match.raw_response
                     nro_boleta = raw.get("nroBoleta") or raw.get("nro_boleta") or raw.get("boleta") or raw.get("ticket_numero")
@@ -3069,9 +3162,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         for k, v in vouchers_by_channel.items()
         if v["cantidad_esperada"] > 0
     }
-    summary_final = medios_dict if any(v.get("cantidad", 0) > 0 for v in medios_dict.values()) else summary_por_canal
-    if not summary_final:
-        summary_final = summary_por_canal
+    summary_final = summary_por_canal
 
     res_h = await db.execute(
         select(CashHandoff).where(CashHandoff.session_id == sid).order_by(CashHandoff.created_at.desc()).limit(1)
@@ -3453,110 +3544,101 @@ async def get_sales_by_payment_method_report(
     fecha_desde: date | datetime | str,
     fecha_hasta: date | datetime | str,
 ) -> dict:
-    """Reporte de recaudación agrupado por medios de pago para arqueo de caja y tesorería."""
+    """Reporte de recaudación agrupado por canales de pago desglosados para arqueo y tesorería."""
     dt_desde, dt_hasta = _parse_range_asuncion(fecha_desde, fecha_hasta)
-    comp_uuid = uuid.UUID(company_id)
+    comp_uuid = uuid.UUID(str(company_id))
 
+    # Consultar agrupando por forma_pago, moneda, tipo_operacion de POS y PlugPay
     query = (
         select(
             SalePayment.forma_pago,
             SalePayment.moneda,
+            PosTerminalTransaction.tipo_operacion.label("pos_op"),
+            PosTerminalTransaction.nombre_tarjeta.label("pos_nombre"),
+            PlugpayTransaction.tipo_operacion.label("plug_op"),
             func.count(SalePayment.id).label("cantidad_operaciones"),
             func.coalesce(func.sum(SalePayment.monto), 0).label("monto_total"),
         )
         .select_from(SalePayment)
         .join(Sale, Sale.id == SalePayment.sale_id)
+        .outerjoin(PosTerminalTransaction, and_(PosTerminalTransaction.sale_id == Sale.id, PosTerminalTransaction.exitosa == True))
+        .outerjoin(PlugpayTransaction, and_(PlugpayTransaction.sale_id == Sale.id, PlugpayTransaction.exitosa == True))
         .where(
             Sale.company_id == comp_uuid,
             Sale.fecha >= dt_desde,
             Sale.fecha <= dt_hasta,
             Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
         )
-        .group_by(SalePayment.forma_pago, SalePayment.moneda)
-        .order_by(func.coalesce(func.sum(SalePayment.monto), 0).desc())
+        .group_by(
+            SalePayment.forma_pago,
+            SalePayment.moneda,
+            PosTerminalTransaction.tipo_operacion,
+            PosTerminalTransaction.nombre_tarjeta,
+            PlugpayTransaction.tipo_operacion,
+        )
     )
 
     result = await db.execute(query)
     rows = result.all()
 
-    methods_dict = {
-        "efectivo_pyg": {"label": "Efectivo Guaraníes (₲)", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
-        "efectivo_brl": {"label": "Efectivo Reales (R$)", "moneda": "BRL", "monto": Decimal("0"), "operaciones": 0},
-        "efectivo_usd": {"label": "Efectivo Dólares (US$)", "moneda": "USD", "monto": Decimal("0"), "operaciones": 0},
-        "bancard": {"label": "Tarjetas Bancard (Débito/Crédito)", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
-        "dinelco": {"label": "Tarjetas Dinelco", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
-        "qr": {"label": "Pagos con Código QR", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
-        "pix": {"label": "Transferencia PIX Brasil", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
-        "transferencia": {"label": "Transferencia Bancaria / SIPAP", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
-        "extra_club": {"label": "Crédito Extra Club / Vales Convenios", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
-        "cheque": {"label": "Cheques Recibidos", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
-        "otros": {"label": "Otros Medios de Pago", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
+    channels_accum = {
+        ckey: {
+            "key": ckey,
+            "label": clabel,
+            "moneda": "PYG" if "PYG" in ckey else ("BRL" if "BRL" in ckey else ("USD" if "USD" in ckey else "PYG")),
+            "monto": Decimal("0"),
+            "operaciones": 0,
+        }
+        for ckey, clabel, ctipo, cicon in PAYMENT_CHANNEL_DEFINITIONS
     }
 
     total_recaudado_pyg = Decimal("0")
     total_operaciones = 0
+    efectivo_brl_tot = Decimal("0")
+    efectivo_usd_tot = Decimal("0")
 
     for r in rows:
-        fp = (r.forma_pago or "").upper()
-        mon = (r.moneda or "PYG").upper()
+        ckey, clabel, ctipo, cicon = classify_payment_channel(
+            r.forma_pago, r.moneda, r.pos_op, r.pos_nombre, r.plug_op
+        )
         m = Decimal(str(r.monto_total or 0))
         ops = int(r.cantidad_operaciones or 0)
+
+        if ckey not in channels_accum:
+            channels_accum[ckey] = {
+                "key": ckey,
+                "label": clabel,
+                "moneda": r.moneda or "PYG",
+                "monto": Decimal("0"),
+                "operaciones": 0,
+            }
+
+        channels_accum[ckey]["monto"] += m
+        channels_accum[ckey]["operaciones"] += ops
         total_operaciones += ops
 
-        if "EFECTIVO" in fp:
-            if mon == "BRL":
-                methods_dict["efectivo_brl"]["monto"] += m
-                methods_dict["efectivo_brl"]["operaciones"] += ops
-            elif mon == "USD":
-                methods_dict["efectivo_usd"]["monto"] += m
-                methods_dict["efectivo_usd"]["operaciones"] += ops
-            else:
-                methods_dict["efectivo_pyg"]["monto"] += m
-                methods_dict["efectivo_pyg"]["operaciones"] += ops
-                total_recaudado_pyg += m
-        elif "DINELCO" in fp and "QR" not in fp:
-            methods_dict["dinelco"]["monto"] += m
-            methods_dict["dinelco"]["operaciones"] += ops
-            total_recaudado_pyg += m
-        elif any(t in fp for t in ["BANCARD", "TARJETA", "DEBITO", "CREDITO"]) and "QR" not in fp:
-            methods_dict["bancard"]["monto"] += m
-            methods_dict["bancard"]["operaciones"] += ops
-            total_recaudado_pyg += m
-        elif "PIX" in fp:
-            methods_dict["pix"]["monto"] += m
-            methods_dict["pix"]["operaciones"] += ops
-            total_recaudado_pyg += m
-        elif "QR" in fp:
-            methods_dict["qr"]["monto"] += m
-            methods_dict["qr"]["operaciones"] += ops
-            total_recaudado_pyg += m
-        elif any(t in fp for t in ["TRANSFERENCIA", "TRANSF", "SIPAP"]):
-            methods_dict["transferencia"]["monto"] += m
-            methods_dict["transferencia"]["operaciones"] += ops
-            total_recaudado_pyg += m
-        elif any(t in fp for t in ["EXTRA_CLUB", "CLUB", "CREDITO", "VALE", "CONVENIO"]):
-            methods_dict["extra_club"]["monto"] += m
-            methods_dict["extra_club"]["operaciones"] += ops
-            total_recaudado_pyg += m
-        elif "CHEQUE" in fp:
-            methods_dict["cheque"]["monto"] += m
-            methods_dict["cheque"]["operaciones"] += ops
-            total_recaudado_pyg += m
-        else:
-            methods_dict["otros"]["monto"] += m
-            methods_dict["otros"]["operaciones"] += ops
+        if ckey == "EFECTIVO_BRL":
+            efectivo_brl_tot += m
+        elif ckey == "EFECTIVO_USD":
+            efectivo_usd_tot += m
+        elif channels_accum[ckey]["moneda"] == "PYG":
             total_recaudado_pyg += m
 
+    # Solo canales con movimientos ("Si no hay movimientos en los medios de pago, no se listan y punto")
     breakdown = []
-    for k, v in methods_dict.items():
-        m_val = float(v["monto"])
-        pct = float((v["monto"] / total_recaudado_pyg) * 100) if (total_recaudado_pyg > 0 and v["moneda"] == "PYG") else 0.0
+    for ckey, clabel, ctipo, cicon in PAYMENT_CHANNEL_DEFINITIONS:
+        data = channels_accum.get(ckey)
+        if not data or (data["operaciones"] == 0 and data["monto"] == 0):
+            continue
+
+        m_val = float(data["monto"])
+        pct = float((data["monto"] / total_recaudado_pyg) * 100) if (total_recaudado_pyg > 0 and data["moneda"] == "PYG") else 0.0
         breakdown.append({
-            "key": k,
-            "label": v["label"],
-            "moneda": v["moneda"],
+            "key": ckey,
+            "label": data["label"],
+            "moneda": data["moneda"],
             "monto": m_val,
-            "operaciones": v["operaciones"],
+            "operaciones": data["operaciones"],
             "porcentaje": round(pct, 2),
         })
 
@@ -3565,8 +3647,8 @@ async def get_sales_by_payment_method_report(
         "fecha_hasta": dt_hasta.strftime("%Y-%m-%d"),
         "total_recaudado_pyg": float(total_recaudado_pyg),
         "total_operaciones": total_operaciones,
-        "efectivo_brl_recaudado": float(methods_dict["efectivo_brl"]["monto"]),
-        "efectivo_usd_recaudado": float(methods_dict["efectivo_usd"]["monto"]),
+        "efectivo_brl_recaudado": float(efectivo_brl_tot),
+        "efectivo_usd_recaudado": float(efectivo_usd_tot),
         "medios_pago": breakdown,
     }
 

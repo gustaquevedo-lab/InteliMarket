@@ -672,8 +672,11 @@ def generate_cierre_sesion_individual_pdf(
             m_gs = float(m.get("monto_gs") or 0)
             pct = (m_gs / tot_cobrado * 100) if tot_cobrado > 0 else 0
             mon_txt = "BRL" if "BRL" in m.get("clave", "") else ("USD" if "USD" in m.get("clave", "") else "PYG")
+            cant = m.get("cantidad", 0)
+            cant_str = f" ({cant})" if cant > 0 else ""
+            canal_label = f"{m.get('label', '—')}{cant_str}"
             pay_data.append([
-                m.get("label", "—"),
+                Paragraph(canal_label, styles["Small"]),
                 mon_txt,
                 m.get("monto_formateado", "—"),
                 _fmt_gs(m_gs),
@@ -1145,7 +1148,7 @@ def generate_ventas_por_medio_pago_pdf(
 
         table_data.append([
             str(i),
-            m.get("label", "Medio de Pago"),
+            Paragraph(m.get("label", "Medio de Pago"), styles["Small"]),
             mon,
             f"{m.get('operaciones', 0):,}".replace(",", "."),
             m_str,
@@ -1155,7 +1158,7 @@ def generate_ventas_por_medio_pago_pdf(
     # Fila de Totales
     table_data.append([
         "",
-        "TOTAL COBRADO EN GUARANÍES",
+        Paragraph("<b>TOTAL COBRADO EN GUARANÍES</b>", styles["Small"]),
         "PYG",
         f"{tot_ops:,}".replace(",", "."),
         f"₲ {_fmt_val(tot_recaudado)}",
@@ -1259,9 +1262,9 @@ def generate_punteo_vouchers_pdf(
         if cant > 0 or monto > 0:
             total_cant += cant
             total_monto_no_ef += monto
-            res_rows.append([v.get("label", k), str(cant), _fmt_gs(monto)])
+            res_rows.append([Paragraph(v.get("label", k), styles["Small"]), str(cant), _fmt_gs(monto)])
 
-    res_rows.append(["TOTAL MEDIOS NO EFECTIVO", str(total_cant), _fmt_gs(total_monto_no_ef)])
+    res_rows.append([Paragraph("<b>TOTAL MEDIOS NO EFECTIVO</b>", styles["Small"]), str(total_cant), _fmt_gs(total_monto_no_ef)])
 
     t_res = Table(res_rows, colWidths=[96 * mm, 35 * mm, 55 * mm])
     t_res.setStyle(TableStyle([
@@ -1476,14 +1479,17 @@ def generate_session_sales_pdf(
         for m in desglose:
             m_gs = float(m.get("monto_gs") or 0)
             pct = (m_gs / tot_v * 100) if tot_v > 0 else 0
+            cant = m.get("cantidad")
+            cant_str = f" ({cant})" if cant else ""
+            label_text = f"{m.get('label', '—')}{cant_str}"
             medios_rows.append([
-                m.get("label", "—"),
+                Paragraph(label_text, styles["Small"]),
                 m.get("monto_formateado", "—"),
                 _fmt_gs(m_gs),
                 f"{pct:.1f}%",
             ])
         medios_rows.append([
-            "TOTAL FACTURADO EN TICKETS",
+            Paragraph("<b>TOTAL FACTURADO EN TICKETS</b>", styles["Small"]),
             "—",
             _fmt_gs(tot.get("total_ventas_gs", 0)),
             "100.0%",
