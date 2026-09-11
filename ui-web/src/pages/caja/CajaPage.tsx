@@ -3530,6 +3530,13 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     </div>
                   </div>
                 </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs flex items-center gap-2 text-slate-600 dark:text-slate-300">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    <strong>Fondo de Apertura (Gs. 500.000 / R$ 300):</strong> Queda certificado en custodia permanente en la gaveta para la siguiente sesión y se excluye del dinero esperado por Tesorería.
+                  </span>
+                </div>
               </div>
             )}
 

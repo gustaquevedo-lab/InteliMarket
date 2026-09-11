@@ -539,12 +539,14 @@ def generate_cierre_escpos(recon: dict) -> dict:
         lines.append(f"Cotiz. USD: 1 U$ = {recon['tasa_usd']:,.0f} Gs.")
     lines.append("-" * W)
     
-    # 1. Fondos de Apertura Recibidos (Desglosados Bimonetarios)
-    lines.append("[1. FONDOS DE APERTURA RECIBIDOS]")
+    # 1. Fondos de Apertura Certificados en Gaveta (Custodia Continua)
+    lines.append("[1. FONDO DE APERTURA EN GAVETA (Custodia)]")
     lines.append(_format_two_col("  Fondo Inicial Gs.:", f"{recon['fondo_pyg']:,.0f} Gs.", W))
     lines.append(_format_two_col("  Fondo Inicial R$ (Vuelto):", f"R$ {recon['fondo_brl']:,.2f}", W))
     if recon.get('fondo_usd', 0) > 0:
         lines.append(_format_two_col("  Fondo Inicial US$:", f"US$ {recon['fondo_usd']:,.2f}", W))
+    lines.append("  * Verificado y certificado por Supervisora.")
+    lines.append("  * Permanece en gaveta, NO remitido a Tesorería.")
     lines.append("-" * W)
 
     # 2. Comprobantes de Pago No Efectivo (para cotejo físico individual)
@@ -563,36 +565,37 @@ def generate_cierre_escpos(recon: dict) -> dict:
     lines.append(_format_two_col("TOTAL FACTURADO (Tickets):", f"{recon['total_cobrado_gs']:,.0f} Gs.", W))
     lines.append("-" * W)
 
-    # 3. Efectivo Esperado en Gaveta
-    lines.append("[3. EFECTIVO ESPERADO EN GAVETA]")
-    lines.append(_format_two_col("  Devolución Fondo Gs.:", f"{recon['fondo_pyg']:,.0f} Gs.", W))
-    lines.append(_format_two_col("  (+) Ventas Efectivo Gs.:", f"{recon.get('efectivo_pyg', 0):,.0f} Gs.", W))
-    if recon.get('total_drops_gs', 0) > 0:
-        lines.append(_format_two_col("  (-) Retiros / Drops Gs.:", f"-{recon['total_drops_gs']:,.0f} Gs.", W))
-    esp_pyg = recon.get('esp_pyg', recon['fondo_pyg'] + recon.get('efectivo_pyg', 0) - recon.get('total_drops_gs', 0))
-    lines.append(_format_two_col("  >> Total Esperado Gs.:", f"{esp_pyg:,.0f} Gs.", W))
+    # 3. Efectivo Esperado a Rendir a Tesorería (Ventas Efectivo menos Drops)
+    lines.append("[3. EFECTIVO ESPERADO A RENDIR A TESORERÍA]")
+    lines.append(_format_two_col("  Ventas Efectivo Gs.:", f"{recon.get('efectivo_pyg', 0):,.0f} Gs.", W))
+    drop_gs = recon.get('d_pyg', recon.get('total_drops_gs', 0))
+    if drop_gs > 0:
+        lines.append(_format_two_col("  (-) Retiros / Drops Gs.:", f"-{drop_gs:,.0f} Gs.", W))
+    esp_pyg = recon.get('esp_pyg', recon.get('efectivo_pyg', 0) - drop_gs)
+    lines.append(_format_two_col("  >> Esperado a Rendir Gs.:", f"{esp_pyg:,.0f} Gs.", W))
     lines.append("")
-    lines.append(_format_two_col("  Devolución Fondo R$:", f"R$ {recon['fondo_brl']:,.2f}", W))
     if recon.get('efectivo_brl', 0) > 0:
-        lines.append(_format_two_col("  (+) Cobros en Reales:", f"R$ {recon['efectivo_brl']:,.2f}", W))
-    esp_brl = recon.get('esp_brl', recon['fondo_brl'] + recon.get('efectivo_brl', 0))
-    lines.append(_format_two_col("  >> Total Esperado R$:", f"R$ {esp_brl:,.2f}", W))
-    if recon.get('efectivo_usd', 0) > 0 or recon.get('fondo_usd', 0) > 0:
-        esp_usd = recon['fondo_usd'] + recon.get('efectivo_usd', 0)
-        lines.append(_format_two_col("  >> Total Esperado US$:", f"US$ {esp_usd:,.2f}", W))
+        lines.append(_format_two_col("  Ventas Efectivo R$:", f"R$ {recon['efectivo_brl']:,.2f}", W))
+        if recon.get('d_brl', 0) > 0:
+            lines.append(_format_two_col("  (-) Retiros R$:", f"-R$ {recon['d_brl']:,.2f}", W))
+        lines.append(_format_two_col("  >> Esperado a Rendir R$:", f"R$ {recon['esp_brl']:,.2f}", W))
+    if recon.get('efectivo_usd', 0) > 0:
+        lines.append(_format_two_col("  Ventas Efectivo US$:", f"US$ {recon['efectivo_usd']:,.2f}", W))
+        lines.append(_format_two_col("  >> Esperado a Rendir US$:", f"US$ {recon['esp_usd']:,.2f}", W))
     lines.append("-" * W)
 
-    # 4. Arqueo Físico Real en Gaveta
-    lines.append("[4. ARQUEO FISICO REAL EN GAVETA]")
-    lines.append(_format_two_col("  Contado Guaraníes:", f"{recon['contado_pyg']:,.0f} Gs.", W))
-    lines.append("  (Fondo devuelto + Recaudación Gs.)")
-    lines.append(_format_two_col("  Contado Reales:", f"R$ {recon['contado_brl']:,.2f}", W))
+    # 4. Arqueo Físico Rendido a Tesorería
+    lines.append("[4. ARQUEO FÍSICO RENDIDO A TESORERÍA]")
+    lines.append(_format_two_col("  Rendido Guaraníes:", f"{recon['contado_pyg']:,.0f} Gs.", W))
+    if recon.get('fondo_deducido_de_conteo'):
+        lines.append("  (Gaveta menos ₲ 500.000 fondo retenido)")
+    lines.append(_format_two_col("  Rendido Reales:", f"R$ {recon['contado_brl']:,.2f}", W))
     lines.append(f"  ({recon['contado_brl_gs']:,.0f} Gs. equivalentes)")
     if recon.get('contado_usd', 0) > 0:
-        lines.append(_format_two_col("  Contado Dólares:", f"US$ {recon['contado_usd']:,.2f}", W))
+        lines.append(_format_two_col("  Rendido Dólares:", f"US$ {recon['contado_usd']:,.2f}", W))
         lines.append(f"  ({recon['contado_usd_gs']:,.0f} Gs. equivalentes)")
     lines.append("-" * W)
-    lines.append(_format_two_col("TOTAL RENDIDO EN GAVETA:", f"{recon['contado_total_gs']:,.0f} Gs.", W))
+    lines.append(_format_two_col("TOTAL RENDIDO A TESORERÍA:", f"{recon['contado_total_gs']:,.0f} Gs.", W))
     lines.append("=" * W)
 
     # 5. Conciliación y Dictamen
@@ -604,8 +607,8 @@ def generate_cierre_escpos(recon: dict) -> dict:
     lines.append("=" * W)
 
     # Detalle de compensación por moneda
-    dif_mon_pyg = recon['contado_pyg'] - esp_pyg
-    dif_mon_brl = recon['contado_brl'] - esp_brl
+    dif_mon_pyg = recon.get('dif_mon_pyg', recon['contado_pyg'] - esp_pyg)
+    dif_mon_brl = recon.get('dif_mon_brl', recon['contado_brl'] - recon.get('esp_brl', 0))
     comp_brl_gs = dif_mon_brl * recon['tasa_brl']
     lines.append("Detalle por Moneda:")
     signo_p = "+" if dif_mon_pyg >= 0 else ""
@@ -829,19 +832,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         fondo_brl = Decimal("0.00")
         fondo_usd = Decimal("0.00")
     else:
-        # Si la cajera contó exactamente su recaudación de ventas (sin incluir el fondo inicial en gaveta),
-        # o si la apertura no registró fondo, evitar clavarle un descuadre ficticio de 833.000 Gs
-        if count_obj:
-            c_pyg = Decimal(str(count_obj.monto_efectivo or 0))
-            c_brl = Decimal(str(count_obj.monto_efectivo_brl or 0))
-            c_tot_gs = c_pyg + (c_brl * tasa_brl)
-            if abs(c_tot_gs - ventas_ef_total_gs) < Decimal("25000") and c_tot_gs > Decimal("0"):
-                fondo_pyg = Decimal("0")
-                fondo_brl = Decimal("0.00")
-            else:
-                fondo_pyg = Decimal("500000")
-                fondo_brl = Decimal("300.00")
-        else:
+        if fondo_pyg <= 0 and fondo_brl <= 0:
             fondo_pyg = Decimal("500000")
             fondo_brl = Decimal("300.00")
 
@@ -849,24 +840,51 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     fondo_usd_gs = fondo_usd * tasa_usd
     fondo_total_gs = fondo_pyg + fondo_brl_gs + fondo_usd_gs
 
-    # Total esperado en gaveta
-    esperado_total_gs = fondo_total_gs + ventas_ef_total_gs - total_drops_gs
+    # NUEVA REGLA INMUTABLE: El fondo inicial NO es dinero que llega a Tesorería.
+    # Se certifica su existencia en gaveta por Supervisora y queda en custodia permanente
+    # de la cajera para su siguiente turno.
+    # El monto esperado a rendir a Tesorería es estrictamente: Ventas en Efectivo - Retiros/Drops
+    esp_pyg = max(Decimal("0"), Decimal(str(efectivo_pyg)) - d_pyg)
+    esp_brl = max(Decimal("0"), Decimal(str(efectivo_brl)) - d_brl)
+    esp_usd = max(Decimal("0"), Decimal(str(efectivo_usd)) - d_usd)
+    esperado_total_gs = esp_pyg + (esp_brl * tasa_brl) + (esp_usd * tasa_usd)
 
     # Arqueo contado
     if count_obj:
-        contado_pyg = Decimal(str(count_obj.monto_efectivo if count_obj.monto_efectivo is not None else (session_obj.monto_cierre or 0)))
-        contado_brl = Decimal(str(count_obj.monto_efectivo_brl or 0))
-        contado_usd = Decimal(str(count_obj.monto_efectivo_usd or 0))
+        raw_contado_pyg = Decimal(str(count_obj.monto_efectivo if count_obj.monto_efectivo is not None else (session_obj.monto_cierre or 0)))
+        raw_contado_brl = Decimal(str(count_obj.monto_efectivo_brl or 0))
+        raw_contado_usd = Decimal(str(count_obj.monto_efectivo_usd or 0))
     else:
-        contado_pyg = Decimal(str(session_obj.monto_cierre or 0))
-        contado_brl = Decimal("0")
-        contado_usd = Decimal("0")
+        raw_contado_pyg = Decimal(str(session_obj.monto_cierre or 0))
+        raw_contado_brl = Decimal("0")
+        raw_contado_usd = Decimal("0")
+
+    # Si la cajera contó todo el dinero en gaveta (incluyendo el fondo inicial),
+    # el monto neto rendido a Tesorería es descontando el fondo que queda en custodia en gaveta.
+    if fondo_pyg > 0 and raw_contado_pyg >= (esp_pyg + (fondo_pyg * Decimal("0.6"))):
+        contado_pyg = raw_contado_pyg - fondo_pyg
+        fondo_pyg_en_conteo = True
+    else:
+        contado_pyg = raw_contado_pyg
+        fondo_pyg_en_conteo = False
+
+    if fondo_brl > 0 and raw_contado_brl >= (esp_brl + (fondo_brl * Decimal("0.6"))):
+        contado_brl = raw_contado_brl - fondo_brl
+        fondo_brl_en_conteo = True
+    else:
+        contado_brl = raw_contado_brl
+        fondo_brl_en_conteo = False
+
+    contado_usd = raw_contado_usd
 
     contado_brl_gs = contado_brl * tasa_brl
     contado_usd_gs = contado_usd * tasa_usd
     contado_total_gs = contado_pyg + contado_brl_gs + contado_usd_gs
 
-    # Diferencia Consolidada
+    # Diferencias por moneda y consolidada
+    diferencia_pyg = contado_pyg - esp_pyg
+    diferencia_brl = contado_brl - esp_brl
+    diferencia_usd = contado_usd - esp_usd
     diferencia_consolidada_gs = contado_total_gs - esperado_total_gs
 
     ap_loc = _to_asuncion_tz(session_obj.fecha_apertura)
@@ -910,22 +928,38 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         "fondo_brl_gs": float(fondo_brl_gs),
         "fondo_usd_gs": float(fondo_usd_gs),
         "fondo_total_gs": float(fondo_total_gs),
+        "fondo_custodia_certificado": {
+            "pyg": float(fondo_pyg),
+            "brl": float(fondo_brl),
+            "usd": float(fondo_usd),
+            "total_gs": float(fondo_total_gs),
+            "descripcion": "Fondo certificado en gaveta por Supervisora. Queda en custodia permanente para la próxima sesión y NO ingresa a Tesorería.",
+        },
         "total_no_efectivo_gs": float(total_no_efectivo_gs),
         "efectivo_pyg": float(efectivo_pyg),
         "efectivo_brl": float(efectivo_brl),
         "efectivo_usd": float(efectivo_usd),
         "ventas_ef_total_gs": float(ventas_ef_total_gs),
-        "esp_pyg": float(fondo_pyg + Decimal(str(efectivo_pyg)) - total_drops_gs),
-        "esp_brl": float(fondo_brl + Decimal(str(efectivo_brl))),
-        "esp_usd": float(fondo_usd + Decimal(str(efectivo_usd))),
+        "drops_pyg": float(d_pyg),
+        "drops_brl": float(d_brl),
+        "drops_usd": float(d_usd),
         "total_drops_gs": float(total_drops_gs),
+        "esp_pyg": float(esp_pyg),
+        "esp_brl": float(esp_brl),
+        "esp_usd": float(esp_usd),
         "esperado_total_gs": float(esperado_total_gs),
+        "raw_contado_pyg": float(raw_contado_pyg),
+        "raw_contado_brl": float(raw_contado_brl),
+        "raw_contado_usd": float(raw_contado_usd),
         "contado_pyg": float(contado_pyg),
         "contado_brl": float(contado_brl),
         "contado_usd": float(contado_usd),
         "contado_brl_gs": float(contado_brl_gs),
         "contado_usd_gs": float(contado_usd_gs),
         "contado_total_gs": float(contado_total_gs),
+        "diferencia_pyg": float(diferencia_pyg),
+        "diferencia_brl": float(diferencia_brl),
+        "diferencia_usd": float(diferencia_usd),
         "diferencia_consolidada_gs": float(diferencia_consolidada_gs),
         "total_ventas_count": total_ventas_count,
         "total_cobrado_gs": float(total_cobrado_gs),
@@ -988,6 +1022,10 @@ async def close_session(
         and abs(diferencia_consolidada) > register.diferencia_maxima_tolerada
     )
 
+    diferencia_pyg = Decimal(str(recon["diferencia_pyg"])) if recon else (Decimal(str(monto_cierre_real)) - monto_cierre_esperado_total_gs)
+    diferencia_brl = Decimal(str(recon["diferencia_brl"])) if recon else Decimal("0")
+    diferencia_usd = Decimal(str(recon["diferencia_usd"])) if recon else Decimal("0")
+
     count = CashCount(
         session_id=session_obj.id,
         monto_efectivo=monto_cierre_real,
@@ -995,8 +1033,8 @@ async def close_session(
         diferencia=diferencia_consolidada,
         monto_efectivo_usd=monto_cierre_usd,
         monto_efectivo_brl=monto_cierre_brl,
-        diferencia_usd=Decimal("0"),
-        diferencia_brl=Decimal("0"),
+        diferencia_usd=diferencia_usd,
+        diferencia_brl=diferencia_brl,
         requiere_revision=requiere_revision,
     )
     db.add(count)
@@ -1041,11 +1079,11 @@ async def close_session(
         "monto_apertura_usd": monto_apertura_usd,
         "monto_apertura_brl": monto_apertura_brl,
         "monto_cierre_esperado": monto_cierre_esperado_total_gs,
-        "monto_cierre_esperado_usd": monto_apertura_usd,
-        "monto_cierre_esperado_brl": monto_apertura_brl,
+        "monto_cierre_esperado_usd": Decimal(str(recon["esp_usd"])) if recon else Decimal("0"),
+        "monto_cierre_esperado_brl": Decimal(str(recon["esp_brl"])) if recon else Decimal("0"),
         "diferencia": diferencia_consolidada,
-        "diferencia_usd": Decimal("0"),
-        "diferencia_brl": Decimal("0"),
+        "diferencia_usd": diferencia_usd,
+        "diferencia_brl": diferencia_brl,
         "requiere_revision": requiere_revision,
         "handoff_id": handoff.id,
         "reconciliation": recon,
@@ -2836,8 +2874,8 @@ async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, c
     monto_apertura_brl = float(recon["fondo_brl"]) if recon else float(s.monto_apertura_brl or 0)
 
     monto_cierre_esperado = float(recon["esperado_total_gs"]) if recon else monto_apertura_pyg
-    monto_cierre_esperado_usd = monto_apertura_usd
-    monto_cierre_esperado_brl = monto_apertura_brl
+    monto_cierre_esperado_usd = float(recon["esp_usd"]) if recon else monto_apertura_usd
+    monto_cierre_esperado_brl = float(recon["esp_brl"]) if recon else monto_apertura_brl
 
     # Breakdown formas de pago
     breakdown = await get_session_payment_breakdown(db, str(s.id))
@@ -2875,13 +2913,13 @@ async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, c
         "monto_cierre_esperado_usd": monto_cierre_esperado_usd,
         "monto_cierre_esperado_brl": monto_cierre_esperado_brl,
         "efectivo_cobrado_pyg": float(recon["ventas_ef_total_gs"]) if recon else 0.0,
-        "efectivo_usd_esperado": 0.0,
-        "efectivo_brl_esperado": 0.0,
-        "monto_efectivo_usd": float(count.monto_efectivo_usd or 0) if count else 0,
-        "monto_efectivo_brl": float(count.monto_efectivo_brl or 0) if count else 0,
+        "efectivo_usd_esperado": float(recon["esp_usd"]) if recon else 0.0,
+        "efectivo_brl_esperado": float(recon["esp_brl"]) if recon else 0.0,
+        "monto_efectivo_usd": float(recon["contado_usd"]) if recon else (float(count.monto_efectivo_usd or 0) if count else 0),
+        "monto_efectivo_brl": float(recon["contado_brl"]) if recon else (float(count.monto_efectivo_brl or 0) if count else 0),
         "diferencia": float(recon["diferencia_consolidada_gs"]) if recon else (float(count.diferencia or 0) if count else 0),
-        "diferencia_usd": float(count.diferencia_usd or 0) if count else 0,
-        "diferencia_brl": float(count.diferencia_brl or 0) if count else 0,
+        "diferencia_usd": float(recon["diferencia_usd"]) if recon else (float(count.diferencia_usd or 0) if count else 0),
+        "diferencia_brl": float(recon["diferencia_brl"]) if recon else (float(count.diferencia_brl or 0) if count else 0),
         "requiere_revision": count.requiere_revision if count else False,
         "observaciones": s.observaciones,
         "estado": s.estado,
