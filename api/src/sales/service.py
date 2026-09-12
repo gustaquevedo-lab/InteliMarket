@@ -1223,37 +1223,38 @@ async def reopen_sale_payment(
         else nota_auditoria
     )
 
-    # Preservar el ticket térmico ESC/POS original intacto (logo bitmap, fuentes, márgenes, items, cortes)
-    # y únicamente parchar la condición, medio de pago y datos del socio.
-    patched = False
-    if sale.recibo_escpos_b64:
-        try:
-            raw_bytes = base64.b64decode(sale.recibo_escpos_b64)
-            raw_text = raw_bytes.decode("latin-1")
-
-            nueva_cond = "CREDITO" if nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO") else "CONTADO"
-            raw_text = re.sub(r'(?i)(Condicion\s*:\s*)[^\r\n]+', rf'\g<1>{nueva_cond}', raw_text)
-
-            if socio_nombre:
-                clean_socio = unicodedata.normalize("NFKD", socio_nombre).encode("ascii", "ignore").decode("ascii")[:32].strip()
-                raw_text = re.sub(r'(?i)(Cliente\s*:\s*)[^\r\n]+', rf'\g<1>{clean_socio}', raw_text)
-                if cust_obj:
-                    socio_doc = (cust_obj.ruc or cust_obj.ci or "").strip()
-                    if socio_doc:
-                        clean_doc = unicodedata.normalize("NFKD", socio_doc).encode("ascii", "ignore").decode("ascii")[:20].strip()
-                        raw_text = re.sub(r'(?i)(RUC(?:\s*/\s*CI)?\s*:\s*)[^\r\n]+', rf'\g<1>{clean_doc}', raw_text)
-
-            sale.recibo_escpos_b64 = base64.b64encode(raw_text.encode("latin-1")).decode("ascii")
-            patched = True
-        except Exception as e:
-            logger.warning("Error parchando recibo_escpos_b64 en reopen_sale_payment: %s", e)
-
-    if not patched and not sale.recibo_escpos_b64:
+    # Regenerar el ticket térmico oficial ESC/POS fielmente con la nueva condición,
+    # medios de pago, socio y talón de pagaré si es Extra Club.
+    try:
         ticket_text, ticket_b64 = await build_sale_receipt_escpos(db, sale.id, nueva_forma_pago.upper(), cust_obj)
         if ticket_b64:
             sale.recibo_escpos_b64 = ticket_b64
-            if not sale.recibo_html:
-                sale.recibo_html = ticket_text
+            sale.recibo_html = ticket_text
+    except Exception as e:
+        logger.warning("Error reconstruyendo recibo_escpos_b64 en reopen_sale_payment: %s", e)
+        # Fallback a parchado regex sobre el ticket existente si falló la reconstrucción
+        if sale.recibo_escpos_b64:
+            try:
+                raw_bytes = base64.b64decode(sale.recibo_escpos_b64)
+                raw_text = raw_bytes.decode("latin-1")
+
+                nueva_cond = "CREDITO" if nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO") else "CONTADO"
+                tipo_doc = "FACTURA CREDITO" if nueva_cond == "CREDITO" else "FACTURA CONTADO"
+                raw_text = re.sub(r'(?i)(FACTURA\s+(?:CONTADO|CREDITO))', tipo_doc, raw_text)
+                raw_text = re.sub(r'(?i)(Condicion\s*:\s*)[^\r\n]+', rf'\g<1>{nueva_cond}', raw_text)
+
+                if socio_nombre:
+                    clean_socio = unicodedata.normalize("NFKD", socio_nombre).encode("ascii", "ignore").decode("ascii")[:32].strip()
+                    raw_text = re.sub(r'(?i)(Cliente\s*:\s*)[^\r\n]+', rf'\g<1>{clean_socio}', raw_text)
+                    if cust_obj:
+                        socio_doc = (cust_obj.ruc or cust_obj.ci or "").strip()
+                        if socio_doc:
+                            clean_doc = unicodedata.normalize("NFKD", socio_doc).encode("ascii", "ignore").decode("ascii")[:20].strip()
+                            raw_text = re.sub(r'(?i)(RUC(?:\s*/\s*CI)?\s*:\s*)[^\r\n]+', rf'\g<1>{clean_doc}', raw_text)
+
+                sale.recibo_escpos_b64 = base64.b64encode(raw_text.encode("latin-1")).decode("ascii")
+            except Exception as e2:
+                logger.warning("Error en fallback regex de recibo_escpos_b64: %s", e2)
 
     await db.commit()
     await db.refresh(sale)
