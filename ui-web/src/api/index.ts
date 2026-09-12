@@ -653,20 +653,131 @@ export interface InventoryMovementRecord {
   saldo_acumulado?: number
 }
 
+export interface AdjustmentMotivo {
+  codigo: string
+  label: string
+  riesgo: "bajo" | "medio" | "alto" | "severo"
+  requiere_evidencia: boolean
+}
+
+export interface AdjustmentItemCreate {
+  product_id: string
+  variant_id?: string | null
+  cantidad_sistema: number
+  cantidad_fisica: number
+  costo_unitario?: number
+}
+
+export interface AdjustmentCreatePayload {
+  company_id?: string
+  warehouse_id: string
+  motivo_codigo: string
+  motivo_detalle: string
+  items: AdjustmentItemCreate[]
+  evidencia_urls?: string[]
+  observaciones?: string
+}
+
+export interface AdjustmentAuditLog {
+  id: string
+  accion: string
+  user_nombre?: string
+  rol_firmante?: string
+  comentario?: string
+  created_at: string
+}
+
+export interface InventoryAdjustmentItemRecord {
+  id: string
+  product_id: string
+  product_nombre?: string
+  product_sku?: string
+  cantidad_sistema: number
+  cantidad_fisica: number
+  diferencia: number
+  costo_unitario: number
+  impacto_gs: number
+}
+
 export interface InventoryAdjustmentRecord {
   id: string
   codigo: string
+  motivo_codigo?: string
+  motivo_label?: string
+  motivo_detalle?: string
   motivo: string
-  estado: string
+  riesgo: "bajo" | "medio" | "alto" | "severo"
+  estado: "pendiente_gerencia" | "pendiente_administracion" | "aprobado" | "rechazado"
+  impacto_financiero_gs: number
+  evidencia_urls?: string[]
   observaciones?: string
   created_at: string
-  fecha_aprobacion?: string
+  aprobado_por_gerencia_nombre?: string
+  fecha_aprobacion_gerencia?: string
+  comentario_gerencia?: string
+  aprobado_por_administracion_nombre?: string
+  fecha_aprobacion_administracion?: string
+  comentario_administracion?: string
+  rechazado_por_nombre?: string
+  motivo_rechazo?: string
+  fecha_rechazo?: string
   warehouse_nombre?: string
   warehouse_codigo?: string
   total_items: number
   diferencia_unidades: number
   diferencia_valorizada_gs: number
+  items?: InventoryAdjustmentItemRecord[]
+  audit_logs?: AdjustmentAuditLog[]
 }
+
+export interface PhysicalSessionItem {
+  id: string
+  session_id: string
+  product_id: string
+  product_nombre?: string
+  product_sku?: string
+  product_codigo_barra?: string
+  cantidad_sistema: number
+  costo_unitario?: number
+  cantidad_conteo_1?: number | null
+  contado_1_at?: string | null
+  cantidad_conteo_2?: number | null
+  contado_2_at?: string | null
+  cantidad_final?: number | null
+  diferencia?: number | null
+  impacto_gs?: number | null
+  estado: "pendiente" | "conteo_1" | "conteo_2" | "reconciliado"
+  nota_reconciliacion?: string | null
+  created_at: string
+}
+
+export interface PhysicalSession {
+  id: string
+  company_id: string
+  warehouse_id: string
+  warehouse_nombre?: string
+  codigo: string
+  tipo: "total" | "parcial" | "ciclico"
+  estado: "abierta" | "en_conteo" | "cerrada" | "cancelada"
+  categoria_id?: string | null
+  pasillo?: string | null
+  descripcion_alcance?: string | null
+  notas?: string | null
+  creado_por_nombre?: string | null
+  contador_1_nombre?: string | null
+  contador_2_nombre?: string | null
+  cerrado_por_nombre?: string | null
+  total_items?: number
+  items_con_diferencia?: number
+  diferencia_total_unidades?: number
+  diferencia_total_gs?: number
+  adjustment_id?: string | null
+  fecha_inicio?: string | null
+  fecha_cierre?: string | null
+  created_at: string
+  items?: PhysicalSessionItem[]
+}
+
 
 export interface ScaleConfig { id: string; nombre: string; marca: string; modelo?: string; protocolo: string; conexion: string; puerto_com?: string; baudrate: number; data_bits?: number; host?: string; puerto_tcp: number; timeout_segundos: number; vendor_id?: string; product_id?: string; ruta_carga?: string; sync_automatico: boolean; etiqueta_formato: string; etiqueta_cabecera?: string; activa: boolean; created_at: string }
 export interface ScaleWeightResult { scale_id: string; scale_nombre: string; protocolo: string; peso_bruto: number; peso_neto?: number; tara: number; unidad: string; estable: boolean; raw_response?: string; timestamp: string }
@@ -1034,11 +1145,37 @@ export const api = {
       downloadAuthenticated(`/v1/companies/${COMPANY_ID}/inventory/movements/export.xlsx`, params, "kardex.xlsx"),
     downloadKardexPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; tipo?: string; product_id?: string }) =>
       downloadAuthenticated(`/v1/companies/${COMPANY_ID}/inventory/movements/export.pdf`, params, "kardex.pdf"),
-    listAdjustments: (params?: { warehouse_id?: string; estado?: string; limit?: number; offset?: number }) =>
+    getAdjustmentMotivos: () => client.get<AdjustmentMotivo[]>("/v1/inventory/adjustment-motivos"),
+    listAdjustments: (params?: { warehouse_id?: string; estado?: string; riesgo?: string; limit?: number; offset?: number }) =>
       client.get<InventoryAdjustmentRecord[]>(`/v1/companies/${COMPANY_ID}/adjustments`, params as any),
+    getAdjustmentDetail: (id: string) => client.get<InventoryAdjustmentRecord>(`/v1/inventory/adjustments/${id}`),
+    createAdjustment: (data: AdjustmentCreatePayload) => client.post<any>(`/v1/inventory/adjustments`, { ...data, company_id: COMPANY_ID }),
+    approveAdjustmentGerencia: (id: string, body?: { comentario?: string }) =>
+      client.post<{ ok: boolean; estado: string; mensaje: string }>(`/v1/inventory/adjustments/${id}/approve-gerencia`, body || {}),
+    approveAdjustmentAdministracion: (id: string, body?: { comentario?: string }) =>
+      client.post<{ ok: boolean; estado: string; mensaje: string }>(`/v1/inventory/adjustments/${id}/approve-administracion`, body || {}),
+    rejectAdjustment: (id: string, body: { motivo_rechazo: string }) =>
+      client.post<{ ok: boolean; estado: string; mensaje: string }>(`/v1/inventory/adjustments/${id}/reject`, body),
+    uploadEvidencia: (file: File) => {
+      const fd = new FormData()
+      fd.append("file", file)
+      return requestMultipart<{ url: string; filename: string }>("/v1/petty-cash/upload-comprobante", fd)
+    },
+    physicalSessions: {
+      list: (params?: { warehouse_id?: string; estado?: string; limit?: number; offset?: number }) =>
+        client.get<PhysicalSession[]>(`/v1/companies/${COMPANY_ID}/inventory/physical-sessions`, params as any),
+      get: (id: string) => client.get<PhysicalSession>(`/v1/inventory/physical-sessions/${id}`),
+      create: (data: { warehouse_id: string; tipo: string; categoria_id?: string; pasillo?: string; descripcion_alcance?: string; notas?: string; contador_1_nombre?: string; contador_2_nombre?: string }) =>
+        client.post<any>(`/v1/inventory/physical-sessions`, { ...data, company_id: COMPANY_ID }),
+      registerCount: (sessionId: string, itemId: string, data: { cantidad: number; numero_conteo: 1 | 2 }) =>
+        client.put<PhysicalSessionItem>(`/v1/inventory/physical-sessions/${sessionId}/items/${itemId}/count`, data),
+      reconcileItem: (sessionId: string, itemId: string, data: { cantidad_final: number; nota_reconciliacion?: string }) =>
+        client.put<PhysicalSessionItem>(`/v1/inventory/physical-sessions/${sessionId}/items/${itemId}/reconcile`, data),
+      close: (sessionId: string) =>
+        client.post<{ ok: boolean; mensaje: string; adjustment_id?: string; items_con_diferencia: number; diferencia_total_gs: number }>(`/v1/inventory/physical-sessions/${sessionId}/close`),
+    },
     recordMerma: (data: { warehouse_id: string; product_id: string; cantidad: number; motivo: string; observaciones?: string }) =>
       client.post<any>(`/v1/inventory/mermas`, { ...data, company_id: COMPANY_ID }),
-    createAdjustment: (data: any) => client.post<any>(`/v1/inventory/adjustments`, { ...data, company_id: COMPANY_ID }),
     approveAdjustment: (id: string) => client.post<any>(`/v1/inventory/adjustments/${id}/approve`),
     sessions: {
       list: (params?: { area?: string; estado?: string }) => client.get<any[]>("/v1/supermer/inventory/sessions", params),

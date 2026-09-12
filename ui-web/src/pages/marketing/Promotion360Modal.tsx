@@ -5,7 +5,7 @@ import {
   Users, BarChart3, FileText, Download, Printer, ShieldCheck,
   AlertCircle, CheckCircle2, Clock, Calendar, ArrowRight,
   HelpCircle, ChevronRight, Tag, Percent, RefreshCw, Loader2, Store,
-  Building2, Receipt, Award, Share2
+  Building2, Receipt, Award, Share2, Edit
 } from "lucide-react"
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar,

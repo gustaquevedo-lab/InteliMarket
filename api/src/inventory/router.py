@@ -17,6 +17,7 @@ from api.src.inventory.schemas import (
     ApproveAdjustmentBody, RejectAdjustmentBody,
     PhysicalSessionCreate, PhysicalSessionResponse,
     PhysicalSessionItemCountBody, PhysicalSessionItemReconcileBody,
+    PhysicalSessionItemResponse,
 )
 from api.src.inventory import service, export_service, pdf_reports
 
@@ -473,7 +474,7 @@ async def list_physical_sessions(
     return await service.list_physical_sessions(db, company_id, warehouse_id, estado, limit, offset)
 
 
-@router.get("/inventory/physical-sessions/{session_id}")
+@router.get("/inventory/physical-sessions/{session_id}", response_model=PhysicalSessionResponse)
 async def get_physical_session(
     session_id: str,
     db: AsyncSession = Depends(get_db),
@@ -484,7 +485,7 @@ async def get_physical_session(
     return session
 
 
-@router.put("/inventory/physical-sessions/{session_id}/items/{item_id}/count")
+@router.put("/inventory/physical-sessions/{session_id}/items/{item_id}/count", response_model=PhysicalSessionItemResponse)
 async def register_item_count(
     session_id: str,
     item_id: str,
@@ -502,7 +503,7 @@ async def register_item_count(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.put("/inventory/physical-sessions/{session_id}/items/{item_id}/reconcile")
+@router.put("/inventory/physical-sessions/{session_id}/items/{item_id}/reconcile", response_model=PhysicalSessionItemResponse)
 async def reconcile_item(
     session_id: str,
     item_id: str,

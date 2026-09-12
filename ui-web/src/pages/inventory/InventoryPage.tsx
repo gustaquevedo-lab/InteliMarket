@@ -18,12 +18,14 @@ import {
 } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
+import AjustesTab from "./AjustesTab"
+import TomaFisicaTab from "./TomaFisicaTab"
 
 export default function InventoryPage() {
   const toast = useToast()
 
   // Estado Principal
-  const [activeTab, setActiveTab] = useState<"stock" | "stock_valorizado" | "vencimientos" | "kardex" | "toma_fisica" | "warehouses">("stock")
+  const [activeTab, setActiveTab] = useState<"stock" | "stock_valorizado" | "vencimientos" | "kardex" | "ajustes" | "toma_fisica" | "warehouses">("stock")
   const [warehouses, setWarehouses] = useState<WarehouseType[]>([])
   const [stock, setStock] = useState<StockItem[]>([])
   const [stats, setStats] = useState<any>(null)
@@ -675,7 +677,8 @@ export default function InventoryPage() {
           { id: "stock_valorizado", label: "Stock Valorizado (Proveedor & Corte)", icon: DollarSign },
           { id: "vencimientos", label: "Control de Vencimientos & Lotes", icon: Clock },
           { id: "kardex", label: "Kardex & Movimientos", icon: Layers },
-          { id: "toma_fisica", label: "Toma Física con Escáner", icon: Barcode },
+          { id: "ajustes", label: "Ajustes de Stock (Doble Aprobación)", icon: ShieldAlert },
+          { id: "toma_fisica", label: "Toma Física (Doble Ciego)", icon: Barcode },
           { id: "warehouses", label: "Administración de Depósitos", icon: Building2 },
         ].map((tab) => {
           const Icon = tab.icon
@@ -706,15 +709,17 @@ export default function InventoryPage() {
             {activeTab === "stock_valorizado" && "Pestaña Especial: Stock Valorizado por Proveedor & Fecha de Corte"}
             {activeTab === "vencimientos" && "Pestaña 2: Auditoría de Lotes & Control de Vencimientos FEFO"}
             {activeTab === "kardex" && "Pestaña 3: Libro Kardex & Trazabilidad Inmutable"}
-            {activeTab === "toma_fisica" && "Pestaña 4: Conteo Físico Ciego & Auditoría con Escáner"}
-            {activeTab === "warehouses" && "Pestaña 5: Catálogo de Depósitos, Filiales & Cámaras"}
+            {activeTab === "ajustes" && "Pestaña 4: Ajustes de Stock & Flujo de Doble Aprobación"}
+            {activeTab === "toma_fisica" && "Pestaña 5: Toma Física & Conteo Doble Ciego"}
+            {activeTab === "warehouses" && "Pestaña 6: Catálogo de Depósitos, Filiales & Cámaras"}
           </p>
           <p className="text-gray-600 dark:text-slate-300 text-[11px] leading-relaxed">
             {activeTab === "stock" && "Muestra el inventario exacto por cada depósito del supermercado (Salón Central, Depósito 1, Cámara Frigorífica). Podés filtrar por estado de quiebre, stock bajo o buscar por código de barra o descripción."}
             {activeTab === "stock_valorizado" && "Valorización oficial del inventario a costo promedio ponderado. Permite filtrar por proveedor asignado y fijar fecha de corte histórica reconstruida retrospectivamente mediante los movimientos del Kardex."}
             {activeTab === "vencimientos" && "Monitoreo integral de lotes recibidos en muelle con fecha de caducidad. Permite priorizar la rotación FEFO (primero en vencer, primero en salir), prevenir mermas y activar rescates dinámicos en góndola."}
             {activeTab === "kardex" && "Historial oficial de cada transacción que alteró el inventario: compras recibidas, ventas de facturación/POS, mermas registradas, ajustes y transferencias entre depósitos con fecha, usuario y motivo."}
-            {activeTab === "toma_fisica" && "Permite realizar inventarios rotativos o generales pistoleando productos en góndola. El sistema calcula en vivo la diferencia entre lo contado físicamente y el stock teórico para aplicar ajustes."}
+            {activeTab === "ajustes" && "Protocolo profesional e infalible de ajuste de stock con catalogación de riesgos, justificación obligatoria, evidencia documental y doble aprobación requerida de Gerencia y Administración."}
+            {activeTab === "toma_fisica" && "Gestión de sesiones de inventario físico total, parcial o rotativo con doble conteo ciego independiente, detección y reconciliación de discrepancias, y generación automática de ajustes de stock."}
             {activeTab === "warehouses" && "Permite definir y administrar la estructura logística de tu negocio: depósitos principales, depósitos de sucursales, cámaras de congelados y almacén de insumos."}
           </p>
         </div>
@@ -1752,88 +1757,18 @@ export default function InventoryPage() {
         document.body
       )}
 
-      {/* ── CONTENIDO PESTAÑA 3: TOMA FÍSICA ─────────────────────────────────── */}
+      {/* ── CONTENIDO PESTAÑA 4: AJUSTES DE STOCK ──────────────────────────── */}
+      {activeTab === "ajustes" && (
+        <AjustesTab warehouses={warehouses} products={products} />
+      )}
+
+      {/* ── CONTENIDO PESTAÑA 5: TOMA FÍSICA DOBLE CIEGO ────────────────────── */}
       {activeTab === "toma_fisica" && (
-        <div className="space-y-6">
-          <div className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl space-y-4 shadow-sm">
-            <h3 className="font-extrabold text-sm text-gray-900 dark:text-white uppercase flex items-center gap-2">
-              <Barcode className="w-4 h-4 text-emerald-600" />
-              <span>Escaneo en Góndola / Depósito</span>
-            </h3>
-
-            <form onSubmit={handleScanSubmit} className="flex gap-2">
-              <input
-                ref={scanInputRef}
-                type="text"
-                value={scanCode}
-                onChange={(e) => setScanCode(e.target.value)}
-                placeholder="Pistoleá el código de barras o escribí el SKU..."
-                className="input-field flex-1 text-sm font-mono py-2.5"
-                autoFocus
-              />
-              <button type="submit" className="btn-primary text-xs px-6 font-extrabold uppercase">
-                Contar (+1)
-              </button>
-            </form>
-          </div>
-
-          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
-            {scannedItems.length === 0 ? (
-              <div className="p-16 text-center text-gray-400 space-y-2">
-                <Barcode className="w-12 h-12 mx-auto opacity-30 text-emerald-600" />
-                <p className="font-bold text-xs">No hay productos escaneados aún</p>
-                <p className="text-[11px]">Pistoleá los códigos para empezar el conteo físico comparativo.</p>
-              </div>
-            ) : (
-              <table className="w-full text-left text-xs min-w-[650px]">
-                <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
-                  <tr>
-                    <th className="p-3.5">Código / SKU</th>
-                    <th className="p-3.5">Producto</th>
-                    <th className="p-3.5 text-right">Conteo Físico</th>
-                    <th className="p-3.5 text-right">Stock en Sistema</th>
-                    <th className="p-3.5 text-right">Diferencia</th>
-                    <th className="p-3.5 text-center">Acción</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80 font-medium">
-                  {scannedItems.map((item, idx) => {
-                    const diff = item.cantidad_fisica - item.cantidad_sistema
-                    return (
-                      <tr key={item.product.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
-                        <td className="p-3.5 font-mono text-gray-600 dark:text-gray-300 font-bold">
-                          {item.product.codigo_barra || item.product.sku}
-                        </td>
-                        <td className="p-3.5 font-extrabold text-gray-900 dark:text-white">
-                          {item.product.nombre}
-                        </td>
-                        <td className="p-3.5 text-right font-mono font-black text-sm text-emerald-600">
-                          {item.cantidad_fisica}
-                        </td>
-                        <td className="p-3.5 text-right font-mono text-gray-400">
-                          {item.cantidad_sistema}
-                        </td>
-                        <td className={`p-3.5 text-right font-mono font-black ${
-                          diff === 0 ? "text-gray-400" : diff > 0 ? "text-emerald-600" : "text-red-600"
-                        }`}>
-                          {diff > 0 ? `+${diff}` : diff}
-                        </td>
-                        <td className="p-3.5 text-center">
-                          <button
-                            onClick={() => setScannedItems(prev => prev.filter((_, i) => i !== idx))}
-                            className="text-gray-400 hover:text-red-600"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
+        <TomaFisicaTab
+          warehouses={warehouses}
+          products={products}
+          onGoToAdjustments={() => setActiveTab("ajustes")}
+        />
       )}
 
       {/* ── CONTENIDO PESTAÑA 4: ADMINISTRACIÓN DE DEPÓSITOS Y SUBDEPÓSITOS ─────── */}
