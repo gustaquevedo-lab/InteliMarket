@@ -1309,6 +1309,7 @@ async def get_kardex_summary(
         for r in dias_result
     ]
 
+    return {
         "total_movimientos": totales.total_movimientos if totales else 0,
         "productos_con_movimiento": totales.productos_con_movimiento if totales else 0,
         "total_entradas": float(totales.total_entradas) if totales else 0.0,
@@ -1317,6 +1318,7 @@ async def get_kardex_summary(
         "top_productos": top_productos,
         "por_dia": por_dia,
     }
+
 
 
 # ---------------------------------------------------------------------------
