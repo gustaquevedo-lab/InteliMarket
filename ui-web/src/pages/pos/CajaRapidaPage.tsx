@@ -889,6 +889,18 @@ export default function POSPage() {
       }
       return next as any
     })
+    // Si se selecciona un medio no-efectivo en modo no-mixto, limpiar el
+    // efectivo precargado. El campo de Gs se precarga con el total exacto
+    // al abrir el modal (handleOpenPayment). Si la cajera luego elige
+    // Extra Club, Bancard, QR, etc. sin pago mixto, ese monto precargado
+    // queda sumando al total recibido aunque no sea dinero real en gaveta.
+    // Esto hace que totalRecibidoPyg >= totalPyg desde el primer Enter en
+    // el campo del nuevo medio, provocando el cierre abrupto.
+    if (!allowMixedPayment && m !== "cash") {
+      setPayCashPyg("")
+      setPayCashBrl("")
+      setPayCashUsd("")
+    }
     setPosVerifyStatus("idle")
     setPosVerifyCandidates([])
     setPosVerifiedTxn(null)
@@ -5460,7 +5472,17 @@ export default function POSPage() {
     if (e.key === "Enter") {
       e.preventDefault()
       if (totalRecibidoPyg >= totalPyg && totalPyg > 0 && !submitting) {
-        handleProcessCheckout()
+        // Mismo patron que handleCashFieldKeyDown: el primer Enter "marca listo"
+        // para que la cajera pueda ver el estado del pago antes de confirmar;
+        // solo el segundo Enter cierra la venta. Sin esta guardia, un Enter
+        // accidental en el campo de Extra Club/QR/Bancard disparaba el checkout
+        // directo si el efectivo precargado ya cubria el total -- causa del
+        // cierre abrupto reportado (ventas 4883 y otros casos similares).
+        if (listoParaCerrar) {
+          handleProcessCheckout()
+        } else {
+          setListoParaCerrar(true)
+        }
       } else {
         const faltante = Math.max(0, totalPyg - totalRecibidoPyg)
         if (faltante > 0) setValue(Math.ceil(faltante).toLocaleString("es-PY"))
@@ -5535,6 +5557,14 @@ export default function POSPage() {
   useEffect(() => {
     setListoParaCerrar(false)
   }, [payCashPyg, payCashBrl, payCashUsd])
+
+  // Resetear la guardia de doble-Enter también cuando cambia el medio de pago --
+  // si la cajera iba a cerrar con Extra Club (primer Enter ya dado) y luego
+  // cambia a efectivo, el segundo Enter en el campo de efectivo no debe
+  // disparar el checkout sin pasar por el ciclo de confirmacion de ese campo.
+  useEffect(() => {
+    setListoParaCerrar(false)
+  }, [activeMethods])
 
   const handleQuickCashClick = (amount: number) => {
     if (!hasClickedQuickCash) {

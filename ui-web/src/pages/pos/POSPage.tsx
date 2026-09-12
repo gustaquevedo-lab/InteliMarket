@@ -952,6 +952,13 @@ export default function POSPage() {
       }
       return next as any
     })
+    // Si se selecciona un medio no-efectivo en modo no-mixto, limpiar el
+    // efectivo precargado para que no siga sumando al total recibido.
+    if (!allowMixedPayment && m !== "cash") {
+      setPayCashPyg("")
+      setPayCashBrl("")
+      setPayCashUsd("")
+    }
     setPosVerifyStatus("idle")
     setPosVerifyCandidates([])
     setPosVerifiedTxn(null)
@@ -5575,7 +5582,14 @@ export default function POSPage() {
     if (e.key === "Enter") {
       e.preventDefault()
       if (totalRecibidoPyg >= totalPyg && totalPyg > 0 && !submitting) {
-        handleProcessCheckout()
+        // Doble-Enter: primer Enter "marca listo", segundo Enter cierra.
+        // Sin esta guardia un Enter accidental en cualquier campo no-efectivo
+        // disparaba el checkout si el efectivo precargado ya cubria el total.
+        if (listoParaCerrar) {
+          handleProcessCheckout()
+        } else {
+          setListoParaCerrar(true)
+        }
       } else {
         const faltante = Math.max(0, totalPyg - totalRecibidoPyg)
         if (faltante > 0) setValue(Math.ceil(faltante).toLocaleString("es-PY"))
@@ -5650,6 +5664,11 @@ export default function POSPage() {
   useEffect(() => {
     setListoParaCerrar(false)
   }, [payCashPyg, payCashBrl, payCashUsd])
+
+  // Resetear la guardia de doble-Enter cuando cambia el medio de pago.
+  useEffect(() => {
+    setListoParaCerrar(false)
+  }, [activeMethods])
 
   const handleQuickCashClick = (amount: number) => {
     if (!hasClickedQuickCash) {
