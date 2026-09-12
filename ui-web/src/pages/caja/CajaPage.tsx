@@ -4946,9 +4946,15 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                       {/* 📌 Banner de Conciliación Matemática (Fórmula Oficial) */}
                       <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-700 text-xs grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
                         <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800">
-                          <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Facturado</span>
+                          <span className="text-[10px] text-slate-400 uppercase font-bold block">
+                            {Number(recon.total_devoluciones_gs || 0) > 0 ? "Facturado Neto" : "Total Facturado"}
+                          </span>
                           <span className="font-mono font-bold text-white text-xs">{formatPYG(totalFacturadoGs)}</span>
-                          <span className="text-[9px] text-slate-400 block">({ticketsCount} tickets)</span>
+                          <span className="text-[9px] text-slate-400 block">
+                            {Number(recon.total_devoluciones_gs || 0) > 0
+                              ? `(-${formatPYG(recon.total_devoluciones_gs)} NC)`
+                              : `(${ticketsCount} tickets)`}
+                          </span>
                         </div>
                         <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800">
                           <span className="text-[10px] text-slate-400 uppercase font-bold block">(-) No Efectivo</span>
@@ -5667,7 +5673,9 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                   <tr
                                     key={v.id}
                                     className={`transition-colors ${
-                                      isFaltante
+                                      v.es_devolucion
+                                        ? "bg-purple-50/70 dark:bg-purple-950/30 text-purple-950 dark:text-purple-200 hover:bg-purple-100/70 dark:hover:bg-purple-900/30"
+                                        : isFaltante
                                         ? "bg-rose-50/80 dark:bg-rose-950/30 text-rose-950 dark:text-rose-200"
                                         : isDiscrepante
                                         ? "bg-amber-50/80 dark:bg-amber-950/30 text-amber-950 dark:text-amber-200"
@@ -5685,11 +5693,18 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                             <ArrowLeftRight className="w-2.5 h-2.5 text-amber-600" /> Reclasif.
                                           </span>
                                         )}
+                                        {v.es_devolucion && (
+                                          <span className="px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 text-[9px] font-bold border border-purple-300 dark:border-purple-700/70 flex items-center gap-1 shrink-0" title={`Nota de Crédito / Devolución: ${v.motivo || ''}`}>
+                                            Nota de Crédito
+                                          </span>
+                                        )}
                                       </div>
                                     </td>
                                     <td className="p-2.5 whitespace-nowrap">
                                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${
-                                        v.canal_key?.includes("BANCARD")
+                                        v.es_devolucion
+                                          ? "bg-purple-100 text-purple-800 border border-purple-200 dark:bg-purple-950/80 dark:text-purple-200 dark:border-purple-700"
+                                          : v.canal_key?.includes("BANCARD")
                                           ? "bg-blue-100 text-blue-800 border border-blue-200 dark:bg-blue-950/80 dark:text-blue-200 dark:border-blue-700"
                                           : v.canal_key?.includes("DINELCO")
                                           ? "bg-rose-100 text-rose-800 border border-rose-200 dark:bg-rose-950/80 dark:text-rose-200 dark:border-rose-700"
@@ -5737,7 +5752,9 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                       )}
                                     </td>
                                     <td className="p-2.5 font-mono font-bold text-right text-slate-900 dark:text-white whitespace-nowrap">
-                                      {formatPYG(v.monto_gs)}
+                                      <span className={v.monto_gs < 0 ? "text-purple-600 dark:text-purple-400 font-extrabold" : ""}>
+                                        {v.monto_gs < 0 ? `- ${formatPYG(Math.abs(v.monto_gs))}` : formatPYG(v.monto_gs)}
+                                      </span>
                                       {v.moneda !== "PYG" && (
                                         <div className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
                                           {v.moneda} {v.monto_original?.toFixed(2)}

@@ -32,6 +32,8 @@ from api.src.pos_terminal_transactions.models import PosTerminalTransaction
 from api.src.plugpay.models import PlugpayTransaction
 from api.src.financial.models import BankAccount, BankTransaction
 from api.src.auth.models import User
+from api.src.returns.models import Return
+from api.src.fiscal.models import NotaCreditoDebito
 
 # Canales de pago oficiales desglosados aceptados en Extra Supermercado
 PAYMENT_CHANNEL_DEFINITIONS = [
@@ -609,12 +611,21 @@ def generate_cierre_escpos(recon: dict) -> dict:
         lines.append(_format_two_col("  Total Comprobantes:", f"{tot_no_ef_gs:,.0f} Gs.", W))
     else:
         lines.append("  (Sin comprobantes no efectivo)")
-    lines.append(_format_two_col("TOTAL FACTURADO (Tickets):", f"{recon['total_cobrado_gs']:,.0f} Gs.", W))
+    tot_dev_gs = recon.get("total_devoluciones_gs", 0)
+    if tot_dev_gs > 0:
+        lines.append(_format_two_col("  Ventas Brutas:", f"{recon.get('total_ventas_brutas_gs', recon['total_cobrado_gs']):,.0f} Gs.", W))
+        lines.append(_format_two_col("  (-) Devoluciones / NC:", f"-{tot_dev_gs:,.0f} Gs.", W))
+        lines.append(_format_two_col("TOTAL FACTURADO NETO:", f"{recon['total_cobrado_gs']:,.0f} Gs.", W))
+    else:
+        lines.append(_format_two_col("TOTAL FACTURADO (Tickets):", f"{recon['total_cobrado_gs']:,.0f} Gs.", W))
     lines.append("-" * W)
 
     # 3. Efectivo Esperado a Rendir a Tesorería (100% en Guaraníes)
     lines.append("[3. EFECTIVO ESPERADO A RENDIR]")
-    lines.append(_format_two_col("  Total Facturado:", f"{recon['total_cobrado_gs']:,.0f} Gs.", W))
+    if tot_dev_gs > 0:
+        lines.append(_format_two_col("  Facturado Neto:", f"{recon['total_cobrado_gs']:,.0f} Gs.", W))
+    else:
+        lines.append(_format_two_col("  Total Facturado:", f"{recon['total_cobrado_gs']:,.0f} Gs.", W))
     lines.append(_format_two_col("  (-) Medios No Efectivo:", f"-{recon['total_no_efectivo_gs']:,.0f} Gs.", W))
     lines.append(_format_two_col("  (=) Efectivo Ventas:", f"{recon['ventas_ef_total_gs']:,.0f} Gs.", W))
     tot_drops = recon.get('total_drops_gs', 0)
@@ -717,7 +728,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         select(Sale.id, Sale.total, Sale.created_at)
         .where(
             Sale.session_id == session_obj.id,
-            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
+            Sale.estado.in_(["confirmado", "completada", "completado", "pagado", "devuelto"]),
         )
     )
     sales_rows = sales_res.all()
@@ -849,6 +860,81 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         channels_accum[ckey]["cantidad"] += 1
         channels_accum[ckey]["monto_orig"] += m_dec
         channels_accum[ckey]["monto_gs"] += m_gs
+
+    # ── Devoluciones aprobadas de las ventas de la sesión ──
+    returns_rows = []
+    if sale_ids:
+        ret_res = await db.execute(
+            select(Return, NotaCreditoDebito.numero)
+            .outerjoin(NotaCreditoDebito, Return.nota_credito_id == NotaCreditoDebito.id)
+            .where(
+                Return.sale_id.in_(sale_ids),
+                Return.estado.in_(["aprobado", "aprobada", "Aprobado", "APROBADO"]),
+            )
+            .order_by(Return.fecha.asc())
+        )
+        returns_rows = ret_res.all()
+
+    # Mapear pagos de cada venta para asociar a qué canal imputar cada devolución
+    sale_to_channels: dict[uuid.UUID, list] = {}
+    for p in payments_rows:
+        pos = pos_map.get(p.sale_id)
+        plug = plug_map.get(p.sale_id)
+        pos_op = pos.tipo_operacion if pos else None
+        pos_nom = pos.nombre_tarjeta if pos else None
+        plug_op = plug.tipo_operacion if plug else None
+        ckey, _, _, _ = classify_payment_channel(p.forma_pago, p.moneda, pos_op, pos_nom, plug_op)
+        if p.sale_id not in sale_to_channels:
+            sale_to_channels[p.sale_id] = []
+        sale_to_channels[p.sale_id].append(ckey)
+
+    total_devoluciones_gs = Decimal("0")
+    devoluciones_list = []
+    for ret_obj, nc_num in returns_rows:
+        r_tot = Decimal(str(ret_obj.total or 0))
+        total_devoluciones_gs += r_tot
+        devoluciones_list.append({
+            "id": str(ret_obj.id),
+            "numero": ret_obj.numero,
+            "sale_id": str(ret_obj.sale_id),
+            "nota_credito_numero": nc_num or "S/N",
+            "motivo": ret_obj.motivo,
+            "monto_gs": float(r_tot),
+            "fecha": _to_asuncion_tz(ret_obj.fecha).strftime("%d/%m/%Y %H:%M") if ret_obj.fecha else None,
+        })
+        # Determinar canal a descontar
+        cand_channels = sale_to_channels.get(ret_obj.sale_id, [])
+        target_ch = None
+        for ch in cand_channels:
+            if "EFECTIVO" not in ch:
+                target_ch = ch
+                break
+        if not target_ch and cand_channels:
+            target_ch = cand_channels[0]
+        if not target_ch:
+            target_ch = "EXTRA_CLUB" if "extra" in (ret_obj.motivo or "").lower() else "EFECTIVO_PYG"
+
+        if target_ch in channels_accum:
+            channels_accum[target_ch]["monto_gs"] -= r_tot
+            channels_accum[target_ch]["monto_orig"] -= r_tot
+            if target_ch == "EFECTIVO_PYG":
+                efectivo_pyg = max(Decimal("0"), efectivo_pyg - r_tot)
+        else:
+            inst_info = CHANNEL_TO_INSTRUMENT_TYPE.get(target_ch, ("DOCUMENTOS_VALOR", "Documentos de Pago", "file-check", 5))
+            channels_accum[target_ch] = {
+                "clave": target_ch,
+                "label": target_ch.replace("_", " ").title(),
+                "tipo": inst_info[0].lower(),
+                "icon": inst_info[2],
+                "cantidad": 1,
+                "monto_orig": -r_tot,
+                "monto_gs": -r_tot,
+                "moneda": "PYG",
+            }
+
+    total_ventas_brutas_gs = total_cobrado_gs
+    total_ventas_netas_gs = max(Decimal("0"), total_ventas_brutas_gs - total_devoluciones_gs)
+    total_cobrado_gs = total_ventas_netas_gs
 
     # Desglose detallado: SOLO canales con movimientos ("Si no hay movimientos en los medios de pago, no se listan y punto")
     desglose_detallado = []
@@ -1121,6 +1207,10 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         "diferencia_consolidada_gs": float(diferencia_consolidada_gs),
         "total_ventas_count": total_ventas_count,
         "total_cobrado_gs": float(total_cobrado_gs),
+        "total_ventas_brutas_gs": float(total_ventas_brutas_gs),
+        "total_devoluciones_gs": float(total_devoluciones_gs),
+        "total_ventas_netas_gs": float(total_ventas_netas_gs),
+        "devoluciones": devoluciones_list,
         "total_ajustes_reclasificados_gs": float(total_ajustes_efectivo_a_no_efectivo),
         "ajustes_comprobantes": [
             {
@@ -1586,6 +1676,34 @@ async def get_session_sales_detail(db: AsyncSession, session_id: str, company_id
                 "monto": float(p.monto or 0),
             })
 
+    # 3b. Consultar devoluciones aprobadas de las ventas de la sesión
+    returns_by_sale: dict[uuid.UUID, list[dict]] = {}
+    total_devoluciones_gs = Decimal("0")
+    if sale_ids:
+        ret_query = (
+            select(Return, NotaCreditoDebito.numero)
+            .outerjoin(NotaCreditoDebito, Return.nota_credito_id == NotaCreditoDebito.id)
+            .where(
+                Return.sale_id.in_(sale_ids),
+                Return.estado.in_(["aprobado", "aprobada", "Aprobado", "APROBADO"]),
+            )
+            .order_by(Return.fecha.asc())
+        )
+        ret_res = await db.execute(ret_query)
+        for ret, nc_num in ret_res.all():
+            if ret.sale_id not in returns_by_sale:
+                returns_by_sale[ret.sale_id] = []
+            r_tot = Decimal(str(ret.total or 0))
+            total_devoluciones_gs += r_tot
+            returns_by_sale[ret.sale_id].append({
+                "id": str(ret.id),
+                "numero": ret.numero,
+                "nota_credito_numero": nc_num or "S/N",
+                "motivo": ret.motivo,
+                "total": float(r_tot),
+                "fecha": ret.fecha.isoformat() if ret.fecha else None,
+            })
+
     # 4. Consultar conteo de items por venta
     items_count_map: dict[uuid.UUID, int] = {}
     if sale_ids:
@@ -1645,6 +1763,10 @@ async def get_session_sales_detail(db: AsyncSession, session_id: str, company_id
             fp_resumen = "Mixto (" + " + ".join(f"{p['forma_pago']} ({p['moneda']})" for p in p_list) + ")"
 
         fecha_loc = _to_asuncion_tz(sale.fecha)
+        sale_devs = returns_by_sale.get(sale.id, [])
+        sale_dev_tot = sum(d["total"] for d in sale_devs)
+        sale_net_tot = float(tot - Decimal(str(sale_dev_tot)))
+
         sales_list.append({
             "id": str(sale.id),
             "numero": sale.numero,
@@ -1660,6 +1782,9 @@ async def get_session_sales_detail(db: AsyncSession, session_id: str, company_id
             "subtotal": float(sale.subtotal or 0),
             "descuento": float(desc),
             "total": float(tot),
+            "total_devuelto": sale_dev_tot,
+            "total_neto": sale_net_tot,
+            "devoluciones": sale_devs,
             "monto_donacion": float(dona),
             "iva_10": float(sale.iva_10 or 0),
             "iva_5": float(sale.iva_5 or 0),
@@ -1671,6 +1796,8 @@ async def get_session_sales_detail(db: AsyncSession, session_id: str, company_id
 
     ap_loc = _to_asuncion_tz(session_obj.fecha_apertura)
     ci_loc = _to_asuncion_tz(session_obj.fecha_cierre)
+
+    total_neto_ventas = total_ventas_gs - total_devoluciones_gs
 
     return {
         "session": {
@@ -1688,9 +1815,12 @@ async def get_session_sales_detail(db: AsyncSession, session_id: str, company_id
             "observaciones": session_obj.observaciones,
         },
         "totales": {
-            "total_ventas_gs": float(total_ventas_gs),
+            "total_ventas_gs": float(total_neto_ventas),
+            "total_ventas_brutas_gs": float(total_ventas_gs),
+            "total_devoluciones_gs": float(total_devoluciones_gs),
+            "total_ventas_netas_gs": float(total_neto_ventas),
             "cantidad_ventas": confirmadas_count,
-            "ticket_promedio_gs": float(total_ventas_gs / confirmadas_count) if confirmadas_count > 0 else 0.0,
+            "ticket_promedio_gs": float(total_neto_ventas / confirmadas_count) if confirmadas_count > 0 else 0.0,
             "total_descuentos_gs": float(total_descuentos_gs),
             "total_donaciones_gs": float(total_donaciones_gs),
             "total_iva_10_gs": float(total_iva_10_gs),
@@ -3273,7 +3403,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         .outerjoin(PlugpayTransaction, and_(PlugpayTransaction.sale_id == Sale.id, PlugpayTransaction.exitosa == True))
         .where(
             Sale.session_id == sid,
-            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
+            Sale.estado.in_(["confirmado", "completada", "completado", "pagado", "devuelto"]),
         )
         .order_by(SalePayment.fecha.asc())
     )
@@ -3640,6 +3770,59 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
                             vouchers.remove(orig_v)
                         break
 
+    # 5b. Inyectar comprobantes de Devoluciones y Notas de Crédito que afectan medios no efectivo
+    returns_punteo_res = await db.execute(
+        select(Return, NotaCreditoDebito.numero, Sale.numero.label("sale_numero"))
+        .outerjoin(NotaCreditoDebito, Return.nota_credito_id == NotaCreditoDebito.id)
+        .join(Sale, Return.sale_id == Sale.id)
+        .where(
+            Sale.session_id == sid,
+            Return.estado.in_(["aprobado", "aprobada", "Aprobado", "APROBADO"]),
+        )
+        .order_by(Return.fecha.asc())
+    )
+    returns_punteo_rows = returns_punteo_res.all()
+
+    for ret_p, nc_num, s_num in returns_punteo_rows:
+        m_gs_dev = float(ret_p.total or 0)
+        orig_pays = sale_payments_map.get(ret_p.sale_id, [])
+        target_ch = "EXTRA_CLUB"
+        target_label = "Extra Club"
+        for op in orig_pays:
+            op_fp = (op.forma_pago or "").upper().strip()
+            if "EFECTIVO" not in op_fp:
+                op_pos_op = getattr(op, "pos_tipo_operacion", None)
+                op_pos_nom = getattr(op, "nombre_tarjeta", None)
+                op_plug_op = getattr(op, "plug_tipo_operacion", None)
+                target_ch, target_label, _, _ = classify_payment_channel(op_fp, op.moneda, op_pos_op, op_pos_nom, op_plug_op)
+                break
+
+        voucher_dev = {
+            "id": f"dev_{str(ret_p.id)}",
+            "return_id": str(ret_p.id),
+            "sale_id": str(ret_p.sale_id),
+            "fecha": ret_p.fecha.isoformat() if ret_p.fecha else None,
+            "numero_ticket": f"NC {nc_num or 'S/N'}",
+            "tipo_comprobante": "Nota de Crédito / Devolución",
+            "medio_pago": f"{target_label} (Devolución)",
+            "canal_key": target_ch,
+            "moneda": "PYG",
+            "monto_original": -m_gs_dev,
+            "monto_gs": -m_gs_dev,
+            "nro_boleta": nc_num or str(ret_p.numero),
+            "codigo_autorizacion": f"DEV: {ret_p.numero}",
+            "nsu": "—",
+            "tarjeta_marca": "Nota de Crédito",
+            "tarjeta_pan": "—",
+            "titular": f"Ref. Factura {s_num or '—'}",
+            "es_devolucion": True,
+            "motivo": ret_p.motivo,
+        }
+        vouchers.append(voucher_dev)
+        if target_ch in vouchers_by_channel:
+            vouchers_by_channel[target_ch]["total_esperado_gs"] = max(0.0, vouchers_by_channel[target_ch]["total_esperado_gs"] - m_gs_dev)
+            vouchers_by_channel[target_ch]["vouchers"].append(voucher_dev)
+
     # 6. Enriquecer vouchers con Tipo de Instrumento y Ordenar
     for v in vouchers:
         ck = v.get("canal_key") or "OTROS"
@@ -3667,7 +3850,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             "tipo_instrumento_orden": CHANNEL_TO_INSTRUMENT_TYPE.get(k, ("DOCUMENTOS_VALOR", "Documentos de Pago", "file-check", 5))[3],
         }
         for k, v in vouchers_by_channel.items()
-        if v["cantidad_esperada"] > 0
+        if v["cantidad_esperada"] > 0 or len(v.get("vouchers", [])) > 0
     }
     summary_final = summary_por_canal
 

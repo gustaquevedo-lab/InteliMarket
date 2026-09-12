@@ -2,7 +2,7 @@ from decimal import Decimal
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import re
@@ -12,7 +12,9 @@ from api.src.returns.schemas import ReturnCreate, ReturnApprove
 from api.src.inventory.models import Stock, InventoryMovement
 from api.src.products.models import Product
 from api.src.customers.models import Customer
-from api.src.sales.models import Sale, SaleItem
+from api.src.sales.models import Sale, SaleItem, SalePayment
+from api.src.accounts_receivable.models import Account
+from api.src.credit_accounts.models import CreditAccount, CreditMovement
 from api.src.fiscal.models import NotaCreditoDebito, PuntoEmisionSecuencia
 from api.src.sifen.models import SifenTimbrado
 from api.src.fiscal.service import reserve_fiscal_invoice_number, TimbradoAgotadoError, TimbradoVencidoError
@@ -376,6 +378,71 @@ async def approve_return(db: AsyncSession, return_id: str, data: ReturnApprove) 
             await db.refresh(nota)
             return_obj.nota_credito_id = nota.id
             nota_credito_numero = nota.numero
+
+    # ── Impacto en Cuentas por Cobrar y Línea de Crédito ──
+    # Si la venta original tenía cuentas por cobrar o se pagó con Extra Club / Crédito,
+    # la devolución debe reducir la deuda pendiente y liberar la línea de crédito del cliente.
+    if sale:
+        monto_dev = Decimal(str(return_obj.total or 0))
+        ar_result = await db.execute(select(Account).where(Account.sale_id == sale.id))
+        ar_list = ar_result.scalars().all()
+        monto_ar_deducido = Decimal(0)
+
+        if ar_list:
+            rem_dev = monto_dev
+            for ar in ar_list:
+                if (ar.saldo_pendiente or Decimal(0)) > Decimal(0) and rem_dev > Decimal(0):
+                    rebaja = min(Decimal(str(ar.saldo_pendiente)), rem_dev)
+                    ar.saldo_pendiente -= rebaja
+                    if ar.saldo_pendiente == Decimal(0):
+                        ar.estado = "pagado"
+                    ar.updated_at = datetime.now(timezone.utc)
+                    ar.notas_cobranza = (
+                        (ar.notas_cobranza or "")
+                        + f"\n[Devolución {return_obj.numero} - NC {nota_credito_numero or 'S/N'}] -₲ {rebaja:,.0f}"
+                    ).strip()
+                    rem_dev -= rebaja
+                    monto_ar_deducido += rebaja
+
+        # Verificar pagos a crédito / Extra Club de la venta
+        sp_result = await db.execute(select(SalePayment).where(SalePayment.sale_id == sale.id))
+        payments = sp_result.scalars().all()
+        credito_pagado = sum(
+            Decimal(str(p.monto))
+            for p in payments
+            if (p.metodo_pago or "").upper() in ("EXTRA_CLUB", "CREDITO_LOCAL", "CREDITO")
+        )
+
+        monto_liberar_credito = monto_ar_deducido
+        if monto_liberar_credito == Decimal(0) and credito_pagado > Decimal(0):
+            monto_liberar_credito = min(monto_dev, credito_pagado)
+
+        if return_obj.customer_id and monto_liberar_credito > Decimal(0):
+            ca_result = await db.execute(
+                select(CreditAccount).where(CreditAccount.customer_id == return_obj.customer_id).limit(1)
+            )
+            credit_acc = ca_result.scalar_one_or_none()
+            if credit_acc:
+                saldo_ant = credit_acc.saldo_utilizado or Decimal(0)
+                nuevo_utilizado = max(Decimal(0), saldo_ant - monto_liberar_credito)
+                credit_acc.saldo_utilizado = nuevo_utilizado
+                credit_acc.saldo_disponible = (credit_acc.limite_credito or Decimal(0)) - nuevo_utilizado
+                credit_acc.updated_at = datetime.now(timezone.utc)
+
+                mov = CreditMovement(
+                    company_id=return_obj.company_id,
+                    credit_account_id=credit_acc.id,
+                    customer_id=return_obj.customer_id,
+                    tipo="devolucion",
+                    monto=monto_liberar_credito,
+                    saldo_anterior=saldo_ant,
+                    saldo_nuevo=nuevo_utilizado,
+                    referencia_type="return",
+                    referencia_id=return_obj.id,
+                    observaciones=f"Devolución {return_obj.numero} — Factura {sale.numero or ''}",
+                    created_at=return_obj.fecha or datetime.now(timezone.utc),
+                )
+                db.add(mov)
 
     # ── Marcar la venta como devuelta si ya no queda nada por devolver ──
     # "devuelto" ya existia como estado reconocido (bloquea ediciones/
