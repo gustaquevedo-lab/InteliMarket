@@ -692,6 +692,25 @@ ipcMain.handle('pos:bancard-call', async (_event, { ip, path: reqPath, body, tim
   const effectiveTimeout = timeoutMs || 45000
 
   return new Promise((resolve) => {
+    let settled = false
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(hardDeadline)
+      resolve(result)
+    }
+
+    // El timeout de socket de Node es de INACTIVIDAD (se resetea con cualquier
+    // byte que llegue), no de duracion total -- si el terminal Bancard deja la
+    // conexion abierta sin cerrar la respuesta, ese timeout nunca dispara y la
+    // promesa queda colgada para siempre (pantalla congelada, sin error, aun
+    // con la venta ya cobrada e impresa en el terminal). Este deadline manual
+    // fuerza una resolucion pase lo que pase.
+    const hardDeadline = setTimeout(() => {
+      req.destroy()
+      finish({ ok: false, status: null, message: 'timeout' })
+    }, effectiveTimeout)
+
     const req = http.request({
       hostname: ip,
       port: 3000,
@@ -701,22 +720,17 @@ ipcMain.handle('pos:bancard-call', async (_event, { ip, path: reqPath, body, tim
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(payload),
       },
-      timeout: effectiveTimeout,
     }, (res) => {
       let raw = ''
       res.on('data', (chunk) => { raw += chunk })
       res.on('end', () => {
         let parsed = null
         try { parsed = JSON.parse(raw) } catch (e) { parsed = null }
-        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, body: parsed })
+        finish({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, body: parsed })
       })
     })
-    req.on('timeout', () => {
-      req.destroy()
-      resolve({ ok: false, status: null, message: 'timeout' })
-    })
     req.on('error', (err) => {
-      resolve({ ok: false, status: null, message: err.code || err.message || 'connection_error' })
+      finish({ ok: false, status: null, message: err.code || err.message || 'connection_error' })
     })
     req.write(payload)
     req.end()
