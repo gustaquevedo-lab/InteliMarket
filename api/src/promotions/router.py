@@ -112,7 +112,7 @@ async def update_promotion(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    result = await service.update_promotion(db, promo_id, data)
+    result = await service.update_promotion(db, promo_id, data, user["company_id"])
     if not result:
         raise HTTPException(status_code=404, detail="Promoción no encontrada")
     return result

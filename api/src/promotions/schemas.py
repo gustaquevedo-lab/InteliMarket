@@ -140,6 +140,12 @@ class PromotionUpdate(BaseModel):
     usos_maximos: Optional[int] = None
     activo: Optional[bool] = None
     usuario_registro: Optional[str] = None
+    
+    # Campos adicionales para corto vencimiento y sell-out (editables post-creación)
+    porcentaje_nc_costo: Optional[Decimal] = None
+    monto_total_nc_comprometido: Optional[Decimal] = None
+    fecha_vencimiento_lote: Optional[date] = None
+    nc_estado: Optional[str] = None
 
 
 class PromotionResponse(BaseModel):

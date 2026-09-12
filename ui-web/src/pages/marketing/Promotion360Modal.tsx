@@ -20,6 +20,7 @@ interface Promotion360ModalProps {
   promoId: string
   onClose: () => void
   onUpdate?: () => void
+  onEdit?: (promoId: string) => void
 }
 
 type TabType = "finanzas" | "graficos" | "clientes" | "ia" | "informe_encargados"
@@ -27,7 +28,8 @@ type TabType = "finanzas" | "graficos" | "clientes" | "ia" | "informe_encargados
 export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
   promoId,
   onClose,
-  onUpdate
+  onUpdate,
+  onEdit
 }) => {
   const { addToast } = useToast()
   const { dark: isDark } = useTheme()
@@ -167,6 +169,17 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {onEdit && (
+              <button
+                onClick={() => { onEdit(promoId); onClose() }}
+                disabled={loading}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow transition"
+                title="Editar esta promoción"
+              >
+                <Edit className="w-4 h-4" />
+                <span>Editar</span>
+              </button>
+            )}
             <button
               onClick={handleDownloadReportPdf}
               disabled={downloadingPdf || loading}

@@ -162,7 +162,7 @@ export default function PurchasesPage() {
   const [poDetailItems, setPoDetailItems] = useState<PurchaseOrderItem[]>([])
   const [loadingPODetail, setLoadingPODetail] = useState(false)
 
-  // Estados para Creación y Edición de Orden de Compra
+  // Estados para Creación y Edición de Orden de Compra con Libertad de Proveedores y Comparativa
   const [showManualPOModal, setShowManualPOModal] = useState(false)
   const [editingPOId, setEditingPOId] = useState<string | null>(null)
   const [editingPO, setEditingPO] = useState<PurchaseOrder | null>(null)
@@ -170,7 +170,13 @@ export default function PurchasesPage() {
   const [manualPOFechaEntrega, setManualPOFechaEntrega] = useState("")
   const [manualPOPrioridad, setManualPOPrioridad] = useState("normal")
   const [manualPOCondiciones, setManualPOCondiciones] = useState("30 Días")
+  const [manualPOCondicionesCustom, setManualPOCondicionesCustom] = useState("")
+  const [manualPOMoneda, setManualPOMoneda] = useState<"PYG" | "USD" | "BRL">("PYG")
+  const [manualPOTipoCambio, setManualPOTipoCambio] = useState<number>(1)
+  const [manualPODiasValidez, setManualPODiasValidez] = useState<number>(30)
   const [manualPOObservaciones, setManualPOObservaciones] = useState("")
+  const [manualPOFilterBySupplier, setManualPOFilterBySupplier] = useState(false) // false = Catálogo completo sin restricción de proveedor
+  const [manualPOUpdateDefaultSupplier, setManualPOUpdateDefaultSupplier] = useState(false) // Actualizar este proveedor como nuevo habitual
   const [manualPOItems, setManualPOItems] = useState<any[]>([])
   const [searchProductPO, setSearchProductPO] = useState("")
   const [productSearchResultsPO, setProductSearchResultsPO] = useState<Product[]>([])

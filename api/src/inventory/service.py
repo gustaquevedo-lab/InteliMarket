@@ -1,4 +1,5 @@
-"""Inventory service with costing logic"""
+"""Inventory service — workflow doble aprobación (Gerencia + Administración),
+audit trail inmutable, toma física con doble conteo ciego."""
 
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,9 +10,14 @@ from api.src.inventory.models import (
     Warehouse, Stock, InventoryMovement,
     StockTransfer, StockTransferItem,
     InventoryAdjustment, InventoryAdjustmentItem,
+    StockAdjustmentAuditLog,
+    PhysicalInventorySession, PhysicalInventorySessionItem,
+    MOTIVOS_AJUSTE, RIESGOS_CON_EVIDENCIA,
 )
 from api.src.inventory.schemas import (
     WarehouseCreate, MovementCreate, TransferCreate, AdjustmentCreate,
+    ApproveAdjustmentBody, RejectAdjustmentBody,
+    PhysicalSessionCreate, PhysicalSessionItemCountBody, PhysicalSessionItemReconcileBody,
 )
 from api.src.products.models import Product
 
@@ -380,41 +386,387 @@ async def complete_transfer(db: AsyncSession, transfer_id: str, user_id: uuid.UU
     return transfer_obj
 
 
-async def create_adjustment(db: AsyncSession, data: AdjustmentCreate, user_id: uuid.UUID | None = None) -> InventoryAdjustment:
-    adj_code = f"ADJ-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+# ---------------------------------------------------------------------------
+# Helpers de audit log
+# ---------------------------------------------------------------------------
+
+async def _write_audit_log(
+    db: AsyncSession,
+    adjustment_id: uuid.UUID,
+    accion: str,
+    user_id: uuid.UUID,
+    user_nombre: str | None = None,
+    rol_firmante: str | None = None,
+    comentario: str | None = None,
+    ip_address: str | None = None,
+    metadata_extra: dict | None = None,
+) -> None:
+    """Escribe un registro inmutable en el audit trail. Solo INSERT, nunca UPDATE."""
+    log = StockAdjustmentAuditLog(
+        adjustment_id=adjustment_id,
+        accion=accion,
+        user_id=user_id,
+        user_nombre=user_nombre,
+        rol_firmante=rol_firmante,
+        comentario=comentario,
+        ip_address=ip_address,
+        metadata_extra=metadata_extra,
+    )
+    db.add(log)
+    await db.flush()
+
+
+async def _get_user_nombre(db: AsyncSession, user_id: uuid.UUID | None) -> str | None:
+    """Recupera el nombre del usuario para desnormalizar en el audit trail."""
+    if not user_id:
+        return None
+    from sqlalchemy import text
+    r = await db.execute(
+        text("SELECT nombre FROM users WHERE id = :uid LIMIT 1"),
+        {"uid": user_id},
+    )
+    row = r.first()
+    return row[0] if row else None
+
+
+# ---------------------------------------------------------------------------
+# Crear ajuste — calcula riesgo e impacto automáticamente
+# ---------------------------------------------------------------------------
+
+async def create_adjustment(
+    db: AsyncSession,
+    data: AdjustmentCreate,
+    user_id: uuid.UUID | None = None,
+    user_nombre: str | None = None,
+    ip_address: str | None = None,
+) -> InventoryAdjustment:
+    """Crea un ajuste de stock en estado pendiente_gerencia.
+    
+    NUNCA modifica el stock real — eso ocurre solo cuando el segundo aprobador
+    (Administración) firma la aprobación final.
+    """
+    motivo_info = MOTIVOS_AJUSTE.get(data.motivo_codigo, {})
+    riesgo = motivo_info.get("riesgo", "bajo")
+    motivo_label = motivo_info.get("label", data.motivo_codigo)
+
+    # Validar evidencia obligatoria para riesgo alto/severo
+    if riesgo in RIESGOS_CON_EVIDENCIA:
+        if not data.evidencia_urls or len(data.evidencia_urls) == 0:
+            raise ValueError(
+                f"El motivo '{motivo_label}' tiene riesgo {riesgo.upper()} y requiere "
+                "al menos un archivo de evidencia (foto/documento) adjunto."
+            )
+
+    # Pre-calcular impacto financiero sumando diferencias valorizadas
+    impacto_total = 0
+    enriched_items = []
+    for item_data in data.items:
+        diff = float(item_data.cantidad_fisica) - float(item_data.cantidad_sistema)
+        costo = float(item_data.costo_unitario or 0)
+
+        # Si no viene costo, intentar recuperar de la DB
+        if costo == 0 and item_data.product_id:
+            product = await db.get(Product, item_data.product_id)
+            if product:
+                costo = float(product.costo_promedio or product.ultimo_costo or 0)
+
+        impacto_item = abs(diff) * costo
+        impacto_total += impacto_item
+        enriched_items.append((item_data, diff, costo, impacto_item))
+
+    adj_code = f"ADJ-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}-{uuid.uuid4().hex[:5].upper()}"
     adjustment = InventoryAdjustment(
         company_id=data.company_id,
         warehouse_id=data.warehouse_id,
         codigo=adj_code,
-        motivo=data.motivo,
+        motivo_codigo=data.motivo_codigo,
+        motivo_label=motivo_label,
+        motivo_detalle=data.motivo_detalle,
+        motivo=motivo_label,  # legado
+        riesgo=riesgo,
+        estado="pendiente_gerencia",
+        impacto_financiero_gs=int(impacto_total),
+        evidencia_urls=data.evidencia_urls,
         observaciones=data.observaciones,
         user_id=user_id,
     )
     db.add(adjustment)
     await db.flush()
 
-    for item_data in data.items:
-        diff = item_data["cantidad_fisica"] - item_data["cantidad_sistema"]
+    for item_data, diff, costo, impacto_item in enriched_items:
+        # Recuperar nombre/sku del producto para desnormalizar
+        product = await db.get(Product, item_data.product_id)
         item = InventoryAdjustmentItem(
             adjustment_id=adjustment.id,
-            product_id=uuid.UUID(item_data["product_id"]) if isinstance(item_data["product_id"], str) else item_data["product_id"],
-            variant_id=uuid.UUID(item_data["variant_id"]) if item_data.get("variant_id") and isinstance(item_data["variant_id"], str) else item_data.get("variant_id"),
-            cantidad_sistema=item_data["cantidad_sistema"],
-            cantidad_fisica=item_data["cantidad_fisica"],
+            product_id=item_data.product_id,
+            variant_id=item_data.variant_id,
+            product_nombre=product.nombre if product else None,
+            product_sku=product.sku if product else None,
+            cantidad_sistema=item_data.cantidad_sistema,
+            cantidad_fisica=item_data.cantidad_fisica,
             diferencia=diff,
-            costo_unitario=item_data.get("costo_unitario"),
+            costo_unitario=int(costo) if costo else None,
+            impacto_gs=int(impacto_item),
         )
         db.add(item)
 
     await db.flush()
+
+    # Audit log: creación
+    await _write_audit_log(
+        db,
+        adjustment_id=adjustment.id,
+        accion="creado",
+        user_id=user_id or uuid.UUID(int=0),
+        user_nombre=user_nombre,
+        rol_firmante="creador",
+        comentario=f"Ajuste creado con motivo '{motivo_label}', riesgo {riesgo}, impacto Gs. {int(impacto_total):,}",
+        ip_address=ip_address,
+        metadata_extra={"riesgo": riesgo, "impacto_gs": int(impacto_total), "items_count": len(enriched_items)},
+    )
+
     await db.refresh(adjustment)
     return adjustment
 
 
-async def approve_adjustment(db: AsyncSession, adjustment_id: str, user_id: uuid.UUID | None = None) -> InventoryAdjustment | None:
-    result = await db.execute(select(InventoryAdjustment).where(InventoryAdjustment.id == uuid.UUID(adjustment_id)))
+# ---------------------------------------------------------------------------
+# Aprobación paso 1: Gerencia
+# ---------------------------------------------------------------------------
+
+async def approve_adjustment_gerencia(
+    db: AsyncSession,
+    adjustment_id: str,
+    user_id: uuid.UUID,
+    user_nombre: str | None = None,
+    body: "ApproveAdjustmentBody | None" = None,
+    ip_address: str | None = None,
+) -> InventoryAdjustment:
+    """Firma de Gerencia. Pasa el ajuste a estado pendiente_administracion.
+    
+    El stock NO se modifica todavía.
+    """
+    adj_uuid = uuid.UUID(adjustment_id) if isinstance(adjustment_id, str) else adjustment_id
+    result = await db.execute(select(InventoryAdjustment).where(InventoryAdjustment.id == adj_uuid))
     adjustment = result.scalar_one_or_none()
-    if not adjustment or adjustment.estado != "pendiente":
+
+    if not adjustment:
+        raise ValueError("Ajuste no encontrado")
+    if adjustment.estado != "pendiente_gerencia":
+        raise ValueError(f"El ajuste no está en estado 'pendiente_gerencia' (estado actual: {adjustment.estado})")
+    # Seguridad: el creador no puede aprobar como Gerencia
+    if adjustment.user_id and adjustment.user_id == user_id:
+        raise ValueError("El creador del ajuste no puede aprobarlo como Gerencia")
+
+    comentario = (body.comentario if body else None) or ""
+    nombre = user_nombre or await _get_user_nombre(db, user_id)
+
+    adjustment.estado = "pendiente_administracion"
+    adjustment.aprobado_por_gerencia = user_id
+    adjustment.aprobado_por_gerencia_nombre = nombre
+    adjustment.fecha_aprobacion_gerencia = datetime.now(timezone.utc)
+    adjustment.comentario_gerencia = comentario
+
+    await db.flush()
+
+    await _write_audit_log(
+        db,
+        adjustment_id=adjustment.id,
+        accion="aprobado_gerencia",
+        user_id=user_id,
+        user_nombre=nombre,
+        rol_firmante="gerencia",
+        comentario=comentario or "Aprobado por Gerencia",
+        ip_address=ip_address,
+    )
+
+    await db.refresh(adjustment)
+    return adjustment
+
+
+# ---------------------------------------------------------------------------
+# Aprobación paso 2: Administración — ejecuta el ajuste real de stock
+# ---------------------------------------------------------------------------
+
+async def approve_adjustment_administracion(
+    db: AsyncSession,
+    adjustment_id: str,
+    user_id: uuid.UUID,
+    user_nombre: str | None = None,
+    body: "ApproveAdjustmentBody | None" = None,
+    ip_address: str | None = None,
+) -> InventoryAdjustment:
+    """Firma de Administración. Pasa el ajuste a estado aprobado y EJECUTA
+    los cambios de stock y el registro Kardex.
+    """
+    adj_uuid = uuid.UUID(adjustment_id) if isinstance(adjustment_id, str) else adjustment_id
+    result = await db.execute(select(InventoryAdjustment).where(InventoryAdjustment.id == adj_uuid))
+    adjustment = result.scalar_one_or_none()
+
+    if not adjustment:
+        raise ValueError("Ajuste no encontrado")
+    if adjustment.estado != "pendiente_administracion":
+        raise ValueError(f"El ajuste no está en estado 'pendiente_administracion' (estado actual: {adjustment.estado})")
+    # Mismo usuario no puede aprobar ambas etapas
+    if adjustment.aprobado_por_gerencia and adjustment.aprobado_por_gerencia == user_id:
+        raise ValueError("El mismo usuario no puede aprobar las dos etapas. Gerencia y Administración deben ser personas distintas.")
+
+    items_result = await db.execute(
+        select(InventoryAdjustmentItem).where(InventoryAdjustmentItem.adjustment_id == adjustment.id)
+    )
+    items = items_result.scalars().all()
+
+    # Ejecutar cambios de stock y registrar en Kardex
+    for item in items:
+        if item.diferencia != 0:
+            movement = InventoryMovement(
+                company_id=adjustment.company_id,
+                warehouse_id=adjustment.warehouse_id,
+                product_id=item.product_id,
+                variant_id=item.variant_id,
+                tipo="ajuste",
+                cantidad=int(item.diferencia),
+                costo_unitario=item.costo_unitario,
+                referencia_type="adjustment",
+                referencia_id=adjustment.id,
+                motivo=(
+                    f"[{adjustment.riesgo.upper()}] {adjustment.codigo}: "
+                    f"{adjustment.motivo_label} — {adjustment.motivo_detalle[:80]}"
+                ),
+                user_id=user_id,
+            )
+            db.add(movement)
+
+            stock = await get_stock(db, str(adjustment.warehouse_id), str(item.product_id))
+            if stock:
+                stock.cantidad = int(item.cantidad_fisica)
+                stock.updated_at = datetime.now(timezone.utc)
+            else:
+                stock = Stock(
+                    warehouse_id=adjustment.warehouse_id,
+                    product_id=item.product_id,
+                    variant_id=item.variant_id,
+                    cantidad=int(item.cantidad_fisica),
+                    costo_unitario=item.costo_unitario,
+                )
+                db.add(stock)
+
+    comentario = (body.comentario if body else None) or ""
+    nombre = user_nombre or await _get_user_nombre(db, user_id)
+
+    adjustment.estado = "aprobado"
+    adjustment.aprobado_por_administracion = user_id
+    adjustment.aprobado_por_administracion_nombre = nombre
+    adjustment.fecha_aprobacion_administracion = datetime.now(timezone.utc)
+    adjustment.comentario_administracion = comentario
+    # Mantener legado
+    adjustment.aprobado_por = user_id
+    adjustment.fecha_aprobacion = datetime.now(timezone.utc)
+
+    await db.flush()
+
+    await _write_audit_log(
+        db,
+        adjustment_id=adjustment.id,
+        accion="aprobado_administracion",
+        user_id=user_id,
+        user_nombre=nombre,
+        rol_firmante="administracion",
+        comentario=comentario or "Aprobado por Administración. Stock actualizado.",
+        ip_address=ip_address,
+        metadata_extra={"items_ejecutados": len(items)},
+    )
+
+    await _write_audit_log(
+        db,
+        adjustment_id=adjustment.id,
+        accion="ejecutado",
+        user_id=user_id,
+        user_nombre="Sistema",
+        rol_firmante="sistema",
+        comentario=f"Stock actualizado. {len(items)} productos afectados. Impacto: Gs. {int(adjustment.impacto_financiero_gs or 0):,}",
+        ip_address=None,
+    )
+
+    await db.refresh(adjustment)
+    return adjustment
+
+
+# ---------------------------------------------------------------------------
+# Rechazo (cualquier aprobador, cualquier etapa)
+# ---------------------------------------------------------------------------
+
+async def reject_adjustment(
+    db: AsyncSession,
+    adjustment_id: str,
+    user_id: uuid.UUID,
+    user_nombre: str | None = None,
+    body: "RejectAdjustmentBody | None" = None,
+    ip_address: str | None = None,
+) -> InventoryAdjustment:
+    """Rechaza el ajuste. Irreversible — si se necesita ajustar, crear uno nuevo."""
+    adj_uuid = uuid.UUID(adjustment_id) if isinstance(adjustment_id, str) else adjustment_id
+    result = await db.execute(select(InventoryAdjustment).where(InventoryAdjustment.id == adj_uuid))
+    adjustment = result.scalar_one_or_none()
+
+    if not adjustment:
+        raise ValueError("Ajuste no encontrado")
+    if adjustment.estado in ("aprobado", "rechazado"):
+        raise ValueError(f"No se puede rechazar un ajuste en estado '{adjustment.estado}'")
+
+    motivo_rechazo = (body.motivo_rechazo if body else None) or "Sin motivo especificado"
+    nombre = user_nombre or await _get_user_nombre(db, user_id)
+
+    # Determinar en qué etapa se rechazó para el audit
+    rol_firmante = "gerencia" if adjustment.estado == "pendiente_gerencia" else "administracion"
+
+    adjustment.estado = "rechazado"
+    adjustment.rechazado_por = user_id
+    adjustment.rechazado_por_nombre = nombre
+    adjustment.motivo_rechazo = motivo_rechazo
+    adjustment.fecha_rechazo = datetime.now(timezone.utc)
+
+    await db.flush()
+
+    await _write_audit_log(
+        db,
+        adjustment_id=adjustment.id,
+        accion="rechazado",
+        user_id=user_id,
+        user_nombre=nombre,
+        rol_firmante=rol_firmante,
+        comentario=f"RECHAZADO: {motivo_rechazo}",
+        ip_address=ip_address,
+        metadata_extra={"etapa_rechazo": adjustment.estado, "riesgo": adjustment.riesgo},
+    )
+
+    await db.refresh(adjustment)
+    return adjustment
+
+
+# ---------------------------------------------------------------------------
+# Compatibilidad legado — approve_adjustment (un solo aprobador, path antiguo)
+# ---------------------------------------------------------------------------
+
+async def approve_adjustment(db: AsyncSession, adjustment_id: str, user_id: uuid.UUID | None = None) -> InventoryAdjustment | None:
+    """Legado: redirige al nuevo flujo de doble aprobación.
+    
+    Solo funciona para ajustes creados antes de la migración (estado=pendiente).
+    Para nuevos ajustes use approve_adjustment_gerencia / approve_adjustment_administracion.
+    """
+    adj_uuid = uuid.UUID(adjustment_id) if isinstance(adjustment_id, str) else adjustment_id
+    result = await db.execute(select(InventoryAdjustment).where(InventoryAdjustment.id == adj_uuid))
+    adjustment = result.scalar_one_or_none()
+    if not adjustment:
+        return None
+
+    # Si ya está en el nuevo workflow, redirigir
+    if adjustment.estado == "pendiente_gerencia" and user_id:
+        return await approve_adjustment_gerencia(db, adjustment_id, user_id)
+    if adjustment.estado == "pendiente_administracion" and user_id:
+        return await approve_adjustment_administracion(db, adjustment_id, user_id)
+
+    # Flujo legado para estado=pendiente (ajustes históricos)
+    if adjustment.estado != "pendiente":
         return None
 
     items_result = await db.execute(select(InventoryAdjustmentItem).where(InventoryAdjustmentItem.adjustment_id == adjustment.id))
@@ -428,7 +780,7 @@ async def approve_adjustment(db: AsyncSession, adjustment_id: str, user_id: uuid
                 product_id=item.product_id,
                 variant_id=item.variant_id,
                 tipo="ajuste",
-                cantidad=item.diferencia,
+                cantidad=int(item.diferencia),
                 costo_unitario=item.costo_unitario,
                 referencia_type="adjustment",
                 referencia_id=adjustment.id,
@@ -439,7 +791,7 @@ async def approve_adjustment(db: AsyncSession, adjustment_id: str, user_id: uuid
 
             stock = await get_stock(db, str(adjustment.warehouse_id), str(item.product_id))
             if stock:
-                stock.cantidad = item.cantidad_fisica
+                stock.cantidad = int(item.cantidad_fisica)
                 stock.updated_at = datetime.now(timezone.utc)
 
     adjustment.estado = "aprobado"
@@ -530,41 +882,93 @@ async def list_adjustments(
     company_id: str,
     warehouse_id: str | None = None,
     estado: str | None = None,
+    riesgo: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict]:
-    import uuid
     from sqlalchemy import text
-    
+
     comp_uuid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
     where = "a.company_id = :comp_id"
     params: dict = {"comp_id": comp_uuid, "limit": limit, "offset": offset}
-    
+
     if warehouse_id:
         where += " AND a.warehouse_id = :wh_id"
         params["wh_id"] = uuid.UUID(warehouse_id) if isinstance(warehouse_id, str) else warehouse_id
     if estado:
         where += " AND a.estado = :estado"
         params["estado"] = estado
-        
+    if riesgo:
+        where += " AND a.riesgo = :riesgo"
+        params["riesgo"] = riesgo
+
     query = f"""
-        SELECT 
-            a.id, a.codigo, a.motivo, a.estado, a.observaciones, a.created_at, a.fecha_aprobacion,
+        SELECT
+            a.id, a.codigo,
+            a.motivo_codigo, a.motivo_label, a.motivo_detalle, a.motivo,
+            a.riesgo, a.estado,
+            a.impacto_financiero_gs,
+            a.evidencia_urls,
+            a.aprobado_por_gerencia, a.aprobado_por_gerencia_nombre, a.fecha_aprobacion_gerencia,
+            a.aprobado_por_administracion, a.aprobado_por_administracion_nombre, a.fecha_aprobacion_administracion,
+            a.rechazado_por_nombre, a.motivo_rechazo, a.fecha_rechazo,
+            a.user_id, a.observaciones, a.physical_session_id,
+            a.created_at, a.updated_at,
             w.nombre as warehouse_nombre, w.codigo as warehouse_codigo,
             COUNT(ai.id) as total_items,
-            COALESCE(SUM(ai.diferencia), 0) as diferencia_unidades,
-            COALESCE(SUM(ai.diferencia * COALESCE(ai.costo_unitario, p.costo_promedio, 0)), 0) as diferencia_valorizada_gs
+            COALESCE(SUM(ai.diferencia), 0) as diferencia_unidades
         FROM inventory_adjustments a
         LEFT JOIN warehouses w ON w.id = a.warehouse_id
         LEFT JOIN inventory_adjustment_items ai ON ai.adjustment_id = a.id
-        LEFT JOIN products p ON p.id = ai.product_id
         WHERE {where}
-        GROUP BY a.id, a.codigo, a.motivo, a.estado, a.observaciones, a.created_at, a.fecha_aprobacion, w.nombre, w.codigo
+        GROUP BY a.id, w.nombre, w.codigo
         ORDER BY a.created_at DESC
         LIMIT :limit OFFSET :offset
     """
     result = await db.execute(text(query), params)
     return [dict(r._mapping) for r in result]
+
+
+async def get_adjustment_detail(db: AsyncSession, adjustment_id: str) -> dict | None:
+    """Detalle completo de un ajuste: items + audit log."""
+    adj_uuid = uuid.UUID(adjustment_id) if isinstance(adjustment_id, str) else adjustment_id
+    result = await db.execute(
+        select(InventoryAdjustment).where(InventoryAdjustment.id == adj_uuid)
+    )
+    adjustment = result.scalar_one_or_none()
+    if not adjustment:
+        return None
+
+    items_result = await db.execute(
+        select(InventoryAdjustmentItem).where(InventoryAdjustmentItem.adjustment_id == adj_uuid)
+    )
+    items = items_result.scalars().all()
+
+    logs_result = await db.execute(
+        select(StockAdjustmentAuditLog)
+        .where(StockAdjustmentAuditLog.adjustment_id == adj_uuid)
+        .order_by(StockAdjustmentAuditLog.created_at)
+    )
+    logs = logs_result.scalars().all()
+
+    return {
+        "adjustment": adjustment,
+        "items": items,
+        "audit_logs": logs,
+    }
+
+
+async def get_adjustment_motivos() -> list[dict]:
+    """Retorna el catálogo de motivos con su nivel de riesgo."""
+    return [
+        {
+            "codigo": code,
+            "label": info["label"],
+            "riesgo": info["riesgo"],
+            "requiere_evidencia": info["riesgo"] in RIESGOS_CON_EVIDENCIA,
+        }
+        for code, info in MOTIVOS_AJUSTE.items()
+    ]
 
 
 async def record_quick_merma(
@@ -905,7 +1309,6 @@ async def get_kardex_summary(
         for r in dias_result
     ]
 
-    return {
         "total_movimientos": totales.total_movimientos if totales else 0,
         "productos_con_movimiento": totales.productos_con_movimiento if totales else 0,
         "total_entradas": float(totales.total_entradas) if totales else 0.0,
@@ -914,3 +1317,347 @@ async def get_kardex_summary(
         "top_productos": top_productos,
         "por_dia": por_dia,
     }
+
+
+# ---------------------------------------------------------------------------
+# Toma Física de Inventario
+# ---------------------------------------------------------------------------
+
+async def create_physical_session(
+    db: AsyncSession,
+    data: PhysicalSessionCreate,
+    user_id: uuid.UUID | None = None,
+    user_nombre: str | None = None,
+) -> PhysicalInventorySession:
+    """Crea una sesión de toma física y pre-carga los ítems con el stock actual.
+    
+    El stock del sistema queda congelado en cada ítem (cantidad_sistema).
+    Los contadores registran sus conteos sin ver los valores del sistema.
+    """
+    from sqlalchemy import text as sqtext
+
+    session_code = f"TF-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}-{uuid.uuid4().hex[:4].upper()}"
+    session = PhysicalInventorySession(
+        company_id=data.company_id,
+        warehouse_id=data.warehouse_id,
+        codigo=session_code,
+        tipo=data.tipo,
+        categoria_id=data.categoria_id,
+        pasillo=data.pasillo,
+        descripcion_alcance=data.descripcion_alcance,
+        notas=data.notas,
+        estado="abierta",
+        creado_por=user_id,
+        creado_por_nombre=user_nombre,
+        contador_1_id=data.contador_1_id,
+        contador_1_nombre=data.contador_1_nombre,
+        contador_2_id=data.contador_2_id,
+        contador_2_nombre=data.contador_2_nombre,
+        fecha_inicio=datetime.now(timezone.utc),
+    )
+    db.add(session)
+    await db.flush()
+
+    # Pre-cargar ítems con stock actual del depósito
+    query_params: dict = {"wh_id": data.warehouse_id}
+    items_query = """
+        SELECT
+            s.product_id,
+            p.nombre as product_nombre,
+            p.sku as product_sku,
+            COALESCE(p.codigo_barra, '') as product_codigo_barra,
+            s.cantidad as cantidad_sistema,
+            COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0) as costo_unitario
+        FROM stock s
+        JOIN products p ON p.id = s.product_id
+        WHERE s.warehouse_id = :wh_id AND p.activo = true
+    """
+    if data.categoria_id:
+        items_query += " AND p.categoria_id = :cat_id"
+        query_params["cat_id"] = data.categoria_id
+
+    items_query += " ORDER BY p.nombre"
+
+    items_result = await db.execute(sqtext(items_query), query_params)
+    items_rows = items_result.fetchall()
+
+    for row in items_rows:
+        item = PhysicalInventorySessionItem(
+            session_id=session.id,
+            product_id=row.product_id,
+            product_nombre=row.product_nombre,
+            product_sku=row.product_sku,
+            product_codigo_barra=row.product_codigo_barra,
+            cantidad_sistema=float(row.cantidad_sistema or 0),
+            costo_unitario=int(row.costo_unitario or 0) if row.costo_unitario else None,
+            estado="pendiente",
+        )
+        db.add(item)
+
+    session.total_items = len(items_rows)
+    session.estado = "en_conteo"
+    await db.flush()
+    await db.refresh(session)
+    return session
+
+
+async def get_physical_session(db: AsyncSession, session_id: str) -> PhysicalInventorySession | None:
+    sid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+    result = await db.execute(
+        select(PhysicalInventorySession).where(PhysicalInventorySession.id == sid)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_physical_sessions(
+    db: AsyncSession,
+    company_id: str,
+    warehouse_id: str | None = None,
+    estado: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    from sqlalchemy import text as sqtext
+
+    comp_uuid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
+    where = "s.company_id = :comp_id"
+    params: dict = {"comp_id": comp_uuid, "limit": limit, "offset": offset}
+
+    if warehouse_id:
+        where += " AND s.warehouse_id = :wh_id"
+        params["wh_id"] = uuid.UUID(warehouse_id) if isinstance(warehouse_id, str) else warehouse_id
+    if estado:
+        where += " AND s.estado = :estado"
+        params["estado"] = estado
+
+    query = f"""
+        SELECT
+            s.id, s.codigo, s.tipo, s.estado,
+            s.total_items, s.items_con_diferencia,
+            s.diferencia_total_unidades, s.diferencia_total_gs,
+            s.creado_por_nombre, s.contador_1_nombre, s.contador_2_nombre, s.cerrado_por_nombre,
+            s.fecha_inicio, s.fecha_cierre,
+            s.adjustment_id, s.notas, s.descripcion_alcance,
+            s.created_at,
+            w.nombre as warehouse_nombre
+        FROM physical_inventory_sessions s
+        LEFT JOIN warehouses w ON w.id = s.warehouse_id
+        WHERE {where}
+        ORDER BY s.created_at DESC
+        LIMIT :limit OFFSET :offset
+    """
+    result = await db.execute(sqtext(query), params)
+    return [dict(r._mapping) for r in result]
+
+
+async def register_item_count(
+    db: AsyncSession,
+    session_id: str,
+    item_id: str,
+    body: PhysicalSessionItemCountBody,
+    user_id: uuid.UUID | None = None,
+) -> PhysicalInventorySessionItem:
+    """Registra el conteo 1 o 2 de un ítem. El contador 2 no ve el conteo 1 (doble ciego)."""
+    sid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+    iid = uuid.UUID(item_id) if isinstance(item_id, str) else item_id
+
+    session_res = await db.execute(
+        select(PhysicalInventorySession).where(PhysicalInventorySession.id == sid)
+    )
+    session = session_res.scalar_one_or_none()
+    if not session or session.estado not in ("en_conteo", "abierta"):
+        raise ValueError("La sesión no está activa para recibir conteos")
+
+    item_res = await db.execute(
+        select(PhysicalInventorySessionItem).where(
+            PhysicalInventorySessionItem.id == iid,
+            PhysicalInventorySessionItem.session_id == sid,
+        )
+    )
+    item = item_res.scalar_one_or_none()
+    if not item:
+        raise ValueError("Ítem no encontrado en la sesión")
+
+    now = datetime.now(timezone.utc)
+    if body.numero_conteo == 1:
+        item.cantidad_conteo_1 = float(body.cantidad)
+        item.contado_1_at = now
+        item.contado_1_by = user_id
+        item.estado = "conteo_1"
+    else:
+        if item.cantidad_conteo_1 is None:
+            raise ValueError("Debe completarse el primer conteo antes del segundo")
+        item.cantidad_conteo_2 = float(body.cantidad)
+        item.contado_2_at = now
+        item.contado_2_by = user_id
+
+        # Si ambos conteos son iguales, auto-reconciliar
+        if abs(float(body.cantidad) - float(item.cantidad_conteo_1)) < 0.001:
+            item.cantidad_final = float(body.cantidad)
+            item.diferencia = float(body.cantidad) - float(item.cantidad_sistema)
+            item.impacto_gs = int(abs(item.diferencia) * float(item.costo_unitario or 0))
+            item.estado = "reconciliado"
+        else:
+            item.estado = "conteo_2"  # Discrepancia — requiere reconciliación manual
+
+    await db.flush()
+    await db.refresh(item)
+    return item
+
+
+async def reconcile_item(
+    db: AsyncSession,
+    session_id: str,
+    item_id: str,
+    body: PhysicalSessionItemReconcileBody,
+    user_id: uuid.UUID | None = None,
+) -> PhysicalInventorySessionItem:
+    """Supervisor reconcilia diferencia entre conteo 1 y 2."""
+    sid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+    iid = uuid.UUID(item_id) if isinstance(item_id, str) else item_id
+
+    item_res = await db.execute(
+        select(PhysicalInventorySessionItem).where(
+            PhysicalInventorySessionItem.id == iid,
+            PhysicalInventorySessionItem.session_id == sid,
+        )
+    )
+    item = item_res.scalar_one_or_none()
+    if not item:
+        raise ValueError("Ítem no encontrado")
+    if item.estado not in ("conteo_2", "conteo_1"):
+        raise ValueError(f"El ítem no requiere reconciliación (estado: {item.estado})")
+
+    item.cantidad_final = float(body.cantidad_final)
+    item.diferencia = float(body.cantidad_final) - float(item.cantidad_sistema)
+    item.impacto_gs = int(abs(item.diferencia) * float(item.costo_unitario or 0))
+    item.reconciliado_by = user_id
+    item.nota_reconciliacion = body.nota_reconciliacion
+    item.estado = "reconciliado"
+
+    await db.flush()
+    await db.refresh(item)
+    return item
+
+
+async def close_physical_session(
+    db: AsyncSession,
+    session_id: str,
+    user_id: uuid.UUID | None = None,
+    user_nombre: str | None = None,
+    ip_address: str | None = None,
+) -> dict:
+    """Cierra la sesión y genera automáticamente un InventoryAdjustment con las diferencias.
+    
+    El ajuste generado entra directamente al workflow de doble aprobación.
+    Solo items con diferencia != 0 se incluyen en el ajuste.
+    """
+    sid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+
+    session_res = await db.execute(
+        select(PhysicalInventorySession).where(PhysicalInventorySession.id == sid)
+    )
+    session = session_res.scalar_one_or_none()
+    if not session:
+        raise ValueError("Sesión no encontrada")
+    if session.estado not in ("en_conteo", "abierta"):
+        raise ValueError(f"La sesión no puede cerrarse (estado: {session.estado})")
+
+    # Verificar que todos los ítems estén reconciliados
+    items_result = await db.execute(
+        select(PhysicalInventorySessionItem).where(
+            PhysicalInventorySessionItem.session_id == sid
+        )
+    )
+    items = items_result.scalars().all()
+
+    pendientes = [i for i in items if i.estado in ("pendiente", "conteo_2") and i.cantidad_conteo_1 is not None]
+    if pendientes:
+        raise ValueError(
+            f"Hay {len(pendientes)} ítem(s) con discrepancias sin reconciliar. "
+            "Reconcílielos antes de cerrar la sesión."
+        )
+
+    # Calcular totales
+    items_con_diff = [i for i in items if i.diferencia and abs(float(i.diferencia)) > 0.001]
+    diferencia_total_unidades = sum(float(i.diferencia or 0) for i in items_con_diff)
+    diferencia_total_gs = sum(float(i.impacto_gs or 0) for i in items_con_diff)
+
+    session.estado = "cerrada"
+    session.items_con_diferencia = len(items_con_diff)
+    session.diferencia_total_unidades = diferencia_total_unidades
+    session.diferencia_total_gs = diferencia_total_gs
+    session.cerrado_por = user_id
+    session.cerrado_por_nombre = user_nombre
+    session.fecha_cierre = datetime.now(timezone.utc)
+
+    adjustment = None
+    if items_con_diff:
+        # Crear ajuste automáticamente para las diferencias
+        adj_code = f"ADJ-TF-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}-{uuid.uuid4().hex[:4].upper()}"
+        motivo_info = MOTIVOS_AJUSTE["conteo_fisico"]
+
+        adjustment = InventoryAdjustment(
+            company_id=session.company_id,
+            warehouse_id=session.warehouse_id,
+            codigo=adj_code,
+            motivo_codigo="conteo_fisico",
+            motivo_label=motivo_info["label"],
+            motivo_detalle=(
+                f"Toma física {session.codigo} ({session.tipo}). "
+                f"{len(items_con_diff)} productos con diferencia. "
+                f"Impacto total: Gs. {int(diferencia_total_gs):,}"
+            ),
+            motivo=motivo_info["label"],
+            riesgo=motivo_info["riesgo"],
+            estado="pendiente_gerencia",
+            impacto_financiero_gs=int(diferencia_total_gs),
+            user_id=user_id,
+            physical_session_id=session.id,
+        )
+        db.add(adjustment)
+        await db.flush()
+
+        for item in items_con_diff:
+            adj_item = InventoryAdjustmentItem(
+                adjustment_id=adjustment.id,
+                product_id=item.product_id,
+                product_nombre=item.product_nombre,
+                product_sku=item.product_sku,
+                cantidad_sistema=float(item.cantidad_sistema),
+                cantidad_fisica=float(item.cantidad_final or item.cantidad_conteo_1 or 0),
+                diferencia=float(item.diferencia or 0),
+                costo_unitario=item.costo_unitario,
+                impacto_gs=int(item.impacto_gs or 0),
+            )
+            db.add(adj_item)
+
+        await db.flush()
+
+        # Audit log del ajuste generado automáticamente
+        await _write_audit_log(
+            db,
+            adjustment_id=adjustment.id,
+            accion="creado",
+            user_id=user_id or uuid.UUID(int=0),
+            user_nombre=user_nombre,
+            rol_firmante="sistema",
+            comentario=(
+                f"Ajuste generado automáticamente al cerrar toma física {session.codigo}. "
+                f"{len(items_con_diff)} productos afectados."
+            ),
+            ip_address=ip_address,
+            metadata_extra={"origen": "toma_fisica", "session_id": str(session.id)},
+        )
+
+        session.adjustment_id = adjustment.id
+        await db.flush()
+
+    await db.refresh(session)
+    return {
+        "session": session,
+        "adjustment_id": str(adjustment.id) if adjustment else None,
+        "items_con_diferencia": len(items_con_diff),
+        "diferencia_total_gs": diferencia_total_gs,
+    }
+

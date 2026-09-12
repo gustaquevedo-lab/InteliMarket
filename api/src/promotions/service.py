@@ -298,27 +298,53 @@ async def list_promotions(
     return promos
 
 
-async def update_promotion(db: AsyncSession, promo_id: str, data: PromotionUpdate) -> Promotion | None:
+async def update_promotion(db: AsyncSession, promo_id: str, data: PromotionUpdate, company_id: str | None = None) -> Promotion | None:
     promo = await get_promotion(db, promo_id)
     if not promo:
         return None
+
+    # Validar pertenencia si se suministra company_id
+    if company_id and str(promo.company_id) != company_id:
+        return None
+
     update_data = data.model_dump(exclude_unset=True)
-    if "producto_ids" in update_data and update_data["producto_ids"] is not None:
-        update_data["producto_ids"] = [uuid.UUID(p) for p in update_data["producto_ids"]]
-    if "categoria_ids" in update_data and update_data["categoria_ids"] is not None:
-        update_data["categoria_ids"] = [uuid.UUID(c) for c in update_data["categoria_ids"]]
-    if "supplier_id" in update_data and update_data["supplier_id"] is not None:
-        update_data["supplier_id"] = uuid.UUID(update_data["supplier_id"])
-    if "purchases_invoices_ids" in update_data and update_data["purchases_invoices_ids"] is not None:
-        update_data["purchases_invoices_ids"] = [uuid.UUID(p) for p in update_data["purchases_invoices_ids"]]
+
+    # Convertir UUIDs — permitir desasociar supplier/invoices pasando None explícito
+    if "producto_ids" in update_data:
+        pids = update_data["producto_ids"]
+        update_data["producto_ids"] = [uuid.UUID(p) for p in pids] if pids else None
+    if "categoria_ids" in update_data:
+        cids = update_data["categoria_ids"]
+        update_data["categoria_ids"] = [uuid.UUID(c) for c in cids] if cids else None
+    if "supplier_id" in update_data:
+        sid = update_data["supplier_id"]
+        update_data["supplier_id"] = uuid.UUID(sid) if sid else None
+    if "purchases_invoices_ids" in update_data:
+        iids = update_data["purchases_invoices_ids"]
+        update_data["purchases_invoices_ids"] = [uuid.UUID(p) for p in iids] if iids else None
+
+    # Sincronizar estado cuando se cambia activo directamente
+    if "activo" in update_data and "estado" not in update_data:
+        update_data["estado"] = "activa" if update_data["activo"] else "pausada"
+
+    # Recalcular vende_bajo_costo si cambian precio o costo de referencia
+    new_precio = update_data.get("precio_fijo_promocional", promo.precio_fijo_promocional)
+    new_costo = update_data.get("costo_unitario_referencia", promo.costo_unitario_referencia)
+    if "precio_fijo_promocional" in update_data or "costo_unitario_referencia" in update_data:
+        precio_d = Decimal(str(new_precio)) if new_precio else Decimal("0")
+        costo_d = Decimal(str(new_costo)) if new_costo else Decimal("0")
+        if precio_d > 0 and costo_d > 0:
+            update_data["vende_bajo_costo"] = precio_d < costo_d
 
     for field, value in update_data.items():
         setattr(promo, field, value)
 
     await db.flush()
-    await db.refresh(promo)
     await _sync_balanza_si_aplica(db, promo)
-    return promo
+
+    # Retornar objeto con productos_detalle cargado
+    return await get_promotion(db, promo_id)
+
 
 
 async def toggle_promotion_status(db: AsyncSession, company_id: str, promo_id: str) -> Promotion | None:

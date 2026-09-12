@@ -90,6 +90,7 @@ export default function PromocionesPage() {
   const [loadingClaim, setLoadingClaim] = useState(false)
   const [showSimModal, setShowSimModal] = useState(false)
   const [syncingNemuha, setSyncingNemuha] = useState(false)
+  const [editingPromo, setEditingPromo] = useState<Promotion | null>(null)
 
   // ── FORMULARIO MULTIPRODUCTO & CAMPAÑA MASIVA ───────────────────────────
   const [newNombre, setNewNombre] = useState("")
@@ -649,6 +650,86 @@ export default function PromocionesPage() {
     }
   }
 
+  // ── ABRIR MODAL EN MODO EDICIÓN ─────────────────────────────────────────
+  const handleOpenEdit = async (promo: Promotion) => {
+    // Precargar todos los campos del formulario desde la promoción existente
+    setNewNombre(promo.nombre || "")
+    setNewDesc(promo.descripcion || "")
+    setNewTipo(promo.tipo || "precio_fijo_oferta")
+    setNewOrigen(promo.origen || "iniciativa_propia")
+    setNewFinanciamiento(promo.financiamiento || "propio_supermercado")
+    setNewSupplierId(promo.supplier_id || "")
+    const supFound = suppliers.find(s => s.id === promo.supplier_id)
+    setSupplierSearchText(supFound ? (supFound.razon_social || (supFound as any).nombre || "") : "")
+    setNewPctAporteProveedor(promo.porcentaje_aporte_proveedor ?? "")
+    setNewPctAporteTienda(promo.porcentaje_aporte_tienda ?? "")
+    setNewCategoryId((promo.categoria_ids && promo.categoria_ids.length > 0) ? promo.categoria_ids[0] : "")
+    setSelectionMode(promo.aplica_a === "categoria" ? "category" : "search")
+    setNewLimitePorCompra(promo.limite_por_compra ?? "")
+    setNewLimitarStock(promo.limitar_unidades ?? false)
+    setNewStockLimite(promo.stock_limite_unidades ?? "")
+    setNewPorcentajeNcCosto((promo as any).porcentaje_nc_costo ?? "")
+    setNewFechaVencimientoLote((promo as any).fecha_vencimiento_lote || "")
+    // Precios / valores según el tipo
+    if (promo.tipo === "precio_fijo_oferta" || promo.tipo === "combo_pack" || promo.tipo === "combo_precio") {
+      setNewBulkPrecioFijo(promo.precio_fijo_promocional ?? "")
+    } else if (promo.tipo === "porcentaje") {
+      setNewBulkValorPct(promo.valor ?? 15)
+      setNewBaseCalculoPct((promo.base_calculo_pct as "venta" | "costo") ?? "venta")
+    } else if (promo.tipo === "monto_fijo") {
+      setNewBulkMontoFijo(promo.valor ?? "")
+    } else if (promo.tipo === "segunda_unidad_pct") {
+      setNewSegundaUnidadPct(promo.valor ?? 50)
+    } else {
+      setNewBulkValorPct(promo.valor ?? "")
+    }
+    setNewTerminacionPsicologica(promo.terminacion_psicologica ?? "")
+    setNewCombinable(promo.combinable ?? false)
+    setNewMontoMinimoCompra(promo.monto_minimo_compra ?? "")
+    setNewCantidadMinima(promo.cantidad_minima ?? "")
+    // Vigencia y horarios relámpago
+    setNewDesde(promo.valido_desde || new Date().toISOString().slice(0, 10))
+    setNewHasta(promo.valido_hasta || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10))
+    const tieneHorario = !!(promo.horario_desde && promo.horario_hasta)
+    setNewEsRelampago(tieneHorario)
+    setNewHorarioDesde(promo.horario_desde ? String(promo.horario_desde).slice(0, 5) : "18:00")
+    setNewHorarioHasta(promo.horario_hasta ? String(promo.horario_hasta).slice(0, 5) : "21:00")
+    setNewDiasSemana(promo.dias_semana && promo.dias_semana.length > 0 ? promo.dias_semana : [0, 1, 2, 3, 4, 5, 6])
+    // Precargar productos seleccionados a partir de productos_detalle
+    const prodsDetalle = (promo as any).productos_detalle as Array<{ id: string; nombre: string; sku?: string; codigo_barra?: string }> | undefined
+    const batchMap = new Map<string, SelectedPromoProduct>()
+    if (prodsDetalle && prodsDetalle.length > 0) {
+      const costoRef = (promo.costo_unitario_referencia as number | undefined) ?? 0
+      const precioPromoRef = (promo.precio_fijo_promocional as number | undefined) ?? 0
+      prodsDetalle.forEach(det => {
+        // Usar el catálogo local si está disponible para obtener precio y costo reales
+        const localProd = allCatalogProducts.find(p => p.id === det.id)
+        const costo = localProd ? Number(localProd.costo_promedio || 0) : costoRef
+        const precioReg = localProd ? Number(localProd.precio_venta || 0) : 0
+        const precioPromo = precioPromoRef || calcularPrecioPromocional(
+          promo.tipo,
+          precioReg,
+          costo,
+          promo.valor ?? "",
+          "",
+          promo.precio_fijo_promocional ?? "",
+          (promo.base_calculo_pct as "venta" | "costo") ?? "venta",
+          promo.terminacion_psicologica ?? ""
+        )
+        batchMap.set(det.id, {
+          product: localProd || ({ id: det.id, nombre: det.nombre, sku: det.sku, codigo_barra: det.codigo_barra } as any),
+          costo,
+          precio_regular: precioReg,
+          precio_promocional: precioPromo
+        })
+      })
+    }
+    setSelectedBatchProducts(batchMap)
+    setEditingPromo(promo)
+    setViewingPromo(null)
+    setShowCreateModal(true)
+  }
+
   // ── GUARDAR CAMPAÑA MULTIPRODUCTO / LOTE DE PROMOCIONES ─────────────────
   const handleCreateBatchPromos = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -751,9 +832,16 @@ export default function PromocionesPage() {
         payload.horario_hasta = newHorarioHasta
       }
 
-      const created = await api.promotions.create(payload)
-      toast.success("Campaña Multiproducto Creada", `Se activó la promoción "${created.nombre}" para ${productIds.length} productos y variantes`)
+      let savedPromo: Promotion
+      if (editingPromo) {
+        savedPromo = await api.promotions.update(editingPromo.id, payload)
+        toast.success("Promoción Actualizada", `Los cambios en "${savedPromo.nombre}" se guardaron correctamente`)
+      } else {
+        savedPromo = await api.promotions.create(payload)
+        toast.success("Campaña Multiproducto Creada", `Se activó la promoción "${savedPromo.nombre}" para ${productIds.length} productos y variantes`)
+      }
       setShowCreateModal(false)
+      setEditingPromo(null)
       setSelectedBatchProducts(new Map())
       setNewNombre("")
       setNewDesc("")
@@ -836,6 +924,31 @@ export default function PromocionesPage() {
             <button
               type="button"
               onClick={() => {
+                setEditingPromo(null)
+                setSelectedBatchProducts(new Map())
+                setNewNombre("")
+                setNewDesc("")
+                setNewTipo("precio_fijo_oferta")
+                setNewOrigen("iniciativa_propia")
+                setNewFinanciamiento("propio_supermercado")
+                setNewSupplierId("")
+                setSupplierSearchText("")
+                setNewDesde(new Date().toISOString().slice(0, 10))
+                setNewHasta(new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10))
+                setNewDiasSemana([0, 1, 2, 3, 4, 5, 6])
+                setNewEsRelampago(false)
+                setNewCombinable(false)
+                setNewLimitarStock(false)
+                setNewBulkPrecioFijo("")
+                setNewBulkValorPct(15)
+                setNewBulkMontoFijo("")
+                setNewTerminacionPsicologica("")
+                setNewLimitePorCompra("")
+                setNewStockLimite("")
+                setNewPorcentajeNcCosto("")
+                setNewFechaVencimientoLote("")
+                setNewMontoMinimoCompra("")
+                setNewCantidadMinima("")
                 setShowCreateModal(true)
               }}
               className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-emerald-500/25 cursor-pointer active:scale-95"
@@ -1200,6 +1313,17 @@ export default function PromocionesPage() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation()
+                                handleOpenEdit(promo)
+                              }}
+                              title="Editar Promoción"
+                              className="p-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800/70 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
                                 setViewingPromo(promo)
                               }}
                               title="Ver Ficha Técnica Lateral"
@@ -1528,6 +1652,14 @@ export default function PromocionesPage() {
 
               <div className="flex items-center gap-2">
                 <button
+                  onClick={() => handleOpenEdit(viewingPromo)}
+                  className="px-3 py-2 rounded-xl border border-indigo-200 dark:border-indigo-800/70 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 text-xs font-bold flex items-center gap-1.5 transition"
+                >
+                  <Edit className="w-3.5 h-3.5" />
+                  <span>Editar</span>
+                </button>
+
+                <button
                   onClick={() => handleTogglePromo(viewingPromo)}
                   className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
                     viewingPromo.activo
@@ -1566,13 +1698,21 @@ export default function PromocionesPage() {
             {/* Header Modal - Fijo */}
             <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3.5 shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20 shrink-0">
-                  <Sparkles className="w-5 h-5" />
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-lg shrink-0 ${
+                  editingPromo
+                    ? "bg-gradient-to-br from-indigo-500 to-violet-600 shadow-indigo-500/20"
+                    : "bg-gradient-to-br from-emerald-500 to-teal-600 shadow-emerald-500/20"
+                }`}>
+                  {editingPromo ? <Edit className="w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
-                      TRADE MARKETING & OFERTAS MASIVAS
+                    <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md border ${
+                      editingPromo
+                        ? "text-indigo-700 dark:text-indigo-300 bg-indigo-500/10 border-indigo-500/20"
+                        : "text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border-emerald-500/20"
+                    }`}>
+                      {editingPromo ? "EDICIÓN DE PROMOCIÓN" : "TRADE MARKETING & OFERTAS MASIVAS"}
                     </span>
                     {(selectedBatchProducts?.size || 0) > 0 && (
                       <span className="text-[10px] font-mono font-bold text-purple-700 dark:text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded-md border border-purple-500/20">
@@ -1581,13 +1721,16 @@ export default function PromocionesPage() {
                     )}
                   </div>
                   <h3 className="text-lg font-black text-gray-900 dark:text-white mt-0.5">
-                    Configuración de Campaña Promocional
+                    {editingPromo ? `Editar: ${editingPromo.nombre}` : "Configuración de Campaña Promocional"}
                   </h3>
                 </div>
               </div>
               <button 
                 type="button" 
-                onClick={() => setShowCreateModal(false)} 
+                onClick={() => {
+                  setShowCreateModal(false)
+                  setEditingPromo(null)
+                }} 
                 className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer transition"
                 title="Cerrar ventana"
               >
@@ -2579,7 +2722,10 @@ export default function PromocionesPage() {
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() => setShowCreateModal(false)}
+                    onClick={() => {
+                      setShowCreateModal(false)
+                      setEditingPromo(null)
+                    }}
                     className="px-4 py-2 rounded-xl border border-gray-300 dark:border-slate-700 text-gray-700 dark:text-gray-300 text-xs font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
                   >
                     Cancelar
@@ -2587,10 +2733,14 @@ export default function PromocionesPage() {
                   <button
                     type="submit"
                     disabled={saving || (selectedBatchProducts?.size || 0) === 0}
-                    className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold flex items-center gap-2 shadow-lg shadow-emerald-500/25 disabled:opacity-50 cursor-pointer transition"
+                    className={`px-5 py-2 rounded-xl text-white text-xs font-extrabold flex items-center gap-2 shadow-lg disabled:opacity-50 cursor-pointer transition ${
+                      editingPromo
+                        ? "bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 shadow-indigo-500/25"
+                        : "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-500/25"
+                    }`}
                   >
                     {saving && <RefreshCw className="w-4 h-4 animate-spin" />}
-                    <span>Guardar Promoción ({selectedBatchProducts?.size || 0} items)</span>
+                    <span>{editingPromo ? `Guardar Cambios (${selectedBatchProducts?.size || 0} items)` : `Guardar Promoción (${selectedBatchProducts?.size || 0} items)`}</span>
                   </button>
                 </div>
               </div>

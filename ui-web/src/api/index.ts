@@ -842,6 +842,12 @@ export interface Promotion {
   usos_actuales?: number
   activo?: boolean
   created_at?: string
+  // Campos de NC y lote de vencimiento
+  porcentaje_nc_costo?: number
+  monto_total_nc_comprometido?: number
+  fecha_vencimiento_lote?: string
+  // Productos detalle (enriquecido por el backend tras fetch)
+  productos_detalle?: Array<{ id: string; nombre: string; sku?: string; codigo_barra?: string }>
 }
 export interface PromotionUsage { id: string; promotion_id?: string; sale_id?: string; customer_id?: string; branch_id?: string; codigo_cupon?: string; descuento_aplicado?: number; items_aplicados?: string[]; created_at?: string }
 export interface MobileDashboard { recepciones_pendientes: number; inventarios_pendientes: number; sugerencias_pendientes: number; entregas_hoy: number }
