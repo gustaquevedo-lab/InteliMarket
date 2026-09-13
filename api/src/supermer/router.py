@@ -317,30 +317,13 @@ async def create_waste(
     return await service.create_waste(db, user["company_id"], data, user["user_id"])
 
 
-async def _require_gerente(db: AsyncSession, user: dict):
-    """Autorización de merma: exige rol Gerente o Administrador.
-
-    A diferencia del resto del sistema (que usa require_permission con
-    bypass total para Administrador), acá el pedido del cliente fue
-    puntualmente "solo con autorización del gerente" -- se resuelve el rol
-    real vía rbac.get_user_roles() (mismo mecanismo que usan las
-    aprobaciones de caja/finanzas) en vez de un permiso RBAC genérico.
-    """
-    from api.src.rbac.service import get_user_roles
-    import uuid as _uuid
-
-    roles = {r["role_name"] for r in await get_user_roles(db, _uuid.UUID(user["user_id"]), _uuid.UUID(user["tenant_id"]))}
-    if not roles & {"Gerente", "Administrador"}:
-        raise HTTPException(403, "No autorizado: se requiere rol Gerente para aprobar o rechazar una merma")
-
-
 @router.post("/waste/{waste_id}/approve", response_model=WasteLogResponse)
 async def approve_waste(
     waste_id: str,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("mermas:approve")),
 ):
-    await _require_gerente(db, user)
     return await service.approve_waste(db, user["company_id"], waste_id, user["user_id"])
 
 
@@ -350,8 +333,8 @@ async def reject_waste(
     data: WasteLogRejectRequest,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("mermas:approve")),
 ):
-    await _require_gerente(db, user)
     return await service.reject_waste(db, user["company_id"], waste_id, user["user_id"], data.motivo_rechazo)
 
 

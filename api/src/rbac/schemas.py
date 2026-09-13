@@ -134,6 +134,11 @@ DEFAULT_PERMISSIONS = [
     # 6-7 permisos finos para un solo rol que necesita las 6-7 cosas.
     ("salon:manage", "Gestionar carnicería, frescos, panadería, HACCP, equipos y ESL", "salon"),
     ("label_printing:manage", "Imprimir y gestionar etiquetas de góndola", "label_printing"),
+    # Control de mermas: registrar (cubierto por salon:manage) vs. autorizar
+    # que salga del stock. Antes de este permiso, la única forma de aprobar
+    # una merma era tener User.rol == "admin" -- ningún rol RBAC real podía
+    # hacerlo sin ser Administrador completo.
+    ("mermas:approve", "Aprobar o rechazar mermas antes de que descuenten stock", "salon"),
 ]
 
 DEFAULT_ROLES = [
@@ -189,6 +194,15 @@ DEFAULT_ROLES = [
         "permissions": [
             "salon:view_prices", "salon:view_promotions", "salon:manage", "label_printing:manage",
             "products:view", "price_lists:view", "inventory:view",
+        ],
+    },
+    {
+        "name": "Gerente",
+        "description": "Autoriza mermas y pérdidas de Carnicería, Panadería y Verdulería antes de que salgan de stock",
+        "is_system": True,
+        "is_default": False,
+        "permissions": [
+            "mermas:approve", "salon:manage", "inventory:view", "reports:view",
         ],
     },
     {
