@@ -1,9 +1,10 @@
-from sqlalchemy import Column, String, Boolean, DateTime, Text, BigInteger, Integer, Enum as SAEnum, ForeignKey, Index, ForeignKeyConstraint
+from sqlalchemy import Column, String, Boolean, DateTime, Text, BigInteger, Integer, Enum as SAEnum, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 import enum
 
 from api.src.db import Base
+from api.src.tenants.models import Tenant  # noqa: F401
 
 
 class ConversationStatus(str, enum.Enum):
@@ -104,7 +105,6 @@ class WhatsAppConversation(Base):
         Index("ix_whatsapp_conversations_tenant_id", "tenant_id"),
         Index("ix_whatsapp_conversations_contact_phone", "contact_phone"),
         Index("ix_whatsapp_conversations_status", "status"),
-        ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
     )
 
 
@@ -127,7 +127,6 @@ class WhatsAppMessage(Base):
         Index("ix_whatsapp_messages_conversation_id", "conversation_id"),
         Index("ix_whatsapp_messages_direction", "direction"),
         Index("ix_whatsapp_messages_created_at", "created_at"),
-        ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
     )
 
 
@@ -138,16 +137,6 @@ class WhatsAppTemplate(Base):
     tenant_id = Column(UUID(as_uuid=True), nullable=False)
     name = Column(String(100), nullable=False)
     content = Column(Text, nullable=False)
-    # No es TemplateTipo (ese enum es para otra cosa -- welcome/order_status/
-    # etc, una categorizacion de negocio que nunca se uso para esto). El
-    # valor real que se guarda aca son claves libres tipo "venta.creada",
-    # "pedido.pendiente", "entrega.assigned" (ver DEFAULT_WA_TEMPLATES en
-    # whatsapp/service.py) -- declararlo como SAEnum(TemplateTipo) generaba
-    # un tipo ENUM de Postgres ("templatetipo") que la tabla real nunca tuvo
-    # (la columna en la base siempre fue varchar), asi que CUALQUIER consulta
-    # a esta tabla tiraba "type templatetipo does not exist" y rompia todas
-    # las notificaciones de WhatsApp (venta creada, cancelada, pago
-    # recibido) para cualquier cliente con telefono cargado.
     tipo = Column(String(50), nullable=False)
     active = Column(Boolean, default=True, server_default="true")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -156,7 +145,6 @@ class WhatsAppTemplate(Base):
     __table_args__ = (
         Index("ix_whatsapp_templates_tenant_id", "tenant_id"),
         Index("ix_whatsapp_templates_tipo", "tipo"),
-        ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
     )
 
 
@@ -192,7 +180,6 @@ class WhatsAppCampaign(Base):
     __table_args__ = (
         Index("ix_whatsapp_campaigns_tenant_status", "tenant_id", "status"),
         Index("ix_whatsapp_campaigns_scheduled", "scheduled_at"),
-        ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
     )
 
 
@@ -217,7 +204,6 @@ class WhatsAppCampaignRecipient(Base):
     __table_args__ = (
         Index("ix_wa_campaign_recipients_campaign_status", "campaign_id", "status"),
         Index("ix_wa_campaign_recipients_phone", "contact_phone"),
-        ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
     )
 
 
@@ -239,5 +225,4 @@ class WhatsAppAutomationRule(Base):
 
     __table_args__ = (
         Index("ix_wa_automation_rules_tenant_event", "tenant_id", "trigger_event"),
-        ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
     )
