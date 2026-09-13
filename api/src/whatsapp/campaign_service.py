@@ -251,7 +251,7 @@ async def send_campaign_batch(db: AsyncSession, campaign_id: UUID, batch_size: i
             if not evo_resp.get("success"):
                 raise RuntimeError(evo_resp.get("detail", "Error enviando vía Evolution API"))
 
-            rec.status = CampaignRecipientStatus.sent
+            rec.status = CampaignRecipientStatus.sent.value
             rec.sent_at = datetime.now(timezone.utc)
             rec.error_message = None
             sent += 1
@@ -262,17 +262,17 @@ async def send_campaign_batch(db: AsyncSession, campaign_id: UUID, batch_size: i
             msg = WhatsAppMessage(
                 tenant_id=campaign.tenant_id,
                 conversation_id=conv.id,
-                direction=MessageDirection.outbound,
+                direction=MessageDirection.outbound.value,
                 content=content,
                 message_id=evo_resp.get("message_id"),
-                status=MessageStatus.sent,
+                status=MessageStatus.sent.value,
                 command="campaign",
             )
             db.add(msg)
             # Delay de 1 segundo entre envíos para respetar límites de WhatsApp
             await asyncio.sleep(1.0)
         except Exception as e:
-            rec.status = CampaignRecipientStatus.failed
+            rec.status = CampaignRecipientStatus.failed.value
             rec.error_message = str(e)[:500]
             errors += 1
 
@@ -293,28 +293,28 @@ async def seed_default_rules(db: AsyncSession, tenant_id: UUID):
     defaults = [
         {
             "name": "Envío de Ticket Digital + Puntos ExtraClub",
-            "trigger_event": AutomationTriggerEvent.sale_created,
+            "trigger_event": AutomationTriggerEvent.sale_created.value,
             "message_template": "🛒 *¡Gracias por tu compra en Extra Supermercado!*\n\n📄 Ticket Digital: *#{NUMERO}*\n💰 Total: *Gs. {TOTAL}*\n⭐ Sumaste *{PUNTOS} Puntos ExtraClub*.\n\n¡Te esperamos pronto en nuestras sucursales!",
             "delay_minutes": 0,
             "active": True,
         },
         {
             "name": "Aviso de Pago y Acreditación de Saldo",
-            "trigger_event": AutomationTriggerEvent.payment_received,
+            "trigger_event": AutomationTriggerEvent.payment_received.value,
             "message_template": "💵 *Pago Acreditado — Extra Supermercado*\nConfirmamos la recepción de tu pago por *Gs. {MONTO}*. ¡Muchas gracias por tu puntualidad!",
             "delay_minutes": 0,
             "active": True,
         },
         {
             "name": "Alerta Preventiva de Cuota por Vencer",
-            "trigger_event": AutomationTriggerEvent.payment_overdue,
+            "trigger_event": AutomationTriggerEvent.payment_overdue.value,
             "message_template": "🔔 *Recordatorio de Cuota — Extra Supermercado*\nEstimado/a cliente, te informamos que tenés una cuota de crédito pendiente de pago.\nPodés abonar en caja de cualquier sucursal o por transferencia bancaria.",
             "delay_minutes": 0,
             "active": True,
         },
         {
             "name": "Alerta de Quiebre de Stock en Góndola",
-            "trigger_event": AutomationTriggerEvent.stock_below_minimum,
+            "trigger_event": AutomationTriggerEvent.stock_below_minimum.value,
             "message_template": "⚠️ *Alerta Interna de Salón*: El producto {PRODUCTO} ha alcanzado el umbral mínimo de reposición.",
             "delay_minutes": 0,
             "active": True,

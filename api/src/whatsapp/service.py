@@ -440,7 +440,7 @@ async def seed_default_templates(db: AsyncSession, tenant_id: UUID):
         },
         {
             "name": "Bienvenida ExtraClub",
-            "tipo": "extra_club.bienvenida",
+            "tipo": "extraclub.bienvenida",
             "content": "👋 ¡Bienvenido/a a *ExtraClub*, el club de beneficios de Extra Supermercado! ✨\n\nTu N° de socio es: *{socio}*.\nPor registrarte ganaste tus primeros *50 Puntos ExtraClub* de bienvenida para canjear en caja. 🛒",
             "active": True
         },
