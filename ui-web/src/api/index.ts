@@ -1605,6 +1605,10 @@ export const api = {
     deleteNotification: (id: string) => client.delete<void>(`/v1/notifications/notifications/${id}`),
   },
   whatsapp: {
+    getStatus: () => client.get<{ success: boolean; state: string; connected: boolean; instance: string; gateway_url: string }>("/v1/whatsapp/status"),
+    connect: () => client.post<{ qrcode?: string; pairing_code?: string; state: string; connected: boolean }>("/v1/whatsapp/connect"),
+    disconnect: () => client.post<{ success: boolean }>("/v1/whatsapp/disconnect"),
+    sendTestMessage: (data: { phone: string; message: string }) => client.post<{ success: boolean; message_id?: string }>("/v1/whatsapp/test", data),
     getConfig: () => client.get<WhatsAppConfig>("/v1/whatsapp/config"),
     saveConfig: (data: Partial<WhatsAppConfig>) => client.put<WhatsAppConfig>("/v1/whatsapp/config", data),
     testMessage: (data: { to: string; message: string }) => client.post<{ message: string }>("/v1/whatsapp/config/test", data),
@@ -2112,6 +2116,10 @@ export const api = {
       client.get<any>("/v1/marketing-agent/dashboard", { company_id: companyId || COMPANY_ID }),
     chat: (data: { message: string; conversation_history?: any[]; company_id?: string }) =>
       client.post<{ reply: string; suggested_prompts?: string[] }>("/v1/marketing-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),
+    sendCoupon: (data: { phone: string; message: string; customer_name?: string; cupon?: string }) =>
+      client.post<any>("/v1/marketing-agent/send-coupon", data),
+    launchCampaign: (data: { company_id?: string; campaign_id: string; segmento: string; message?: string }) =>
+      client.post<any>("/v1/marketing-agent/launch-campaign", { company_id: data.company_id || COMPANY_ID, ...data }),
   },
   riskAgent: {
     dashboard: (dias?: number, companyId?: string) =>

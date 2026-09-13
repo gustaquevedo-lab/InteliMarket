@@ -1,5 +1,6 @@
 import re
 from datetime import datetime, timezone
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Header
@@ -44,24 +45,83 @@ async def save_config(
     return WhatsAppConfigResponse.from_config(config)
 
 
+from api.src.whatsapp.evolution_client import evolution_client
+
+
+@router.get("/status")
+async def get_gateway_status(
+    user: dict = Depends(require_auth),
+):
+    """Obtiene el estado de conexión de la instancia de Evolution API."""
+    status = await evolution_client.get_instance_status()
+    return {
+        "success": True,
+        "instance": status.get("instance"),
+        "state": status.get("state"),
+        "connected": status.get("connected", False),
+        "gateway_url": evolution_client.base_url,
+    }
+
+
+@router.post("/connect")
+async def connect_gateway(
+    user: dict = Depends(require_auth),
+):
+    """Inicia la instancia y retorna el código QR base64 para emparejar WhatsApp."""
+    qr_data = await evolution_client.get_qr_code()
+    return qr_data
+
+
+@router.post("/disconnect")
+async def disconnect_gateway(
+    user: dict = Depends(require_auth),
+):
+    """Cierra la sesión de WhatsApp en el gateway."""
+    result = await evolution_client.disconnect_instance()
+    return result
+
+
+@router.post("/test")
+async def test_send_message(
+    body: dict,
+    user: dict = Depends(require_auth),
+):
+    """Envía un mensaje de prueba a través de Evolution API."""
+    phone = body.get("phone")
+    message = body.get("message") or "Mensaje de prueba desde Extra Supermercado (InteliMarket)"
+    if not phone:
+        raise HTTPException(status_code=400, detail="El campo 'phone' es obligatorio")
+
+    result = await evolution_client.send_text_message(phone, message)
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("detail", "Error al enviar mensaje"))
+    return result
+
+
 @router.post("/config/test")
-async def test_message(
-    phone: str = Query(...),
-    content: str = Query("Mensaje de prueba desde InteliMarket"),
+async def test_message_legacy(
+    request: Request,
+    phone: Optional[str] = Query(None),
+    content: Optional[str] = Query(None),
     user: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = UUID(user["tenant_id"])
-    config = await whatsapp_service.get_config(db, tenant_id)
-    if not config:
-        raise HTTPException(status_code=404, detail="Configuración no encontrada")
-    if not config.enabled:
-        raise HTTPException(status_code=400, detail="WhatsApp no está habilitado")
+    target_phone = phone
+    target_content = content or "Mensaje de prueba desde InteliMarket"
     try:
-        await whatsapp_service.make_twilio_call(phone, content, config)
-        return {"status": "ok", "message": "Mensaje enviado"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error enviando mensaje: {str(e)}")
+        body = await request.json()
+        target_phone = target_phone or body.get("to") or body.get("phone")
+        target_content = body.get("message") or body.get("content") or target_content
+    except Exception:
+        pass
+
+    if not target_phone:
+        raise HTTPException(status_code=400, detail="Número de teléfono requerido ('phone' o 'to')")
+
+    result = await evolution_client.send_text_message(target_phone, target_content)
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("detail", "Error enviando mensaje"))
+    return {"status": "ok", "message": "Mensaje enviado", "result": result}
 
 
 @router.get("/conversations")
@@ -295,6 +355,94 @@ async def webhook(
 
     result = await whatsapp_service.handle_inbound_webhook(db, config, payload)
     return result
+
+
+@router.post("/webhook/evolution")
+async def evolution_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Webhook para eventos de Evolution API:
+    - QRCODE_UPDATED / qrcode.updated
+    - CONNECTION_UPDATE / connection.update
+    - MESSAGES_UPSERT / messages.upsert
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"status": "ignored", "detail": "Invalid JSON"}
+
+    event = payload.get("event")
+    instance = payload.get("instance")
+    logger = logging.getLogger("whatsapp.webhook")
+    logger.info(f"[Evolution Webhook] Evento recibido: '{event}' para instancia '{instance}'")
+
+    if event in ("messages.upsert", "MESSAGES_UPSERT"):
+        msg_data = payload.get("data", {})
+        key = msg_data.get("key", {})
+        if key.get("fromMe"):
+            return {"status": "ignored", "detail": "Outbound message"}
+
+        remote_jid = key.get("remoteJid", "")
+        if not remote_jid or remote_jid.endswith("@g.us") or remote_jid == "status@broadcast":
+            return {"status": "ignored", "detail": "Group or broadcast"}
+
+        clean_phone = re.sub(r"@(s\.whatsapp\.net|lid)$", "", remote_jid)
+        push_name = msg_data.get("pushName") or clean_phone
+
+        # Extraer texto del mensaje
+        content = ""
+        msg_content = msg_data.get("message", {})
+        if "conversation" in msg_content:
+            content = msg_content["conversation"]
+        elif "extendedTextMessage" in msg_content:
+            content = msg_content["extendedTextMessage"].get("text", "")
+        elif "imageMessage" in msg_content:
+            content = msg_content["imageMessage"].get("caption", "[Imagen]")
+        elif "documentMessage" in msg_content:
+            content = msg_content["documentMessage"].get("fileName", "[Documento]")
+
+        if not content:
+            return {"status": "ignored", "detail": "Empty content"}
+
+        # Buscar o asociar con el primer tenant disponible de la empresa
+        from api.src.tenants.models import Tenant
+        tenant_res = await db.execute(select(Tenant).limit(1))
+        tenant = tenant_res.scalar_one_or_none()
+        if not tenant:
+            return {"status": "ignored", "detail": "No tenant found"}
+
+        conv = await whatsapp_service.get_or_create_conversation(db, tenant.id, clean_phone, push_name)
+        inbound_msg = WhatsAppMessage(
+            tenant_id=tenant.id,
+            conversation_id=conv.id,
+            direction=MessageDirection.inbound,
+            content=content,
+            message_id=key.get("id"),
+            status=MessageStatus.delivered,
+        )
+        db.add(inbound_msg)
+        await db.commit()
+
+        # Si el chatbot o respuesta automática está configurada
+        cfg = await whatsapp_service.get_config(db, tenant.id)
+        if cfg and cfg.auto_reply:
+            from api.src.companies.models import Company
+            from api.src.whatsapp.chatbot import ChatbotEngine, update_conversation_state
+            comp_res = await db.execute(select(Company).where(Company.tenant_id == tenant.id).limit(1))
+            company = comp_res.scalar_one_or_none()
+            if company:
+                chatbot = ChatbotEngine(db, company.id)
+                resp_data = await chatbot.process_message(conv, content)
+                if resp_data and resp_data.get("text"):
+                    await whatsapp_service.reply_to_conversation(db, tenant.id, conv.id, resp_data["text"])
+                    if resp_data.get("next_state"):
+                        await update_conversation_state(db, conv.id, resp_data["next_state"])
+
+        return {"status": "ok", "conversation_id": str(conv.id), "message_id": key.get("id")}
+
+    return {"status": "ok", "event": event}
 
 
 @router.get("/stats", response_model=WhatsAppStats)

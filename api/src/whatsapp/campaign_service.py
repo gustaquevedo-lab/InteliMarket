@@ -204,16 +204,9 @@ async def send_campaign_batch(db: AsyncSession, campaign_id: UUID, batch_size: i
     if not campaign:
         return {"sent": 0, "errors": 0}
 
-    # Get config
-    config_r = await db.execute(
-        select(WhatsAppConfig).where(
-            WhatsAppConfig.tenant_id == campaign.tenant_id,
-            WhatsAppConfig.enabled == True,
-        )
-    )
-    config = config_r.scalar_one_or_none()
-    if not config:
-        raise ValueError("WhatsApp no configurado para este tenant")
+    # Configuración de Evolution API
+    from api.src.whatsapp.evolution_client import evolution_client
+    import asyncio
 
     # Resolve template
     template_content = campaign.message_template
@@ -254,7 +247,10 @@ async def send_campaign_batch(db: AsyncSession, campaign_id: UUID, batch_size: i
             if rec.customer_id:
                 content = content.replace("{cliente_id}", str(rec.customer_id))
 
-            twilio_resp = await make_twilio_call(rec.contact_phone, content, config)
+            evo_resp = await evolution_client.send_text_message(rec.contact_phone, content, delay_ms=1000)
+            if not evo_resp.get("success"):
+                raise RuntimeError(evo_resp.get("detail", "Error enviando vía Evolution API"))
+
             rec.status = CampaignRecipientStatus.sent
             rec.sent_at = datetime.now(timezone.utc)
             rec.error_message = None
@@ -268,11 +264,13 @@ async def send_campaign_batch(db: AsyncSession, campaign_id: UUID, batch_size: i
                 conversation_id=conv.id,
                 direction=MessageDirection.outbound,
                 content=content,
-                message_id=twilio_resp.get("sid"),
+                message_id=evo_resp.get("message_id"),
                 status=MessageStatus.sent,
                 command="campaign",
             )
             db.add(msg)
+            # Delay de 1 segundo entre envíos para respetar límites de WhatsApp
+            await asyncio.sleep(1.0)
         except Exception as e:
             rec.status = CampaignRecipientStatus.failed
             rec.error_message = str(e)[:500]

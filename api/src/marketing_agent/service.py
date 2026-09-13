@@ -152,3 +152,55 @@ async def chat_with_marketing_agent(
         suggestions = ["Reactivar clientes VIP inactivos", "Ver combo de sobre-stock", "Cruce de margen con Finanzas"]
 
     return ChatMessageResponse(reply=reply, suggested_prompts=suggestions)
+
+
+async def send_coupon_via_whatsapp(phone: str, message: str, customer_name: str | None = None, cupon: str | None = None) -> dict:
+    """Envía un cupón nominativo vía Evolution API a un cliente puntual."""
+    from api.src.whatsapp.evolution_client import evolution_client
+    res = await evolution_client.send_text_message(phone, message, delay_ms=1000)
+    return res
+
+
+async def launch_campaign_via_whatsapp(db: AsyncSession, company_id: str, campaign_id: str, segmento: str, message: str | None = None) -> dict:
+    """Dispara una campaña sugerida por el Gerente de Marketing a los clientes del segmento real."""
+    from api.src.whatsapp.evolution_client import evolution_client
+    import asyncio
+
+    seg = await _segmentos_reales(db, company_id)
+    target_customers = []
+
+    if "vip" in segmento.lower() or "inactiv" in segmento.lower():
+        target_customers = seg.get("vip_inactivos", [])
+    elif "frecuente" in segmento.lower() or "combo" in segmento.lower():
+        target_customers = seg.get("frecuentes", [])
+    else:
+        target_customers = seg.get("vip", [])
+
+    if not target_customers:
+        return {"success": False, "detail": "El segmento no contiene clientes con datos de contacto", "sent": 0}
+
+    sent_count = 0
+    errors = 0
+    default_msg = message or "¡Hola! En Extra Supermercado te preparamos una promoción especial exclusiva para vos. ¡Te esperamos!"
+
+    for c in target_customers:
+        phone = c.get("telefono")
+        if not phone:
+            continue
+        try:
+            personalized = default_msg.replace("{nombre}", c.get("nombre", "Cliente"))
+            res = await evolution_client.send_text_message(phone, personalized, delay_ms=1000)
+            if res.get("success"):
+                sent_count += 1
+            else:
+                errors += 1
+            await asyncio.sleep(1.0)
+        except Exception:
+            errors += 1
+
+    return {
+        "success": True,
+        "sent": sent_count,
+        "errors": errors,
+        "total_segment": len(target_customers),
+    }

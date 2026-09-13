@@ -32,3 +32,17 @@ class ChatMessageRequest(BaseModel):
 class ChatMessageResponse(BaseModel):
     reply: str
     suggested_prompts: list[str] = Field(default_factory=list)
+
+
+class SendCouponRequest(BaseModel):
+    phone: str
+    customer_name: Optional[str] = None
+    message: str
+    cupon: Optional[str] = None
+
+
+class LaunchCampaignRequest(BaseModel):
+    company_id: str
+    campaign_id: str
+    segmento: str
+    message: Optional[str] = None

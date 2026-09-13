@@ -132,9 +132,7 @@ const navGroups: NavGroup[] = [
       { icon: Users, label: "Fidelidad ExtraClub", path: "/crm", anyPermission: ["crm:update", "crm:campaigns"] },
       { icon: Ticket, label: "Cupones de Sorteo", path: "/cupones" },
       { icon: PieChart, label: "Customer 360", path: "/customer360" },
-      // DESACTIVADO 2026-09-04: conversaciones/campanas 100% hardcodeadas en el
-      // frontend, sin ninguna llamada real a backend. Ver auditoria de sidebar.
-      // { icon: MessageCircle, label: "IntelliZapp (WhatsApp)", path: "/intellizapp" },
+      { icon: MessageCircle, label: "WhatsApp & IntelliZapp", path: "/whatsapp" },
       { icon: Tag, label: "Promociones & Campañas", path: "/promociones" },
     ]
   },

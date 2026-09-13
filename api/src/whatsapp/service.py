@@ -17,60 +17,25 @@ from api.src.whatsapp.models import (
 from api.src.whatsapp.schemas import TwilioWebhook
 
 
-TWILIO_API_URL = "https://api.twilio.com/2010-04-01"
+from api.src.whatsapp.evolution_client import evolution_client, normalize_phone_e164
 
 
 def mask_token(token: str) -> str:
     return "****"
 
 
-def verify_twilio_signature(auth_token: str, signature: str, url: str, params: dict) -> bool:
-    data = url + "".join(f"{k}{v}" for k, v in sorted(params.items()))
-    expected = base64.b64encode(
-        hmac.new(auth_token.encode(), data.encode(), hashlib.sha1).digest()
-    ).decode()
-    return hmac.compare_digest(expected, signature)
-
-
-async def get_config(db: AsyncSession, tenant_id: UUID) -> Optional[WhatsAppConfig]:
-    result = await db.execute(
-        select(WhatsAppConfig).where(WhatsAppConfig.tenant_id == tenant_id)
-    )
-    return result.scalar_one_or_none()
-
-
-async def save_config(db: AsyncSession, tenant_id: UUID, data: dict) -> WhatsAppConfig:
-    config = await get_config(db, tenant_id)
-    if config:
-        for key, value in data.items():
-            if value is not None and key != "auth_token" or (key == "auth_token" and value):
-                setattr(config, key, value)
-        await db.commit()
-        await db.refresh(config)
-        return config
-    else:
-        config = WhatsAppConfig(tenant_id=tenant_id, **data)
-        db.add(config)
-        await db.commit()
-        await db.refresh(config)
-        return config
-
-
-async def make_twilio_call(to_phone: str, content: str, config: WhatsAppConfig, media_url: Optional[str] = None) -> dict:
-    url = f"{TWILIO_API_URL}/Accounts/{config.account_sid}/Messages.json"
-    auth = (config.account_sid, config.auth_token)
-    data = {
-        "From": config.phone_number,
-        "To": to_phone,
-        "Body": content,
-    }
+async def make_twilio_call(to_phone: str, content: str, config: Optional[WhatsAppConfig] = None, media_url: Optional[str] = None) -> dict:
+    """Wrapper retrocompatible: envía mensaje vía Evolution API."""
     if media_url:
-        data["MediaUrl"] = media_url
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(url, data=data, auth=auth)
-        resp.raise_for_status()
-        return resp.json()
+        resp = await evolution_client.send_media_message(to_phone, media_url, caption=content)
+    else:
+        resp = await evolution_client.send_text_message(to_phone, content)
+    
+    return {
+        "sid": resp.get("message_id", "evolution-ok"),
+        "status": resp.get("status", "sent"),
+        "success": resp.get("success", False),
+    }
 
 
 async def get_or_create_conversation(
@@ -443,33 +408,15 @@ async def seed_default_templates(db: AsyncSession, tenant_id: UUID):
 async def send_message_to_phone(
     db: AsyncSession, company_id: str, to_phone: str, message: str
 ) -> bool:
-    """Send WhatsApp to a phone using the company's Twilio config. Non-blocking."""
+    """Send WhatsApp to a phone using Evolution API gateway. Non-blocking."""
     try:
-        from api.src.companies.models import Company
-        from sqlalchemy import select as sel_q
-
-        company_result = await db.execute(sel_q(Company).where(Company.id == company_id))
-        company = company_result.scalar_one_or_none()
-        if not company or not company.tenant_id:
+        if not to_phone or not message:
             return False
-
-        config_result = await db.execute(
-            sel_q(WhatsAppConfig).where(
-                WhatsAppConfig.tenant_id == company.tenant_id,
-                WhatsAppConfig.enabled == True,
-            )
-        )
-        config = config_result.scalar_one_or_none()
-        if not config:
-            return False
-
-        phone = to_phone
-        if not phone.startswith("+"):
-            phone = "+595" + phone.lstrip("0")
-
-        await make_twilio_call(phone, message, config)
-        return True
-    except Exception:
+        res = await evolution_client.send_text_message(to_phone, message, delay_ms=1000)
+        return bool(res.get("success", False))
+    except Exception as e:
+        import logging
+        logging.getLogger("whatsapp.service").error(f"Error in send_message_to_phone: {e}")
         return False
 
 

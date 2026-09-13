@@ -218,9 +218,50 @@ export default function MarketingAgentPage() {
     }
   }
 
-  const handleLaunchCampaign = (campId: string) => {
-    setSuggestedCampaigns(prev => prev.map(c => c.id === campId ? { ...c, estado: "lanzada" } : c))
-    toast.success("Campaña Disparada vía IntelliZapp", "Los mensajes y folletos digitales comenzaron a enviarse al segmento seleccionado.")
+  const [launchingCampId, setLaunchingCampId] = useState<string | null>(null)
+  const [sendingCouponId, setSendingCouponId] = useState<string | null>(null)
+
+  const handleLaunchCampaign = async (campId: string) => {
+    const camp = suggestedCampaigns.find(c => c.id === campId)
+    setLaunchingCampId(campId)
+    try {
+      const res = await api.marketingAgent.launchCampaign({
+        campaign_id: campId,
+        segmento: camp?.segmento || "vip_inactivos",
+        message: `¡Hola {nombre}! En Extra Supermercado te preparamos un beneficio especial: ${camp?.titulo || "Oferta exclusiva"}. ¡Te esperamos!`,
+      })
+      setSuggestedCampaigns(prev => prev.map(c => c.id === campId ? { ...c, estado: "lanzada" } : c))
+      if (res.success) {
+        toast.success("Campaña Disparada vía WhatsApp", `Enviados exitosamente ${res.sent} mensajes vía Evolution API.`)
+      } else {
+        toast.warning("Aviso de Campaña", res.detail || "Campaña procesada.")
+      }
+    } catch (e: any) {
+      toast.error("Error al disparar campaña", e?.response?.data?.detail || e?.message || "Fallo en el gateway de WhatsApp")
+    } finally {
+      setLaunchingCampId(null)
+    }
+  }
+
+  const handleSendSingleCoupon = async (c: any) => {
+    setSendingCouponId(c.cupon)
+    try {
+      const res = await api.marketingAgent.sendCoupon({
+        phone: c.telefono,
+        message: c.copy_preview,
+        customer_name: c.nombre,
+        cupon: c.cupon,
+      })
+      if (res.success) {
+        toast.success(`WhatsApp Despachado a ${c.nombre}`, `Cupón ${c.cupon} entregado vía Evolution API.`)
+      } else {
+        toast.error(`Error al enviar a ${c.nombre}`, res.detail || "El gateway no pudo entregar el mensaje.")
+      }
+    } catch (e: any) {
+      toast.error("Error de despacho", e?.response?.data?.detail || e?.message || "Error al enviar WhatsApp")
+    } finally {
+      setSendingCouponId(null)
+    }
   }
 
   return (
@@ -460,10 +501,10 @@ export default function MarketingAgentPage() {
                   </div>
                 </div>
 
-                <button onClick={() => handleLaunchCampaign(c.id)} disabled={c.estado === "lanzada"}
+                <button onClick={() => handleLaunchCampaign(c.id)} disabled={c.estado === "lanzada" || launchingCampId === c.id}
                   className={`w-full py-3 rounded-2xl font-bold uppercase text-xs flex items-center justify-center gap-1.5 transition ${c.estado === "lanzada" ? "bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed" : "bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-md shadow-pink-500/20"}`}>
-                  {c.estado === "lanzada" ? <CheckCircle2 className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-                  {c.estado === "lanzada" ? "Campaña en Curso" : "Disparar vía IntelliZapp"}
+                  {launchingCampId === c.id ? <Loader2 className="w-4 h-4 animate-spin" /> : c.estado === "lanzada" ? <CheckCircle2 className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                  {launchingCampId === c.id ? "Despachando por WhatsApp..." : c.estado === "lanzada" ? "Campaña en Curso" : "Disparar vía WhatsApp"}
                 </button>
               </div>
             ))}
@@ -482,12 +523,17 @@ export default function MarketingAgentPage() {
                   Motor de Rescate 1-a-1: Descuento Exclusivo en su Producto Favorito
                 </p>
                 <p className="text-rose-900 dark:text-rose-300 leading-relaxed">
-                  La IA detecta qué producto compra siempre cada cliente inactivo, genera un <b>cupón nominativo 1-a-1 con 20% OFF</b> exclusivo para su documento/RUC con <b>vigencia de 72 horas</b>, y lo despacha automáticamente por <b>IntelliZapp</b> para incentivar su regreso inmediato al salón.
+                  La IA detecta qué producto compra siempre cada cliente inactivo, genera un <b>cupón nominativo 1-a-1 con 20% OFF</b> exclusivo para su documento/RUC con <b>vigencia de 72 horas</b>, y lo despacha automáticamente por <b>WhatsApp (Evolution API)</b> para incentivar su regreso inmediato al salón.
                 </p>
               </div>
             </div>
-            <button onClick={() => handleLaunchCampaign("camp-2")} className="text-xs px-4 py-2.5 rounded-xl shrink-0 flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold shadow-md shadow-rose-500/20 transition">
-              <MessageCircle className="w-4 h-4" /> Disparar Todos los Rescates ({customers.length ? "42 VIPs" : "42"})
+            <button
+              onClick={() => handleLaunchCampaign("camp-2")}
+              disabled={launchingCampId === "camp-2"}
+              className="text-xs px-4 py-2.5 rounded-xl shrink-0 flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold shadow-md shadow-rose-500/20 transition disabled:opacity-60"
+            >
+              {launchingCampId === "camp-2" ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4" />}
+              {launchingCampId === "camp-2" ? "Enviando rescates..." : `Disparar Todos los Rescates (${customers.length ? "42 VIPs" : "42"})`}
             </button>
           </div>
 
@@ -576,10 +622,20 @@ export default function MarketingAgentPage() {
                   <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
                     <CheckCircle2 className="w-3.5 h-3.5" /> Habilitado en Caja POS
                   </span>
-                  <button onClick={() => {
-                    toast.success(`WhatsApp Despachado a ${c.nombre}`, `Cupón ${c.cupon} enviado por IntelliZapp con vigencia de 72hs.`)
-                  }} className="text-xs px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition">
-                    <Send className="w-3 h-3" /> Enviar Cupón vía IntelliZapp
+                  <button
+                    onClick={() => handleSendSingleCoupon(c)}
+                    disabled={sendingCouponId === c.cupon}
+                    className="text-xs px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition disabled:opacity-60 shadow-xs"
+                  >
+                    {sendingCouponId === c.cupon ? (
+                      <>
+                        <Loader2 className="w-3 h-3 animate-spin" /> Enviando...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3 h-3" /> Enviar Cupón vía WhatsApp
+                      </>
+                    )}
                   </button>
                 </div>
               </div>

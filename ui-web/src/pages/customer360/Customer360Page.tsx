@@ -169,11 +169,11 @@ export default function Customer360Page() {
     }
     setSendingMsg(true)
     try {
-      await api.whatsapp.testMessage({
-        to: profile.customer.telefono,
+      await api.whatsapp.sendTestMessage({
+        phone: profile.customer.telefono,
         message: customMsg,
       })
-      toast.success("¡Mensaje Enviado por IntelliZapp!", `Campaña enviada a ${profile.customer.telefono}`)
+      toast.success("¡Mensaje Enviado por WhatsApp!", `Enviado con éxito a ${profile.customer.telefono}`)
       setSentSuccess(true)
     } catch (e: any) {
       // Fallback a apertura directa de WhatsApp Web

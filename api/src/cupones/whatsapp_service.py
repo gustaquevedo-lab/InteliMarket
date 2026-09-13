@@ -37,6 +37,9 @@ def normalize_phone_e164(phone: Optional[str]) -> Optional[str]:
     return cleaned
 
 
+from api.src.whatsapp.evolution_client import evolution_client, normalize_phone_e164
+
+
 async def send_cupon_whatsapp_confirmation(
     telefono: str,
     nombre: str,
@@ -47,18 +50,8 @@ async def send_cupon_whatsapp_confirmation(
     sorteo_nombre: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Envía mensaje humanizado de confirmación de cupones vía Evolution API local (:8085).
+    Envía mensaje humanizado de confirmación de cupones vía Evolution API.
     """
-    normalized_num = normalize_phone_e164(telefono)
-    if not normalized_num:
-        return {"success": False, "status": "error_numero_invalido", "detail": "Número de teléfono no válido"}
-
-    evolution_url = getattr(settings, "evolution_api_url", "http://127.0.0.1:8085")
-    api_key = getattr(settings, "evolution_api_key", "intelizapp_master_key_2026")
-    instance = getattr(settings, "evolution_instance_name", "supermercado")
-
-    endpoint = f"{evolution_url.rstrip('/')}/message/sendText/{instance}"
-
     plural_cupon = "cupón" if cantidad_cupones == 1 else "cupones"
     sorteo_txt = sorteo_nombre or "Gran Sorteo Aniversario Extra Supermercado"
 
@@ -76,33 +69,10 @@ async def send_cupon_whatsapp_confirmation(
             f"🛒 ¡Muchas gracias por tu compra y mucha suerte! 🍀✨"
         )
 
-    payload = {
-        "number": normalized_num,
-        "text": mensaje,
-        "options": {
-            "delay": 1200,
-            "presence": "composing",
-            "linkPreview": False
-        }
-    }
-
-    headers = {
-        "Content-Type": "application/json",
-        "apikey": api_key
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            response = await client.post(endpoint, json=payload, headers=headers)
-            if response.status_code in (200, 201):
-                logger.info(f"WhatsApp de cupón enviado a {normalized_num} (Ticket #{nro_ticket})")
-                return {"success": True, "status": "enviado", "response": response.json()}
-            else:
-                logger.warning(f"Evolution API error {response.status_code}: {response.text}")
-                return {"success": False, "status": f"http_{response.status_code}", "detail": response.text}
-    except httpx.ConnectError:
-        logger.warning(f"Evolution API no accesible en {evolution_url} (¿Contenedor intelizapp-evo offline?)")
-        return {"success": False, "status": "gateway_offline", "detail": "Evolution API local no responde"}
-    except Exception as e:
-        logger.error(f"Error al enviar WhatsApp a {normalized_num}: {e}")
-        return {"success": False, "status": "error_excepcion", "detail": str(e)}
+    res = await evolution_client.send_text_message(telefono, mensaje, delay_ms=1200)
+    if res.get("success"):
+        logger.info(f"WhatsApp de cupón enviado a {telefono} (Ticket #{nro_ticket})")
+        return {"success": True, "status": "enviado", "response": res.get("data")}
+    else:
+        logger.warning(f"Fallo al enviar WhatsApp de cupón a {telefono}: {res.get('detail')}")
+        return res
