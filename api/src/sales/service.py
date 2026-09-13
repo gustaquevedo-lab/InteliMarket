@@ -800,16 +800,13 @@ async def attach_escpos_ticket(db: AsyncSession, sale_id: str, recibo_escpos_b64
 
 
 async def reopen_sale_customer(
-    db: AsyncSession, sale_id: str, customer_id: str,
+    db: AsyncSession, sale_id: str, customer_id: str | None,
     autorizado_por_id: str, autorizado_por_nombre: str,
 ) -> Sale | None:
-    """Agrega la identificacion del cliente a una venta ya cerrada que salio
-    como Consumidor Final -- pedido real de las cajeras: el cliente se va,
-    la venta ya se cerro, y despues vuelve pidiendo que la factura lleve su
-    nombre. No reabre el cobro ni toca montos/items, solo el vinculo al
-    cliente -- siempre requiere autorizacion de supervisor (verificada en el
-    frontend via el mismo flujo de solicitud remota que ya usan devoluciones
-    y pagos Extra Club antes de llegar aca)."""
+    """Agrega o modifica la identificacion del cliente a una venta ya cerrada
+    (sea que haya salido como Consumidor Final o a otro cliente por error).
+    No reabre el cobro ni toca montos/items, solo el vinculo al cliente --
+    siempre requiere autorizacion de supervisor."""
     from api.src.customers.models import Customer
     result = await db.execute(select(Sale).where(Sale.id == uuid.UUID(sale_id)))
     sale = result.scalar_one_or_none()
@@ -827,15 +824,21 @@ async def reopen_sale_customer(
                 f"La política permite modificar titular únicamente hasta 48 horas posteriores a la compra."
             )
 
-    cust_res = await db.execute(select(Customer).where(Customer.id == uuid.UUID(customer_id)))
-    cust = cust_res.scalar_one_or_none()
+    cust = None
+    if not customer_id or customer_id in ("default", "00000000-0000-0000-0000-000000000000"):
+        sale.customer_id = None
+        c_name = "Consumidor Final"
+        c_doc = ""
+        c_ec = None
+    else:
+        cust_res = await db.execute(select(Customer).where(Customer.id == uuid.UUID(customer_id)))
+        cust = cust_res.scalar_one_or_none()
+        sale.customer_id = uuid.UUID(customer_id)
+        c_name = (cust.razon_social or cust.nombre_fantasia) if cust else str(customer_id)
+        c_doc = (cust.ruc or cust.ci or cust.telefono) if cust else ""
+        c_ec = cust.extra_club_numero if cust else None
 
-    sale.customer_id = uuid.UUID(customer_id)
-    c_name = (cust.razon_social or cust.nombre_fantasia) if cust else str(customer_id)
-    c_doc = (cust.ruc or cust.ci or cust.telefono) if cust else ""
-    c_ec = cust.extra_club_numero if cust else None
-
-    nota = f"[{datetime.now(timezone.utc).isoformat()}] Identificacion agregada por {autorizado_por_nombre} | Cliente: {c_name} (Doc: {c_doc})"
+    nota = f"[{datetime.now(timezone.utc).isoformat()}] Identificacion modificada por {autorizado_por_nombre} | Cliente: {c_name} (Doc: {c_doc or 'Sin Doc'})"
     sale.observaciones = f"{sale.observaciones}\n{nota}" if sale.observaciones else nota
 
     # Preservar el ticket térmico ESC/POS original intacto (logo bitmap, fuentes, márgenes, items, cortes)
@@ -911,6 +914,7 @@ async def build_sale_receipt_escpos(
     sale_id: uuid.UUID,
     nueva_forma_pago: str | None = None,
     cust_override = None,
+    voucher: str | None = None,
 ) -> tuple[str, str]:
     """Genera el texto plano y el payload binario base64 ESC/POS de un ticket de venta.
     Refleja fielmente la condición, forma de pago, cliente/socio y talón de pagaré si es Extra Club.
@@ -1030,10 +1034,12 @@ async def build_sale_receipt_escpos(
     lines.append(dashes())
     lines.append("Medios de Pago Utilizados:")
     if nueva_forma_pago:
-        lines.append(pad_two_col(f"  {nueva_forma_pago.upper()}:", f"GS. {fmt_gs(sale.total)}"))
+        v_tag = f" ({voucher.strip()})" if voucher else ""
+        lines.append(pad_two_col(f"  {nueva_forma_pago.upper()}{v_tag}:", f"GS. {fmt_gs(sale.total)}"))
     elif payments:
         for p in payments:
             fp = p.forma_pago or "EFECTIVO"
+            ref_tag = f" ({p.referencia.strip()})" if getattr(p, "referencia", None) else ""
             m = float(p.monto or 0)
             if p.moneda == "BRL":
                 m_str = f"R$ {m:.2f}"
@@ -1041,7 +1047,7 @@ async def build_sale_receipt_escpos(
                 m_str = f"US$ {m:.2f}"
             else:
                 m_str = f"GS. {fmt_gs(m)}"
-            lines.append(pad_two_col(f"  {fp}:", m_str))
+            lines.append(pad_two_col(f"  {fp}{ref_tag}:", m_str))
     else:
         fp = "EXTRA_CLUB" if is_credito else "EFECTIVO"
         lines.append(pad_two_col(f"  {fp}:", f"GS. {fmt_gs(sale.total)}"))
@@ -1114,6 +1120,12 @@ async def reopen_sale_payment(
     autorizado_por_id: str,
     autorizado_por_nombre: str,
     customer_id: str | None = None,
+    voucher: str | None = None,
+    lote: str | None = None,
+    tarjeta_marca: str | None = None,
+    terminal_ip: str | None = None,
+    moneda: str | None = "PYG",
+    monto_moneda: Decimal | None = None,
 ) -> Sale | None:
     """Cambia la forma de pago de una venta ya cerrada y opcionalmente vincula al socio cliente.
 
@@ -1122,7 +1134,7 @@ async def reopen_sale_payment(
     - Requiere autorización de supervisor y motivo descriptivo.
     - Deja trazabilidad completa en `observaciones` (no borra el dato anterior).
     - Actualiza `customer_id` (si se provee), `condicion` y los registros en `sale_payments`.
-    - Regenera fielmente el ticket térmico ESC/POS con el nuevo medio y cliente.
+    - Regenera fielmente el ticket térmico ESC/POS con el nuevo medio, voucher y cliente.
     - Si la caja del cajero ya está cerrada, reajusta automáticamente `cash_counts.diferencia`.
     - Actualiza la línea de crédito (`credito_usado`) del socio.
     """
@@ -1166,15 +1178,22 @@ async def reopen_sale_payment(
 
     if nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO"):
         sale.condicion = "credito"
-    elif nueva_forma_pago.upper() in ("EFECTIVO", "TARJETA", "TRANSFERENCIA", "QR"):
+    else:
         sale.condicion = "contado"
 
     # Actualizar o insertar en sale_payments
+    values_to_update: dict[str, Any] = {
+        "forma_pago": nueva_forma_pago.upper(),
+        "moneda": moneda or "PYG",
+    }
+    if voucher:
+        values_to_update["referencia"] = voucher.strip()
+
     if existing_payments:
         await db.execute(
             update(SalePayment)
             .where(SalePayment.sale_id == sale.id)
-            .values(forma_pago=nueva_forma_pago.upper())
+            .values(**values_to_update)
         )
     else:
         db.add(SalePayment(
@@ -1182,7 +1201,8 @@ async def reopen_sale_payment(
             sale_id=sale.id,
             forma_pago=nueva_forma_pago.upper(),
             monto=sale.total,
-            moneda=sale.moneda or "PYG",
+            moneda=moneda or "PYG",
+            referencia=voucher.strip() if voucher else None,
             fecha=sale.fecha or datetime.now(timezone.utc),
         ))
 
@@ -1211,10 +1231,16 @@ async def reopen_sale_payment(
 
     ts = datetime.now(timezone.utc).isoformat()
     socio_txt = f" | Socio: {socio_nombre} (ID: {customer_id})" if customer_id else ""
+    voucher_txt = f" | Voucher: {voucher.strip()}" if voucher else ""
+    lote_txt = f" (Lote: {lote.strip()})" if lote else ""
+    tarjeta_txt = f" | Tarjeta: {tarjeta_marca.strip()}" if tarjeta_marca else ""
+    terminal_txt = f" | Terminal: {terminal_ip.strip()}" if terminal_ip else ""
+    moneda_txt = f" | Moneda: {moneda} {monto_moneda}" if moneda and moneda != "PYG" and monto_moneda else ""
     nota_auditoria = (
         f"[{ts}] ⚠️ CAMBIO DE FORMA DE PAGO — Autorizado por: {autorizado_por_nombre} "
         f"(ID: {autorizado_por_id}) | "
-        f"Anterior: {forma_pago_anterior} → Nueva: {nueva_forma_pago.upper()}{socio_txt} | "
+        f"Anterior: {forma_pago_anterior} → Nueva: {nueva_forma_pago.upper()}"
+        f"{voucher_txt}{lote_txt}{tarjeta_txt}{terminal_txt}{moneda_txt}{socio_txt} | "
         f"Motivo: {motivo.strip()}"
     )
     sale.observaciones = (
@@ -1224,9 +1250,9 @@ async def reopen_sale_payment(
     )
 
     # Regenerar el ticket térmico oficial ESC/POS fielmente con la nueva condición,
-    # medios de pago, socio y talón de pagaré si es Extra Club.
+    # medios de pago, voucher, socio y talón de pagaré si es Extra Club.
     try:
-        ticket_text, ticket_b64 = await build_sale_receipt_escpos(db, sale.id, nueva_forma_pago.upper(), cust_obj)
+        ticket_text, ticket_b64 = await build_sale_receipt_escpos(db, sale.id, nueva_forma_pago.upper(), cust_obj, voucher=voucher)
         if ticket_b64:
             sale.recibo_escpos_b64 = ticket_b64
             sale.recibo_html = ticket_text

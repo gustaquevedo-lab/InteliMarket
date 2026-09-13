@@ -127,6 +127,8 @@ export default function PromocionesPage() {
   const [newCantidadMinima, setNewCantidadMinima] = useState<number | "">("")
   const [newSegundaUnidadPct, setNewSegundaUnidadPct] = useState<number | "">(50)
   const [showAdvancedRules, setShowAdvancedRules] = useState(false)
+  const [newActivo, setNewActivo] = useState(true)
+  
   
   // Selección Múltiple de Productos
   const [selectionMode, setSelectionMode] = useState<"search" | "supplier" | "category">("search")
@@ -653,6 +655,7 @@ export default function PromocionesPage() {
   // ── ABRIR MODAL EN MODO EDICIÓN ─────────────────────────────────────────
   const handleOpenEdit = async (promo: Promotion) => {
     // Precargar todos los campos del formulario desde la promoción existente
+    setNewActivo(promo.activo ?? true)
     setNewNombre(promo.nombre || "")
     setNewDesc(promo.descripcion || "")
     setNewTipo(promo.tipo || "precio_fijo_oferta")
@@ -782,7 +785,8 @@ export default function PromocionesPage() {
         valido_desde: newDesde,
         valido_hasta: newHasta,
         dias_semana: newDiasSemana.length === 7 ? undefined : newDiasSemana,
-        activo: true,
+        activo: newActivo,
+        estado: newActivo ? "activa" : "pausada",
       }
 
       if (newTipo === "precio_fijo_oferta") {
@@ -842,6 +846,7 @@ export default function PromocionesPage() {
       }
       setShowCreateModal(false)
       setEditingPromo(null)
+      setNewActivo(true)
       setSelectedBatchProducts(new Map())
       setNewNombre("")
       setNewDesc("")
@@ -1730,6 +1735,7 @@ export default function PromocionesPage() {
                 onClick={() => {
                   setShowCreateModal(false)
                   setEditingPromo(null)
+                  setNewActivo(true)
                 }} 
                 className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer transition"
                 title="Cerrar ventana"
@@ -1748,9 +1754,24 @@ export default function PromocionesPage() {
                   
                   {/* BLOQUE 1: DATOS GENERALES DE CAMPAÑA */}
                   <div className="p-3.5 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-200 dark:border-slate-700/80 space-y-3">
-                    <div className="flex items-center gap-2 text-gray-800 dark:text-gray-200 font-bold border-b border-gray-200 dark:border-slate-700/60 pb-2">
-                      <Tag className="w-4 h-4 text-emerald-600" />
-                      <span>1. Identificación y Origen</span>
+                    <div className="flex items-center justify-between border-b border-gray-200 dark:border-slate-700/60 pb-2">
+                      <div className="flex items-center gap-2 text-gray-800 dark:text-gray-200 font-bold">
+                        <Tag className="w-4 h-4 text-emerald-600" />
+                        <span>1. Identificación y Origen</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setNewActivo(!newActivo)}
+                        className={`px-2.5 py-1 rounded-xl text-[11px] font-black transition flex items-center gap-1.5 shadow-sm ${
+                          newActivo
+                            ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                            : "bg-amber-600 hover:bg-amber-700 text-white"
+                        }`}
+                        title="Cambiar estado de la promoción"
+                      >
+                        {newActivo ? <Play className="w-3 h-3 fill-current" /> : <Pause className="w-3 h-3 fill-current" />}
+                        <span>{newActivo ? "ESTADO: ACTIVA" : "ESTADO: PAUSADA"}</span>
+                      </button>
                     </div>
 
                     <div>
@@ -2725,6 +2746,7 @@ export default function PromocionesPage() {
                     onClick={() => {
                       setShowCreateModal(false)
                       setEditingPromo(null)
+                      setNewActivo(true)
                     }}
                     className="px-4 py-2 rounded-xl border border-gray-300 dark:border-slate-700 text-gray-700 dark:text-gray-300 text-xs font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
                   >
@@ -3196,6 +3218,19 @@ export default function PromocionesPage() {
           promoId={promo360Id}
           onClose={() => setPromo360Id(null)}
           onUpdate={loadData}
+          onEdit={async (id) => {
+            let promoToEdit = promotions.find((p: Promotion) => p.id === id)
+            if (!promoToEdit) {
+              try {
+                promoToEdit = await api.promotions.get(id)
+              } catch (e) {
+                console.error("Error al obtener datos de promoción para editar:", e)
+              }
+            }
+            if (promoToEdit) {
+              handleOpenEdit(promoToEdit)
+            }
+          }}
         />
       )}
 

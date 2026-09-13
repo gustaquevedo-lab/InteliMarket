@@ -12,7 +12,7 @@ import {
   Layers, Tag, Boxes, Radio, Activity, ShieldAlert, ArrowUpRight, Sliders, UserPlus, Sparkle, RotateCcw, ExternalLink, Smartphone,
   Ticket, Scissors, Heart, Copy
 } from "lucide-react"
-import { api, type Product, type Customer, type Sale, type Warehouse, API_ORIGIN, COMPANY_ID } from "../../api"
+import { api, withTimeout, type Product, type Customer, type Sale, type Warehouse, API_ORIGIN, COMPANY_ID } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useTheme } from "../../context/ThemeContext"
 import { useToast } from "../../context/ToastContext"
@@ -20,7 +20,7 @@ import { formatPYG } from "../../utils/format"
 import { DEFAULT_RECEIPT_CONFIG } from "../../constants/receiptDefaults"
 import { loadCachedPOSData, persistPOSCatalog } from "../../utils/posOfflineSync"
 import { offlineDB } from "../../utils/offlineDB"
-import { syncPendingSales } from "../../utils/syncManager"
+import { syncPendingSales, syncPendingCupones } from "../../utils/syncManager"
 import QRCode from "qrcode"
 
 
@@ -745,6 +745,12 @@ export default function POSPage() {
     customer?: Customer
     formaPago?: string
     motivo?: string
+    voucher?: string
+    lote?: string
+    tarjetaMarca?: string
+    terminalIp?: string
+    moneda?: string
+    montoMoneda?: number
     weightProduct?: Product
     weightEtiquetaKg?: number
     weightBalanzaKg?: number
@@ -2668,6 +2674,7 @@ export default function POSPage() {
           // Si el backend confirma que NO hay sesión activa en base de datos para este usuario,
           // limpiar inmediatamente cualquier residuo local de turnos anteriores
           localStorage.removeItem(userCajaKey)
+          localStorage.removeItem("current_cash_session")
           cajaAbiertaRef.current = false
           cashSessionIdRef.current = null
           setCashSessionId(null)
@@ -2676,6 +2683,7 @@ export default function POSPage() {
           setActiveUserSessionInfo(null)
           return
         }
+        localStorage.setItem("current_cash_session", JSON.stringify(active))
         setActiveUserSessionInfo(active)
         if (active.estado === "pausada") {
           // Sesión pausada (Modelo A: Relevo / Almuerzo) -> Mostrar modal para reanudar
@@ -2696,7 +2704,24 @@ export default function POSPage() {
           }
         }
       })
-      .catch(() => {})
+      .catch((err) => {
+        // Fallback offline: si el servidor central se reinicia, restaurar turno desde almacenamiento local
+        const cached = localStorage.getItem("current_cash_session")
+        if (cached) {
+          try {
+            const sess = JSON.parse(cached)
+            if (sess?.id && sess.estado === "abierta") {
+              cajaAbiertaRef.current = true
+              cashSessionIdRef.current = sess.id
+              setCashSessionId(sess.id)
+              setCajaAbierta(true)
+              setShowAperturaModal(false)
+              setActiveUserSessionInfo(sess)
+              console.info("[POS] Servidor offline: turno restaurado desde almacenamiento local:", sess.id)
+            }
+          } catch {}
+        }
+      })
     return () => { isCancelled = true }
   }, [user?.id])
 
@@ -2706,6 +2731,7 @@ export default function POSPage() {
     try {
       await api.caja.sessions.pause(cashSessionId, { motivo: pausaMotivo.trim() || undefined })
       localStorage.removeItem(userCajaKey)
+      localStorage.removeItem("current_cash_session")
       setCashSessionId(null)
       setCajaAbierta(false)
       setShowPausaTurnoModal(false)
@@ -2946,6 +2972,7 @@ export default function POSPage() {
 
 
       localStorage.removeItem(userCajaKey)
+      localStorage.removeItem("current_cash_session")
       setCashSessionId(null)
       setCajaAbierta(false)
       setMontoCierreReal("")
@@ -3280,6 +3307,13 @@ export default function POSPage() {
   const [reabrirPagoCustomerSearch, setReabrirPagoCustomerSearch] = useState("")
   const [reabrirPagoCustomerResults, setReabrirPagoCustomerResults] = useState<Customer[]>([])
   const [reabrirPagoCustomerSearching, setReabrirPagoCustomerSearching] = useState(false)
+  const [reabrirPagoVoucher, setReabrirPagoVoucher] = useState("")
+  const [reabrirPagoLote, setReabrirPagoLote] = useState("")
+  const [reabrirPagoTarjetaMarca, setReabrirPagoTarjetaMarca] = useState("")
+  const [reabrirPagoMoneda, setReabrirPagoMoneda] = useState("PYG")
+  const [reabrirPagoMontoMoneda, setReabrirPagoMontoMoneda] = useState<number | undefined>(undefined)
+  const [reabrirPagoPosLoading, setReabrirPagoPosLoading] = useState(false)
+  const [reabrirPagoPosMsg, setReabrirPagoPosMsg] = useState<string | null>(null)
   const [submittingReabrirPago, setSubmittingReabrirPago] = useState(false)
 
   // ── CUPONES DE SORTEO EN CAJA (ELECTRON / POS MULTI-CAMPAÑA) ────────────────
@@ -3287,6 +3321,7 @@ export default function POSPage() {
   const [cuponModalStep, setCuponModalStep] = useState<"pregunta" | "formulario">("pregunta")
   const [lookingUpDoc, setLookingUpDoc] = useState(false)
   const [pendingCuponData, setPendingCuponData] = useState<{
+    saleId?: string
     saleNumero: string
     montoCompra: number
     totalCupones: number
@@ -3329,7 +3364,8 @@ export default function POSPage() {
       if (lastLookedUpDocRef.current === clean) return
       try {
         setLookingUpDoc(true)
-        const res = await api.cupones.buscarDocumento(clean)
+        // Intentar consultar al servidor con timeout rápido (800ms) para no trabar la cajera
+        const res = await withTimeout(api.cupones.buscarDocumento(clean), 800, null)
         lastLookedUpDocRef.current = clean
         if (res && res.encontrado && res.nombre) {
           setPendingCuponData(prev => {
@@ -3363,9 +3399,26 @@ export default function POSPage() {
             "Cliente Localizado",
             `${res.nombre} (${res.origen === "padron_tsje" ? "Padrón Nacional TSJE" : "Base de Clientes"})`
           )
+        } else {
+          // Fallback local: buscar en clientes cacheados en IndexedDB
+          try {
+            const localCusts = await offlineDB.customers.getByCI(clean)
+            if (localCusts && localCusts.length > 0 && localCusts[0]?.razon_social) {
+              const c = localCusts[0]
+              setPendingCuponData(prev => prev ? ({
+                ...prev,
+                doc: clean,
+                nombre: c.razon_social || prev.nombre,
+                telefono: c.telefono || prev.telefono,
+                ciudad: c.ciudad || prev.ciudad,
+                origenDoc: "local_cache"
+              }) : null)
+              toast.info("Cliente Localizado (Local)", `${c.razon_social}`)
+            }
+          } catch {}
         }
       } catch {
-        // Silencioso
+        // Silencioso ante timeout o desconexión
       } finally {
         setLookingUpDoc(false)
       }
@@ -3471,31 +3524,49 @@ export default function POSPage() {
 
     setSavingCupon(true)
     const fullTel = `${pendingCuponData.telCodigo}${pendingCuponData.telefono.trim()}`
-    try {
-      await api.cupones.registrarMultiple({
-        documento: pendingCuponData.doc.trim(),
-        nombre: pendingCuponData.nombre.trim(),
-        telefono: fullTel,
-        barrio: pendingCuponData.barrio.trim() || "Centro",
-        ciudad: pendingCuponData.ciudad.trim() || "Pedro Juan Caballero",
-        nro_ticket: pendingCuponData.saleNumero,
-        monto_compra: pendingCuponData.montoCompra,
-        usuario_nombre: user?.nombre || "Cajero POS",
-        cupones_por_campana: pendingCuponData.campanasCalificadas.map(c => ({
-          campana_id: c.campana_id,
-          campana_nombre: c.nombre,
-          cantidad: c.cupones_ganados
-        })),
-        items: pendingCuponData.items,
-        enviar_whatsapp: true
-      })
+    const cuponPayload = {
+      sale_id: pendingCuponData.saleId || undefined,
+      documento: pendingCuponData.doc.trim(),
+      nombre: pendingCuponData.nombre.trim(),
+      telefono: fullTel,
+      barrio: pendingCuponData.barrio.trim() || "Centro",
+      ciudad: pendingCuponData.ciudad.trim() || "Pedro Juan Caballero",
+      nro_ticket: pendingCuponData.saleNumero,
+      monto_compra: pendingCuponData.montoCompra,
+      usuario_nombre: user?.nombre || "Cajero POS",
+      cupones_por_campana: pendingCuponData.campanasCalificadas.map(c => ({
+        campana_id: c.campana_id,
+        campana_nombre: c.nombre,
+        cantidad: c.cupones_ganados
+      })),
+      items: pendingCuponData.items,
+      enviar_whatsapp: true
+    }
 
-      // Imprimir factura primero
+    let syncedOnline = false
+    try {
+      // 1. Intento con fast-timeout (1200ms) al backend
+      try {
+        await withTimeout(api.cupones.registrarMultiple(cuponPayload), 1200)
+        syncedOnline = true
+      } catch (backendErr) {
+        console.warn("[POS Cupones] Backend central no disponible o lento. Encolando cupones en IndexedDB...", backendErr)
+        const cuponOfflineId = `cup-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+        await offlineDB.pendingCupones.add({
+          id: cuponOfflineId,
+          data: cuponPayload,
+          created_at: new Date().toISOString(),
+          status: "pending",
+          retry_count: 0,
+        })
+      }
+
+      // 2. Imprimir factura primero
       if (pendingCuponData.printInvoiceCallback) {
         await pendingCuponData.printInvoiceCallback()
       }
 
-      // Luego imprimir cupones
+      // 3. Luego imprimir cupones físicos en ticketera térmica ESC/POS
       await printCuponesMultiCampanaEscPos({
         saleNumero: pendingCuponData.saleNumero,
         montoCompra: pendingCuponData.montoCompra,
@@ -3507,11 +3578,16 @@ export default function POSPage() {
         ciudad: pendingCuponData.ciudad.trim() || "Pedro Juan Caballero",
       })
 
-      toast.success("Cupones Emitidos", `Se emitieron ${pendingCuponData.totalCupones} cupón(es) para ${pendingCuponData.campanasCalificadas.length} sorteo(s).`)
+      if (syncedOnline) {
+        toast.success("Cupones Emitidos", `Se emitieron ${pendingCuponData.totalCupones} cupón(es) para ${pendingCuponData.campanasCalificadas.length} sorteo(s).`)
+      } else {
+        toast.info("Cupones Emitidos (Offline)", `Se emitieron e imprimieron ${pendingCuponData.totalCupones} cupón(es). Se sincronizarán automáticamente al reconectar.`)
+      }
       setShowCuponModal(false)
       setPendingCuponData(null)
     } catch (err: any) {
-      toast.error("Error al emitir cupones", err?.message || "No se pudo guardar el cupón.")
+      console.error("Error emitiendo cupones:", err)
+      toast.error("Error al emitir cupones", err?.message || "No se pudo completar la emisión.")
     } finally {
       setSavingCupon(false)
     }
@@ -3563,26 +3639,78 @@ export default function POSPage() {
     return () => clearTimeout(timer)
   }, [reabrirPagoCustomerSearch, reabrirPagoSaleId])
 
+  const handleReabrirPagoCobrarPos = async (sale: Sale) => {
+    const ip = activePosConfig.bancardIp
+    if (!ip) {
+      toast.error("POS no configurado", "No hay IP asignada para la terminal Bancard en esta caja.")
+      return
+    }
+    if (!(window as any).electronAPI?.bancardCall) {
+      toast.error("Integración Electron requerida", "El cobro integrado con AXIUM DX8000 requiere ejecutar en la aplicación de escritorio.")
+      return
+    }
+    setReabrirPagoPosLoading(true)
+    setReabrirPagoPosMsg("Iniciando cobro en terminal DX8000... Pase o inserte la tarjeta en el POS.")
+    try {
+      const res = await (window as any).electronAPI.bancardCall({
+        url: `http://${ip}:8080/pos/venta-ux`,
+        method: "POST",
+        body: {
+          monto: String(Math.round(sale.total || 0)),
+          tipo: "CREDITO",
+          cuotas: "00",
+          ticket: true,
+        }
+      })
+      if (!res.ok) {
+        throw new Error(res.error || `HTTP ${res.status}`)
+      }
+      const data = res.data || {}
+      if (data.responseCode === "00" || data.status === "APPROVED" || data.codigoRespuesta === "00") {
+        const ticketNum = data.ticketNumber || data.secuencia || data.nroComprobante || data.nroTicket || ""
+        const loteNum = data.batchNumber || data.nroLote || data.lote || ""
+        const cardBrand = data.cardBrand || data.marca || data.tarjeta || ""
+        setReabrirPagoVoucher(ticketNum ? String(ticketNum) : "POS-APROBADO")
+        if (loteNum) setReabrirPagoLote(String(loteNum))
+        if (cardBrand) setReabrirPagoTarjetaMarca(String(cardBrand))
+        setReabrirPagoPosMsg("✅ Cobro aprobado exitosamente en POS.")
+        toast.success("Cobro POS Aprobado", `Voucher: ${ticketNum || "OK"} - Lote: ${loteNum || "—"}`)
+      } else {
+        const desc = data.responseDescription || data.mensajeRespuesta || data.message || "Operación cancelada o rechazada en el POS."
+        setReabrirPagoPosMsg(`❌ Rechazado: ${desc}`)
+        toast.error("Cobro POS Rechazado", desc)
+      }
+    } catch (err: any) {
+      setReabrirPagoPosMsg(`❌ Error de comunicación con POS (${ip}): ${err.message}`)
+      toast.error("Fallo de comunicación con POS", err.message)
+    } finally {
+      setReabrirPagoPosLoading(false)
+    }
+  }
+
   const submitReabrirFactura = async (sale: Sale, selected: Customer, resolverId: string, resolverNombre: string) => {
     setSubmittingReabrirFactura(true)
     try {
+      const isDefault = !selected?.id || String(selected.id) === DEFAULT_CUSTOMER.id
       const updated = await api.sales.reopenCustomer(sale.id, {
-        customer_id: String(selected.id),
+        customer_id: isDefault ? null : String(selected.id),
         autorizado_por_id: resolverId,
         autorizado_por_nombre: resolverNombre,
       })
       const baseTicket = updated.recibo_escpos_b64 || sale.recibo_escpos_b64
+      const customerNombre = isDefault ? "Consumidor Final" : (selected.nombre || selected.razon_social || "")
+      const customerDoc = isDefault ? "" : ((selected.ruc || selected.ci) || "")
       const patchedB64 = baseTicket
-        ? patchEscposTicketCustomer(baseTicket, selected.nombre || selected.razon_social || "", (selected.ruc || selected.ci) || "")
+        ? patchEscposTicketCustomer(baseTicket, customerNombre, customerDoc)
         : baseTicket
 
       const saleActualizada = {
         ...sale,
-        customer_id: updated.customer_id ?? String(selected.id),
-        customer: selected || sale.customer,
-        customer_nombre: selected.nombre || sale.customer_nombre,
-        customer_doc: (selected.ruc || selected.ci) || sale.customer_doc,
-        customer_extra_club: (selected as any).extra_club_numero || sale.customer_extra_club,
+        customer_id: updated.customer_id ?? (isDefault ? null : String(selected.id)),
+        customer: isDefault ? DEFAULT_CUSTOMER : (selected || sale.customer),
+        customer_nombre: customerNombre,
+        customer_doc: customerDoc,
+        customer_extra_club: isDefault ? undefined : ((selected as any).extra_club_numero || sale.customer_extra_club),
         observaciones: updated.observaciones || sale.observaciones,
         recibo_escpos_b64: patchedB64,
         recibo_html: updated.recibo_html || sale.recibo_html,
@@ -3591,7 +3719,10 @@ export default function POSPage() {
       setReabrirFacturaSaleId(null)
       setReabrirFacturaSearch("")
       setReabrirFacturaResults([])
-      toast.success("Factura reabierta", `${selected.nombre} vinculado a la venta Nº ${sale.numero}. Reimprimiendo con su identificación...`)
+      toast.success(
+        isDefault ? "Factura convertida a Consumidor Final" : "Factura reabierta",
+        `Venta Nº ${sale.numero}: ${customerNombre}. Reimprimiendo con datos actualizados...`
+      )
       await handleReimprimirSale(saleActualizada)
     } catch (e: any) {
       toast.error("No se pudo reabrir la factura", e?.message || "Intente nuevamente.")
@@ -3607,6 +3738,12 @@ export default function POSPage() {
     resolverId: string,
     resolverNombre: string,
     selectedCustomer?: Customer | null,
+    voucher?: string,
+    lote?: string,
+    tarjetaMarca?: string,
+    terminalIp?: string,
+    moneda?: string,
+    montoMoneda?: number,
   ) => {
     setSubmittingReabrirPago(true)
     try {
@@ -3616,6 +3753,12 @@ export default function POSPage() {
         autorizado_por_id: resolverId,
         autorizado_por_nombre: resolverNombre,
         customer_id: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+        voucher,
+        lote,
+        tarjeta_marca: tarjetaMarca,
+        terminal_ip: terminalIp,
+        moneda,
+        monto_moneda: montoMoneda,
       })
       // Actualizar el objeto en memoria con la nueva forma de pago y cliente para que
       // la reimpresión inmediata use los datos correctos.
@@ -3635,6 +3778,12 @@ export default function POSPage() {
       setReabrirPagoCustomer(null)
       setReabrirPagoCustomerSearch("")
       setReabrirPagoCustomerResults([])
+      setReabrirPagoVoucher("")
+      setReabrirPagoLote("")
+      setReabrirPagoTarjetaMarca("")
+      setReabrirPagoMoneda("PYG")
+      setReabrirPagoMontoMoneda(undefined)
+      setReabrirPagoPosMsg(null)
       toast.success(
         "Forma de pago actualizada",
         `Venta Nº ${sale.numero}: ${sale.forma_pago} → ${formaPago}${selectedCustomer ? ` (${selectedCustomer.nombre})` : ""}. Reimprimiendo con el dato correcto...`
@@ -4394,7 +4543,9 @@ export default function POSPage() {
         const fp = (action as any).formaPago || "—"
         const motTxt = (action as any).motivo || ""
         const socio = (action as any).customer?.nombre ? ` (Socio: ${(action as any).customer.nombre})` : ""
-        return `⚠️ CAMBIO DE FORMA DE PAGO — Venta Nº ${s?.numero || ""}: ${s?.forma_pago || ""} → ${fp}${socio} | Motivo: ${motTxt}`
+        const vch = (action as any).voucher ? ` | Vch: ${(action as any).voucher}` : ""
+        const cur = (action as any).moneda && (action as any).moneda !== "PYG" ? ` | ${(action as any).moneda} ${(action as any).montoMoneda || ""}` : ""
+        return `⚠️ CAMBIO DE FORMA DE PAGO — Venta Nº ${s?.numero || ""}: ${s?.forma_pago || ""} → ${fp}${socio}${vch}${cur} | Motivo: ${motTxt}`
       }
       case "use_label_weight": {
         const wp = (action as any).weightProduct
@@ -4421,7 +4572,20 @@ export default function POSPage() {
     } else if (action.type === "reopen_invoice") {
       await submitReabrirFactura(action.sale, action.customer, resolverId, resolverNombre)
     } else if (action.type === "reopen_payment") {
-      await submitReabrirPago(action.sale, action.formaPago, action.motivo, resolverId, resolverNombre, action.customer)
+      await submitReabrirPago(
+        action.sale,
+        action.formaPago,
+        action.motivo,
+        resolverId,
+        resolverNombre,
+        action.customer,
+        action.voucher,
+        action.lote,
+        action.tarjetaMarca,
+        action.terminalIp,
+        action.moneda,
+        action.montoMoneda,
+      )
     } else {
       executeSupervisorAction(action, resolverId, resolverNombre)
     }
@@ -4496,7 +4660,20 @@ export default function POSPage() {
       } else if (action.type === "reopen_invoice") {
         await submitReabrirFactura(action.sale!, action.customer!, user!.id, user?.nombre || "Supervisor")
       } else if (action.type === "reopen_payment") {
-        await submitReabrirPago(action.sale!, (action as any).formaPago!, (action as any).motivo!, user!.id, user?.nombre || "Supervisor", action.customer)
+        await submitReabrirPago(
+          action.sale!,
+          (action as any).formaPago!,
+          (action as any).motivo!,
+          user!.id,
+          user?.nombre || "Supervisor",
+          action.customer,
+          (action as any).voucher,
+          (action as any).lote,
+          (action as any).tarjetaMarca,
+          (action as any).terminalIp,
+          (action as any).moneda,
+          (action as any).montoMoneda,
+        )
       } else {
         executeSupervisorAction(action, user!.id, user?.nombre || "Supervisor")
       }
@@ -4723,7 +4900,20 @@ export default function POSPage() {
         } else if (pendingSupervisorAction.type === "reopen_invoice") {
           await submitReabrirFactura(pendingSupervisorAction.sale!, pendingSupervisorAction.customer!, res.id!, res.nombre || "Supervisor")
         } else if (pendingSupervisorAction.type === "reopen_payment") {
-          await submitReabrirPago(pendingSupervisorAction.sale!, pendingSupervisorAction.formaPago!, pendingSupervisorAction.motivo!, res.id!, res.nombre || "Supervisor", pendingSupervisorAction.customer)
+          await submitReabrirPago(
+            pendingSupervisorAction.sale!,
+            pendingSupervisorAction.formaPago!,
+            pendingSupervisorAction.motivo!,
+            res.id!,
+            res.nombre || "Supervisor",
+            pendingSupervisorAction.customer,
+            pendingSupervisorAction.voucher,
+            pendingSupervisorAction.lote,
+            pendingSupervisorAction.tarjetaMarca,
+            pendingSupervisorAction.terminalIp,
+            pendingSupervisorAction.moneda,
+            pendingSupervisorAction.montoMoneda,
+          )
         } else {
           executeSupervisorAction(pendingSupervisorAction, res.id!, res.nombre || "Supervisor")
         }
@@ -6365,8 +6555,8 @@ export default function POSPage() {
       // ticket -- antes se esperaba esta llamada antes de imprimir, lo que
       // sumaba al delay entre cobrar y que salga el ticket.
       if (!ventaYaCreadaSinRecibo) {
-        saleCreatePromise = api.sales.create({ ...saleBasePayload, recibo_html: receiptHtml } as any).catch(async (apiErr: any) => {
-          console.warn("[POS] API central no disponible, encolando venta offline en IndexedDB...", apiErr)
+        saleCreatePromise = withTimeout(api.sales.create({ ...saleBasePayload, recibo_html: receiptHtml } as any), 1500).catch(async (apiErr: any) => {
+          console.warn("[POS] API central no disponible o demorada, encolando venta offline en IndexedDB...", apiErr)
           try {
             const offlineId = `off-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
             await offlineDB.pendingSales.add({
@@ -11654,29 +11844,31 @@ export default function POSPage() {
 
                       {/* Barra de Acciones */}
                       <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
-                        {esConsumidorFinal && (
-                          isWithin48h ? (
-                            <button
-                              onClick={() => {
-                                setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id)
-                                setReabrirFacturaSearch("")
-                                setReabrirFacturaResults([])
-                                setReabrirPagoSaleId(null)
-                              }}
-                              title="Agregar identificación de cliente a esta factura (política hasta 48h, requiere supervisor)"
-                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-600/10 hover:bg-purple-600/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 cursor-pointer"
-                            >
-                              <User className="w-3.5 h-3.5" />
-                              Reabrir Titular
-                            </button>
-                          ) : (
-                            <span
-                              title="Plazo comercial vencido: solo se puede modificar titular dentro de las 48 horas posteriores a la venta"
-                              className="text-[10px] font-bold text-slate-400 dark:text-slate-500 px-2 py-1 bg-slate-100 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-800 cursor-not-allowed"
-                            >
-                              Titular expirado (&gt;48h)
-                            </span>
-                          )
+                        {isWithin48h ? (
+                          <button
+                            onClick={() => {
+                              setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id)
+                              setReabrirFacturaSearch("")
+                              setReabrirFacturaResults([])
+                              setReabrirPagoSaleId(null)
+                            }}
+                            title="Reabrir factura para cambiar titular o asignar cliente (hasta 48h, requiere supervisor)"
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                              reabrirFacturaSaleId === sale.id
+                                ? "bg-purple-600 text-white"
+                                : "bg-purple-600/10 hover:bg-purple-600/20 text-purple-600 dark:text-purple-400 border border-purple-500/30"
+                            }`}
+                          >
+                            <User className="w-3.5 h-3.5" />
+                            Reabrir Factura
+                          </button>
+                        ) : (
+                          <span
+                            title="Plazo comercial vencido: solo se puede modificar titular dentro de las 48 horas posteriores a la venta"
+                            className="text-[10px] font-bold text-slate-400 dark:text-slate-500 px-2 py-1 bg-slate-100 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-800 cursor-not-allowed"
+                          >
+                            Plazo expirado (&gt;48h)
+                          </span>
                         )}
                         {isCurrentActiveSession ? (
                           <button
@@ -11685,6 +11877,12 @@ export default function POSPage() {
                                 setReabrirPagoSaleId(null)
                                 setReabrirPagoFormaPago("")
                                 setReabrirPagoMotivo("")
+                                setReabrirPagoVoucher("")
+                                setReabrirPagoLote("")
+                                setReabrirPagoTarjetaMarca("")
+                                setReabrirPagoMoneda("PYG")
+                                setReabrirPagoMontoMoneda(undefined)
+                                setReabrirPagoPosMsg("")
                                 setReabrirPagoCustomer(null)
                                 setReabrirPagoCustomerSearch("")
                                 setReabrirPagoCustomerResults([])
@@ -11692,6 +11890,11 @@ export default function POSPage() {
                                 setReabrirPagoSaleId(sale.id)
                                 setReabrirPagoFormaPago(fpActual)
                                 setReabrirPagoMotivo("")
+                                setReabrirPagoVoucher("")
+                                setReabrirPagoLote("")
+                                setReabrirPagoTarjetaMarca("")
+                                setReabrirPagoMoneda((sale as any).moneda || "PYG")
+                                setReabrirPagoPosMsg("")
                                 setReabrirFacturaSaleId(null)
                                 if (sale.customer && String(sale.customer.id) !== DEFAULT_CUSTOMER.id) {
                                   setReabrirPagoCustomer(normalizeCustomer(sale.customer))
@@ -11738,56 +11941,101 @@ export default function POSPage() {
                         </button>
                       </div>
 
-                      {/* Panel de Reabrir Titular */}
+                      {/* Panel de Reabrir Factura / Modificar Titular */}
                       {reabrirFacturaSaleId === sale.id && (
-                        <div className="mt-2 border-t border-slate-200 dark:border-slate-800 pt-2">
-                          <input
-                            type="text"
-                            value={reabrirFacturaSearch}
-                            onChange={(e) => setReabrirFacturaSearch(e.target.value)}
-                            placeholder="Buscar cliente por nombre, CI o RUC..."
-                            autoFocus
-                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-sm text-slate-900 dark:text-white outline-none focus:border-purple-500"
-                          />
-                          {reabrirFacturaSearch.trim() && (
-                            <div className="mt-1.5 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-                              {reabrirFacturaSearching ? (
-                                <div className="p-2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando...</div>
-                              ) : reabrirFacturaResults.length > 0 ? (
-                                reabrirFacturaResults.map((c) => (
-                                  <button
-                                    key={String(c.id)}
-                                    disabled={submittingReabrirFactura}
-                                    onClick={() => requestSupervisorAuthorization({ type: "reopen_invoice", sale, customer: c })}
-                                    className="w-full text-left p-2 text-sm hover:bg-purple-50 dark:hover:bg-purple-500/10 border-b border-slate-100 dark:border-slate-800 last:border-b-0 disabled:opacity-50"
-                                  >
-                                    <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                                      {c.nombre}
-                                      {(c as any).extra_club_numero ? (
-                                        <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black uppercase tracking-wider">★ Extra Club</span>
-                                      ) : null}
-                                    </div>
-                                    <div className="text-xs text-slate-500 dark:text-slate-400">{c.ruc || c.ci || c.telefono || "—"}</div>
-                                  </button>
-                                ))
-                              ) : (
-                                <div className="p-2 text-xs text-slate-500 dark:text-slate-400">No se encontró ningún cliente.</div>
+                        <div className="mt-2 border-t border-purple-500/30 pt-2.5 bg-purple-500/5 dark:bg-purple-500/10 -mx-3 -mb-3 p-3 rounded-b-xl space-y-2.5">
+                          <div className="flex items-center justify-between gap-2 border-b border-purple-500/20 pb-2">
+                            <div className="text-xs">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300 block">
+                                Titular Actual:
+                              </span>
+                              <span className="font-bold text-slate-900 dark:text-white">
+                                {clienteNombre}
+                              </span>
+                              {clienteDoc && (
+                                <span className="text-slate-500 dark:text-slate-400 ml-1.5 text-[11px]">
+                                  (Doc: {clienteDoc})
+                                </span>
                               )}
                             </div>
-                          )}
+                            {!esConsumidorFinal && (
+                              <button
+                                type="button"
+                                disabled={submittingReabrirFactura}
+                                onClick={() => requestSupervisorAuthorization({ type: "reopen_invoice", sale, customer: DEFAULT_CUSTOMER })}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 cursor-pointer disabled:opacity-50 transition-colors"
+                                title="Elimina el RUC/titular actual y restaura el ticket como Consumidor Final"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                                Pasar a Consumidor Final
+                              </button>
+                            )}
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
+                              Buscar y Asignar Nuevo Cliente:
+                            </label>
+                            <input
+                              type="text"
+                              value={reabrirFacturaSearch}
+                              onChange={(e) => setReabrirFacturaSearch(e.target.value)}
+                              placeholder="Buscar por nombre, CI o RUC..."
+                              autoFocus
+                              className="w-full bg-white dark:bg-slate-950 border border-purple-500/40 rounded-xl p-2 text-xs text-slate-900 dark:text-white outline-none focus:border-purple-600 shadow-inner"
+                            />
+                            {reabrirFacturaSearch.trim() && (
+                              <div className="mt-1.5 border border-purple-500/30 rounded-xl bg-white dark:bg-slate-950 overflow-hidden shadow-lg">
+                                {reabrirFacturaSearching ? (
+                                  <div className="p-2.5 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando cliente...
+                                  </div>
+                                ) : reabrirFacturaResults.length > 0 ? (
+                                  reabrirFacturaResults.map((c) => (
+                                    <button
+                                      key={String(c.id)}
+                                      type="button"
+                                      disabled={submittingReabrirFactura}
+                                      onClick={() => requestSupervisorAuthorization({ type: "reopen_invoice", sale, customer: c })}
+                                      className="w-full text-left p-2.5 text-xs hover:bg-purple-50 dark:hover:bg-purple-500/10 border-b border-slate-100 dark:border-slate-800 last:border-b-0 disabled:opacity-50 flex items-center justify-between"
+                                    >
+                                      <div>
+                                        <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                                          {c.nombre}
+                                          {(c as any).extra_club_numero ? (
+                                            <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black uppercase tracking-wider">
+                                              ★ Extra Club #{ (c as any).extra_club_numero }
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                        <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                          {c.ruc || c.ci || c.telefono || "Sin documento"}
+                                        </div>
+                                      </div>
+                                      <Check className="w-4 h-4 text-purple-500" />
+                                    </button>
+                                  ))
+                                ) : (
+                                  <div className="p-2.5 text-xs text-slate-500 dark:text-slate-400">
+                                    No se encontró ningún cliente con ese criterio.
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
 
-                      {/* Panel de Cambiar Forma de Pago con Auditoría y Control de Riesgos */}
+                      {/* Panel de Cambiar Forma de Pago con Medios Reales, POS Integrado y Auditoría */}
                       {reabrirPagoSaleId === sale.id && (
                         <div className="mt-3 border-t border-amber-500/30 pt-3 bg-amber-500/5 dark:bg-amber-500/10 -mx-3 -mb-3 p-3 rounded-b-xl space-y-3">
-                          {/* Banner de Auditoría y Control de Riesgo */}
+                          {/* Banner de Auditoría y Control de Riesgos */}
                           <div className="flex items-start gap-2 bg-amber-500/20 border border-amber-500/40 rounded-xl p-2.5 text-xs text-amber-900 dark:text-amber-200">
                             <span className="text-base leading-none">⚠️</span>
                             <div>
-                              <div className="font-black uppercase tracking-wide text-[11px]">Auditoría y Control de Riesgos</div>
+                              <div className="font-black uppercase tracking-wide text-[11px]">Auditoría de Cambio de Pago — Turno Actual</div>
                               <div className="text-[11px] opacity-90 leading-relaxed mt-0.5">
-                                Esta acción modifica la forma de pago de la venta cerrada (Turno Actual). Quedará registrada la traza completa (anterior: <strong>{fpActual}</strong>), motivo y supervisor autorizante. Se reimprimirá la factura automáticamente con el dato correcto.
+                                Modifica el medio de pago de la venta Nº <strong>{sale.numero}</strong> (anterior: <strong>{fpActual}</strong>). Se registrará la traza completa, se generará el nuevo ticket con voucher y se recalculará el arqueo de gaveta.
                               </div>
                             </div>
                           </div>
@@ -11797,37 +12045,135 @@ export default function POSPage() {
                             <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
                               Seleccionar Nueva Forma de Pago:
                             </label>
-                            <div className="grid grid-cols-3 gap-1.5">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                               {[
-                                { id: "EXTRA_CLUB", label: "★ Extra Club", color: "border-purple-500 text-purple-600 bg-purple-500/10" },
-                                { id: "EFECTIVO", label: "💵 Efectivo", color: "border-emerald-500 text-emerald-600 bg-emerald-500/10" },
-                                { id: "TARJETA", label: "💳 Tarjeta", color: "border-blue-500 text-blue-600 bg-blue-500/10" },
-                                { id: "TRANSFERENCIA", label: "🏦 Transfer.", color: "border-sky-500 text-sky-600 bg-sky-500/10" },
-                                { id: "QR", label: "📱 QR Pix", color: "border-amber-500 text-amber-600 bg-amber-500/10" },
-                                { id: "CREDITO", label: "📋 Crédito Casa", color: "border-rose-500 text-rose-600 bg-rose-500/10" },
+                                { id: "EFECTIVO", label: "💵 Efectivo (₲)", desc: "Guaraníes", color: "border-emerald-500 text-emerald-600 bg-emerald-500/10", requiresVoucher: false, isCard: false, isForeign: false },
+                                { id: "EFECTIVO_BRL", label: "💵 Efectivo R$", desc: "Reales", color: "border-teal-500 text-teal-600 bg-teal-500/10", requiresVoucher: false, isCard: false, isForeign: true, moneda: "BRL" },
+                                { id: "EFECTIVO_USD", label: "💵 Efectivo US$", desc: "Dólares", color: "border-cyan-500 text-cyan-600 bg-cyan-500/10", requiresVoucher: false, isCard: false, isForeign: true, moneda: "USD" },
+                                { id: "TARJETA_BANCARD", label: "💳 Tarjeta Bancard", desc: "DX8000 / Manual", color: "border-blue-500 text-blue-600 bg-blue-500/10", requiresVoucher: true, isCard: true, cardNetwork: "Bancard" },
+                                { id: "TARJETA_DINELCO", label: "💳 Tarjeta Dinelco", desc: "POS Dinelco", color: "border-indigo-500 text-indigo-600 bg-indigo-500/10", requiresVoucher: true, isCard: true, cardNetwork: "Dinelco" },
+                                { id: "QR", label: "📱 QR Zimple / PIX", desc: "Pago QR", color: "border-amber-500 text-amber-600 bg-amber-500/10", requiresVoucher: true, isCard: false, isForeign: false },
+                                { id: "EXTRA_CLUB", label: "★ Extra Club", desc: "Crédito a Socio", color: "border-purple-500 text-purple-600 bg-purple-500/10", requiresVoucher: false, isCard: false, isForeign: false, requiresCustomer: true },
+                                { id: "TRANSFERENCIA", label: "🏦 Transferencia", desc: "SIPAP / Cheque", color: "border-sky-500 text-sky-600 bg-sky-500/10", requiresVoucher: true, isCard: false, isForeign: false },
                               ].map((opt) => {
-                                const isSelected = reabrirPagoFormaPago === opt.id
-                                const isSameAsCurrent = fpActual === opt.id
+                                const isSelected = reabrirPagoFormaPago === opt.id || (reabrirPagoFormaPago === "TARJETA" && opt.id === "TARJETA_BANCARD")
+                                const isSameAsCurrent = fpActual === opt.id || (fpActual === "TARJETA" && opt.id === "TARJETA_BANCARD")
                                 return (
                                   <button
                                     key={opt.id}
                                     type="button"
-                                    onClick={() => setReabrirPagoFormaPago(opt.id)}
+                                    onClick={() => {
+                                      setReabrirPagoFormaPago(opt.id)
+                                      if (opt.isForeign && opt.moneda) {
+                                        setReabrirPagoMoneda(opt.moneda)
+                                        const cotiz = opt.moneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800)
+                                        setReabrirPagoMontoMoneda(Number(((sale.total || 0) / cotiz).toFixed(2)))
+                                      } else {
+                                        setReabrirPagoMoneda("PYG")
+                                        setReabrirPagoMontoMoneda(undefined)
+                                      }
+                                    }}
                                     className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center relative ${
                                       isSelected
                                         ? `${opt.color} border-2 ring-2 ring-amber-500/50 shadow-xs scale-102`
                                         : "bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-400"
                                     }`}
                                   >
-                                    {opt.label}
+                                    <div className="leading-tight">{opt.label}</div>
+                                    <div className="text-[9px] opacity-75 font-normal mt-0.5">{opt.desc}</div>
                                     {isSameAsCurrent && (
-                                      <span className="block text-[9px] text-slate-400 font-normal mt-0.5">(Actual)</span>
+                                      <span className="block text-[8px] text-slate-400 font-bold mt-0.5">(Actual)</span>
                                     )}
                                   </button>
                                 )
                               })}
                             </div>
                           </div>
+
+                          {/* Integración POS AXIUM DX8000 para Tarjeta Bancard */}
+                          {(reabrirPagoFormaPago === "TARJETA_BANCARD" || reabrirPagoFormaPago === "TARJETA") && (
+                            <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-black text-blue-700 dark:text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
+                                  <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+                                  Cobro en Terminal POS AXIUM DX8000 ({activePosConfig.bancardIp || "Sin IP"})
+                                </span>
+                                {reabrirPagoPosMsg && (
+                                  <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                                    {reabrirPagoPosMsg}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={reabrirPagoPosLoading || !activePosConfig.bancardIp}
+                                  onClick={() => handleReabrirPagoCobrarPos(sale)}
+                                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer disabled:opacity-50 transition-all"
+                                >
+                                  {reabrirPagoPosLoading ? (
+                                    <>
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      Procesando en Terminal...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <CreditCard className="w-3.5 h-3.5" />
+                                      ⚡ Enviar Cobro {formatPYG(sale.total)} al POS
+                                    </>
+                                  )}
+                                </button>
+                                <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                                  O podés ingresar el voucher/cupón manualmente si ya cobraste en el POS.
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Campos de Voucher / Cupón y Lote para Tarjetas, QR y Transferencias */}
+                          {["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(reabrirPagoFormaPago) && (
+                            <div className="grid grid-cols-2 gap-2 bg-slate-50 dark:bg-slate-950 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
+                              <div>
+                                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                                  Nº Voucher / Cupón / Comprobante <span className="text-rose-500">*</span>:
+                                </label>
+                                <input
+                                  type="text"
+                                  value={reabrirPagoVoucher}
+                                  onChange={(e) => setReabrirPagoVoucher(e.target.value)}
+                                  placeholder="Ej: 004821 o Nº Comprobante"
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-xs font-mono font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                                  Lote POS / Tarjeta (Opcional):
+                                </label>
+                                <input
+                                  type="text"
+                                  value={reabrirPagoLote}
+                                  onChange={(e) => setReabrirPagoLote(e.target.value)}
+                                  placeholder="Ej: 001"
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Equivalente en Divisa Extranjera (R$ o US$) */}
+                          {(reabrirPagoFormaPago === "EFECTIVO_BRL" || reabrirPagoFormaPago === "EFECTIVO_USD") && (
+                            <div className="bg-teal-500/10 border border-teal-500/30 rounded-xl p-2.5 text-xs text-teal-900 dark:text-teal-200 space-y-1">
+                              <div className="font-bold flex items-center justify-between">
+                                <span>Cobro en Efectivo Divisa ({reabrirPagoFormaPago === "EFECTIVO_BRL" ? "Reales R$" : "Dólares US$"})</span>
+                                <span className="font-mono text-[11px]">
+                                  Cotización: 1 {reabrirPagoMoneda} = {formatPYG(reabrirPagoMoneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800))}
+                                </span>
+                              </div>
+                              <div className="text-[11px] opacity-90">
+                                Importe exacto esperado: <strong>{reabrirPagoMoneda === "BRL" ? "R$" : "US$"} {((sale.total || 0) / (reabrirPagoMoneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800))).toFixed(2)}</strong>
+                              </div>
+                            </div>
+                          )}
 
                           {/* Selector de Socio Extra Club cuando la forma de pago elegida es EXTRA_CLUB o CREDITO */}
                           {(reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO") && (
@@ -11936,7 +12282,7 @@ export default function POSPage() {
                               rows={2}
                               value={reabrirPagoMotivo}
                               onChange={(e) => setReabrirPagoMotivo(e.target.value)}
-                              placeholder="Ej: Cajera cobró en efectivo por error, cliente es socio Extra Club y solicitó crédito..."
+                              placeholder="Ej: Cajera cobró en efectivo por error, se cobró con POS Bancard / cliente es socio Extra Club..."
                               className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500 resize-none"
                             />
                           </div>
@@ -11949,6 +12295,12 @@ export default function POSPage() {
                                 setReabrirPagoSaleId(null)
                                 setReabrirPagoFormaPago("")
                                 setReabrirPagoMotivo("")
+                                setReabrirPagoVoucher("")
+                                setReabrirPagoLote("")
+                                setReabrirPagoTarjetaMarca("")
+                                setReabrirPagoMoneda("PYG")
+                                setReabrirPagoMontoMoneda(undefined)
+                                setReabrirPagoPosMsg("")
                                 setReabrirPagoCustomer(null)
                                 setReabrirPagoCustomerSearch("")
                                 setReabrirPagoCustomerResults([])
@@ -11963,16 +12315,28 @@ export default function POSPage() {
                                 submittingReabrirPago ||
                                 !reabrirPagoFormaPago ||
                                 ((reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO") && !reabrirPagoCustomer) ||
+                                (["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(reabrirPagoFormaPago) && !reabrirPagoVoucher.trim()) ||
                                 (reabrirPagoFormaPago === fpActual && (!reabrirPagoCustomer || (sale.customer && String(reabrirPagoCustomer.id) === String(sale.customer.id)))) ||
                                 reabrirPagoMotivo.trim().length < 10
                               }
                               onClick={() => {
+                                const isForeign = reabrirPagoFormaPago === "EFECTIVO_BRL" || reabrirPagoFormaPago === "EFECTIVO_USD"
+                                const moneda = isForeign ? (reabrirPagoFormaPago === "EFECTIVO_BRL" ? "BRL" : "USD") : "PYG"
+                                const rate = moneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800)
+                                const montoMoneda = isForeign ? Number(((sale.total || 0) / rate).toFixed(2)) : undefined
+
                                 requestSupervisorAuthorization({
                                   type: "reopen_payment",
                                   sale,
                                   customer: reabrirPagoCustomer || undefined,
                                   formaPago: reabrirPagoFormaPago,
                                   motivo: reabrirPagoMotivo.trim(),
+                                  voucher: reabrirPagoVoucher.trim() || undefined,
+                                  lote: reabrirPagoLote.trim() || undefined,
+                                  tarjetaMarca: reabrirPagoTarjetaMarca.trim() || undefined,
+                                  terminalIp: activePosConfig.bancardIp || undefined,
+                                  moneda,
+                                  montoMoneda,
                                 } as any)
                               }}
                               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white shadow-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all"
@@ -12147,29 +12511,31 @@ export default function POSPage() {
 
                         {/* Barra de Acciones */}
                         <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
-                          {esConsumidorFinal && (
-                            isWithin48h ? (
-                              <button
-                                onClick={() => {
-                                  setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id)
-                                  setReabrirFacturaSearch("")
-                                  setReabrirFacturaResults([])
-                                  setReabrirPagoSaleId(null)
-                                }}
-                                title="Agregar identificación de cliente a esta factura (política hasta 48h, requiere supervisor)"
-                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-600/10 hover:bg-purple-600/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 cursor-pointer"
-                              >
-                                <User className="w-3.5 h-3.5" />
-                                Reabrir Titular
-                              </button>
-                            ) : (
-                              <span
-                                title="Plazo comercial vencido: solo se puede modificar titular dentro de las 48 horas posteriores a la venta"
-                                className="text-[10px] font-bold text-slate-400 dark:text-slate-500 px-2 py-1 bg-slate-100 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-800 cursor-not-allowed"
-                              >
-                                Titular expirado (&gt;48h)
-                              </span>
-                            )
+                          {isWithin48h ? (
+                            <button
+                              onClick={() => {
+                                setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id)
+                                setReabrirFacturaSearch("")
+                                setReabrirFacturaResults([])
+                                setReabrirPagoSaleId(null)
+                              }}
+                              title="Reabrir factura para cambiar titular o asignar cliente (hasta 48h, requiere supervisor)"
+                              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                                reabrirFacturaSaleId === sale.id
+                                  ? "bg-purple-600 text-white"
+                                  : "bg-purple-600/10 hover:bg-purple-600/20 text-purple-600 dark:text-purple-400 border border-purple-500/30"
+                              }`}
+                            >
+                              <User className="w-3.5 h-3.5" />
+                              Reabrir Factura
+                            </button>
+                          ) : (
+                            <span
+                              title="Plazo comercial vencido: solo se puede modificar titular dentro de las 48 horas posteriores a la venta"
+                              className="text-[10px] font-bold text-slate-400 dark:text-slate-500 px-2 py-1 bg-slate-100 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-800 cursor-not-allowed"
+                            >
+                              Plazo expirado (&gt;48h)
+                            </span>
                           )}
 
                           {isCurrentActiveSession ? (
@@ -12179,15 +12545,48 @@ export default function POSPage() {
                                   setReabrirPagoSaleId(null)
                                   setReabrirPagoFormaPago("")
                                   setReabrirPagoMotivo("")
+                                  setReabrirPagoVoucher("")
+                                  setReabrirPagoLote("")
+                                  setReabrirPagoTarjetaMarca("")
+                                  setReabrirPagoMoneda("PYG")
+                                  setReabrirPagoMontoMoneda(undefined)
+                                  setReabrirPagoPosMsg("")
+                                  setReabrirPagoCustomer(null)
+                                  setReabrirPagoCustomerSearch("")
+                                  setReabrirPagoCustomerResults([])
                                 } else {
                                   setReabrirPagoSaleId(sale.id)
                                   setReabrirPagoFormaPago(fpActual)
                                   setReabrirPagoMotivo("")
+                                  setReabrirPagoVoucher("")
+                                  setReabrirPagoLote("")
+                                  setReabrirPagoTarjetaMarca("")
+                                  setReabrirPagoMoneda((sale as any).moneda || "PYG")
+                                  setReabrirPagoPosMsg("")
                                   setReabrirFacturaSaleId(null)
+                                  if (sale.customer && String(sale.customer.id) !== DEFAULT_CUSTOMER.id) {
+                                    setReabrirPagoCustomer(normalizeCustomer(sale.customer))
+                                  } else if (sale.customer_id && sale.customer_id !== DEFAULT_CUSTOMER.id && sale.customer_nombre) {
+                                    setReabrirPagoCustomer(normalizeCustomer({
+                                      id: sale.customer_id,
+                                      razon_social: sale.customer_nombre,
+                                      nombre: sale.customer_nombre,
+                                      ruc: sale.customer_doc,
+                                      extra_club_numero: sale.customer_extra_club,
+                                    }))
+                                  } else {
+                                    setReabrirPagoCustomer(null)
+                                  }
+                                  setReabrirPagoCustomerSearch("")
+                                  setReabrirPagoCustomerResults([])
                                 }
                               }}
                               title="Cambiar forma de pago (solo sesión en curso, requiere supervisor y motivo)"
-                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-600/10 hover:bg-amber-600/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 cursor-pointer"
+                              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                                reabrirPagoSaleId === sale.id
+                                  ? "bg-amber-600 text-white"
+                                  : "bg-amber-600/10 hover:bg-amber-600/20 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+                              }`}
                             >
                               <CreditCard className="w-3.5 h-3.5" />
                               Cambiar Pago
@@ -12211,43 +12610,417 @@ export default function POSPage() {
                           </button>
                         </div>
 
-                        {/* Panel de Reabrir Titular en Modo Supervisora */}
+                        {/* Panel de Reabrir Factura / Modificar Titular en Modo Supervisora */}
                         {reabrirFacturaSaleId === sale.id && (
-                          <div className="mt-2 border-t border-slate-200 dark:border-slate-800 pt-2">
-                            <input
-                              type="text"
-                              value={reabrirFacturaSearch}
-                              onChange={(e) => setReabrirFacturaSearch(e.target.value)}
-                              placeholder="Buscar cliente por nombre, CI o RUC..."
-                              autoFocus
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-sm text-slate-900 dark:text-white outline-none focus:border-purple-500"
-                            />
-                            {reabrirFacturaSearch.trim() && (
-                              <div className="mt-1.5 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-                                {reabrirFacturaSearching ? (
-                                  <div className="p-2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando...</div>
-                                ) : reabrirFacturaResults.length > 0 ? (
-                                  reabrirFacturaResults.map((c) => (
+                          <div className="mt-2 border-t border-purple-500/30 pt-2.5 bg-purple-500/5 dark:bg-purple-500/10 -mx-3 -mb-3 p-3 rounded-b-xl space-y-2.5">
+                            <div className="flex items-center justify-between gap-2 border-b border-purple-500/20 pb-2">
+                              <div className="text-xs">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300 block">
+                                  Titular Actual:
+                                </span>
+                                <span className="font-bold text-slate-900 dark:text-white">
+                                  {clienteNombre}
+                                </span>
+                                {clienteDoc && (
+                                  <span className="text-slate-500 dark:text-slate-400 ml-1.5 text-[11px]">
+                                    (Doc: {clienteDoc})
+                                  </span>
+                                )}
+                              </div>
+                              {!esConsumidorFinal && (
+                                <button
+                                  type="button"
+                                  disabled={submittingReabrirFactura}
+                                  onClick={() => requestSupervisorAuthorization({ type: "reopen_invoice", sale, customer: DEFAULT_CUSTOMER })}
+                                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 cursor-pointer disabled:opacity-50 transition-colors"
+                                  title="Elimina el RUC/titular actual y restaura el ticket como Consumidor Final"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                  Pasar a Consumidor Final
+                                </button>
+                              )}
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
+                                Buscar y Asignar Nuevo Cliente:
+                              </label>
+                              <input
+                                type="text"
+                                value={reabrirFacturaSearch}
+                                onChange={(e) => setReabrirFacturaSearch(e.target.value)}
+                                placeholder="Buscar por nombre, CI o RUC..."
+                                autoFocus
+                                className="w-full bg-white dark:bg-slate-950 border border-purple-500/40 rounded-xl p-2 text-xs text-slate-900 dark:text-white outline-none focus:border-purple-600 shadow-inner"
+                              />
+                              {reabrirFacturaSearch.trim() && (
+                                <div className="mt-1.5 border border-purple-500/30 rounded-xl bg-white dark:bg-slate-950 overflow-hidden shadow-lg">
+                                  {reabrirFacturaSearching ? (
+                                    <div className="p-2.5 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando cliente...
+                                    </div>
+                                  ) : reabrirFacturaResults.length > 0 ? (
+                                    reabrirFacturaResults.map((c) => (
+                                      <button
+                                        key={String(c.id)}
+                                        type="button"
+                                        disabled={submittingReabrirFactura}
+                                        onClick={() => requestSupervisorAuthorization({ type: "reopen_invoice", sale, customer: c })}
+                                        className="w-full text-left p-2.5 text-xs hover:bg-purple-50 dark:hover:bg-purple-500/10 border-b border-slate-100 dark:border-slate-800 last:border-b-0 disabled:opacity-50 flex items-center justify-between"
+                                      >
+                                        <div>
+                                          <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                                            {c.nombre}
+                                            {(c as any).extra_club_numero ? (
+                                              <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black uppercase tracking-wider">
+                                                ★ Extra Club #{ (c as any).extra_club_numero }
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                          <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                            {c.ruc || c.ci || c.telefono || "Sin documento"}
+                                          </div>
+                                        </div>
+                                        <Check className="w-4 h-4 text-purple-500" />
+                                      </button>
+                                    ))
+                                  ) : (
+                                    <div className="p-2.5 text-xs text-slate-500 dark:text-slate-400">
+                                      No se encontró ningún cliente con ese criterio.
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Panel de Cambiar Forma de Pago en Modo Supervisora */}
+                        {reabrirPagoSaleId === sale.id && (
+                          <div className="mt-3 border-t border-amber-500/30 pt-3 bg-amber-500/5 dark:bg-amber-500/10 -mx-3 -mb-3 p-3 rounded-b-xl space-y-3">
+                            <div className="flex items-start gap-2 bg-amber-500/20 border border-amber-500/40 rounded-xl p-2.5 text-xs text-amber-900 dark:text-amber-200">
+                              <span className="text-base leading-none">⚠️</span>
+                              <div>
+                                <div className="font-black uppercase tracking-wide text-[11px]">Auditoría de Cambio de Pago — Turno Actual</div>
+                                <div className="text-[11px] opacity-90 leading-relaxed mt-0.5">
+                                  Modifica el medio de pago de la venta Nº <strong>{sale.numero}</strong> (anterior: <strong>{fpActual}</strong>). Se registrará la traza completa y se recalculará el arqueo de gaveta.
+                                </div>
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                                Seleccionar Nueva Forma de Pago:
+                              </label>
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                                {[
+                                  { id: "EFECTIVO", label: "💵 Efectivo (₲)", desc: "Guaraníes", color: "border-emerald-500 text-emerald-600 bg-emerald-500/10", requiresVoucher: false, isCard: false, isForeign: false },
+                                  { id: "EFECTIVO_BRL", label: "💵 Efectivo R$", desc: "Reales", color: "border-teal-500 text-teal-600 bg-teal-500/10", requiresVoucher: false, isCard: false, isForeign: true, moneda: "BRL" },
+                                  { id: "EFECTIVO_USD", label: "💵 Efectivo US$", desc: "Dólares", color: "border-cyan-500 text-cyan-600 bg-cyan-500/10", requiresVoucher: false, isCard: false, isForeign: true, moneda: "USD" },
+                                  { id: "TARJETA_BANCARD", label: "💳 Tarjeta Bancard", desc: "DX8000 / Manual", color: "border-blue-500 text-blue-600 bg-blue-500/10", requiresVoucher: true, isCard: true, cardNetwork: "Bancard" },
+                                  { id: "TARJETA_DINELCO", label: "💳 Tarjeta Dinelco", desc: "POS Dinelco", color: "border-indigo-500 text-indigo-600 bg-indigo-500/10", requiresVoucher: true, isCard: true, cardNetwork: "Dinelco" },
+                                  { id: "QR", label: "📱 QR Zimple / PIX", desc: "Pago QR", color: "border-amber-500 text-amber-600 bg-amber-500/10", requiresVoucher: true, isCard: false, isForeign: false },
+                                  { id: "EXTRA_CLUB", label: "★ Extra Club", desc: "Crédito a Socio", color: "border-purple-500 text-purple-600 bg-purple-500/10", requiresVoucher: false, isCard: false, isForeign: false, requiresCustomer: true },
+                                  { id: "TRANSFERENCIA", label: "🏦 Transferencia", desc: "SIPAP / Cheque", color: "border-sky-500 text-sky-600 bg-sky-500/10", requiresVoucher: true, isCard: false, isForeign: false },
+                                ].map((opt) => {
+                                  const isSelected = reabrirPagoFormaPago === opt.id || (reabrirPagoFormaPago === "TARJETA" && opt.id === "TARJETA_BANCARD")
+                                  const isSameAsCurrent = fpActual === opt.id || (fpActual === "TARJETA" && opt.id === "TARJETA_BANCARD")
+                                  return (
                                     <button
-                                      key={String(c.id)}
-                                      disabled={submittingReabrirFactura}
-                                      onClick={() => requestSupervisorAuthorization({ type: "reopen_invoice", sale, customer: c })}
-                                      className="w-full text-left p-2 text-sm hover:bg-purple-50 dark:hover:bg-purple-500/10 border-b border-slate-100 dark:border-slate-800 last:border-b-0 disabled:opacity-50"
+                                      key={opt.id}
+                                      type="button"
+                                      onClick={() => {
+                                        setReabrirPagoFormaPago(opt.id)
+                                        if (opt.isForeign && opt.moneda) {
+                                          setReabrirPagoMoneda(opt.moneda)
+                                          const cotiz = opt.moneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800)
+                                          setReabrirPagoMontoMoneda(Number(((sale.total || 0) / cotiz).toFixed(2)))
+                                        } else {
+                                          setReabrirPagoMoneda("PYG")
+                                          setReabrirPagoMontoMoneda(undefined)
+                                        }
+                                      }}
+                                      className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center relative ${
+                                        isSelected
+                                          ? `${opt.color} border-2 ring-2 ring-amber-500/50 shadow-xs scale-102`
+                                          : "bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-400"
+                                      }`}
                                     >
-                                      <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                                        {c.nombre}
-                                        {(c as any).extra_club_numero ? (
-                                          <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black uppercase tracking-wider">★ Extra Club</span>
-                                        ) : null}
-                                      </div>
-                                      <div className="text-xs text-slate-500 dark:text-slate-400">{c.ruc || c.ci || c.telefono || "—"}</div>
+                                      <div className="leading-tight">{opt.label}</div>
+                                      <div className="text-[9px] opacity-75 font-normal mt-0.5">{opt.desc}</div>
+                                      {isSameAsCurrent && (
+                                        <span className="block text-[8px] text-slate-400 font-bold mt-0.5">(Actual)</span>
+                                      )}
                                     </button>
-                                  ))
+                                  )
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Integración POS AXIUM DX8000 para Tarjeta Bancard */}
+                            {(reabrirPagoFormaPago === "TARJETA_BANCARD" || reabrirPagoFormaPago === "TARJETA") && (
+                              <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] font-black text-blue-700 dark:text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
+                                    <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+                                    Cobro en Terminal POS AXIUM DX8000 ({activePosConfig.bancardIp || "Sin IP"})
+                                  </span>
+                                  {reabrirPagoPosMsg && (
+                                    <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                                      {reabrirPagoPosMsg}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={reabrirPagoPosLoading || !activePosConfig.bancardIp}
+                                    onClick={() => handleReabrirPagoCobrarPos(sale)}
+                                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer disabled:opacity-50 transition-all"
+                                  >
+                                    {reabrirPagoPosLoading ? (
+                                      <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        Procesando en Terminal...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <CreditCard className="w-3.5 h-3.5" />
+                                        ⚡ Enviar Cobro {formatPYG(sale.total)} al POS
+                                      </>
+                                    )}
+                                  </button>
+                                  <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                                    O podés ingresar el voucher/cupón manualmente si ya cobraste en el POS.
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Campos de Voucher / Cupón y Lote para Tarjetas, QR y Transferencias */}
+                            {["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(reabrirPagoFormaPago) && (
+                              <div className="grid grid-cols-2 gap-2 bg-slate-50 dark:bg-slate-950 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
+                                <div>
+                                  <label className="block text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                                    Nº Voucher / Cupón / Comprobante <span className="text-rose-500">*</span>:
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={reabrirPagoVoucher}
+                                    onChange={(e) => setReabrirPagoVoucher(e.target.value)}
+                                    placeholder="Ej: 004821 o Nº Comprobante"
+                                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-xs font-mono font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                                    Lote POS / Tarjeta (Opcional):
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={reabrirPagoLote}
+                                    onChange={(e) => setReabrirPagoLote(e.target.value)}
+                                    placeholder="Ej: 001"
+                                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Equivalente en Divisa Extranjera (R$ o US$) */}
+                            {(reabrirPagoFormaPago === "EFECTIVO_BRL" || reabrirPagoFormaPago === "EFECTIVO_USD") && (
+                              <div className="bg-teal-500/10 border border-teal-500/30 rounded-xl p-2.5 text-xs text-teal-900 dark:text-teal-200 space-y-1">
+                                <div className="font-bold flex items-center justify-between">
+                                  <span>Cobro en Efectivo Divisa ({reabrirPagoFormaPago === "EFECTIVO_BRL" ? "Reales R$" : "Dólares US$"})</span>
+                                  <span className="font-mono text-[11px]">
+                                    Cotización: 1 {reabrirPagoMoneda} = {formatPYG(reabrirPagoMoneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800))}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] opacity-90">
+                                  Importe exacto esperado: <strong>{reabrirPagoMoneda === "BRL" ? "R$" : "US$"} {((sale.total || 0) / (reabrirPagoMoneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800))).toFixed(2)}</strong>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Selector de Socio Extra Club cuando la forma de pago elegida es EXTRA_CLUB o CREDITO */}
+                            {(reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO") && (
+                              <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-3 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] font-black text-purple-700 dark:text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                                    <Star className="w-3.5 h-3.5 fill-purple-500 text-purple-500" />
+                                    Socio Extra Club Obligatorio:
+                                  </span>
+                                  {reabrirPagoCustomer && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setReabrirPagoCustomer(null)
+                                        setReabrirPagoCustomerSearch("")
+                                      }}
+                                      className="text-[10px] text-purple-600 dark:text-purple-400 hover:underline font-bold cursor-pointer"
+                                    >
+                                      Cambiar socio
+                                    </button>
+                                  )}
+                                </div>
+
+                                {reabrirPagoCustomer ? (
+                                  <div className="bg-white dark:bg-slate-900 border border-purple-500/40 rounded-xl p-2.5 flex items-center justify-between shadow-xs">
+                                    <div>
+                                      <div className="font-black text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
+                                        {reabrirPagoCustomer.nombre}
+                                        <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black uppercase tracking-wider">
+                                          ★ Extra Club
+                                        </span>
+                                      </div>
+                                      <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                        {reabrirPagoCustomer.ruc || reabrirPagoCustomer.ci || "Sin documento"} · {reabrirPagoCustomer.extra_club_numero ? `Socio #${reabrirPagoCustomer.extra_club_numero}` : "Cuenta Extra Club"}
+                                      </div>
+                                    </div>
+                                    <CheckCircle className="w-5 h-5 text-purple-500 shrink-0" />
+                                  </div>
                                 ) : (
-                                  <div className="p-2 text-xs text-slate-500 dark:text-slate-400">No se encontró ningún cliente.</div>
+                                  <div className="space-y-1.5">
+                                    <input
+                                      type="text"
+                                      value={reabrirPagoCustomerSearch}
+                                      onChange={(e) => setReabrirPagoCustomerSearch(e.target.value)}
+                                      placeholder="Buscar socio por nombre, CI, RUC o Nº Extra Club..."
+                                      className="w-full bg-white dark:bg-slate-950 border border-purple-500/40 rounded-xl p-2 text-xs text-slate-900 dark:text-white outline-none focus:border-purple-600 shadow-inner"
+                                      autoFocus
+                                    />
+                                    {reabrirPagoCustomerSearch.trim().length >= 2 && (
+                                      <div className="max-h-44 overflow-y-auto border border-purple-500/30 rounded-xl bg-white dark:bg-slate-950 divide-y divide-slate-100 dark:divide-slate-800 shadow-lg">
+                                        {reabrirPagoCustomerSearching ? (
+                                          <div className="p-2.5 text-xs text-slate-500 flex items-center gap-2">
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando socios...
+                                          </div>
+                                        ) : reabrirPagoCustomerResults.length > 0 ? (
+                                          reabrirPagoCustomerResults.map((c) => (
+                                            <button
+                                              key={String(c.id)}
+                                              type="button"
+                                              onClick={() => {
+                                                setReabrirPagoCustomer(c)
+                                                setReabrirPagoCustomerSearch("")
+                                                setReabrirPagoCustomerResults([])
+                                              }}
+                                              className="w-full text-left p-2 hover:bg-purple-50 dark:hover:bg-purple-500/10 flex items-center justify-between transition-colors cursor-pointer"
+                                            >
+                                              <div>
+                                                <div className="font-bold text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                                                  {c.nombre}
+                                                  {c.extra_club_numero && (
+                                                    <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black">
+                                                      ★ #{c.extra_club_numero}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                                <div className="text-[10px] text-slate-500">
+                                                  {c.ruc || c.ci || c.telefono || "—"}
+                                                </div>
+                                              </div>
+                                              <Plus className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                                            </button>
+                                          ))
+                                        ) : (
+                                          <div className="p-2.5 text-xs text-slate-500">No se encontró ningún cliente/socio con ese criterio.</div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                             )}
+
+                            {/* Campo de Motivo Obligatorio */}
+                            <div>
+                              <div className="flex justify-between items-baseline mb-1">
+                                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                                  Motivo del Cambio (Obligatorio):
+                                </label>
+                                <span className={`text-[10px] font-bold ${
+                                  reabrirPagoMotivo.trim().length >= 10 ? "text-emerald-500" : "text-rose-500"
+                                }`}>
+                                  {reabrirPagoMotivo.trim().length}/10 caracteres mín.
+                                </span>
+                              </div>
+                              <textarea
+                                rows={2}
+                                value={reabrirPagoMotivo}
+                                onChange={(e) => setReabrirPagoMotivo(e.target.value)}
+                                placeholder="Ej: Cajera cobró en efectivo por error, se cobró con POS Bancard / cliente es socio Extra Club..."
+                                className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500 resize-none"
+                              />
+                            </div>
+
+                            {/* Botones de Acción */}
+                            <div className="flex items-center justify-end gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReabrirPagoSaleId(null)
+                                  setReabrirPagoFormaPago("")
+                                  setReabrirPagoMotivo("")
+                                  setReabrirPagoVoucher("")
+                                  setReabrirPagoLote("")
+                                  setReabrirPagoTarjetaMarca("")
+                                  setReabrirPagoMoneda("PYG")
+                                  setReabrirPagoMontoMoneda(undefined)
+                                  setReabrirPagoPosMsg("")
+                                  setReabrirPagoCustomer(null)
+                                  setReabrirPagoCustomerSearch("")
+                                  setReabrirPagoCustomerResults([])
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer"
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                disabled={
+                                  submittingReabrirPago ||
+                                  !reabrirPagoFormaPago ||
+                                  ((reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO") && !reabrirPagoCustomer) ||
+                                  (["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(reabrirPagoFormaPago) && !reabrirPagoVoucher.trim()) ||
+                                  (reabrirPagoFormaPago === fpActual && (!reabrirPagoCustomer || (sale.customer && String(reabrirPagoCustomer.id) === String(sale.customer.id)))) ||
+                                  reabrirPagoMotivo.trim().length < 10
+                                }
+                                onClick={() => {
+                                  const isForeign = reabrirPagoFormaPago === "EFECTIVO_BRL" || reabrirPagoFormaPago === "EFECTIVO_USD"
+                                  const moneda = isForeign ? (reabrirPagoFormaPago === "EFECTIVO_BRL" ? "BRL" : "USD") : "PYG"
+                                  const rate = moneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800)
+                                  const montoMoneda = isForeign ? Number(((sale.total || 0) / rate).toFixed(2)) : undefined
+
+                                  requestSupervisorAuthorization({
+                                    type: "reopen_payment",
+                                    sale,
+                                    customer: reabrirPagoCustomer || undefined,
+                                    formaPago: reabrirPagoFormaPago,
+                                    motivo: reabrirPagoMotivo.trim(),
+                                    voucher: reabrirPagoVoucher.trim() || undefined,
+                                    lote: reabrirPagoLote.trim() || undefined,
+                                    tarjetaMarca: reabrirPagoTarjetaMarca.trim() || undefined,
+                                    terminalIp: activePosConfig.bancardIp || undefined,
+                                    moneda,
+                                    montoMoneda,
+                                  } as any)
+                                }}
+                                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white shadow-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all"
+                              >
+                                {submittingReabrirPago ? (
+                                  <>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    Guardando...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Printer className="w-3.5 h-3.5" />
+                                    Confirmar y Reimprimir Correcto
+                                  </>
+                                )}
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>

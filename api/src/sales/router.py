@@ -205,7 +205,7 @@ async def attach_ticket(sale_id: str, body: SaleAttachTicket, db: AsyncSession =
 @router.patch("/sales/{sale_id}/customer", response_model=SaleResponse)
 async def reopen_sale_customer(sale_id: str, body: SaleReopenCustomer, db: AsyncSession = Depends(get_db)):
     result = await service.reopen_sale_customer(
-        db, sale_id, str(body.customer_id), str(body.autorizado_por_id), body.autorizado_por_nombre,
+        db, sale_id, str(body.customer_id) if body.customer_id else None, str(body.autorizado_por_id), body.autorizado_por_nombre,
     )
     if not result:
         raise HTTPException(status_code=404, detail="Venta no encontrada")
@@ -227,6 +227,12 @@ async def reopen_sale_payment(sale_id: str, body: SaleReopenPayment, db: AsyncSe
             str(body.autorizado_por_id),
             body.autorizado_por_nombre,
             str(body.customer_id) if body.customer_id else None,
+            voucher=body.voucher,
+            lote=body.lote,
+            tarjeta_marca=body.tarjeta_marca,
+            terminal_ip=body.terminal_ip,
+            moneda=body.moneda,
+            monto_moneda=body.monto_moneda,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

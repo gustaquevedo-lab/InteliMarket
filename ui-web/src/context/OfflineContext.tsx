@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
 import { offlineDB, type PendingSale, type OfflineCartItem, type CachedProduct, type CachedCustomer, type CachedReceipt } from "../utils/offlineDB"
-import { syncFullCatalog, getCachedCatalog, syncPendingSales, scheduleSyncRetry, cancelSyncRetry, saveOfflineReceipt, getOfflineReceipt, generateOfflineReceipt } from "../utils/syncManager"
+import { syncFullCatalog, getCachedCatalog, syncPendingSales, syncPendingCupones, scheduleSyncRetry, cancelSyncRetry, saveOfflineReceipt, getOfflineReceipt, generateOfflineReceipt } from "../utils/syncManager"
 import { api } from "../api"
 
 interface OfflineContextType {
@@ -105,10 +105,13 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   }
 
   const doSyncPendingSales = async (): Promise<number> => {
-    const result = await syncPendingSales()
+    const [salesResult] = await Promise.allSettled([
+      syncPendingSales(),
+      syncPendingCupones()
+    ])
     const sales = await offlineDB.pendingSales.getAll()
     setPendingSales(sales)
-    return result.synced
+    return salesResult.status === "fulfilled" ? salesResult.value.synced : 0
   }
 
   const generateReceipt = (

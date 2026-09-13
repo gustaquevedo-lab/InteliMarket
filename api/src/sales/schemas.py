@@ -125,14 +125,15 @@ class SaleAttachTicket(BaseModel):
 
 
 class SaleReopenCustomer(BaseModel):
-    customer_id: UUID
+    customer_id: Optional[UUID] = None
     autorizado_por_id: UUID
     autorizado_por_nombre: str
 
 
 FORMAS_PAGO_VALIDAS = {
-    "EFECTIVO", "TARJETA", "EXTRA_CLUB", "TRANSFERENCIA", "QR", "CREDITO",
-    "CHEQUE", "MIXTO",
+    "EFECTIVO", "TARJETA", "TARJETA_BANCARD", "TARJETA_DINELCO",
+    "EXTRA_CLUB", "TRANSFERENCIA", "QR", "QR_ZIMPLE", "QR_PIX", "QR_DINELCO",
+    "CREDITO", "CHEQUE", "MIXTO",
 }
 
 
@@ -147,3 +148,10 @@ class SaleReopenPayment(BaseModel):
                         description="Motivo descriptivo obligatorio (mín. 10 caracteres)")
     autorizado_por_id: UUID
     autorizado_por_nombre: str
+    voucher: Optional[str] = None
+    lote: Optional[str] = None
+    tarjeta_marca: Optional[str] = None
+    terminal_ip: Optional[str] = None
+    moneda: Optional[str] = "PYG"
+    monto_moneda: Optional[Decimal] = None
+

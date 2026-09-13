@@ -23,6 +23,31 @@ export const API_BASE = isLocalhostOrRelative ? "/api" : rawApiUrl
 export const API_ORIGIN = API_BASE.startsWith("http") ? API_BASE.replace(/\/api\/?$/, "") : (typeof window !== "undefined" ? window.location.origin : "")
 export const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
+/**
+ * Ejecuta una promesa con un timeout estricto. Si expira y se proveyó un fallbackValue,
+ * devuelve el fallback. Si no, rechaza con Error de timeout.
+ */
+export function withTimeout<T>(promise: Promise<T>, ms: number, fallbackValue?: T): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (fallbackValue !== undefined) {
+        resolve(fallbackValue)
+      } else {
+        reject(new Error(`Timeout tras ${ms}ms sin respuesta del servidor central`))
+      }
+    }, ms)
+    promise
+      .then((val) => {
+        clearTimeout(timer)
+        resolve(val)
+      })
+      .catch((err) => {
+        clearTimeout(timer)
+        reject(err)
+      })
+  })
+}
+
 let isRefreshing = false
 let refreshPromise: Promise<string | null> | null = null
 
@@ -62,17 +87,22 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
               localStorage.setItem("access_token", refreshData.access_token)
               if (refreshData.refresh_token) localStorage.setItem("refresh_token", refreshData.refresh_token)
               return refreshData.access_token as string
-            } else {
-              // Ver la nota de mas abajo: una estacion nunca se queda sin
-              // credencial, porque no hay nadie que pueda volver a entrar.
+            } else if (refreshRes.status === 401 || refreshRes.status === 403) {
+              // Solo borrar credenciales ante 401/403 legítimo de sesión vencida
               if (!localStorage.getItem("station_token")) {
                 localStorage.removeItem("access_token")
                 localStorage.removeItem("refresh_token")
                 localStorage.removeItem("user_email")
               }
               return null
+            } else {
+              // 502, 503, 504 o reinicio del backend: conservar credenciales locales
+              console.warn(`[API Auth] Servidor central no disponible (${refreshRes.status}). Conservando sesión local offline.`)
+              return null
             }
-          } catch {
+          } catch (e) {
+            // Caída de red o reinicio: conservar credenciales locales
+            console.warn("[API Auth] Fallo de conexión en refresh. Conservando sesión local offline.", e)
             return null
           } finally {
             isRefreshing = false
@@ -96,7 +126,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
         localStorage.setItem("access_token", estacion)
         headers["Authorization"] = `Bearer ${estacion}`
         response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
-      } else {
+      } else if (response.status === 401 || response.status === 403) {
         localStorage.removeItem("access_token")
         localStorage.removeItem("refresh_token")
         localStorage.removeItem("user_email")
@@ -1235,8 +1265,8 @@ export const api = {
     linkQuote: (id: string, quoteId: string) => client.post<any>(`/v1/sales/${id}/link-quote`, { quote_id: quoteId }),
     linkOrder: (id: string, orderId: string) => client.post<any>(`/v1/sales/${id}/link-order`, { order_id: orderId }),
     attachTicket: (id: string, ticketB64: string) => client.patch<any>(`/v1/sales/${id}/ticket`, { recibo_escpos_b64: ticketB64 }),
-    reopenCustomer: (id: string, data: { customer_id: string; autorizado_por_id: string; autorizado_por_nombre: string }) => client.patch<Sale>(`/v1/sales/${id}/customer`, data),
-    reopenPayment: (id: string, data: { forma_pago: string; motivo: string; autorizado_por_id: string; autorizado_por_nombre: string; customer_id?: string }) => client.patch<Sale>(`/v1/sales/${id}/payment-method`, data),
+    reopenCustomer: (id: string, data: { customer_id?: string | null; autorizado_por_id: string; autorizado_por_nombre: string }) => client.patch<Sale>(`/v1/sales/${id}/customer`, data),
+    reopenPayment: (id: string, data: { forma_pago: string; motivo: string; autorizado_por_id: string; autorizado_por_nombre: string; customer_id?: string; voucher?: string; lote?: string; tarjeta_marca?: string; terminal_ip?: string; moneda?: string; monto_moneda?: number }) => client.patch<Sale>(`/v1/sales/${id}/payment-method`, data),
     downloadReceipt: (id: string) => client.get<Blob>(`/v1/receipts/${id}`),
   },
   payments: {

@@ -1,7 +1,8 @@
 const DB_NAME = "intelimarket_offline"
-const DB_VERSION = 4
+const DB_VERSION = 5
 const STORE_CART = "cart"
 const STORE_PENDING_SALES = "pending_sales"
+const STORE_PENDING_CUPONES = "pending_cupones"
 const STORE_PRODUCTS = "products"
 const STORE_CUSTOMERS = "customers"
 const STORE_SYNC_STATE = "sync_state"
@@ -21,6 +22,11 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_CART)) db.createObjectStore(STORE_CART, { keyPath: "id" })
       if (!db.objectStoreNames.contains(STORE_PENDING_SALES)) {
         const store = db.createObjectStore(STORE_PENDING_SALES, { keyPath: "id" })
+        store.createIndex("status", "status", { unique: false })
+        store.createIndex("created_at", "created_at", { unique: false })
+      }
+      if (!db.objectStoreNames.contains(STORE_PENDING_CUPONES)) {
+        const store = db.createObjectStore(STORE_PENDING_CUPONES, { keyPath: "id" })
         store.createIndex("status", "status", { unique: false })
         store.createIndex("created_at", "created_at", { unique: false })
       }
@@ -192,6 +198,32 @@ export interface PendingSale {
   next_retry: string
 }
 
+export interface PendingCupon {
+  id: string
+  data: {
+    sale_id?: string
+    documento: string
+    nombre: string
+    telefono: string
+    barrio?: string
+    ciudad?: string
+    nro_ticket?: string
+    monto_compra?: number
+    usuario_nombre?: string
+    cupones_por_campana: Array<{
+      campana_id: string
+      campana_nombre: string
+      cantidad: number
+    }>
+    items?: any[]
+    enviar_whatsapp?: boolean
+  }
+  created_at: string
+  status: "pending" | "syncing" | "synced" | "failed"
+  retry_count: number
+  last_error?: string
+}
+
 export interface CachedProduct {
   id: string
   sku: string
@@ -287,6 +319,14 @@ export const offlineDB = {
     update: (sale: PendingSale) => putItem(STORE_PENDING_SALES, sale),
     clear: () => clearStore(STORE_PENDING_SALES),
   },
+  pendingCupones: {
+    getAll: () => getStore<PendingCupon>(STORE_PENDING_CUPONES),
+    getPending: () => getByIndex<PendingCupon>(STORE_PENDING_CUPONES, "status", "pending"),
+    add: (cupon: PendingCupon) => putItem(STORE_PENDING_CUPONES, cupon),
+    remove: (id: string) => deleteItem(STORE_PENDING_CUPONES, id),
+    update: (cupon: PendingCupon) => putItem(STORE_PENDING_CUPONES, cupon),
+    clear: () => clearStore(STORE_PENDING_CUPONES),
+  },
   products: {
     getAll: () => getStore<any>(STORE_PRODUCTS),
     getBySku: (sku: string) => getByIndex<any>(STORE_PRODUCTS, "sku", sku),
@@ -327,7 +367,7 @@ export const offlineDB = {
     clear: () => clearStore(STORE_RECEIPTS),
   },
   clearAll: async () => {
-    const stores = [STORE_CART, STORE_PENDING_SALES, STORE_PRODUCTS, STORE_CUSTOMERS, STORE_SYNC_STATE, STORE_RECEIPTS, STORE_TIMBRADOS, STORE_PAYMENT_METHODS, STORE_COMPANY_CONFIG, STORE_INVOICES, STORE_STAFF, STORE_RATES]
+    const stores = [STORE_CART, STORE_PENDING_SALES, STORE_PENDING_CUPONES, STORE_PRODUCTS, STORE_CUSTOMERS, STORE_SYNC_STATE, STORE_RECEIPTS, STORE_TIMBRADOS, STORE_PAYMENT_METHODS, STORE_COMPANY_CONFIG, STORE_INVOICES, STORE_STAFF, STORE_RATES]
     for (const s of stores) await clearStore(s)
   },
   timbrados: {

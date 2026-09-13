@@ -156,6 +156,40 @@ export async function syncPendingSales(onProgress?: (synced: number, total: numb
   return { synced, failed }
 }
 
+export async function syncPendingCupones(onProgress?: (synced: number, total: number) => void): Promise<{ synced: number; failed: number }> {
+  const pending = await offlineDB.pendingCupones.getPending()
+  if (pending.length === 0) return { synced: 0, failed: 0 }
+
+  let synced = 0
+  let failed = 0
+
+  for (const cupon of pending) {
+    if (cupon.retry_count >= MAX_RETRIES) continue
+
+    await offlineDB.pendingCupones.update({
+      ...cupon,
+      status: "syncing",
+      retry_count: cupon.retry_count + 1,
+    })
+
+    try {
+      await api.cupones.registrarMultiple(cupon.data as any)
+      await offlineDB.pendingCupones.update({ ...cupon, status: "synced" as const })
+      synced++
+    } catch (err) {
+      failed++
+      await offlineDB.pendingCupones.update({
+        ...cupon,
+        status: "pending" as const,
+        last_error: err instanceof Error ? err.message : "Sync failed",
+      })
+    }
+  }
+
+  if (onProgress) onProgress(synced, pending.length)
+  return { synced, failed }
+}
+
 export function generateOfflineReceipt(
   saleNumber: string,
   items: Array<{ nombre: string; cantidad: number; precio: number; total: number }>,
@@ -231,8 +265,16 @@ export async function getOfflineReceipt(saleId: string): Promise<CachedReceipt |
 export function scheduleSyncRetry(onSyncComplete: () => void) {
   if (syncTimer) clearTimeout(syncTimer)
   syncTimer = setTimeout(async () => {
-    const result = await syncPendingSales()
-    if (result.synced > 0 || result.failed > 0) {
+    const [salesResult, cuponesResult] = await Promise.allSettled([
+      syncPendingSales(),
+      syncPendingCupones()
+    ])
+    const salesSynced = salesResult.status === "fulfilled" ? salesResult.value.synced : 0
+    const salesFailed = salesResult.status === "fulfilled" ? salesResult.value.failed : 0
+    const cuponesSynced = cuponesResult.status === "fulfilled" ? cuponesResult.value.synced : 0
+    const cuponesFailed = cuponesResult.status === "fulfilled" ? cuponesResult.value.failed : 0
+
+    if (salesSynced > 0 || salesFailed > 0 || cuponesSynced > 0 || cuponesFailed > 0) {
       scheduleSyncRetry(onSyncComplete)
     }
     onSyncComplete()
