@@ -88,6 +88,7 @@ interface PausedSale {
   customer: Customer
   items: CartItem[]
   total: number
+  appliedDiscount?: { type: "percentage" | "fixed"; value: number; montoPyg: number; reason: string; supervisorId: string; supervisorNombre: string } | null
 }
 
 interface CurrencyRates {
@@ -4743,6 +4744,8 @@ export default function POSPage() {
     } else if (action.type === "clear_cart") {
       setCart([])
       setCustomer(DEFAULT_CUSTOMER)
+      setAppliedDiscount(null)
+      setExtraClubAdminOverride(false)
       toast.warning("Venta Cancelada", "Se anularon todos los productos del ticket.")
     } else if (action.type === "decrease_qty" && action.itemId && action.delta) {
       const itemBefore = cart.find((i) => i.id === action.itemId)
@@ -5158,16 +5161,20 @@ export default function POSPage() {
       customer,
       items: [...cart],
       total: totalPyg,
+      appliedDiscount,
     }
     setPausedSales((prev) => [newPaused, ...prev])
     setCart([])
     setCustomer(DEFAULT_CUSTOMER)
+    setAppliedDiscount(null)
+    setExtraClubAdminOverride(false)
     toast.info("Venta en Espera", "La venta fue pausada exitosamente.")
   }
 
   const resumePausedSale = (paused: PausedSale) => {
     setCart(paused.items)
     setCustomer(paused.customer)
+    setAppliedDiscount(paused.appliedDiscount || null)
     setPausedSales((prev) => prev.filter((p) => p.id !== paused.id))
     setShowPausedModal(false)
     toast.success("Venta Recuperada", `Restaurados ${paused.items.length} ítems.`)
@@ -6770,6 +6777,8 @@ export default function POSPage() {
       setShowPaymentModal(false)
       setCart([])
       setCustomer(DEFAULT_CUSTOMER)
+      setAppliedDiscount(null)
+      setExtraClubAdminOverride(false)
       toast.success(
         "¡Cobro Exitoso!",
         `Comprobante ${numeroComprobante} emitido. Vuelto: ${formatPYG(vueltoFinalPyg)}` +
