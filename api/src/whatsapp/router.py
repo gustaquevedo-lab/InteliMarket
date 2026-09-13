@@ -21,6 +21,14 @@ from api.src.whatsapp.models import WhatsAppConversation
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp"])
 
 
+def _val(obj, default=""):
+    if obj is None:
+        return default
+    if hasattr(obj, "value"):
+        return obj.value
+    return str(obj)
+
+
 @router.get("/config", response_model=WhatsAppConfigResponse)
 async def get_config(
     user: dict = Depends(require_auth),
@@ -210,7 +218,7 @@ async def list_conversations(
             contact_name=c.contact_name,
             contact_phone=c.contact_phone,
             last_message_at=c.last_message_at,
-            status=c.status.value if c.status else "active",
+            status=_val(c.status, "active"),
             created_at=c.created_at,
         )
         for c in result.scalars().all()
@@ -235,7 +243,7 @@ async def get_conversation(
         contact_name=conversation.contact_name,
         contact_phone=conversation.contact_phone,
         last_message_at=conversation.last_message_at,
-        status=conversation.status.value if conversation.status else "active",
+        status=_val(conversation.status, "active"),
         created_at=conversation.created_at,
     )
 
@@ -256,11 +264,11 @@ async def get_messages(
             id=m.id,
             tenant_id=m.tenant_id,
             conversation_id=m.conversation_id,
-            direction=m.direction.value if m.direction else "inbound",
+            direction=_val(m.direction, "inbound"),
             content=m.content,
             message_id=m.message_id,
             media_url=m.media_url,
-            status=m.status.value if m.status else "queued",
+            status=_val(m.status, "queued"),
             command=m.command,
             created_at=m.created_at,
         )
@@ -282,11 +290,11 @@ async def send_outbound_message(
         id=msg.id,
         tenant_id=msg.tenant_id,
         conversation_id=msg.conversation_id,
-        direction=msg.direction.value if msg.direction else "outbound",
+        direction=_val(msg.direction, "outbound"),
         content=msg.content,
         message_id=msg.message_id,
         media_url=msg.media_url,
-        status=msg.status.value if msg.status else "queued",
+        status=_val(msg.status, "queued"),
         command=msg.command,
         created_at=msg.created_at,
     )
@@ -317,7 +325,7 @@ async def list_templates(
             tenant_id=t.tenant_id,
             name=t.name,
             content=t.content,
-            tipo=t.tipo.value if t.tipo else "custom",
+            tipo=_val(t.tipo, "custom"),
             active=t.active,
             created_at=t.created_at,
         )
@@ -339,7 +347,7 @@ async def create_template(
         tenant_id=template.tenant_id,
         name=template.name,
         content=template.content,
-        tipo=template.tipo.value if template.tipo else "custom",
+        tipo=_val(template.tipo, "custom"),
         active=template.active,
         created_at=template.created_at,
     )
@@ -361,7 +369,7 @@ async def update_template(
         tenant_id=template.tenant_id,
         name=template.name,
         content=template.content,
-        tipo=template.tipo.value if template.tipo else "custom",
+        tipo=_val(template.tipo, "custom"),
         active=template.active,
         created_at=template.created_at,
     )
