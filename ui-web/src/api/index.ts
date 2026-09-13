@@ -77,11 +77,21 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
         isRefreshing = true
         refreshPromise = (async () => {
           try {
-            const refreshRes = await fetch(`${API_BASE}/v1/auth/refresh`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ refresh_token: refreshToken }),
-            })
+            // Sin timeout propio, este fetch hereda el default de nginx
+            // (60s) cuando la API esta reiniciando -- y como isRefreshing/
+            // refreshPromise son singleton de modulo, ESE fetch colgado
+            // bloqueaba cualquier otra peticion autenticada de la caja
+            // durante ese minuto entero (verify-supervisor, ventas, etc.),
+            // forzando a la cajera a reiniciar la maquina. 6s alcanza de
+            // sobra en la LAN local cuando el servidor esta arriba.
+            const refreshRes = await withTimeout(
+              fetch(`${API_BASE}/v1/auth/refresh`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ refresh_token: refreshToken }),
+              }),
+              6000,
+            )
             if (refreshRes.ok) {
               const refreshData = await refreshRes.json()
               localStorage.setItem("access_token", refreshData.access_token)
