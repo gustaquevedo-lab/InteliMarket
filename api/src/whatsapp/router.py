@@ -45,6 +45,69 @@ async def save_config(
     return WhatsAppConfigResponse.from_config(config)
 
 
+@router.get("/chatbot-config")
+async def get_chatbot_config(
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    from api.src.tenants.models import Tenant
+    tenant_id = UUID(user["tenant_id"])
+    tenant = await db.get(Tenant, tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+
+    cfg = await whatsapp_service.get_config(db, tenant_id)
+    t_cfg = tenant.config or {}
+    bot_cfg = t_cfg.get("chatbot", {})
+
+    default_config = {
+        "bot_name": "ExtraBot",
+        "auto_reply": cfg.auto_reply if cfg else True,
+        "welcome_message": "¡Hola {cliente}! 👋 Bienvenido al canal oficial de atención de Extra Supermercado.",
+        "out_of_hours_message": "¡Hola! En este momento nuestras sucursales se encuentran cerradas. Nuestro horario de atención es de Lunes a Sábados de 07:00 a 21:00 hs y Domingos de 07:30 a 13:00 hs. Dejanos tu consulta y te responderemos ni bien abramos.",
+        "business_hours_start": "07:00",
+        "business_hours_end": "21:00",
+        "business_days": ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado"],
+        "modules_enabled": {
+            "catalog_search": True,
+            "extraclub_points": True,
+            "order_tracking": True,
+            "supermarket_info": True,
+            "human_handoff": True,
+        }
+    }
+    merged = {**default_config, **bot_cfg}
+    merged["auto_reply"] = cfg.auto_reply if cfg else True
+    return merged
+
+
+@router.put("/chatbot-config")
+async def save_chatbot_config(
+    body: dict,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    from api.src.tenants.models import Tenant
+    from sqlalchemy.orm.attributes import flag_modified
+    tenant_id = UUID(user["tenant_id"])
+    tenant = await db.get(Tenant, tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+
+    auto_reply = body.get("auto_reply", True)
+    await whatsapp_service.save_config(db, tenant_id, {"auto_reply": auto_reply})
+
+    t_cfg = dict(tenant.config or {})
+    t_cfg["chatbot"] = body
+    tenant.config = t_cfg
+    flag_modified(tenant, "config")
+    await db.commit()
+    await db.refresh(tenant)
+
+    return {"status": "ok", "config": body}
+
+
+
 from api.src.whatsapp.evolution_client import evolution_client
 
 

@@ -288,13 +288,55 @@ async def send_campaign_batch(db: AsyncSession, campaign_id: UUID, batch_size: i
 # AUTOMATION RULES
 # ═══════════════════════════════════════════════════════════════
 
+async def seed_default_rules(db: AsyncSession, tenant_id: UUID):
+    """Inicializa reglas automáticas estándar para Extra Supermercado."""
+    defaults = [
+        {
+            "name": "Envío de Ticket Digital + Puntos ExtraClub",
+            "trigger_event": AutomationTriggerEvent.sale_created,
+            "message_template": "🛒 *¡Gracias por tu compra en Extra Supermercado!*\n\n📄 Ticket Digital: *#{NUMERO}*\n💰 Total: *Gs. {TOTAL}*\n⭐ Sumaste *{PUNTOS} Puntos ExtraClub*.\n\n¡Te esperamos pronto en nuestras sucursales!",
+            "delay_minutes": 0,
+            "active": True,
+        },
+        {
+            "name": "Aviso de Pago y Acreditación de Saldo",
+            "trigger_event": AutomationTriggerEvent.payment_received,
+            "message_template": "💵 *Pago Acreditado — Extra Supermercado*\nConfirmamos la recepción de tu pago por *Gs. {MONTO}*. ¡Muchas gracias por tu puntualidad!",
+            "delay_minutes": 0,
+            "active": True,
+        },
+        {
+            "name": "Alerta Preventiva de Cuota por Vencer",
+            "trigger_event": AutomationTriggerEvent.payment_overdue,
+            "message_template": "🔔 *Recordatorio de Cuota — Extra Supermercado*\nEstimado/a cliente, te informamos que tenés una cuota de crédito pendiente de pago.\nPodés abonar en caja de cualquier sucursal o por transferencia bancaria.",
+            "delay_minutes": 0,
+            "active": True,
+        },
+        {
+            "name": "Alerta de Quiebre de Stock en Góndola",
+            "trigger_event": AutomationTriggerEvent.stock_below_minimum,
+            "message_template": "⚠️ *Alerta Interna de Salón*: El producto {PRODUCTO} ha alcanzado el umbral mínimo de reposición.",
+            "delay_minutes": 0,
+            "active": True,
+        },
+    ]
+    for r_data in defaults:
+        db.add(WhatsAppAutomationRule(tenant_id=tenant_id, **r_data))
+    await db.commit()
+
+
 async def list_automation_rules(db: AsyncSession, tenant_id: UUID, active_only: bool = False):
     q = select(WhatsAppAutomationRule).where(WhatsAppAutomationRule.tenant_id == tenant_id)
     if active_only:
         q = q.where(WhatsAppAutomationRule.active == True)
     q = q.order_by(WhatsAppAutomationRule.created_at.desc())
     r = await db.execute(q)
-    return r.scalars().all()
+    rules = list(r.scalars().all())
+    if not rules and not active_only:
+        await seed_default_rules(db, tenant_id)
+        r2 = await db.execute(q)
+        rules = list(r2.scalars().all())
+    return rules
 
 
 async def get_automation_rule(db: AsyncSession, rule_id: UUID):

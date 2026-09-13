@@ -1,12 +1,22 @@
 import { useState, useEffect, useRef, useMemo } from "react"
-import { api, type WhatsAppTemplate, type WhatsAppConversation, type WhatsAppMessage } from "../../api"
+import {
+  api,
+  type WhatsAppTemplate,
+  type WhatsAppConversation,
+  type WhatsAppMessage,
+  type IntelliZappCampaign,
+  type IntelliZappAutomationRule,
+} from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { Modal } from "../../components/Modal"
 import {
   MessageCircle, Settings, FileText, Send, Plus, Edit, Trash2,
   Loader2, Check, ExternalLink, RefreshCw, Smartphone, ShieldCheck,
   Zap, Copy, CheckCircle2, Globe, QrCode, PowerOff, AlertCircle,
-  Search, Server, User, Clock, ArrowRight, MessageSquare, Terminal
+  Search, Server, User, Clock, ArrowRight, MessageSquare, Terminal,
+  Bot, Play, Sparkles, Filter, Radio, ChevronRight, CheckCircle,
+  Building, HelpCircle, RotateCcw, Megaphone, BellRing, Users,
+  CheckCheck, AlertTriangle
 } from "lucide-react"
 
 const DEFAULT_GATEWAY_URL = "http://100.72.38.119:8085"
@@ -21,11 +31,13 @@ interface GatewayStatus {
   gateway_url?: string
 }
 
+type TabType = "connection" | "conversations" | "chatbot" | "campaigns" | "automations" | "templates" | "gateway"
+
 export default function WhatsAppPage() {
-  const [tab, setTab] = useState<"connection" | "conversations" | "templates" | "gateway">("connection")
+  const [tab, setTab] = useState<TabType>("connection")
   const toast = useToast()
 
-  // Gateway Connection State
+  // ── 1. Gateway Connection State ──
   const [status, setStatus] = useState<GatewayStatus | null>(null)
   const [loadingStatus, setLoadingStatus] = useState<boolean>(true)
   const [qrCodeData, setQrCodeData] = useState<string | null>(null)
@@ -33,12 +45,86 @@ export default function WhatsAppPage() {
   const [loadingQr, setLoadingQr] = useState<boolean>(false)
   const [disconnecting, setDisconnecting] = useState<boolean>(false)
 
-  // Test Message State
+  // ── Test Message State ──
   const [testPhone, setTestPhone] = useState<string>("")
-  const [testMessage, setTestMessage] = useState<string>("¡Hola! Este es un mensaje de prueba oficial desde Extra Supermercado (InteliMarket). 🛒✨")
+  const [testMessage, setTestMessage] = useState<string>(
+    "¡Hola! Este es un mensaje de prueba oficial desde Extra Supermercado (InteliMarket). 🛒✨"
+  )
   const [sendingTest, setSendingTest] = useState<boolean>(false)
 
-  // Templates State
+  // ── 2. Conversations & Live Chat State ──
+  const [conversations, setConversations] = useState<WhatsAppConversation[]>([])
+  const [conversationsLoading, setConversationsLoading] = useState<boolean>(false)
+  const [selectedConv, setSelectedConv] = useState<WhatsAppConversation | null>(null)
+  const [messages, setMessages] = useState<WhatsAppMessage[]>([])
+  const [messagesLoading, setMessagesLoading] = useState<boolean>(false)
+  const [searchConv, setSearchConv] = useState<string>("")
+  const [replyText, setReplyText] = useState<string>("")
+  const [sendingReply, setSendingReply] = useState<boolean>(false)
+  const chatBottomRef = useRef<HTMLDivElement>(null)
+
+  // ── 3. Chatbot Configuration & Simulator State ──
+  const [chatbotConfig, setChatbotConfig] = useState<any>({
+    bot_name: "ExtraBot",
+    auto_reply: true,
+    welcome_message: "¡Hola {cliente}! 👋 Bienvenido al canal oficial de atención de Extra Supermercado.",
+    out_of_hours_message: "¡Hola! En este momento nuestras sucursales se encuentran cerradas. Nuestro horario de atención es de Lunes a Sábados de 07:00 a 21:00 hs y Domingos de 07:30 a 13:00 hs. Dejanos tu consulta y te responderemos ni bien abramos.",
+    business_hours_start: "07:00",
+    business_hours_end: "21:00",
+    business_days: ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado"],
+    modules_enabled: {
+      catalog_search: true,
+      extraclub_points: true,
+      order_tracking: true,
+      supermarket_info: true,
+      human_handoff: true,
+    },
+  })
+  const [loadingChatbotConfig, setLoadingChatbotConfig] = useState<boolean>(false)
+  const [savingChatbotConfig, setSavingChatbotConfig] = useState<boolean>(false)
+
+  // Chatbot Live Simulator
+  const [simMessages, setSimMessages] = useState<Array<{ sender: "user" | "bot"; text: string; time: string; buttons?: any[] }>>([
+    {
+      sender: "bot",
+      text: "🛒 *¡Hola!* 👋 Bienvenido al canal oficial de *Extra Supermercado*.\n\nEscribí *hola* o enviá un número:\n1️⃣ Catálogo & Precios\n2️⃣ Mis Puntos ExtraClub\n3️⃣ Rastreo de Compras\n4️⃣ Horarios & Sucursales\n5️⃣ Hablar con Agente",
+      time: "Ahora",
+      buttons: [
+        { id: "1", title: "📦 Catálogo & Precios" },
+        { id: "2", title: "⭐ Puntos ExtraClub" },
+        { id: "3", title: "📋 Mis Compras" },
+      ],
+    },
+  ])
+  const [simInput, setSimInput] = useState<string>("")
+  const [simLoading, setSimLoading] = useState<boolean>(false)
+  const [simConvId, setSimConvId] = useState<string | undefined>(undefined)
+
+  // ── 4. Campaigns State (IntelliZapp) ──
+  const [campaigns, setCampaigns] = useState<IntelliZappCampaign[]>([])
+  const [campaignsLoading, setCampaignsLoading] = useState<boolean>(false)
+  const [showCampModal, setShowCampModal] = useState<boolean>(false)
+  const [campForm, setCampForm] = useState({
+    name: "",
+    description: "",
+    tipo: "promotion",
+    message_template: "🛒 ¡Hola {nombre}! Aprovechá las súper ofertas del fin de semana en Extra Supermercado. Sumás doble puntaje en ExtraClub en todos los cortes de carnicería. ¡Te esperamos!",
+  })
+  const [launchingCampId, setLaunchingCampId] = useState<string | null>(null)
+
+  // ── 5. Automation Rules State ──
+  const [rules, setRules] = useState<IntelliZappAutomationRule[]>([])
+  const [rulesLoading, setRulesLoading] = useState<boolean>(false)
+  const [showRuleModal, setShowRuleModal] = useState<boolean>(false)
+  const [ruleForm, setRuleForm] = useState({
+    name: "",
+    trigger_event: "sale.created",
+    message_template: "🛒 *¡Gracias por tu compra en Extra Supermercado!*\n\n📄 Ticket Digital: *#{NUMERO}*\n💰 Total: *Gs. {TOTAL}*\n⭐ Sumaste *{PUNTOS} Puntos ExtraClub*.",
+    delay_minutes: 0,
+    active: true,
+  })
+
+  // ── 6. Templates State ──
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([])
   const [templatesLoading, setTemplatesLoading] = useState<boolean>(false)
   const [showTemplateModal, setShowTemplateModal] = useState<boolean>(false)
@@ -51,30 +137,29 @@ export default function WhatsAppPage() {
   })
   const [savingTemplate, setSavingTemplate] = useState<boolean>(false)
 
-  // Conversations State
-  const [conversations, setConversations] = useState<WhatsAppConversation[]>([])
-  const [conversationsLoading, setConversationsLoading] = useState<boolean>(false)
-  const [selectedConv, setSelectedConv] = useState<WhatsAppConversation | null>(null)
-  const [messages, setMessages] = useState<WhatsAppMessage[]>([])
-  const [messagesLoading, setMessagesLoading] = useState<boolean>(false)
-  const [searchConv, setSearchConv] = useState<string>("")
-
-  // Polling interval ref for QR connection
+  // Polling ref for QR
   const pollingRef = useRef<any>(null)
 
+  // Carga inicial
   useEffect(() => {
     fetchGatewayStatus()
   }, [])
 
   useEffect(() => {
-    if (tab === "templates") {
-      fetchTemplates()
-    } else if (tab === "conversations") {
+    if (tab === "conversations") {
       fetchConversations()
+    } else if (tab === "chatbot") {
+      fetchChatbotConfig()
+    } else if (tab === "campaigns") {
+      fetchCampaigns()
+    } else if (tab === "automations") {
+      fetchRules()
+    } else if (tab === "templates") {
+      fetchTemplates()
     }
   }, [tab])
 
-  // Polling automático cuando el estado es 'connecting' (esperando escaneo de QR)
+  // Polling automático cuando el estado es 'connecting' (escaneo de QR)
   useEffect(() => {
     if (status?.state === "connecting" && !status?.connected) {
       pollingRef.current = setInterval(() => {
@@ -87,6 +172,12 @@ export default function WhatsAppPage() {
       if (pollingRef.current) clearInterval(pollingRef.current)
     }
   }, [status?.state, status?.connected])
+
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages])
+
+  // ── Llamadas de Backend ──
 
   const fetchGatewayStatus = async (showLoading = true) => {
     if (showLoading) setLoadingStatus(true)
@@ -128,7 +219,7 @@ export default function WhatsAppPage() {
       }
       fetchGatewayStatus(false)
     } catch (e: any) {
-      toast.error("Error al generar QR", e?.message || "No se pudo conectar con el dev-server")
+      toast.error("Error al generar QR", e?.message || "No se pudo conectar con el gateway")
     } finally {
       setLoadingQr(false)
     }
@@ -154,7 +245,7 @@ export default function WhatsAppPage() {
   const handleSendTestMessage = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!testPhone.trim()) {
-      toast.error("Número requerido", "Ingresá un número de teléfono con código de área")
+      toast.error("Número requerido", "Ingresá un número con código de área (ej: 0981 123456)")
       return
     }
     setSendingTest(true)
@@ -175,6 +266,245 @@ export default function WhatsAppPage() {
     }
   }
 
+  // ── Conversaciones ──
+  const fetchConversations = async () => {
+    setConversationsLoading(true)
+    try {
+      const data = await api.whatsapp.listConversations()
+      setConversations(data || [])
+      if (data && data.length > 0 && !selectedConv) {
+        setSelectedConv(data[0])
+        fetchMessages(data[0].id)
+      }
+    } catch {
+      // Sin conversaciones aún
+    } finally {
+      setConversationsLoading(false)
+    }
+  }
+
+  const fetchMessages = async (convId: string) => {
+    setMessagesLoading(true)
+    try {
+      const msgs = await api.whatsapp.getMessages(convId)
+      setMessages(msgs || [])
+    } catch {
+      setMessages([])
+    } finally {
+      setMessagesLoading(false)
+    }
+  }
+
+  const handleSendReply = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!replyText.trim() || !selectedConv) return
+    setSendingReply(true)
+    const textToSend = replyText.trim()
+    try {
+      const newMsg = await api.whatsapp.sendMessage(selectedConv.id, { content: textToSend })
+      setMessages((prev) => [...prev, newMsg])
+      setReplyText("")
+      toast.success("Mensaje Enviado", "Despachado al WhatsApp del cliente")
+      fetchConversations()
+    } catch (e: any) {
+      toast.error("Error al enviar", e?.message || "No se pudo entregar el mensaje")
+    } finally {
+      setSendingReply(false)
+    }
+  }
+
+  // ── Chatbot Config & Simulator ──
+  const fetchChatbotConfig = async () => {
+    setLoadingChatbotConfig(true)
+    try {
+      const cfg = await api.whatsapp.getChatbotConfig()
+      if (cfg) setChatbotConfig(cfg)
+    } catch {
+      // Usar defaults
+    } finally {
+      setLoadingChatbotConfig(false)
+    }
+  }
+
+  const handleSaveChatbotConfig = async () => {
+    setSavingChatbotConfig(true)
+    try {
+      await api.whatsapp.saveChatbotConfig(chatbotConfig)
+      toast.success("Configuración Guardada", "Las opciones del Chatbot IA fueron actualizadas")
+    } catch (e: any) {
+      toast.error("Error al guardar", e?.message || "No se pudo guardar la configuración")
+    } finally {
+      setSavingChatbotConfig(false)
+    }
+  }
+
+  const handleSimulateMessage = async (msgText: string) => {
+    if (!msgText.trim()) return
+    const nowTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    setSimMessages((prev) => [...prev, { sender: "user", text: msgText, time: nowTime }])
+    setSimInput("")
+    setSimLoading(true)
+
+    try {
+      const res = await api.intellizapp.chatbotTest({
+        message: msgText,
+        conversation_id: simConvId,
+      })
+      if (res.conversation_id) setSimConvId(res.conversation_id)
+      setSimMessages((prev) => [
+        ...prev,
+        {
+          sender: "bot",
+          text: res.response_text,
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          buttons: res.buttons,
+        },
+      ])
+    } catch {
+      setSimMessages((prev) => [
+        ...prev,
+        {
+          sender: "bot",
+          text: "⚠️ Ocurrió un error al contactar al motor de chatbot. Verificá que la API esté activa.",
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        },
+      ])
+    } finally {
+      setSimLoading(false)
+    }
+  }
+
+  const handleResetSimulator = async () => {
+    setSimLoading(true)
+    try {
+      const res = await api.intellizapp.chatbotTest({
+        message: "hola",
+        conversation_id: simConvId,
+        reset: true,
+      })
+      setSimConvId(res.conversation_id)
+      setSimMessages([
+        {
+          sender: "bot",
+          text: res.response_text || "Conversación reiniciada. ¿En qué puedo ayudarte?",
+          time: "Ahora",
+          buttons: res.buttons,
+        },
+      ])
+      toast.info("Simulador Reiniciado", "Sesión de prueba en estado inicial")
+    } catch {
+      setSimMessages([
+        {
+          sender: "bot",
+          text: "🛒 ¡Hola! Bienvenido a Extra Supermercado. Sesión de prueba reiniciada.",
+          time: "Ahora",
+        },
+      ])
+    } finally {
+      setSimLoading(false)
+    }
+  }
+
+  // ── Campañas Masivas ──
+  const fetchCampaigns = async () => {
+    setCampaignsLoading(true)
+    try {
+      const data = await api.intellizapp.listCampaigns()
+      setCampaigns(data || [])
+    } catch {
+      setCampaigns([])
+    } finally {
+      setCampaignsLoading(false)
+    }
+  }
+
+  const handleCreateCampaign = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!campForm.name.trim()) return
+    try {
+      await api.intellizapp.createCampaign({
+        name: campForm.name,
+        description: campForm.description,
+        tipo: campForm.tipo,
+        message_template: campForm.message_template,
+      })
+      toast.success("Campaña Creada", "La campaña quedó registrada en borrador")
+      setShowCampModal(false)
+      setCampForm({
+        name: "",
+        description: "",
+        tipo: "promotion",
+        message_template: "",
+      })
+      fetchCampaigns()
+    } catch (e: any) {
+      toast.error("Error al crear campaña", e?.message || "No se pudo registrar")
+    }
+  }
+
+  const handleLaunchCampaign = async (campId: string) => {
+    if (!confirm("¿Deseas iniciar el despacho masivo de esta campaña a través de Evolution API?")) return
+    setLaunchingCampId(campId)
+    try {
+      const resLaunch = await api.intellizapp.launchCampaign(campId)
+      toast.info("Segmento Resuelto", `Se prepararon ${resLaunch.total_recipients || 0} destinatarios`)
+      // Enviar primer lote
+      const resBatch = await api.intellizapp.sendBatch(campId, 25)
+      toast.success("Lote Despachado", `Enviados: ${resBatch.sent}. Restantes: ${resBatch.remaining}`)
+      fetchCampaigns()
+    } catch (e: any) {
+      toast.error("Error al lanzar campaña", e?.message || "Fallo en el despacho")
+    } finally {
+      setLaunchingCampId(null)
+    }
+  }
+
+  // ── Automatizaciones ──
+  const fetchRules = async () => {
+    setRulesLoading(true)
+    try {
+      const data = await api.intellizapp.listRules()
+      setRules(data || [])
+    } catch {
+      setRules([])
+    } finally {
+      setRulesLoading(false)
+    }
+  }
+
+  const handleToggleRule = async (rule: IntelliZappAutomationRule) => {
+    try {
+      await api.intellizapp.updateRule(rule.id, { active: !rule.active })
+      setRules((prev) =>
+        prev.map((r) => (r.id === rule.id ? { ...r, active: !r.active } : r))
+      )
+      toast.success("Regla Actualizada", `Regla "${rule.name}" ${!rule.active ? "activada" : "pausada"}`)
+    } catch {
+      toast.error("Error", "No se pudo actualizar el estado de la regla")
+    }
+  }
+
+  const handleCreateRule = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!ruleForm.name.trim()) return
+    try {
+      await api.intellizapp.createRule(ruleForm as any)
+      toast.success("Regla Creada", "La automatización se ejecutará ante el evento seleccionado")
+      setShowRuleModal(false)
+      setRuleForm({
+        name: "",
+        trigger_event: "sale.created",
+        message_template: "",
+        delay_minutes: 0,
+        active: true,
+      })
+      fetchRules()
+    } catch (e: any) {
+      toast.error("Error al crear regla", e?.message || "No se pudo registrar la automatización")
+    }
+  }
+
+  // ── Plantillas ──
   const fetchTemplates = async () => {
     setTemplatesLoading(true)
     try {
@@ -208,47 +538,31 @@ export default function WhatsAppPage() {
     }
   }
 
-  const fetchConversations = async () => {
-    setConversationsLoading(true)
+  const handleDeleteTemplate = async (tmplId: string) => {
+    if (!confirm("¿Eliminar esta plantilla?")) return
     try {
-      const data = await api.whatsapp.listConversations()
-      setConversations(data || [])
-      if (data && data.length > 0 && !selectedConv) {
-        setSelectedConv(data[0])
-        fetchMessages(data[0].id)
-      }
+      await api.whatsapp.deleteTemplate(tmplId)
+      toast.success("Plantilla Eliminada", "Se removió de la base de datos")
+      fetchTemplates()
     } catch {
-      // Ignorar fallo si la tabla está vacía
-    } finally {
-      setConversationsLoading(false)
-    }
-  }
-
-  const fetchMessages = async (convId: string) => {
-    setMessagesLoading(true)
-    try {
-      const msgs = await api.whatsapp.getMessages(convId)
-      setMessages(msgs || [])
-    } catch {
-      setMessages([])
-    } finally {
-      setMessagesLoading(false)
+      toast.error("Error", "No se pudo eliminar la plantilla")
     }
   }
 
   const filteredConversations = useMemo(() => {
     if (!searchConv.trim()) return conversations
     const q = searchConv.toLowerCase()
-    return conversations.filter((c) =>
-      c.contact_name?.toLowerCase().includes(q) ||
-      c.contact_phone?.toLowerCase().includes(q) ||
-      c.ultimo_mensaje?.toLowerCase().includes(q)
+    return conversations.filter(
+      (c) =>
+        c.contact_name?.toLowerCase().includes(q) ||
+        c.contact_phone?.toLowerCase().includes(q) ||
+        c.ultimo_mensaje?.toLowerCase().includes(q)
     )
   }, [conversations, searchConv])
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 animate-fade-in">
-      {/* Header Ejecutivo */}
+      {/* ── HEADER EJECUTIVO ── */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
@@ -258,7 +572,7 @@ export default function WhatsAppPage() {
             <div>
               <div className="flex items-center gap-3 flex-wrap">
                 <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 dark:text-white">
-                  WhatsApp Hub & Evolution API
+                  WhatsApp & IntelliZapp Hub
                 </h1>
                 {loadingStatus ? (
                   <span className="text-[11px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 flex items-center gap-1.5">
@@ -279,7 +593,7 @@ export default function WhatsAppPage() {
                 )}
               </div>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Pasarela de mensajería empresarial integrada con Evolution API en dev-server (:8085)
+                Motor de mensajería Evolution API (:8085) integrado con Chatbot IA, fidelidad ExtraClub y campañas masivas
               </p>
             </div>
           </div>
@@ -289,69 +603,49 @@ export default function WhatsAppPage() {
               onClick={() => fetchGatewayStatus()}
               disabled={loadingStatus}
               className="btn-outline py-2 px-3 text-xs flex items-center gap-1.5 text-slate-700 dark:text-slate-200"
-              title="Refrescar estado"
+              title="Refrescar estado de la pasarela"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loadingStatus ? "animate-spin text-emerald-500" : ""}`} /> Refrescar Estado
             </button>
             <button
               onClick={() => window.open(DEFAULT_MANAGER_URL, "_blank")}
               className="btn-outline py-2 px-3 text-xs flex items-center gap-1.5 text-slate-700 dark:text-slate-200 hover:text-emerald-600 hover:border-emerald-500"
-              title="Abrir Evolution API Manager oficial en dev-server"
+              title="Abrir Evolution API Manager en dev-server"
             >
               <ExternalLink className="w-3.5 h-3.5 text-emerald-600" /> Evolution Manager (:8085)
             </button>
           </div>
         </div>
 
-        {/* Tab Navigation */}
+        {/* ── BARRA DE PESTAÑAS ── */}
         <div className="flex items-center gap-2 mt-6 pt-4 border-t border-slate-200/70 dark:border-slate-800 overflow-x-auto">
-          <button
-            onClick={() => setTab("connection")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              tab === "connection"
-                ? "bg-emerald-600 text-white shadow-sm"
-                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60"
-            }`}
-          >
-            <Smartphone className="w-4 h-4" /> Conexión & Diagnóstico QR
-          </button>
-          <button
-            onClick={() => setTab("conversations")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              tab === "conversations"
-                ? "bg-emerald-600 text-white shadow-sm"
-                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60"
-            }`}
-          >
-            <MessageSquare className="w-4 h-4" /> Historial & Mensajes
-          </button>
-          <button
-            onClick={() => setTab("templates")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              tab === "templates"
-                ? "bg-emerald-600 text-white shadow-sm"
-                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60"
-            }`}
-          >
-            <FileText className="w-4 h-4" /> Plantillas de Mensajes
-          </button>
-          <button
-            onClick={() => setTab("gateway")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              tab === "gateway"
-                ? "bg-emerald-600 text-white shadow-sm"
-                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60"
-            }`}
-          >
-            <Server className="w-4 h-4" /> Servidor & Gateway
-          </button>
+          {[
+            { key: "connection", label: "Conexión QR", icon: Smartphone },
+            { key: "conversations", label: "Chat en Vivo", icon: MessageSquare },
+            { key: "chatbot", label: "Chatbot IA & Opciones", icon: Bot },
+            { key: "campaigns", label: "Campañas Masivas", icon: Megaphone },
+            { key: "automations", label: "Automatizaciones", icon: Zap },
+            { key: "templates", label: "Plantillas Oficiales", icon: FileText },
+            { key: "gateway", label: "Servidor & Gateway", icon: Server },
+          ].map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key as TabType)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                tab === t.key
+                  ? "bg-emerald-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60"
+              }`}
+            >
+              <t.icon className="w-4 h-4" /> {t.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* TAB 1: CONEXIÓN & DIAGNÓSTICO */}
+      {/* ── TAB 1: CONEXIÓN & DIAGNÓSTICO QR ── */}
       {tab === "connection" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Tarjeta de Código QR & Conexión */}
           <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-4">
@@ -360,12 +654,8 @@ export default function WhatsAppPage() {
                     <QrCode className="w-5 h-5" />
                   </div>
                   <div>
-                    <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                      Emparejamiento de WhatsApp
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Escaneá el código QR desde la app móvil en tu teléfono
-                    </p>
+                    <h2 className="text-base font-bold text-slate-900 dark:text-white">Emparejamiento de WhatsApp</h2>
+                    <p className="text-xs text-slate-500">Escaneá el código QR desde la app móvil en tu teléfono</p>
                   </div>
                 </div>
                 <span className="text-[11px] font-mono font-bold bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg text-slate-600 dark:text-slate-300">
@@ -373,14 +663,11 @@ export default function WhatsAppPage() {
                 </span>
               </div>
 
-              {/* Área del QR */}
               <div className="bg-slate-50 dark:bg-slate-950/40 rounded-2xl p-6 border border-slate-200/60 dark:border-slate-800/80 flex flex-col items-center justify-center min-h-[300px]">
                 {loadingQr ? (
                   <div className="flex flex-col items-center gap-3 py-10">
                     <Loader2 className="w-10 h-10 text-emerald-500 animate-spin" />
-                    <p className="text-xs text-slate-500 font-medium animate-pulse">
-                      Generando código QR desde Evolution API...
-                    </p>
+                    <p className="text-xs text-slate-500 font-medium animate-pulse">Generando código QR desde Evolution API...</p>
                   </div>
                 ) : status?.connected ? (
                   <div className="flex flex-col items-center text-center gap-3 py-8">
@@ -388,18 +675,12 @@ export default function WhatsAppPage() {
                       <CheckCircle2 className="w-8 h-8" />
                     </div>
                     <div>
-                      <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                        Línea Conectada y Operativa
-                      </h3>
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">Línea Conectada y Operativa</h3>
                       <p className="text-xs text-slate-500 mt-1 max-w-sm">
-                        La sesión con Extra Supermercado está activa. Los mensajes automáticos, cupones y campañas de marketing se despacharán por este canal.
+                        La sesión con Extra Supermercado está activa. Los mensajes automáticos, cupones, chatbot y campañas masivas despachan por este canal.
                       </p>
                     </div>
-                    <button
-                      onClick={handleDisconnect}
-                      disabled={disconnecting}
-                      className="mt-3 btn-danger text-xs py-2 px-4 flex items-center gap-1.5"
-                    >
+                    <button onClick={handleDisconnect} disabled={disconnecting} className="mt-3 btn-danger text-xs py-2 px-4 flex items-center gap-1.5">
                       <PowerOff className="w-3.5 h-3.5" />
                       {disconnecting ? "Desconectando..." : "Desconectar Sesión de WhatsApp"}
                     </button>
@@ -417,13 +698,11 @@ export default function WhatsAppPage() {
                       <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
                         Abrí WhatsApp &gt; Ajustes &gt; Dispositivos vinculados &gt; Vincular un dispositivo
                       </p>
-                      <p className="text-[11px] text-slate-400">
-                        El código expira en 40 segundos. El sistema verificará automáticamente una vez escaneado.
-                      </p>
+                      <p className="text-[11px] text-slate-400">El código expira en 40 segundos. El sistema verificará automáticamente.</p>
                     </div>
                     {pairingCode && (
                       <div className="mt-2 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 px-4 py-2 rounded-xl flex items-center gap-2">
-                        <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">Código de emparejamiento numérico:</span>
+                        <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">Código numérico:</span>
                         <code className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400">{pairingCode}</code>
                       </div>
                     )}
@@ -434,12 +713,8 @@ export default function WhatsAppPage() {
                       <QrCode className="w-7 h-7" />
                     </div>
                     <div>
-                      <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">
-                        Sin Código QR Activo
-                      </h3>
-                      <p className="text-xs text-slate-400 mt-1 max-w-xs">
-                        Hacé clic en el botón inferior para solicitar un nuevo código de vinculación en tiempo real.
-                      </p>
+                      <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">Sin Código QR Activo</h3>
+                      <p className="text-xs text-slate-400 mt-1 max-w-xs">Hacé clic abajo para solicitar un código de vinculación en tiempo real.</p>
                     </div>
                   </div>
                 )}
@@ -452,11 +727,7 @@ export default function WhatsAppPage() {
                 Cifrado punto a punto vía Evolution Engine
               </div>
               {!status?.connected && (
-                <button
-                  onClick={handleRequestQr}
-                  disabled={loadingQr}
-                  className="btn-primary py-2 px-5 text-xs flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 shadow-sm"
-                >
+                <button onClick={handleRequestQr} disabled={loadingQr} className="btn-primary py-2 px-5 text-xs flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 shadow-sm">
                   <QrCode className="w-4 h-4" />
                   {loadingQr ? "Generando..." : "Generar Código QR"}
                 </button>
@@ -464,7 +735,6 @@ export default function WhatsAppPage() {
             </div>
           </div>
 
-          {/* Tarjeta de Envío de Pruebas */}
           <div className="lg:col-span-5 bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
             <div>
               <div className="flex items-center gap-3 mb-4">
@@ -472,12 +742,8 @@ export default function WhatsAppPage() {
                   <Send className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                    Consola de Envío Inmediato
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    Probá el despacho en tiempo real a tu celular
-                  </p>
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white">Consola de Envío Inmediato</h2>
+                  <p className="text-xs text-slate-500">Probá el despacho en tiempo real a tu celular</p>
                 </div>
               </div>
 
@@ -497,15 +763,11 @@ export default function WhatsAppPage() {
                     />
                     <Smartphone className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   </div>
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    Se normaliza automáticamente a formato internacional E.164 (+595...).
-                  </p>
+                  <p className="text-[10px] text-slate-400 mt-1">Normalizado automáticamente a formato internacional E.164 (+595...).</p>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Cuerpo del Mensaje
-                  </label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">Cuerpo del Mensaje</label>
                   <textarea
                     value={testMessage}
                     onChange={(e) => setTestMessage(e.target.value)}
@@ -513,9 +775,7 @@ export default function WhatsAppPage() {
                     className="input text-xs resize-none"
                     required
                   />
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    Soporta negrita con *asteriscos*, cursiva y emojis.
-                  </p>
+                  <p className="text-[10px] text-slate-400 mt-1">Soporta negrita con *asteriscos*, cursiva y emojis.</p>
                 </div>
 
                 <button
@@ -546,31 +806,37 @@ export default function WhatsAppPage() {
                   <Zap className="w-3.5 h-3.5 text-amber-500" />
                   Protección Anti-Bloqueo
                 </div>
-                <p>
-                  Los envíos incluyen presencia de escritura (*composing*) y delay humanizado de 1.2 segundos para resguardar la línea.
-                </p>
+                <p>Presencia de escritura (*composing*) y delay humanizado de 1.2 segundos para resguardar la línea.</p>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* TAB 2: HISTORIAL DE CONVERSACIONES & MENSAJES */}
+      {/* ── TAB 2: HISTORIAL & CHAT EN VIVO BIDIRECCIONAL ── */}
       {tab === "conversations" && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[650px]">
-          {/* Lista de Conversaciones */}
-          <div className="md:col-span-4 lg:col-span-4 border-r border-slate-100 dark:border-slate-800 flex flex-col">
-            <div className="p-4 border-b border-slate-100 dark:border-slate-800">
-              <div className="relative">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[680px]">
+          {/* Lista de Chats */}
+          <div className="md:col-span-4 border-r border-slate-100 dark:border-slate-800 flex flex-col">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+              <div className="relative flex-1">
                 <input
                   type="text"
                   value={searchConv}
                   onChange={(e) => setSearchConv(e.target.value)}
-                  placeholder="Buscar por cliente o teléfono..."
-                  className="input pl-9 text-xs"
+                  placeholder="Buscar cliente o celular..."
+                  className="input pl-9 text-xs w-full"
                 />
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               </div>
+              <button
+                onClick={fetchConversations}
+                disabled={conversationsLoading}
+                className="btn-outline p-2 text-slate-500 hover:text-emerald-600"
+                title="Actualizar chats"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${conversationsLoading ? "animate-spin" : ""}`} />
+              </button>
             </div>
 
             <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
@@ -582,7 +848,7 @@ export default function WhatsAppPage() {
                 <div className="p-8 text-center text-xs text-slate-400 space-y-2">
                   <MessageCircle className="w-8 h-8 text-slate-300 mx-auto" />
                   <p className="font-bold text-slate-600 dark:text-slate-300">Sin conversaciones registradas</p>
-                  <p className="text-[11px]">Los mensajes transaccionales y respuestas de clientes aparecerán aquí automáticamente.</p>
+                  <p className="text-[11px]">Los mensajes entrantes de clientes y notificaciones automáticas aparecerán aquí.</p>
                 </div>
               ) : (
                 filteredConversations.map((c) => {
@@ -596,11 +862,11 @@ export default function WhatsAppPage() {
                       }}
                       className={`w-full text-left p-3.5 transition-colors flex items-start gap-3 ${
                         isSelected
-                          ? "bg-emerald-50/70 dark:bg-emerald-950/30 border-l-4 border-emerald-500"
+                          ? "bg-emerald-50/80 dark:bg-emerald-950/40 border-l-4 border-emerald-500"
                           : "hover:bg-slate-50 dark:hover:bg-slate-800/40"
                       }`}
                     >
-                      <div className="w-9 h-9 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center font-bold text-xs shrink-0">
+                      <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 flex items-center justify-center font-bold text-xs shrink-0">
                         {c.contact_name ? c.contact_name.charAt(0).toUpperCase() : <User className="w-4 h-4" />}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -610,7 +876,7 @@ export default function WhatsAppPage() {
                           </h4>
                           {c.last_message_at && (
                             <span className="text-[10px] text-slate-400">
-                              {new Date(c.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              {new Date(c.last_message_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                             </span>
                           )}
                         </div>
@@ -626,8 +892,8 @@ export default function WhatsAppPage() {
             </div>
           </div>
 
-          {/* Panel de Chat Activo */}
-          <div className="md:col-span-8 lg:col-span-8 flex flex-col bg-slate-50/50 dark:bg-slate-950/20">
+          {/* Panel de Conversación Activa con Input de Envío */}
+          <div className="md:col-span-8 flex flex-col bg-slate-50/50 dark:bg-slate-950/20">
             {selectedConv ? (
               <>
                 <div className="p-4 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
@@ -642,19 +908,28 @@ export default function WhatsAppPage() {
                       <p className="text-xs font-mono text-slate-500">{selectedConv.contact_phone}</p>
                     </div>
                   </div>
-                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200 capitalize">
-                    {selectedConv.status || "Activo"}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 capitalize">
+                      {selectedConv.status || "Activo"}
+                    </span>
+                    <button
+                      onClick={() => fetchMessages(selectedConv.id)}
+                      className="p-1.5 text-slate-400 hover:text-slate-600"
+                      title="Refrescar mensajes"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex-1 p-4 overflow-y-auto space-y-3">
                   {messagesLoading ? (
                     <div className="py-20 text-center text-xs text-slate-400 flex flex-col items-center gap-2">
-                      <Loader2 className="w-5 h-5 animate-spin text-emerald-500" /> Cargando mensajes...
+                      <Loader2 className="w-5 h-5 animate-spin text-emerald-500" /> Cargando historial...
                     </div>
                   ) : messages.length === 0 ? (
                     <div className="py-20 text-center text-xs text-slate-400">
-                      No hay mensajes registrados en esta conversación.
+                      No hay mensajes registrados en esta conversación. Escribí abajo para enviar el primero.
                     </div>
                   ) : (
                     messages.map((m) => {
@@ -669,29 +944,424 @@ export default function WhatsAppPage() {
                             }`}
                           >
                             <p className="whitespace-pre-wrap">{m.content}</p>
-                            <div className={`mt-1 text-[10px] flex items-center justify-end gap-1 ${isOutbound ? "text-emerald-100" : "text-slate-400"}`}>
-                              <span>{m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}</span>
-                              {isOutbound && <Check className="w-3 h-3" />}
+                            <div
+                              className={`mt-1 text-[10px] flex items-center justify-end gap-1 ${
+                                isOutbound ? "text-emerald-100" : "text-slate-400"
+                              }`}
+                            >
+                              <span>
+                                {m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
+                              </span>
+                              {isOutbound && <CheckCheck className="w-3.5 h-3.5" />}
                             </div>
                           </div>
                         </div>
                       )
                     })
                   )}
+                  <div ref={chatBottomRef} />
                 </div>
+
+                {/* Barra Inferior para Enviar Mensajes en Vivo */}
+                <form onSubmit={handleSendReply} className="p-3 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    placeholder={`Responder a ${selectedConv.contact_name || selectedConv.contact_phone}...`}
+                    className="input text-xs flex-1 py-2.5"
+                    disabled={sendingReply}
+                  />
+                  <button
+                    type="submit"
+                    disabled={sendingReply || !replyText.trim()}
+                    className="btn-primary py-2.5 px-4 text-xs flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    {sendingReply ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    <span>Enviar</span>
+                  </button>
+                </form>
               </>
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400">
                 <MessageSquare className="w-12 h-12 text-slate-300 mb-3" />
                 <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">Seleccioná una conversación</h3>
-                <p className="text-xs text-slate-400 max-w-xs mt-1">Elegí un cliente de la lista de la izquierda para visualizar el historial completo de chats.</p>
+                <p className="text-xs text-slate-400 max-w-xs mt-1">Elegí un cliente de la lista para leer y responder chats en tiempo real.</p>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* TAB 3: PLANTILLAS DE MENSAJES */}
+      {/* ── TAB 3: CHATBOT IA & ASISTENTE EXTRA SUPERMERCADO (OPCIONES INTELLIZAPP) ── */}
+      {tab === "chatbot" && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Panel de Opciones del Chatbot */}
+          <div className="lg:col-span-6 bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 flex items-center justify-center">
+                  <Bot className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white">Configuración del Chatbot IA</h2>
+                  <p className="text-xs text-slate-500">Parámetros de atención automática de Extra Supermercado</p>
+                </div>
+              </div>
+
+              {/* Toggle Auto-responder */}
+              <label className="flex items-center gap-2 cursor-pointer">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Auto-Responder:</span>
+                <input
+                  type="checkbox"
+                  checked={chatbotConfig.auto_reply}
+                  onChange={(e) => setChatbotConfig({ ...chatbotConfig, auto_reply: e.target.checked })}
+                  className="w-4 h-4 accent-emerald-600 rounded"
+                />
+                <span className={`text-xs font-bold ${chatbotConfig.auto_reply ? "text-emerald-600" : "text-slate-400"}`}>
+                  {chatbotConfig.auto_reply ? "Activo" : "Pausado"}
+                </span>
+              </label>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Nombre del Asistente Virtual</label>
+                <input
+                  type="text"
+                  value={chatbotConfig.bot_name}
+                  onChange={(e) => setChatbotConfig({ ...chatbotConfig, bot_name: e.target.value })}
+                  className="input text-xs"
+                  placeholder="Ej: ExtraBot"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Horario Apertura</label>
+                  <input
+                    type="time"
+                    value={chatbotConfig.business_hours_start}
+                    onChange={(e) => setChatbotConfig({ ...chatbotConfig, business_hours_start: e.target.value })}
+                    className="input text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Horario Cierre</label>
+                  <input
+                    type="time"
+                    value={chatbotConfig.business_hours_end}
+                    onChange={(e) => setChatbotConfig({ ...chatbotConfig, business_hours_end: e.target.value })}
+                    className="input text-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Mensaje de Saludo & Bienvenida</label>
+                <textarea
+                  rows={3}
+                  value={chatbotConfig.welcome_message}
+                  onChange={(e) => setChatbotConfig({ ...chatbotConfig, welcome_message: e.target.value })}
+                  className="input text-xs resize-none"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">Usá &#123;cliente&#125; para personalizar con el nombre del contacto.</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Mensaje Fuera de Horario Comercial</label>
+                <textarea
+                  rows={3}
+                  value={chatbotConfig.out_of_hours_message}
+                  onChange={(e) => setChatbotConfig({ ...chatbotConfig, out_of_hours_message: e.target.value })}
+                  className="input text-xs resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">Módulos Activos en el Menú:</label>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {[
+                    { key: "catalog_search", label: "📦 Catálogo & Precios en Gs." },
+                    { key: "extraclub_points", label: "⭐ Puntos ExtraClub" },
+                    { key: "order_tracking", label: "📋 Rastreo de Compras" },
+                    { key: "supermarket_info", label: "ℹ️ Horarios & Sucursal" },
+                    { key: "human_handoff", label: "👤 Derivación a Humano" },
+                  ].map((m) => (
+                    <label key={m.key} className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={chatbotConfig.modules_enabled?.[m.key] !== false}
+                        onChange={(e) =>
+                          setChatbotConfig({
+                            ...chatbotConfig,
+                            modules_enabled: {
+                              ...chatbotConfig.modules_enabled,
+                              [m.key]: e.target.checked,
+                            },
+                          })
+                        }
+                        className="w-3.5 h-3.5 accent-emerald-600 rounded"
+                      />
+                      <span className="text-slate-700 dark:text-slate-300 font-medium">{m.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+                <button
+                  onClick={handleSaveChatbotConfig}
+                  disabled={savingChatbotConfig}
+                  className="btn-primary py-2.5 px-6 text-xs flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700"
+                >
+                  {savingChatbotConfig ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Guardar Opciones del Chatbot
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Simulador Interactivo de Chatbot en Vivo */}
+          <div className="lg:col-span-6 bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">Simulador en Vivo</h3>
+                    <p className="text-[11px] text-slate-400">Probá cómo responderá el bot a tus clientes</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleResetSimulator}
+                  disabled={simLoading}
+                  className="btn-outline py-1.5 px-2.5 text-[11px] flex items-center gap-1 text-slate-500 hover:text-emerald-600"
+                  title="Reiniciar conversación"
+                >
+                  <RotateCcw className="w-3 h-3" /> Reiniciar
+                </button>
+              </div>
+
+              {/* Teléfono simulado */}
+              <div className="bg-slate-100/70 dark:bg-slate-950/60 rounded-2xl p-4 min-h-[380px] max-h-[420px] overflow-y-auto space-y-3 border border-slate-200/60 dark:border-slate-800 flex flex-col">
+                {simMessages.map((msg, i) => (
+                  <div key={i} className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}>
+                    <div
+                      className={`max-w-[85%] rounded-2xl p-3 text-xs leading-relaxed shadow-sm ${
+                        msg.sender === "user"
+                          ? "bg-emerald-600 text-white rounded-tr-none"
+                          : "bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-tl-none border border-slate-200/50 dark:border-slate-700"
+                      }`}
+                    >
+                      <p className="whitespace-pre-wrap">{msg.text}</p>
+                      <span className={`block text-[9px] mt-1 text-right ${msg.sender === "user" ? "text-emerald-100" : "text-slate-400"}`}>
+                        {msg.time}
+                      </span>
+                    </div>
+
+                    {/* Botones de acción simulados */}
+                    {msg.buttons && msg.buttons.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {msg.buttons.map((b) => (
+                          <button
+                            key={b.id}
+                            onClick={() => handleSimulateMessage(b.id)}
+                            disabled={simLoading}
+                            className="text-[11px] font-bold bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 px-3 py-1 rounded-xl hover:bg-emerald-50 transition shadow-xs"
+                          >
+                            {b.title}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {simLoading && (
+                  <div className="flex items-center gap-1.5 text-xs text-slate-400 italic">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" />
+                    <span>{chatbotConfig.bot_name} está escribiendo...</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Input del simulador */}
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
+              <input
+                type="text"
+                value={simInput}
+                onChange={(e) => setSimInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSimulateMessage(simInput)}
+                placeholder="Escribí un mensaje o número (ej: 1, arroz, puntos)..."
+                className="input text-xs flex-1"
+                disabled={simLoading}
+              />
+              <button
+                onClick={() => handleSimulateMessage(simInput)}
+                disabled={simLoading || !simInput.trim()}
+                className="btn-primary py-2 px-4 text-xs bg-emerald-600 hover:bg-emerald-700 flex items-center gap-1.5"
+              >
+                <Send className="w-3.5 h-3.5" /> Enviar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB 4: CAMPAÑAS MASIVAS (INTELLIZAPP) ── */}
+      {tab === "campaigns" && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">Campañas Masivas de Marketing</h2>
+              <p className="text-xs text-slate-500">Envíos masivos segmentados a socios ExtraClub con delay anti-bloqueo</p>
+            </div>
+            <button
+              onClick={() => setShowCampModal(true)}
+              className="btn-primary py-2 px-4 text-xs flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+            >
+              <Plus className="w-4 h-4" /> Nueva Campaña Masiva
+            </button>
+          </div>
+
+          {/* Listado de Campañas */}
+          {campaignsLoading ? (
+            <div className="py-20 text-center text-xs text-slate-400 flex flex-col items-center gap-2">
+              <Loader2 className="w-6 h-6 animate-spin text-emerald-500" /> Cargando campañas...
+            </div>
+          ) : campaigns.length === 0 ? (
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-12 text-center border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-3">
+              <Megaphone className="w-10 h-10 text-slate-300 mx-auto" />
+              <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">No hay campañas registradas</h3>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                Creá tu primera campaña de ofertas de fin de semana o reactivación de socios para despachar por WhatsApp.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {campaigns.map((camp) => (
+                <div key={camp.id} className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="font-bold text-slate-900 dark:text-white text-xs">{camp.name}</h3>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize ${
+                          camp.status === "completed"
+                            ? "bg-emerald-50 text-emerald-700"
+                            : camp.status === "sending"
+                            ? "bg-amber-50 text-amber-700"
+                            : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {camp.status}
+                      </span>
+                    </div>
+                    {camp.description && <p className="text-xs text-slate-500 mb-2">{camp.description}</p>}
+                    <p className="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap font-mono bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800 text-[11px]">
+                      {camp.message_template || "Sin texto configurado"}
+                    </p>
+
+                    <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
+                      <div>
+                        <span className="text-[10px] text-slate-400">Total</span>
+                        <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{camp.total_recipients || 0}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400">Enviados</span>
+                        <p className="text-xs font-bold text-emerald-600">{camp.sent_count || 0}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400">Entregados</span>
+                        <p className="text-xs font-bold text-teal-600">{camp.delivered_count || 0}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
+                    <button
+                      onClick={() => handleLaunchCampaign(camp.id)}
+                      disabled={launchingCampId === camp.id}
+                      className="btn-primary py-1.5 px-3 text-xs flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+                    >
+                      {launchingCampId === camp.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                      <span>Lanzar Despacho</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB 5: AUTOMATIZACIONES & TRIGGERS ── */}
+      {tab === "automations" && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">Automatizaciones & Triggers</h2>
+              <p className="text-xs text-slate-500">Disparadores automáticos vinculados a ventas en POS, fidelidad y cobranzas</p>
+            </div>
+            <button
+              onClick={() => setShowRuleModal(true)}
+              className="btn-primary py-2 px-4 text-xs flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+            >
+              <Plus className="w-4 h-4" /> Nueva Regla
+            </button>
+          </div>
+
+          {rulesLoading ? (
+            <div className="py-20 text-center text-xs text-slate-400 flex flex-col items-center gap-2">
+              <Loader2 className="w-6 h-6 animate-spin text-emerald-500" /> Cargando reglas automáticas...
+            </div>
+          ) : rules.length === 0 ? (
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-12 text-center border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-3">
+              <Zap className="w-10 h-10 text-slate-300 mx-auto" />
+              <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">No hay reglas automáticas</h3>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">Creá reglas para enviar tickets digitales al instante tras cada venta en caja.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {rules.map((rule) => (
+                <div key={rule.id} className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Zap className={`w-4 h-4 ${rule.active ? "text-amber-500" : "text-slate-300"}`} />
+                        <h3 className="font-bold text-slate-900 dark:text-white text-xs">{rule.name}</h3>
+                      </div>
+                      <button
+                        onClick={() => handleToggleRule(rule)}
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-full border transition ${
+                          rule.active
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            : "bg-slate-100 text-slate-500 border-slate-200"
+                        }`}
+                      >
+                        {rule.active ? "Activa" : "Pausada"}
+                      </button>
+                    </div>
+
+                    <div className="text-[11px] text-slate-500 mb-2">
+                      <span>Disparador: </span>
+                      <code className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded font-mono text-[10px] text-slate-700 dark:text-slate-300">
+                        {rule.trigger_event}
+                      </code>
+                    </div>
+
+                    <p className="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap font-mono bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800 text-[11px]">
+                      {rule.message_template || "Usa plantilla vinculada"}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB 6: PLANTILLAS OFICIALES ── */}
       {tab === "templates" && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
@@ -720,7 +1390,7 @@ export default function WhatsAppPage() {
               <FileText className="w-10 h-10 text-slate-300 mx-auto" />
               <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">No hay plantillas registradas</h3>
               <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                Creá plantillas reutilizables para que las campañas del Gerente de Marketing IA y los cupones de sorteos utilicen el formato aprobado.
+                Creá plantillas reutilizables para que las campañas y cupones de sorteos utilicen el formato oficial.
               </p>
             </div>
           ) : (
@@ -734,7 +1404,7 @@ export default function WhatsAppPage() {
                         {tmpl.tipo}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap font-mono bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                    <p className="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap font-mono bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800 text-[11px]">
                       {tmpl.content}
                     </p>
                   </div>
@@ -750,9 +1420,15 @@ export default function WhatsAppPage() {
                         })
                         setShowTemplateModal(true)
                       }}
-                      className="btn-ghost py-1 px-2.5 text-xs text-slate-600 flex items-center gap-1"
+                      className="btn-outline py-1.5 px-3 text-xs flex items-center gap-1 text-slate-600"
                     >
                       <Edit className="w-3.5 h-3.5" /> Editar
+                    </button>
+                    <button
+                      onClick={() => handleDeleteTemplate(tmpl.id)}
+                      className="btn-outline py-1.5 px-3 text-xs flex items-center gap-1 text-rose-600 hover:border-rose-300"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -762,70 +1438,143 @@ export default function WhatsAppPage() {
         </div>
       )}
 
-      {/* TAB 4: SERVIDOR & GATEWAY */}
+      {/* ── TAB 7: SERVIDOR & GATEWAY ── */}
       {tab === "gateway" && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600">
-                  <Server className="w-5 h-5" />
-                </div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Servidor Gateway</h3>
-              </div>
-              <p className="text-base font-bold text-slate-900 dark:text-white font-mono">{DEFAULT_GATEWAY_URL}</p>
-              <span className="text-[11px] text-emerald-600 font-medium">dev-server (Tailscale LAN)</span>
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center">
+              <Server className="w-5 h-5" />
             </div>
-
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-600">
-                  <Smartphone className="w-5 h-5" />
-                </div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Instancia Activa</h3>
-              </div>
-              <p className="text-base font-bold text-slate-900 dark:text-white font-mono">{INSTANCE_NAME}</p>
-              <span className="text-[11px] text-slate-400">Motor WHATSAPP-BAILEYS</span>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600">
-                  <Terminal className="w-5 h-5" />
-                </div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Consola de Gestión</h3>
-              </div>
-              <p className="text-base font-bold text-slate-900 dark:text-white">Evolution Manager</p>
-              <button
-                onClick={() => window.open(DEFAULT_MANAGER_URL, "_blank")}
-                className="mt-1 text-[11px] text-purple-600 hover:text-purple-700 font-bold flex items-center gap-1"
-              >
-                Abrir Manager oficial <ArrowRight className="w-3 h-3" />
-              </button>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">Telemetría de la Pasarela Evolution API</h2>
+              <p className="text-xs text-slate-500">Detalles técnicos del nodo de mensajería y webhooks</p>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-500" /> Parámetros de Integración
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800">
-                <span className="text-slate-400 text-[10px] block uppercase">Webhook Entrante</span>
-                <span className="text-slate-800 dark:text-slate-200">/api/v1/whatsapp/webhook/evolution</span>
-              </div>
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800">
-                <span className="text-slate-400 text-[10px] block uppercase">Contenedor Docker</span>
-                <span className="text-slate-800 dark:text-slate-200">intelizapp-evo:8085</span>
-              </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 space-y-1">
+              <span className="text-[11px] text-slate-400 font-bold uppercase">Dirección del Gateway</span>
+              <p className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200">{DEFAULT_GATEWAY_URL}</p>
+            </div>
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 space-y-1">
+              <span className="text-[11px] text-slate-400 font-bold uppercase">Nombre de Instancia</span>
+              <p className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200">{INSTANCE_NAME}</p>
+            </div>
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 space-y-1">
+              <span className="text-[11px] text-slate-400 font-bold uppercase">Endpoint de Webhook</span>
+              <p className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200 truncate">/api/v1/whatsapp/webhook/evolution</p>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal de Plantilla */}
+      {/* ── MODAL: NUEVA CAMPAÑA ── */}
+      {showCampModal && (
+        <Modal open={showCampModal} onClose={() => setShowCampModal(false)} title="Nueva Campaña Masiva">
+          <form onSubmit={handleCreateCampaign} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Nombre de la Campaña</label>
+              <input
+                type="text"
+                value={campForm.name}
+                onChange={(e) => setCampForm({ ...campForm, name: e.target.value })}
+                className="input text-xs"
+                placeholder="Ej: Ofertas del Fin de Semana"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Descripción / Segmento</label>
+              <input
+                type="text"
+                value={campForm.description}
+                onChange={(e) => setCampForm({ ...campForm, description: e.target.value })}
+                className="input text-xs"
+                placeholder="Ej: Todos los socios activos de ExtraClub"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Mensaje de Campaña</label>
+              <textarea
+                rows={4}
+                value={campForm.message_template}
+                onChange={(e) => setCampForm({ ...campForm, message_template: e.target.value })}
+                className="input text-xs resize-none"
+                placeholder="Escribí el texto con {nombre} o {puntos}..."
+                required
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button type="button" onClick={() => setShowCampModal(false)} className="btn-outline py-2 px-4 text-xs">
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primary py-2 px-5 text-xs bg-emerald-600 hover:bg-emerald-700">
+                Guardar Campaña
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ── MODAL: NUEVA REGLA ── */}
+      {showRuleModal && (
+        <Modal open={showRuleModal} onClose={() => setShowRuleModal(false)} title="Nueva Regla de Automatización">
+          <form onSubmit={handleCreateRule} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Nombre de la Regla</label>
+              <input
+                type="text"
+                value={ruleForm.name}
+                onChange={(e) => setRuleForm({ ...ruleForm, name: e.target.value })}
+                className="input text-xs"
+                placeholder="Ej: Ticket Digital POS"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Evento Disparador</label>
+              <select
+                value={ruleForm.trigger_event}
+                onChange={(e) => setRuleForm({ ...ruleForm, trigger_event: e.target.value })}
+                className="input text-xs"
+              >
+                <option value="sale.created">Venta Completada en POS (Ticket Digital)</option>
+                <option value="payment.received">Cobro / Pago Recibido en Caja</option>
+                <option value="payment.overdue">Cuota de Crédito por Vencer</option>
+                <option value="customer.inactive_30d">Reactivación Socio Inactivo</option>
+                <option value="stock.below_minimum">Alerta Interna Stock Mínimo</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Plantilla de Mensaje</label>
+              <textarea
+                rows={4}
+                value={ruleForm.message_template}
+                onChange={(e) => setRuleForm({ ...ruleForm, message_template: e.target.value })}
+                className="input text-xs resize-none"
+                placeholder="Cuerpo del mensaje automático..."
+                required
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button type="button" onClick={() => setShowRuleModal(false)} className="btn-outline py-2 px-4 text-xs">
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primary py-2 px-5 text-xs bg-emerald-600 hover:bg-emerald-700">
+                Guardar Regla
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ── MODAL: PLANTILLA ── */}
       {showTemplateModal && (
-        <Modal open={showTemplateModal} onClose={() => setShowTemplateModal(false)} title={editingTemplate ? "Editar Plantilla" : "Nueva Plantilla"}>
+        <Modal
+          open={showTemplateModal}
+          onClose={() => setShowTemplateModal(false)}
+          title={editingTemplate ? "Editar Plantilla" : "Nueva Plantilla"}
+        >
           <form onSubmit={handleSaveTemplate} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Nombre de la Plantilla</label>
@@ -833,59 +1582,39 @@ export default function WhatsAppPage() {
                 type="text"
                 value={templateForm.name}
                 onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })}
-                placeholder="Ej: Confirmación Cupón Sorteo"
                 className="input text-xs"
+                placeholder="Ej: Ticket Digital POS + Puntos"
                 required
               />
             </div>
-
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Tipo de Notificación</label>
-              <select
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Clave de Tipo</label>
+              <input
+                type="text"
                 value={templateForm.tipo}
                 onChange={(e) => setTemplateForm({ ...templateForm, tipo: e.target.value })}
                 className="input text-xs"
-              >
-                <option value="welcome">Bienvenida Socio</option>
-                <option value="cupon">Cupón de Sorteo</option>
-                <option value="promo">Promoción Especial</option>
-                <option value="dunning">Aviso de Cuota / Mora</option>
-                <option value="receipt">Recibo de Compra</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Contenido del Mensaje
-              </label>
-              <textarea
-                value={templateForm.content}
-                onChange={(e) => setTemplateForm({ ...templateForm, content: e.target.value })}
-                rows={5}
-                className="input text-xs font-mono resize-none"
-                placeholder="¡Hola {{nombre}}! Registramos {{cantidad}} para el sorteo..."
+                placeholder="Ej: venta.creada, extra_club.bienvenida"
                 required
               />
-              <p className="text-[10px] text-slate-400 mt-1">
-                Variables disponibles: <code>&#123;&#123;nombre&#125;&#125;</code>, <code>&#123;&#123;cantidad&#125;&#125;</code>, <code>&#123;&#123;sorteo&#125;&#125;</code>, <code>&#123;&#123;ticket&#125;&#125;</code>.
-              </p>
             </div>
-
-            <div className="flex justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setShowTemplateModal(false)}
-                className="btn-ghost py-2 px-4 text-xs"
-              >
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Contenido</label>
+              <textarea
+                rows={5}
+                value={templateForm.content}
+                onChange={(e) => setTemplateForm({ ...templateForm, content: e.target.value })}
+                className="input text-xs resize-none"
+                placeholder="Texto con variables como {ticket}, {monto}, {puntos}..."
+                required
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button type="button" onClick={() => setShowTemplateModal(false)} className="btn-outline py-2 px-4 text-xs">
                 Cancelar
               </button>
-              <button
-                type="submit"
-                disabled={savingTemplate}
-                className="btn-primary py-2 px-5 text-xs bg-emerald-600 hover:bg-emerald-700 flex items-center gap-1.5"
-              >
-                {savingTemplate ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                Guardar Plantilla
+              <button type="submit" disabled={savingTemplate} className="btn-primary py-2 px-5 text-xs bg-emerald-600 hover:bg-emerald-700">
+                {savingTemplate ? "Guardando..." : "Guardar Plantilla"}
               </button>
             </div>
           </form>

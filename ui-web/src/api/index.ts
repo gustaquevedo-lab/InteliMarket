@@ -1632,6 +1632,23 @@ export const api = {
     updateTemplate: (id: string, data: Partial<WhatsAppTemplate>) => client.put<WhatsAppTemplate>(`/v1/whatsapp/templates/${id}`, data),
     deleteTemplate: (id: string) => client.delete<void>(`/v1/whatsapp/templates/${id}`),
     getStats: () => client.get<WhatsAppStats>("/v1/whatsapp/stats"),
+    getChatbotConfig: () => client.get<{
+      bot_name: string
+      auto_reply: boolean
+      welcome_message: string
+      out_of_hours_message: string
+      business_hours_start: string
+      business_hours_end: string
+      business_days: string[]
+      modules_enabled: {
+        catalog_search: boolean
+        extraclub_points: boolean
+        order_tracking: boolean
+        supermarket_info: boolean
+        human_handoff: boolean
+      }
+    }>("/v1/whatsapp/chatbot-config"),
+    saveChatbotConfig: (data: any) => client.put<{ status: string; config: any }>("/v1/whatsapp/chatbot-config", data),
   },
   crm: {
     listLeads: () => client.get<Lead[]>("/v1/crm/leads"),

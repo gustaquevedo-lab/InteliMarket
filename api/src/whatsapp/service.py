@@ -38,6 +38,40 @@ async def make_twilio_call(to_phone: str, content: str, config: Optional[WhatsAp
     }
 
 
+async def get_config(db: AsyncSession, tenant_id: UUID) -> WhatsAppConfig:
+    """Obtiene o inicializa la configuración de WhatsApp para el tenant."""
+    result = await db.execute(
+        select(WhatsAppConfig).where(WhatsAppConfig.tenant_id == tenant_id).limit(1)
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        config = WhatsAppConfig(
+            tenant_id=tenant_id,
+            account_sid="evolution-api",
+            auth_token="evolution-token",
+            phone_number="+595981000000",
+            webhook_url="/api/v1/whatsapp/webhook/evolution",
+            enabled=True,
+            auto_reply=True,
+        )
+        db.add(config)
+        await db.commit()
+        await db.refresh(config)
+    return config
+
+
+async def save_config(db: AsyncSession, tenant_id: UUID, data: dict) -> WhatsAppConfig:
+    """Guarda cambios en la configuración de WhatsApp del tenant."""
+    config = await get_config(db, tenant_id)
+    for key, value in data.items():
+        if hasattr(config, key) and value is not None:
+            setattr(config, key, value)
+    await db.commit()
+    await db.refresh(config)
+    return config
+
+
+
 async def get_or_create_conversation(
     db: AsyncSession, tenant_id: UUID, phone: str, name: Optional[str] = None
 ) -> WhatsAppConversation:
@@ -93,6 +127,8 @@ async def send_message(
 ) -> WhatsAppMessage:
     config = await get_config(db, tenant_id)
     conversation = await db.get(WhatsAppConversation, conversation_id)
+    if not conversation:
+        raise ValueError("Conversación no encontrada")
 
     msg = WhatsAppMessage(
         tenant_id=tenant_id,
@@ -105,11 +141,11 @@ async def send_message(
     db.add(msg)
     await db.flush()
 
-    if config and config.enabled:
-        twilio_resp = await make_twilio_call(conversation.contact_phone, content, config, media_url)
-        msg.message_id = twilio_resp.get("sid")
-        msg.status = MessageStatus.sent
+    evo_resp = await make_twilio_call(conversation.contact_phone, content, config, media_url)
+    msg.message_id = evo_resp.get("sid")
+    msg.status = MessageStatus.sent if evo_resp.get("success") else MessageStatus.failed
 
+    conversation.last_message_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(msg)
     return msg
@@ -120,6 +156,8 @@ async def reply_to_conversation(
 ) -> WhatsAppMessage:
     config = await get_config(db, tenant_id)
     conversation = await db.get(WhatsAppConversation, conversation_id)
+    if not conversation:
+        raise ValueError("Conversación no encontrada")
 
     msg = WhatsAppMessage(
         tenant_id=tenant_id,
@@ -132,10 +170,9 @@ async def reply_to_conversation(
     db.add(msg)
     await db.flush()
 
-    if config and config.enabled:
-        twilio_resp = await make_twilio_call(conversation.contact_phone, response, config)
-        msg.message_id = twilio_resp.get("sid")
-        msg.status = MessageStatus.sent
+    evo_resp = await make_twilio_call(conversation.contact_phone, response, config)
+    msg.message_id = evo_resp.get("sid")
+    msg.status = MessageStatus.sent if evo_resp.get("success") else MessageStatus.failed
 
     conversation.last_message_at = datetime.now(timezone.utc)
     await db.commit()
@@ -348,7 +385,14 @@ async def get_templates(db: AsyncSession, tenant_id: UUID) -> list:
     result = await db.execute(
         select(WhatsAppTemplate).where(WhatsAppTemplate.tenant_id == tenant_id)
     )
-    return list(result.scalars().all())
+    templates = list(result.scalars().all())
+    if not templates:
+        await seed_default_templates(db, tenant_id)
+        result2 = await db.execute(
+            select(WhatsAppTemplate).where(WhatsAppTemplate.tenant_id == tenant_id)
+        )
+        templates = list(result2.scalars().all())
+    return templates
 
 
 async def create_template(db: AsyncSession, tenant_id: UUID, data: dict) -> WhatsAppTemplate:
@@ -377,21 +421,41 @@ async def update_template(db: AsyncSession, tenant_id: UUID, template_id: UUID, 
 
 
 async def delete_template(db: AsyncSession, tenant_id: UUID, template_id: UUID):
+    from sqlalchemy import delete
     await db.execute(
-        select(WhatsAppTemplate)
+        delete(WhatsAppTemplate)
         .where(WhatsAppTemplate.id == template_id)
         .where(WhatsAppTemplate.tenant_id == tenant_id)
     )
+    await db.commit()
 
 
 async def seed_default_templates(db: AsyncSession, tenant_id: UUID):
     defaults = [
-        {"name": "Bienvenido", "tipo": TemplateTipo.welcome,
-         "content": "¡Hola! Bienvenido a [EMPRESA]. ¿En qué podemos ayudarte hoy?", "active": True},
-        {"name": "Estado de pedido", "tipo": TemplateTipo.order_status,
-         "content": "Tu pedido #[ID] está: [ESTADO]. Monto: [MONTO] PYG. Gracias por confiar en nosotros.", "active": True},
-        {"name": "Alerta de stock", "tipo": TemplateTipo.stock_alert,
-         "content": "⚠️ Alerta: [PRODUCTO] tiene stock bajo. Stock actual: [CANTIDAD] unidades.", "active": True},
+        {
+            "name": "Ticket Digital POS + Puntos",
+            "tipo": "venta.creada",
+            "content": "🛒 *¡Gracias por tu compra en Extra Supermercado Mayorista!*\n\n📄 Ticket Digital: *#{ticket}*\n💰 Total: *Gs. {monto}*\n⭐ Sumaste *{puntos} Puntos ExtraClub*.\n\n¡Te esperamos pronto en nuestras sucursales!",
+            "active": True
+        },
+        {
+            "name": "Bienvenida ExtraClub",
+            "tipo": "extra_club.bienvenida",
+            "content": "👋 ¡Bienvenido/a a *ExtraClub*, el club de beneficios de Extra Supermercado! ✨\n\nTu N° de socio es: *{socio}*.\nPor registrarte ganaste tus primeros *50 Puntos ExtraClub* de bienvenida para canjear en caja. 🛒",
+            "active": True
+        },
+        {
+            "name": "Cupón Oficial de Sorteo",
+            "tipo": "cupon.sorteo",
+            "content": "🎟️ *¡Tu Cupón Oficial de Sorteo Extra Supermercado!*\n\nCupón N°: *{cupon_numero}*\nCliente: *{nombre}*\nPromoción: *{campana}*\n\nGuardá este mensaje como comprobante oficial. ¡Mucha suerte!",
+            "active": True
+        },
+        {
+            "name": "Recordatorio de Cuota de Crédito",
+            "tipo": "cuota.recordatorio",
+            "content": "🔔 *Recordatorio de Vencimiento — Extra Supermercado*\n\nEstimado/a *{nombre}*, te recordamos que tu cuota de crédito de *Gs. {monto}* vence el *{fecha}*.\nPodés abonar en caja de cualquier sucursal o por transferencia bancaria.",
+            "active": True
+        },
     ]
     for t in defaults:
         existing = await db.execute(
