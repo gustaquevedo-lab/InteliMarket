@@ -5,14 +5,15 @@ import {
   Phone, Mail, Calendar, CheckCircle2, AlertTriangle, ArrowRight,
   RefreshCw, MessageCircle, HeartHandshake, DollarSign, Star,
   ShieldCheck, CreditCard, ChevronRight, Check, X, Tag, Package,
-  HelpCircle, BarChart2
+  HelpCircle, BarChart2, Clock
 } from "lucide-react"
 import { api, type Customer, type LoyaltyConfig, type LoyaltyReward, type LoyaltyPoints } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate } from "../../utils/format"
+import TarjetasSocioPage from "../loyalty/TarjetasSocioPage"
 
-type CrmTab = "miembros" | "solicitudes" | "rfm" | "premios" | "reglas"
+type CrmTab = "miembros" | "tarjetas" | "solicitudes" | "rfm" | "premios" | "reglas"
 
 const TIER_COLORS: Record<string, { bg: string; text: string; border: string }> = {
   vip: { bg: "bg-purple-100 dark:bg-purple-950/60", text: "text-purple-700 dark:text-purple-300", border: "border-purple-200 dark:border-purple-900/50" },
@@ -26,7 +27,28 @@ export default function CrmPage() {
   const { user } = useAuth()
   const companyId = (user as any)?.company_id || "00000000-0000-0000-0000-000000000010"
 
-  const [tab, setTab] = useState<CrmTab>("miembros")
+  const [tab, setTab] = useState<CrmTab>(() => {
+    try {
+      const p = new URLSearchParams(window.location.search).get("tab")
+      if (p === "tarjetas" || p === "solicitudes" || p === "rfm" || p === "premios" || p === "reglas" || p === "miembros") {
+        return p as CrmTab
+      }
+    } catch {}
+    return "miembros"
+  })
+
+  const handleTabChange = (newTab: CrmTab) => {
+    setTab(newTab)
+    try {
+      const url = new URL(window.location.href)
+      if (newTab === "miembros") {
+        url.searchParams.delete("tab")
+      } else {
+        url.searchParams.set("tab", newTab)
+      }
+      window.history.replaceState({}, "", url.toString())
+    } catch {}
+  }
   const [loading, setLoading] = useState(true)
 
   // Solicitudes Web de Tarjetas PVC
@@ -351,7 +373,8 @@ export default function CrmPage() {
       <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
           { id: "miembros", label: `Socios ExtraClub (${customers.length || 4864})`, icon: Users },
-          { id: "solicitudes", label: `Solicitudes de Tarjetas (${solicitudes.length})`, icon: CreditCard },
+          { id: "tarjetas", label: "Tarjetas Extra Club (Zebra ZC300)", icon: CreditCard },
+          { id: "solicitudes", label: `Solicitudes Web (${solicitudes.length})`, icon: Clock },
           { id: "rfm", label: "Segmentación RFM (126.345 Ventas)", icon: BarChart2 },
           { id: "premios", label: `Catálogo de Premios (${rewards.length || 6})`, icon: Gift },
           { id: "reglas", label: "Reglas & Multiplicadores", icon: Settings },
@@ -361,8 +384,8 @@ export default function CrmPage() {
           return (
             <button
               key={t.id}
-              onClick={() => setTab(t.id as CrmTab)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+              onClick={() => handleTabChange(t.id as CrmTab)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
                 active
                   ? "bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
@@ -379,6 +402,13 @@ export default function CrmPage() {
           )
         })}
       </div>
+
+      {/* TAB TARJETAS EXTRA CLUB (ZEBRA ZC300) */}
+      {tab === "tarjetas" && (
+        <div className="card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-xl animate-fade-in">
+          <TarjetasSocioPage />
+        </div>
+      )}
 
       {/* TAB SOLICITUDES DE TARJETAS (WEB / QR / TICKET) */}
       {tab === "solicitudes" && (

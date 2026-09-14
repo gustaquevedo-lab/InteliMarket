@@ -130,7 +130,6 @@ const navGroups: NavGroup[] = [
     title: "CRM & Marketing",
     items: [
       { icon: Users, label: "Fidelidad ExtraClub", path: "/crm", anyPermission: ["crm:update", "crm:campaigns"] },
-      { icon: CreditCard, label: "Tarjetas Extra Club", path: "/tarjetas-extra-club", anyPermission: ["crm:update", "crm:campaigns"] },
       { icon: Ticket, label: "Cupones de Sorteo", path: "/cupones" },
       { icon: PieChart, label: "Customer 360", path: "/customer360" },
       { icon: MessageCircle, label: "WhatsApp & IntelliZapp", path: "/whatsapp" },
