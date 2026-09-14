@@ -123,14 +123,14 @@ async def create_return(db: AsyncSession, data: ReturnCreate) -> Return:
                 )
 
     for item_data in data.items:
-        iva_tasa = Decimal(str(item_data.iva_tasa))
-        base = Decimal(str(item_data.precio_unitario)) * Decimal(str(item_data.cantidad))
+        iva_tasa = Decimal(str(item_data.iva_tasa if item_data.iva_tasa is not None else 10))
+        item_total = (Decimal(str(item_data.precio_unitario)) * Decimal(str(item_data.cantidad))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
         if iva_tasa == Decimal("0"):
+            item_base = item_total
             iva_monto = Decimal("0")
-            item_total = base
         else:
-            iva_monto = (base * iva_tasa / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
-            item_total = base + iva_monto
+            item_base = (item_total / (Decimal("1") + iva_tasa / Decimal("100"))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+            iva_monto = item_total - item_base
 
         # Si no viene descripción, buscamos el producto
         desc = item_data.descripcion
@@ -146,7 +146,7 @@ async def create_return(db: AsyncSession, data: ReturnCreate) -> Return:
             descripcion=desc,
             cantidad=item_data.cantidad,
             precio_unitario=item_data.precio_unitario,
-            iva_tasa=item_data.iva_tasa,
+            iva_tasa=iva_tasa,
             iva_monto=iva_monto,
             total=item_total,
             motivo_detalle=item_data.motivo_detalle,
@@ -154,7 +154,7 @@ async def create_return(db: AsyncSession, data: ReturnCreate) -> Return:
         )
         db.add(item)
 
-        subtotal += base
+        subtotal += item_base
         if iva_tasa == Decimal("10"):
             iva_10 += iva_monto
         elif iva_tasa == Decimal("5"):
@@ -276,7 +276,8 @@ async def approve_return(db: AsyncSession, return_id: str, data: ReturnApprove) 
     warehouse_id = str(data.warehouse_id or return_obj.warehouse_id or "")
 
     items_result = await db.execute(select(ReturnItem).where(ReturnItem.return_id == return_obj.id))
-    for item in items_result.scalars().all():
+    return_items = list(items_result.scalars().all())
+    for item in return_items:
         qty = int(item.cantidad)
         stock_result = await db.execute(
             select(Stock).where(
@@ -350,11 +351,21 @@ async def approve_return(db: AsyncSession, return_id: str, data: ReturnApprove) 
             )
             timbrado_numero = timbrado_result.scalar_one_or_none()
 
-            # No hay desglose de base 5%/10% por línea a nivel de Return (solo
-            # el agregado) -- se aproxima toda la base gravada al tramo que
-            # tenga IVA, razonable para este negocio donde una devolución
-            # mixta 5%/10% en la misma boleta es rarísima.
-            tiene_iva_10 = (return_obj.iva_10 or 0) > 0
+            # Desglose exacto de bases gravadas según tasa de IVA de cada ítem
+            base_10 = Decimal("0")
+            base_5 = Decimal("0")
+            base_exenta = Decimal("0")
+            for it in return_items:
+                tasa = Decimal(str(it.iva_tasa or 0))
+                tot = Decimal(str(it.total or 0))
+                iva_m = Decimal(str(it.iva_monto or 0))
+                if tasa == Decimal("10"):
+                    base_10 += (tot - iva_m)
+                elif tasa == Decimal("5"):
+                    base_5 += (tot - iva_m)
+                else:
+                    base_exenta += tot
+
             nota = NotaCreditoDebito(
                 company_id=return_obj.company_id,
                 sale_id=return_obj.sale_id,
@@ -364,9 +375,9 @@ async def approve_return(db: AsyncSession, return_id: str, data: ReturnApprove) 
                 motivo=f"Devolución {return_obj.numero} — {return_obj.motivo}",
                 subtotal=return_obj.subtotal or 0,
                 descuento_total=0,
-                base_gravada_10=(return_obj.subtotal or 0) if tiene_iva_10 else 0,
-                base_gravada_5=(return_obj.subtotal or 0) if not tiene_iva_10 and (return_obj.iva_5 or 0) > 0 else 0,
-                base_exenta=0,
+                base_gravada_10=base_10,
+                base_gravada_5=base_5,
+                base_exenta=base_exenta,
                 iva_10=return_obj.iva_10 or 0,
                 iva_5=return_obj.iva_5 or 0,
                 total=return_obj.total or 0,
