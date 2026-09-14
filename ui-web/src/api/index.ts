@@ -388,7 +388,7 @@ export interface SupermerRecipe { id: string; area?: string; nombre?: string; de
 export interface SupermerRecipeItem { id?: string; receta_id?: string; producto_id?: string; producto_nombre?: string; cantidad?: number; unidad_medida?: string; es_opcional?: boolean }
 export interface SupermerOrder { id: string; area?: string; receta_id?: string; receta_nombre?: string; cantidad_objetivo?: number; estado?: string; fecha_inicio?: string; fecha_fin?: string; fecha_vencimiento?: string; responsable_id?: string; responsable_nombre?: string; notas?: string; insumos_usados?: any; producto_obtenido?: number; rendimiento_real?: number; created_at?: string }
 export interface SupermerBatch { id: string; producto_id?: string; producto_nombre?: string; cantidad_obtenida?: number; fecha_produccion?: string; fecha_vencimiento?: string; lote_codigo?: string; costo_unitario?: number; orden_id?: string }
-export interface SupermerWaste { id: string; area?: string; producto_id?: string; producto_nombre?: string; cantidad?: number; costo_unitario?: number; costo_total?: number; tipo_merma?: string; motivo?: string; fecha?: string; registrado_por?: string }
+export interface SupermerWaste { id: string; area?: string; warehouse_id?: string; producto_id?: string; producto_nombre?: string; cantidad?: number; costo_unitario?: number; costo_total?: number; tipo_merma?: string; motivo?: string; fecha?: string; registrado_por?: string; registrado_por_nombre?: string; estado?: "pendiente" | "aprobada" | "rechazada"; aprobado_por?: string; aprobado_por_nombre?: string; aprobado_at?: string; motivo_rechazo?: string }
 export interface SupermerPerishableConfig { id: string; producto_id?: string; producto_nombre?: string; vida_util_dias?: number; requiere_markdown?: boolean; categoria_perecedera?: string }
 export interface SupermerMarkdown { id: string; producto_id?: string; producto_nombre?: string; lote_id?: string; descuento_porcentaje?: number; precio_original?: number; precio_markdown?: number; fecha_inicio?: string; fecha_fin?: string; activo?: boolean; motivo?: string }
 export interface SupermerForecast { id: string; producto_id?: string; producto_nombre?: string; fecha_pronosticada?: string; cantidad_pronosticada?: number; confianza?: number; fecha_generacion?: string }
@@ -2537,10 +2537,12 @@ export const api = {
       list: (params?: { producto_id?: string; vencimiento_antes?: string }) => client.get<SupermerBatch[]>("/v1/supermer/batches", params as any),
     },
     waste: {
-      list: (params?: { area?: string; tipo_merma?: string; desde?: string; hasta?: string }) => client.get<SupermerWaste[]>("/v1/supermer/waste", params as any),
-      byArea: (params?: { desde?: string; hasta?: string }) => client.get<SupermerWasteByArea[]>("/v1/supermer/waste/by-area", params as any),
+      list: (params?: { area?: string; tipo_merma?: string; estado?: string; desde?: string; hasta?: string; limit?: number }) => client.get<SupermerWaste[]>("/v1/supermer/waste", params as any),
+      byArea: (params?: { desde?: string; hasta?: string; estado?: string }) => client.get<SupermerWasteByArea[]>("/v1/supermer/waste/by-area", params as any),
       create: (data: any) => client.post<SupermerWaste>("/v1/supermer/waste", data),
       update: (id: string, data: any) => client.put<SupermerWaste>(`/v1/supermer/waste/${id}`, data),
+      approve: (id: string) => client.post<SupermerWaste>(`/v1/supermer/waste/${id}/approve`),
+      reject: (id: string, motivo_rechazo: string) => client.post<SupermerWaste>(`/v1/supermer/waste/${id}/reject`, { motivo_rechazo }),
     },
     perishableConfigs: {
       list: (params?: { categoria?: string }) => client.get<SupermerPerishableConfig[]>("/v1/supermer/perishable-configs", params as any),

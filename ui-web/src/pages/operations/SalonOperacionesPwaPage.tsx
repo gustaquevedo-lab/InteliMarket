@@ -49,6 +49,7 @@ export interface MermaItem {
   costo_total?: number
   fecha: string
   registrado_por?: string
+  estado?: string
 }
 
 export interface ReposicionItem {
@@ -112,6 +113,24 @@ const MOTIVOS_MERMA = [
   { id: "descarte_calidad", label: "Descarte por Calidad / Golpeado" },
   { id: "merma_natural", label: "Merma Natural / Deshidratación" },
 ]
+
+// El backend agrupa mermas en 6 áreas fijas (ProductionArea) y 6 tipos fijos
+// (WasteType) para poder reportar por sector -- son más finos que los 10
+// sectores / 5 motivos de esta pantalla, así que se mapean acá; el detalle
+// original queda igual en el campo de texto libre "motivo".
+const AREA_BACKEND_MAP: Record<string, string> = {
+  "Carnicería": "carniceria",
+  "Panadería & Confitería": "panaderia",
+  "Verdulería & Frutas": "verduleria",
+  "Rotisería & Calientes": "rotiseria",
+}
+const TIPO_MERMA_BACKEND_MAP: Record<string, string> = {
+  rotura_empaque: "rotura",
+  vencimiento: "vencimiento",
+  perdida_frio: "otros",
+  descarte_calidad: "otros",
+  merma_natural: "merma_natural",
+}
 
 export default function SalonOperacionesPwaPage() {
   const { user } = useAuth()
@@ -211,6 +230,7 @@ export default function SalonOperacionesPwaPage() {
   const [mermaArea, setMermaArea] = useState("Góndola General")
   const [mermaObs, setMermaObs] = useState("")
   const [submittingMerma, setSubmittingMerma] = useState(false)
+  const [defaultWarehouseId, setDefaultWarehouseId] = useState<string | null>(null)
 
   // ── ESTADOS DE REPOSICIÓN SALÓN ➔ DEPÓSITO ──
   const [reposiciones, setReposiciones] = useState<ReposicionItem[]>(() => {
@@ -280,6 +300,17 @@ export default function SalonOperacionesPwaPage() {
     }
   }, [])
 
+  // ── DEPÓSITO POR DEFECTO PARA MERMAS (requerido por el backend para poder
+  // descontar el stock correcto una vez que el Gerente aprueba) ──
+  useEffect(() => {
+    api.warehouses.list()
+      .then((whs) => {
+        const principal = whs.find((w: any) => w.tipo === "principal") || whs[0]
+        if (principal) setDefaultWarehouseId(principal.id)
+      })
+      .catch(() => {})
+  }, [])
+
   // ── CARGAR MERMAS OFICIALES DEL BACKEND ──
   const loadMermas = useCallback(async () => {
     setLoadingMermas(true)
@@ -298,6 +329,7 @@ export default function SalonOperacionesPwaPage() {
           costo_total: Number(w.costo_total || 0),
           fecha: new Date(w.fecha).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }),
           registrado_por: w.registrado_por,
+          estado: w.estado,
         }))
         setMermasList(mapped)
       }
@@ -659,22 +691,28 @@ export default function SalonOperacionesPwaPage() {
       return
     }
 
+    if (!defaultWarehouseId) {
+      toast.warning("Depósito no disponible", "No se pudo determinar el depósito para la merma. Reintente en unos segundos.")
+      return
+    }
+
     setSubmittingMerma(true)
     try {
       const costoUni = prod.ultimo_costo || prod.costo_promedio || 0
       const payload = {
-        area: mermaArea,
+        area: AREA_BACKEND_MAP[mermaArea] || "otros",
+        warehouse_id: defaultWarehouseId,
         producto_id: prod.id,
         cantidad: cant,
-        tipo_merma: mermaTipo,
-        motivo: mermaObs.trim() || `Registrado por encargado en salón (${mermaArea})`,
+        tipo_merma: TIPO_MERMA_BACKEND_MAP[mermaTipo] || "otros",
+        motivo: `[${mermaArea}] ${mermaObs.trim() || "Registrado por encargado en salón"}`,
         costo_unitario: costoUni,
       }
 
       await api.supermer.waste.create(payload)
 
       soundAlerts.playScanSuccess()
-      toast.success("Merma Registrada Oficialmente", `Se descontaron ${cant} un. de ${prod.nombre} del stock.`)
+      toast.success("Merma Registrada", `${cant} un. de ${prod.nombre} quedó pendiente de aprobación del Gerente.`)
       setMermaQty("")
       setMermaObs("")
       setMermaProd(null)
@@ -1920,7 +1958,7 @@ export default function SalonOperacionesPwaPage() {
                   className="w-full py-3.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-600/25 cursor-pointer disabled:opacity-50 active:scale-95 transition-all"
                 >
                   {submittingMerma ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                  Confirmar y Descontar Stock Oficial
+                  Registrar Merma (queda a la espera de aprobación)
                 </button>
               </form>
             </div>
@@ -1961,6 +1999,13 @@ export default function SalonOperacionesPwaPage() {
                         <div className="text-[10px] text-slate-500 font-mono">
                           {formatPYG(m.costo_total || m.cantidad * 8500)}
                         </div>
+                        {m.estado && (
+                          <div className={`text-[9px] font-black uppercase tracking-wide mt-0.5 ${
+                            m.estado === "aprobada" ? "text-emerald-400" : m.estado === "rechazada" ? "text-slate-500" : "text-amber-400"
+                          }`}>
+                            {m.estado === "aprobada" ? "Aprobada" : m.estado === "rechazada" ? "Rechazada" : "Pendiente"}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}

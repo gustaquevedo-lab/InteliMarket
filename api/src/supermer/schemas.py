@@ -158,6 +158,11 @@ class WasteLogRejectRequest(BaseModel):
     motivo_rechazo: str
 
 
+class WasteLogUpdate(BaseModel):
+    cantidad: Optional[Decimal] = None
+    motivo: Optional[str] = None
+
+
 class WasteLogResponse(BaseModel):
     id: UUID
     area: str

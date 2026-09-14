@@ -407,6 +407,51 @@ async def create_waste(db: AsyncSession, company_id: str, data: WasteLogCreate, 
     }
 
 
+async def update_waste(db: AsyncSession, company_id: str, waste_id: str, data, user_id: str) -> dict:
+    """Corrige cantidad/motivo de una merma mientras sigue pendiente -- una
+    vez aprobada o rechazada queda fija (el ajuste de una merma ya aprobada
+    es otra merma o una devolución, no una edición del registro original)."""
+    from api.src.inteliaudit.service import record_audit_event
+    from fastapi import HTTPException
+
+    r = await db.execute(select(WasteLog).where(WasteLog.id == waste_id, WasteLog.company_id == company_id))
+    w = r.scalar_one_or_none()
+    if not w:
+        raise HTTPException(404, "Merma no encontrada")
+    if w.estado != WasteStatus.pendiente:
+        raise HTTPException(400, "Solo se puede editar una merma pendiente")
+
+    cambios = {}
+    if data.cantidad is not None and data.cantidad != w.cantidad:
+        cambios["cantidad"] = {"antes": float(w.cantidad), "despues": float(data.cantidad)}
+        w.cantidad = data.cantidad
+        if w.costo_unitario:
+            w.costo_total = w.costo_unitario * w.cantidad
+    if data.motivo is not None and data.motivo != w.motivo:
+        cambios["motivo"] = {"antes": w.motivo, "despues": data.motivo}
+        w.motivo = data.motivo
+
+    if cambios:
+        await record_audit_event(db, {
+            "company_id": company_id,
+            "user_id": user_id,
+            "accion": "merma_editada",
+            "entidad": "supermer_waste_log",
+            "entidad_id": str(w.id),
+            "datos_anteriores": {k: v["antes"] for k, v in cambios.items()},
+            "datos_nuevos": {k: v["despues"] for k, v in cambios.items()},
+        })
+    await db.commit()
+
+    prod_nombre = await _get_product_name(db, w.producto_id)
+    return {
+        **{c.name: getattr(w, c.name) for c in w.__table__.columns},
+        "producto_nombre": prod_nombre,
+        "registrado_por_nombre": await _get_user_name(db, w.registrado_por) if w.registrado_por else None,
+        "aprobado_por_nombre": None,
+    }
+
+
 async def approve_waste(db: AsyncSession, company_id: str, waste_id: str, approver_user_id: str) -> dict:
     """Aprueba una merma pendiente: recién en este momento sale del stock.
 

@@ -477,7 +477,7 @@ function RecipesTab({ data, search, setSearch, loading, fetchAll }: { data: Supe
   // Form State & Edit state
   const [isEditing, setIsEditing] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [formArea, setFormArea] = useState("panadería")
+  const [formArea, setFormArea] = useState("panaderia")
   const [formNombre, setFormNombre] = useState("")
   const [formDesc, setFormDesc] = useState("")
   const [formFinalProdId, setFormFinalProdId] = useState("")
@@ -769,9 +769,9 @@ function RecipesTab({ data, search, setSearch, loading, fetchAll }: { data: Supe
                 <div>
                   <label className="input-label label-required font-bold">Área de Producción</label>
                   <select className="input-field mt-1" value={formArea} onChange={e => setFormArea(e.target.value)} disabled={isEditing}>
-                    <option value="panadería">Panadería 🥐</option>
-                    <option value="carnicería">Carnicería 🥩</option>
-                    <option value="rotisería">Rotisería 🍗</option>
+                    <option value="panaderia">Panadería 🥐</option>
+                    <option value="carniceria">Carnicería 🥩</option>
+                    <option value="rotiseria">Rotisería 🍗</option>
                     <option value="pre_pack">Pre-Pack 📦</option>
                     <option value="otros">Otros 🏷️</option>
                   </select>
@@ -886,7 +886,7 @@ function OrdersTab({ orders, batches, search, setSearch, onComplete, fetchAll }:
   const [formRecipeId, setFormRecipeId] = useState("")
   const [formQty, setFormQty] = useState("")
   const [formNotes, setFormNotes] = useState("")
-  const [formArea, setFormArea] = useState("panadería")
+  const [formArea, setFormArea] = useState("panaderia")
   
   // Edit Order Form State
   const [isEditing, setIsEditing] = useState(false)
@@ -1262,12 +1262,13 @@ function WasteTab({ data, search, setSearch, fetchAll }: { data: SupermerWaste[]
   const [showModal, setShowModal] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
   const [formProductId, setFormProductId] = useState("")
-  const [formArea, setFormArea] = useState("verdulería")
+  const [formArea, setFormArea] = useState("verduleria")
   const [formType, setFormType] = useState("merma_natural")
   const [formQty, setFormQty] = useState("")
   const [formReason, setFormReason] = useState("")
   const [saving, setSaving] = useState(false)
   const [showAuditModal, setShowAuditModal] = useState<SupermerWaste | null>(null)
+  const [defaultWarehouseId, setDefaultWarehouseId] = useState<string | null>(null)
   const toast = useToast()
 
   useEffect(() => {
@@ -1278,11 +1279,25 @@ function WasteTab({ data, search, setSearch, fetchAll }: { data: SupermerWaste[]
     }
   }, [showModal])
 
-  const parseWasteState = (motivo: string = "") => {
+  useEffect(() => {
+    api.warehouses.list()
+      .then((whs: any[]) => {
+        const principal = whs.find((w) => w.tipo === "principal") || whs[0]
+        if (principal) setDefaultWarehouseId(principal.id)
+      })
+      .catch(() => {})
+  }, [])
+
+  // El estado real (pendiente/aprobada/rechazada) ya viene del backend en
+  // waste.estado -- se dejan estas dos funciones solo para leer mermas
+  // viejas que aún tienen el prefijo [PENDIENTE]/[APROBADA]/[RECHAZADA] en
+  // el motivo (de antes de que existiera la columna estado real).
+  const parseWasteState = (w: SupermerWaste) => {
+    if (w.estado) return w.estado === "aprobada" ? "APROBADA" : w.estado === "rechazada" ? "RECHAZADA" : "PENDIENTE"
+    const motivo = w.motivo || ""
     if (motivo.startsWith("[PENDIENTE]")) return "PENDIENTE"
-    if (motivo.startsWith("[APROBADA]")) return "APROBADA"
     if (motivo.startsWith("[RECHAZADA]")) return "RECHAZADA"
-    return "APROBADA" // Default legacy behavior
+    return "APROBADA"
   }
 
   const cleanMotivo = (motivo: string = "") => {
@@ -1305,22 +1320,23 @@ function WasteTab({ data, search, setSearch, fetchAll }: { data: SupermerWaste[]
 
     const prod = products.find(p => p.id === formProductId)
     if (!prod) return
+    if (!defaultWarehouseId) {
+      toast.error("Error", "No se pudo determinar el depósito. Reintente en unos segundos.")
+      return
+    }
 
     setSaving(true)
-    const nowStr = new Date().toLocaleString("es-PY")
-    const auditReason = `[PENDIENTE] ${formReason}\n[${nowStr} - DECLARADA]: Merma reportada por cantidad ${formQty} ${prod.unidad_medida || "kg"}. Pendiente de inspección.`
-
     try {
       await api.supermer.waste.create({
         producto_id: formProductId,
-        producto_nombre: prod.nombre,
         area: formArea,
+        warehouse_id: defaultWarehouseId,
         tipo_merma: formType,
         cantidad: Number(formQty),
         costo_unitario: prod.costo_promedio || prod.precio_venta || 0,
-        motivo: auditReason
+        motivo: formReason,
       })
-      toast.success("Merma Declarada", "La declaración ha sido registrada y enviada a revisión.")
+      toast.success("Merma Declarada", "Queda pendiente de aprobación del Gerente.")
       setShowModal(false)
       setFormProductId("")
       setFormQty("")
@@ -1334,17 +1350,28 @@ function WasteTab({ data, search, setSearch, fetchAll }: { data: SupermerWaste[]
   }
 
   const handleApproveWaste = async (waste: SupermerWaste) => {
-    const nowStr = new Date().toLocaleString("es-PY")
-    const cleanReason = cleanMotivo(waste.motivo || "")
-    const updatedReason = `[APROBADA] ${cleanReason}\n[${nowStr} - APROBADA por Responsable de Inventario]: Ajuste físico confirmado en stock.`
     try {
-      await api.supermer.waste.update(waste.id, {
-        motivo: updatedReason
-      })
-      toast.success("Merma Aprobada", "El descarte ha sido confirmado y descontado.")
+      await api.supermer.waste.approve(waste.id)
+      toast.success("Merma Aprobada", "El descarte fue confirmado y descontado del stock.")
       fetchAll()
     } catch (err: any) {
       toast.error("Error", err.message || "No se pudo aprobar la merma.")
+    }
+  }
+
+  const handleRejectWaste = async (waste: SupermerWaste) => {
+    const motive = window.prompt("Ingrese el motivo del rechazo de la merma:")
+    if (motive === null) return
+    if (!motive.trim()) {
+      toast.error("Error", "Debes ingresar un motivo de rechazo.")
+      return
+    }
+    try {
+      await api.supermer.waste.reject(waste.id, motive.trim())
+      toast.success("Merma Rechazada", "La merma fue rechazada y no afectará el stock.")
+      fetchAll()
+    } catch (err: any) {
+      toast.error("Error", err.message || "No se pudo rechazar la merma.")
     }
   }
 
@@ -1356,41 +1383,12 @@ function WasteTab({ data, search, setSearch, fetchAll }: { data: SupermerWaste[]
       toast.error("Error", "Debes ingresar una cantidad válida mayor a cero.")
       return
     }
-
-    const nowStr = new Date().toLocaleString("es-PY")
-    const cleanReason = cleanMotivo(waste.motivo || "")
-    const updatedReason = `[PENDIENTE] ${cleanReason}\n[${nowStr} - AJUSTADA]: Cantidad declarada corregida de ${waste.cantidad} a ${newQty}.`
     try {
-      await api.supermer.waste.update(waste.id, {
-        cantidad: newQty,
-        motivo: updatedReason
-      })
-      toast.success("Cantidad Ajustada", "La merma ha sido actualizada y sigue en revisión.")
+      await api.supermer.waste.update(waste.id, { cantidad: newQty })
+      toast.success("Cantidad Ajustada", "La merma sigue pendiente de aprobación.")
       fetchAll()
     } catch (err: any) {
       toast.error("Error", err.message || "No se pudo ajustar la cantidad.")
-    }
-  }
-
-  const handleRejectWaste = async (waste: SupermerWaste) => {
-    const motive = window.prompt("Ingrese el motivo del rechazo de la merma:")
-    if (motive === null) return
-    if (!motive.trim()) {
-      toast.error("Error", "Debes ingresar un motivo de rechazo.")
-      return
-    }
-
-    const nowStr = new Date().toLocaleString("es-PY")
-    const cleanReason = cleanMotivo(waste.motivo || "")
-    const updatedReason = `[RECHAZADA] ${cleanReason}\n[${nowStr} - RECHAZADA por Responsable]: Motivo: ${motive}`
-    try {
-      await api.supermer.waste.update(waste.id, {
-        motivo: updatedReason
-      })
-      toast.success("Merma Rechazada", "La merma ha sido rechazada y no afectará los costos operativos.")
-      fetchAll()
-    } catch (err: any) {
-      toast.error("Error", err.message || "No se pudo rechazar la merma.")
     }
   }
 
@@ -1428,7 +1426,7 @@ function WasteTab({ data, search, setSearch, fetchAll }: { data: SupermerWaste[]
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
             {filteredWaste.map(w => {
-              const state = parseWasteState(w.motivo || "");
+              const state = parseWasteState(w);
               const latestLog = w.motivo?.split("\n").filter(Boolean).pop() || "Sin logs de auditoría";
               return (
                 <tr key={w.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/20 transition-colors">
@@ -1528,12 +1526,12 @@ function WasteTab({ data, search, setSearch, fetchAll }: { data: SupermerWaste[]
                 <div>
                   <label className="input-label label-required font-bold">Área de Merma</label>
                   <select className="input-field mt-1" value={formArea} onChange={e => setFormArea(e.target.value)}>
-                    <option value="verdulería">Verdulería 🥦</option>
-                    <option value="carnicería">Carnicería 🥩</option>
-                    <option value="panadería">Panadería 🥐</option>
-                    <option value="rotisería">Rotisería 🍗</option>
-                    <option value="lácteos">Lácteos 🥛</option>
-                    <option value="almacén">Almacén 🥫</option>
+                    <option value="verduleria">Verdulería 🥦</option>
+                    <option value="carniceria">Carnicería 🥩</option>
+                    <option value="panaderia">Panadería 🥐</option>
+                    <option value="rotiseria">Rotisería 🍗</option>
+                    <option value="otros">Lácteos 🥛</option>
+                    <option value="otros">Almacén 🥫</option>
                   </select>
                 </div>
                 <div>

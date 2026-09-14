@@ -16,7 +16,7 @@ from api.src.supermer.schemas import (
     RecipeCreate, RecipeUpdate, RecipeResponse,
     ProductionOrderCreate, ProductionOrderUpdate, ProductionOrderResponse,
     ProductionBatchCreate, ProductionBatchResponse,
-    WasteLogCreate, WasteLogRejectRequest, WasteLogResponse,
+    WasteLogCreate, WasteLogRejectRequest, WasteLogUpdate, WasteLogResponse,
     PerishableConfigCreate, PerishableConfigResponse,
     MarkdownLogCreate, MarkdownLogResponse,
     PurchaseForecastResponse, PurchaseSuggestionCreate, PurchaseSuggestionUpdate,
@@ -315,6 +315,17 @@ async def create_waste(
     _=Depends(require_permission("salon:manage")),
 ):
     return await service.create_waste(db, user["company_id"], data, user["user_id"])
+
+
+@router.put("/waste/{waste_id}", response_model=WasteLogResponse)
+async def update_waste(
+    waste_id: str,
+    data: WasteLogUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
+):
+    return await service.update_waste(db, user["company_id"], waste_id, data, user["user_id"])
 
 
 @router.post("/waste/{waste_id}/approve", response_model=WasteLogResponse)
