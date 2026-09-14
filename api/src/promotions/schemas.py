@@ -177,7 +177,7 @@ class PromotionResponse(BaseModel):
     costo_unitario_referencia: Optional[float] = 0
     vende_bajo_costo: bool = False
     estado: str = "activa"
-    aprobado_por: Optional[str] = None
+    aprobado_por: Optional[Any] = None
     fecha_aprobacion: Optional[datetime] = None
     usuario_registro: Optional[str] = None
 
@@ -290,6 +290,7 @@ class ReactivatePromoInput(BaseModel):
 class ApproveLossPromoInput(BaseModel):
     pin_aprobacion: Optional[str] = None
     motivo: Optional[str] = None
+    justificacion: Optional[str] = None
 
 
 class RecordVendorCreditNoteInput(BaseModel):
