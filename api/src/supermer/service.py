@@ -199,7 +199,7 @@ async def list_orders(
     if desde:
         q = q.where(ProductionOrder.created_at >= desde)
     if hasta:
-        q = q.where(ProductionOrder.created_at <= hasta)
+        q = q.where(ProductionOrder.created_at <= _end_of_day(hasta))
     q = q.order_by(ProductionOrder.created_at.desc()).limit(limit).offset(offset)
     r = await db.execute(q)
     orders = r.scalars().all()
@@ -1087,7 +1087,7 @@ async def get_production_by_area(db: AsyncSession, company_id: str, desde: Optio
     if desde:
         q = q.where(ProductionOrder.fecha_fin >= desde)
     if hasta:
-        q = q.where(ProductionOrder.fecha_fin <= hasta)
+        q = q.where(ProductionOrder.fecha_fin <= _end_of_day(hasta))
     q = q.group_by(ProductionOrder.area)
     r = await db.execute(q)
     prod_rows = r.all()
@@ -1353,7 +1353,7 @@ async def get_butchery_yield_report(
     if desde:
         q = q.where(ProductionOrder.fecha_fin >= desde)
     if hasta:
-        q = q.where(ProductionOrder.fecha_fin <= hasta)
+        q = q.where(ProductionOrder.fecha_fin <= _end_of_day(hasta))
     q = q.order_by(ProductionOrder.fecha_fin.desc())
     r = await db.execute(q)
     orders = r.scalars().all()
