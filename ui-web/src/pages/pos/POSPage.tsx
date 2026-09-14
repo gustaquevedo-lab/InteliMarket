@@ -12348,7 +12348,7 @@ export default function POSPage() {
                 <button
                   ref={confirmCheckoutBtnRef}
                   onClick={() => {
-                    if (activeMethods.has("bancard") && bancardTxnState !== "aprobada" && !posCardCupon.trim() && !bancardQrManualConfirm && bancardCloudQrState !== "aprobada") {
+                    if (activeMethods.has("bancard") && bancardTxnState !== "aprobada" && !posCardCupon.trim() && !bancardQrManualConfirm && bancardCloudQrState !== "aprobada" && bancardQrState !== "aprobada") {
                       toast.warning("Bancard sin confirmar", "Cobrá con el terminal o cargá el cupón/voucher manualmente antes de continuar.")
                       return
                     }
