@@ -1630,6 +1630,7 @@ export const api = {
     sendMessage: (convId: string, data: { content: string; media_url?: string }) => client.post<WhatsAppMessage>(`/v1/whatsapp/conversations/${convId}/messages`, data),
     archiveConversation: (id: string) => client.put<void>(`/v1/whatsapp/conversations/${id}/archive`),
     listTemplates: () => client.get<WhatsAppTemplate[]>("/v1/whatsapp/templates"),
+    seedTemplates: () => client.post<WhatsAppTemplate[]>("/v1/whatsapp/templates/seed"),
     createTemplate: (data: Partial<WhatsAppTemplate>) => client.post<WhatsAppTemplate>("/v1/whatsapp/templates", data),
     updateTemplate: (id: string, data: Partial<WhatsAppTemplate>) => client.put<WhatsAppTemplate>(`/v1/whatsapp/templates/${id}`, data),
     deleteTemplate: (id: string) => client.delete<void>(`/v1/whatsapp/templates/${id}`),

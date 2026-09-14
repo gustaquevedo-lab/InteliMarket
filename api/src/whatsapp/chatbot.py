@@ -4,10 +4,13 @@ Personalizado y conectado a la base de datos real de Extra Supermercado
 """
 from typing import Optional, Dict, Any, List
 from uuid import UUID
+from datetime import datetime, timezone
 import re
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, or_
+from sqlalchemy.orm.attributes import flag_modified
 from api.src.whatsapp.models import WhatsAppMessage, WhatsAppConversation
+from api.src.whatsapp.service import get_wa_template
 from api.src.products.models import Product
 from api.src.sales.models import Sale
 from api.src.customers.models import Customer
@@ -183,6 +186,18 @@ class ChatbotEngine:
         # Comandos globales de salida o reseteo
         if user_input in ["0", "menu", "inicio", "volver", "cancelar"]:
             return await self._show_main_menu(conversation)
+
+        # Opt-in a promociones y ofertas (respuesta a cupón de sorteo o invitación)
+        if user_input in ["si", "sí", "si quiero", "si por favor", "quiero", "quiero ofertas", "acepto", "si confirmo", "dale"]:
+            return await self._handle_optin_confirm(conversation)
+
+        # Opt-out / baja de promociones
+        if user_input in ["baja", "desuscribir", "cancelar ofertas", "no quiero", "no quiero ofertas", "salir de promociones"]:
+            return await self._handle_optout(conversation)
+
+        # Catálogo de Premios ExtraClub
+        if user_input in ["premios", "catalogo", "catalogo de premios", "premios temporada", "premio", "canjes"]:
+            return await self._show_seasonal_prizes(conversation)
 
         # Regla de palabras clave / respuestas rápidas FAQ
         kw_match = await self._match_keyword_rule(user_input)
@@ -427,6 +442,7 @@ class ChatbotEngine:
                 f"✨ Puntos Disponibles: *{total_pts:,} Pts.*\n"
                 f"💰 Equivalente en Compras: *Gs. {valor_canje:,.0f}*\n\n"
                 f"🛒 _Podés canjear tus puntos directamente en línea de caja en tu próxima compra._\n\n"
+                f"🎁 *¿Querés ver los premios de la temporada?* Enviá *PREMIOS* para consultar el catálogo.\n"
                 f"Enviá 0 para volver al menú principal."
             )
         else:
@@ -434,13 +450,85 @@ class ChatbotEngine:
                 f"⭐ *Programa de Fidelidad ExtraClub* ⭐\n\n"
                 f"No encontramos una cuenta ExtraClub vinculada a tu número ({conversation.contact_phone}).\n\n"
                 f"¡Hacerte socio es 100% gratuito! Acercate a Atención al Cliente en nuestro salón o solicitale al cajero en tu próxima compra para sumar puntos con cada ticket. 🛒✨\n\n"
+                f"🎁 Enviá *PREMIOS* para ver los premios vigentes de la temporada.\n"
                 f"Enviá 0 para volver al menú principal."
             )
 
         return {
             "text": text,
-            "buttons": self._get_main_menu_buttons(),
+            "buttons": [
+                {"id": "premios", "title": "🎁 Ver Premios"},
+                {"id": "0", "title": "⬅️ Volver al Menú"}
+            ],
             "next_state": "menu_main"
+        }
+
+    async def _handle_optin_confirm(self, conversation: WhatsAppConversation) -> Dict[str, Any]:
+        """Marca al cliente como validado para promociones y responde con la confirmación oficial"""
+        sess_data = dict(conversation.session_data or {})
+        sess_data["optin_promociones"] = True
+        sess_data["optin_fecha"] = datetime.now(timezone.utc).isoformat()
+        sess_data["optin_validado"] = True
+        conversation.session_data = sess_data
+        flag_modified(conversation, "session_data")
+        await self.db.commit()
+
+        # Intentar obtener la plantilla oficial personalizada
+        tmpl_content = await get_wa_template(self.db, self.entity_id, "optin.confirmado")
+        if not tmpl_content:
+            tmpl_content = (
+                "🎉 *¡Excelente! Tu número ha sido validado para recibir promociones exclusivas.*\n\n"
+                "A partir de ahora vas a recibir ofertas personalizadas, descuentos relámpago y beneficios de Extra Supermercado directo en tu WhatsApp.\n\n"
+                "ℹ️ _Podés responder 'BAJA' en cualquier momento si deseás pausar estas comunicaciones._"
+            )
+
+        return {
+            "text": f"{tmpl_content}\n\n_Enviá 0 para ver el menú de opciones._",
+            "buttons": [{"id": "0", "title": "⬅️ Menú Principal"}],
+            "next_state": "idle",
+        }
+
+    async def _handle_optout(self, conversation: WhatsAppConversation) -> Dict[str, Any]:
+        """Desuscribe al cliente de difusiones automáticas de promociones"""
+        sess_data = dict(conversation.session_data or {})
+        sess_data["optin_promociones"] = False
+        sess_data["optout_fecha"] = datetime.now(timezone.utc).isoformat()
+        conversation.session_data = sess_data
+        flag_modified(conversation, "session_data")
+        await self.db.commit()
+
+        return {
+            "text": (
+                "✅ *Baja confirmada de promociones.*\n\n"
+                "Tu número fue removido de la lista de envíos promocionales automáticos de Extra Supermercado.\n"
+                "Si en el futuro deseás reactivarlo, solo escribí *SI* en cualquier momento.\n\n"
+                "_Enviá 0 para ver el menú de atención al cliente._"
+            ),
+            "buttons": [{"id": "0", "title": "⬅️ Menú Principal"}],
+            "next_state": "idle",
+        }
+
+    async def _show_seasonal_prizes(self, conversation: WhatsAppConversation) -> Dict[str, Any]:
+        """Muestra el catálogo oficial de premios de la temporada"""
+        tmpl_content = await get_wa_template(self.db, self.entity_id, "extraclub.premios")
+        if not tmpl_content:
+            tmpl_content = (
+                "🎁 *Catálogo de Premios de la Temporada — ExtraClub* 🏆\n\n"
+                "¡Canjeá tus puntos por premios fabulosos o descuento directo en tus compras!\n\n"
+                "☕ *1.500 Pts:* Pava Eléctrica Inox 1.8L\n"
+                "🍳 *2.500 Pts:* Set de Sartenes Antiadherentes (2 piezas)\n"
+                "🥪 *3.500 Pts:* Sandwichera Grill Antiadherente\n"
+                "💨 *7.000 Pts:* Freidora de Aire Digital 4.5L\n"
+                "🍲 *12.000 Pts:* Horno Eléctrico de Mesa 45L\n"
+                "📺 *25.000 Pts:* Smart TV 43\" Full HD\n\n"
+                "💡 *Descuento en Caja:* Recordá que también podés descontar tus puntos directamente de tu factura: *1 Punto = Gs. 100*.\n"
+                "Consultá en Atención al Cliente o escribinos aquí para iniciar tu canje."
+            )
+
+        return {
+            "text": f"{tmpl_content}\n\n_Enviá 0 para volver al menú principal._",
+            "buttons": [{"id": "0", "title": "⬅️ Menú Principal"}],
+            "next_state": "idle",
         }
 
     async def _handle_orders_menu(self, conversation: WhatsAppConversation, user_input: str) -> Dict[str, Any]:

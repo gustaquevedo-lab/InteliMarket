@@ -382,14 +382,25 @@ async def handle_inbound_webhook(
 
 
 async def get_templates(db: AsyncSession, tenant_id: UUID) -> list:
+    from sqlalchemy import or_
     result = await db.execute(
-        select(WhatsAppTemplate).where(WhatsAppTemplate.tenant_id == tenant_id)
+        select(WhatsAppTemplate).where(
+            or_(
+                WhatsAppTemplate.tenant_id == tenant_id,
+                WhatsAppTemplate.tenant_id == UUID("00000000-0000-0000-0000-000000000001"),
+            )
+        ).order_by(WhatsAppTemplate.name.asc())
     )
     templates = list(result.scalars().all())
-    if not templates:
+    if not templates or len(templates) < 5:
         await seed_default_templates(db, tenant_id)
         result2 = await db.execute(
-            select(WhatsAppTemplate).where(WhatsAppTemplate.tenant_id == tenant_id)
+            select(WhatsAppTemplate).where(
+                or_(
+                    WhatsAppTemplate.tenant_id == tenant_id,
+                    WhatsAppTemplate.tenant_id == UUID("00000000-0000-0000-0000-000000000001"),
+                )
+            ).order_by(WhatsAppTemplate.name.asc())
         )
         templates = list(result2.scalars().all())
     return templates
@@ -405,13 +416,11 @@ async def create_template(db: AsyncSession, tenant_id: UUID, data: dict) -> What
 
 async def update_template(db: AsyncSession, tenant_id: UUID, template_id: UUID, data: dict) -> WhatsAppTemplate:
     result = await db.execute(
-        select(WhatsAppTemplate)
-        .where(WhatsAppTemplate.id == template_id)
-        .where(WhatsAppTemplate.tenant_id == tenant_id)
+        select(WhatsAppTemplate).where(WhatsAppTemplate.id == template_id)
     )
     template = result.scalar_one_or_none()
     if not template:
-        raise ValueError("Template not found")
+        raise ValueError("Plantilla no encontrada")
     for key, value in data.items():
         if value is not None:
             setattr(template, key, value)
@@ -423,49 +432,92 @@ async def update_template(db: AsyncSession, tenant_id: UUID, template_id: UUID, 
 async def delete_template(db: AsyncSession, tenant_id: UUID, template_id: UUID):
     from sqlalchemy import delete
     await db.execute(
-        delete(WhatsAppTemplate)
-        .where(WhatsAppTemplate.id == template_id)
-        .where(WhatsAppTemplate.tenant_id == tenant_id)
+        delete(WhatsAppTemplate).where(WhatsAppTemplate.id == template_id)
     )
     await db.commit()
 
 
-async def seed_default_templates(db: AsyncSession, tenant_id: UUID):
-    defaults = [
-        {
-            "name": "Ticket Digital POS + Puntos",
-            "tipo": "venta.creada",
-            "content": "🛒 *¡Gracias por tu compra en Extra Supermercado Mayorista!*\n\n📄 Ticket Digital: *#{ticket}*\n💰 Total: *Gs. {monto}*\n⭐ Sumaste *{puntos} Puntos ExtraClub*.\n\n¡Te esperamos pronto en nuestras sucursales!",
-            "active": True
-        },
-        {
-            "name": "Bienvenida ExtraClub",
-            "tipo": "extraclub.bienvenida",
-            "content": "👋 ¡Bienvenido/a a *ExtraClub*, el club de beneficios de Extra Supermercado! ✨\n\nTu N° de socio es: *{socio}*.\nPor registrarte ganaste tus primeros *50 Puntos ExtraClub* de bienvenida para canjear en caja. 🛒",
-            "active": True
-        },
-        {
-            "name": "Cupón Oficial de Sorteo",
-            "tipo": "cupon.sorteo",
-            "content": "🎟️ *¡Tu Cupón Oficial de Sorteo Extra Supermercado!*\n\nCupón N°: *{cupon_numero}*\nCliente: *{nombre}*\nPromoción: *{campana}*\n\nGuardá este mensaje como comprobante oficial. ¡Mucha suerte!",
-            "active": True
-        },
-        {
-            "name": "Recordatorio de Cuota de Crédito",
-            "tipo": "cuota.recordatorio",
-            "content": "🔔 *Recordatorio de Vencimiento — Extra Supermercado*\n\nEstimado/a *{nombre}*, te recordamos que tu cuota de crédito de *Gs. {monto}* vence el *{fecha}*.\nPodés abonar en caja de cualquier sucursal o por transferencia bancaria.",
-            "active": True
-        },
-    ]
-    for t in defaults:
+OFFICIAL_SUPERMARKET_TEMPLATES = [
+    {
+        "name": "Ticket Digital POS + Puntos",
+        "tipo": "venta.creada",
+        "content": "🛒 *¡Gracias por tu compra en Extra Supermercado Mayorista!*\n\n📄 Ticket Digital: *#{ticket}*\n💰 Total: *Gs. {monto}*\n⭐ Sumaste *{puntos} Puntos ExtraClub*.\n\n¡Te esperamos pronto en nuestras sucursales!",
+        "active": True
+    },
+    {
+        "name": "Agradecimiento + Cupones Sorteo + Opt-In",
+        "tipo": "sorteo.optin",
+        "content": "🛒 *¡Muchas gracias por tu compra en Extra Supermercado!*\nEsperamos que hayas tenido una excelente experiencia y te esperamos nuevamente muy pronto.\n\n🎟️ *¡Con esta compra generaste {cupones_generados} cupones para el sorteo '{campana_sorteo}'!*\nAcumulás un total de *{cupones_totales} cupones* registrados a tu nombre (Doc: {documento}).\n\n📲 *¿Querés recibir ofertas personalizadas, descuentos relámpago y promociones exclusivas en tu WhatsApp?*\n👉 *Respondé SÍ a este mensaje* para activar tus beneficios exclusivos y enterarte primero que nadie.",
+        "active": True
+    },
+    {
+        "name": "Confirmación Opt-In Validado",
+        "tipo": "optin.confirmado",
+        "content": "🎉 *¡Excelente! Tu número ha sido validado para recibir promociones exclusivas.*\n\nA partir de ahora vas a recibir ofertas personalizadas, descuentos relámpago y beneficios de Extra Supermercado directo en tu WhatsApp.\n\nℹ️ _Podés responder 'BAJA' en cualquier momento si deseás pausar estas comunicaciones._",
+        "active": True
+    },
+    {
+        "name": "Invitación ExtraClub (No Socio)",
+        "tipo": "extraclub.invitacion",
+        "content": "👋 ¡Hola {cliente}! Notamos que aún no formás parte de *ExtraClub*, el club de fidelidad de Extra Supermercado. ✨\n\n🎁 *Al ser socio ExtraClub:*\n• Acumulás puntos en cada compra que canjeás por dinero directo en caja (1 Punto = Gs. 100).\n• Participás automáticamente con cupones dobles en todos los sorteos del año.\n• Accedés a descuentos especiales exclusivos para miembros.\n\n¡Hacerte socio es 100% gratuito! Acercate al mostrador de Atención al Cliente en tu próxima visita o pedile al cajero al abonar.",
+        "active": True
+    },
+    {
+        "name": "Consulta Saldo de Puntos ExtraClub",
+        "tipo": "extraclub.saldo",
+        "content": "⭐ *Tu Saldo ExtraClub — Extra Supermercado* ⭐\n\n👤 Titular: *{cliente}*\n💳 N° de Socio: *{socio_numero}*\n✨ Puntos Acumulados: *{puntos} Pts.*\n💰 Equivalente en Compras: *Gs. {valor_monetario}*\n\n🛒 _Podés canjear tus puntos directamente en línea de caja en tu próxima compra._ ¡Gracias por ser parte de la familia Extra!",
+        "active": True
+    },
+    {
+        "name": "Catálogo de Premios de la Temporada",
+        "tipo": "extraclub.premios",
+        "content": "🎁 *Catálogo de Premios de la Temporada — ExtraClub* 🏆\n\n¡Canjeá tus puntos por premios fabulosos o descuento directo en tus compras!\n\n☕ *1.500 Pts:* Pava Eléctrica Inox 1.8L\n🍳 *2.500 Pts:* Set de Sartenes Antiadherentes (2 piezas)\n🥪 *3.500 Pts:* Sandwichera Grill Antiadherente\n💨 *7.000 Pts:* Freidora de Aire Digital 4.5L\n🍲 *12.000 Pts:* Horno Eléctrico de Mesa 45L\n📺 *25.000 Pts:* Smart TV 43\" Full HD\n\n💡 *Descuento en Caja:* Recordá que también podés descontar tus puntos directamente de tu factura: *1 Punto = Gs. 100*.\nConsultá en Atención al Cliente o escribinos aquí para iniciar tu canje.",
+        "active": True
+    },
+    {
+        "name": "Cupón Oficial de Sorteo",
+        "tipo": "cupon.sorteo",
+        "content": "🎟️ *¡Tu Cupón Oficial de Sorteo Extra Supermercado!*\n\nCupón N°: *{cupon_numero}*\nCliente: *{cliente}* (Doc: {documento})\nPromoción: *{campana_sorteo}*\nFecha del Sorteo: *{fecha_sorteo}*\n\nGuardá este mensaje como comprobante oficial. ¡Mucha suerte!",
+        "active": True
+    },
+    {
+        "name": "Recordatorio de Cuota de Crédito",
+        "tipo": "cuota.recordatorio",
+        "content": "🔔 *Recordatorio de Vencimiento — Extra Supermercado*\n\nEstimado/a *{cliente}*, te recordamos que tu cuota de crédito de *Gs. {monto}* tiene fecha de vencimiento el *{fecha}*.\nPodés abonar en caja de cualquier sucursal o solicitar datos de transferencia respondiendo a este mensaje.",
+        "active": True
+    },
+    {
+        "name": "Promoción Relámpago del Día",
+        "tipo": "promocion.flash",
+        "content": "🔥 *¡OFERTA RELÁMPAGO EXTRA SUPERMERCADO!* 🔥\n\n¡Solo por hoy o hasta agotar stock!\n🛒 *{oferta_titulo}*\n🏷️ Precio Oferta: *Gs. {precio_oferta}* (Antes: Gs. {precio_regular})\n💥 Descuento exclusivo para socios y clientes validados.\n\n¡Te esperamos en nuestro salón! Promoción válida con cualquier medio de pago.",
+        "active": True
+    }
+]
+
+
+async def seed_default_templates(db: AsyncSession, tenant_id: UUID, force: bool = False):
+    from sqlalchemy import or_
+    for t in OFFICIAL_SUPERMARKET_TEMPLATES:
         existing = await db.execute(
             select(WhatsAppTemplate).where(
-                WhatsAppTemplate.tenant_id == tenant_id,
-                WhatsAppTemplate.name == t["name"],
+                or_(
+                    WhatsAppTemplate.tenant_id == tenant_id,
+                    WhatsAppTemplate.tenant_id == UUID("00000000-0000-0000-0000-000000000001"),
+                ),
+                or_(
+                    WhatsAppTemplate.name == t["name"],
+                    WhatsAppTemplate.tipo == t["tipo"],
+                )
             )
         )
-        if not existing.scalar_one_or_none():
+        template_row = existing.scalar_one_or_none()
+        if not template_row:
             db.add(WhatsAppTemplate(tenant_id=tenant_id, **t))
+        elif force:
+            template_row.name = t["name"]
+            template_row.content = t["content"]
+            template_row.tipo = t["tipo"]
+            template_row.active = t["active"]
     await db.commit()
 
 
@@ -560,8 +612,16 @@ DEFAULT_WA_TEMPLATES: dict[str, str] = {
     "entrega.in_transit": "🚚 *Tu pedido está en tránsito!*\nEl repartidor va en camino a tu dirección.",
     "entrega.delivered": "✅ *Pedido entregado!*\nTu pedido ha sido entregado con éxito.",
     "entrega.failed": "❌ *Entrega fallida*\nNo se pudo entregar tu pedido. Contactanos para más información.",
-    # Ventas
-    "venta.creada": "🧾 *Factura {NUMERO}*\nTotal: {TOTAL} PYG\nGracias por tu compra!",
+    # Ventas & Extra Supermercado
+    "venta.creada": "🛒 *¡Gracias por tu compra en Extra Supermercado Mayorista!*\n\n📄 Ticket Digital: *#{ticket}*\n💰 Total: *Gs. {monto}*\n⭐ Sumaste *{puntos} Puntos ExtraClub*.\n\n¡Te esperamos pronto en nuestras sucursales!",
+    "sorteo.optin": "🛒 *¡Muchas gracias por tu compra en Extra Supermercado!*\nEsperamos que hayas tenido una excelente experiencia y te esperamos nuevamente muy pronto.\n\n🎟️ *¡Con esta compra generaste {cupones_generados} cupones para el sorteo '{campana_sorteo}'!*\nAcumulás un total de *{cupones_totales} cupones* registrados a tu nombre (Doc: {documento}).\n\n📲 *¿Querés recibir ofertas personalizadas, descuentos relámpago y promociones exclusivas en tu WhatsApp?*\n👉 *Respondé SÍ a este mensaje* para activar tus beneficios exclusivos y enterarte primero que nadie.",
+    "optin.confirmado": "🎉 *¡Excelente! Tu número ha sido validado para recibir promociones exclusivas.*\n\nA partir de ahora vas a recibir ofertas personalizadas, descuentos relámpago y beneficios de Extra Supermercado directo en tu WhatsApp.\n\nℹ️ _Podés responder 'BAJA' en cualquier momento si deseás pausar estas comunicaciones._",
+    "extraclub.invitacion": "👋 ¡Hola {cliente}! Notamos que aún no formás parte de *ExtraClub*, el club de fidelidad de Extra Supermercado. ✨\n\n🎁 *Al ser socio ExtraClub:*\n• Acumulás puntos en cada compra que canjeás por dinero directo en caja (1 Punto = Gs. 100).\n• Participás automáticamente con cupones dobles en todos los sorteos del año.\n• Accedés a descuentos especiales exclusivos para miembros.\n\n¡Hacerte socio es 100% gratuito! Acercate al mostrador de Atención al Cliente en tu próxima visita o pedile al cajero al abonar.",
+    "extraclub.saldo": "⭐ *Tu Saldo ExtraClub — Extra Supermercado* ⭐\n\n👤 Titular: *{cliente}*\n💳 N° de Socio: *{socio_numero}*\n✨ Puntos Acumulados: *{puntos} Pts.*\n💰 Equivalente en Compras: *Gs. {valor_monetario}*\n\n🛒 _Podés canjear tus puntos directamente en línea de caja en tu próxima compra._ ¡Gracias por ser parte de la familia Extra!",
+    "extraclub.premios": "🎁 *Catálogo de Premios de la Temporada — ExtraClub* 🏆\n\n¡Canjeá tus puntos por premios fabulosos o descuento directo en tus compras!\n\n☕ *1.500 Pts:* Pava Eléctrica Inox 1.8L\n🍳 *2.500 Pts:* Set de Sartenes Antiadherentes (2 piezas)\n🥪 *3.500 Pts:* Sandwichera Grill Antiadherente\n💨 *7.000 Pts:* Freidora de Aire Digital 4.5L\n🍲 *12.000 Pts:* Horno Eléctrico de Mesa 45L\n📺 *25.000 Pts:* Smart TV 43\" Full HD\n\n💡 *Descuento en Caja:* Recordá que también podés descontar tus puntos directamente de tu factura: *1 Punto = Gs. 100*.\nConsultá en Atención al Cliente o escribinos aquí para iniciar tu canje.",
+    "cupon.sorteo": "🎟️ *¡Tu Cupón Oficial de Sorteo Extra Supermercado!*\n\nCupón N°: *{cupon_numero}*\nCliente: *{cliente}* (Doc: {documento})\nPromoción: *{campana_sorteo}*\nFecha del Sorteo: *{fecha_sorteo}*\n\nGuardá este mensaje como comprobante oficial. ¡Mucha suerte!",
+    "cuota.recordatorio": "🔔 *Recordatorio de Vencimiento — Extra Supermercado*\n\nEstimado/a *{cliente}*, te recordamos que tu cuota de crédito de *Gs. {monto}* tiene fecha de vencimiento el *{fecha}*.\nPodés abonar en caja de cualquier sucursal o solicitar datos de transferencia respondiendo a este mensaje.",
+    "promocion.flash": "🔥 *¡OFERTA RELÁMPAGO EXTRA SUPERMERCADO!* 🔥\n\n¡Solo por hoy o hasta agotar stock!\n🛒 *{oferta_titulo}*\n🏷️ Precio Oferta: *Gs. {precio_oferta}* (Antes: Gs. {precio_regular})\n💥 Descuento exclusivo para socios y clientes validados.\n\n¡Te esperamos en nuestro salón! Promoción válida con cualquier medio de pago.",
     "venta.cancelada": "🚫 *Factura {NUMERO}* cancelada.\nSi tenés dudas contactanos.",
     "pago.recibido": "💵 *Pago recibido*\nMonto: {MONTO} PYG\nFactura: {NUMERO}",
 }

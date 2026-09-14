@@ -397,6 +397,29 @@ async def create_template(
     )
 
 
+@router.post("/templates/seed")
+async def seed_templates(
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Sincroniza y re-siembra las plantillas oficiales de Extra Supermercado."""
+    tenant_id = UUID(user["tenant_id"])
+    await whatsapp_service.seed_default_templates(db, tenant_id, force=True)
+    templates = await whatsapp_service.get_templates(db, tenant_id)
+    return [
+        WhatsAppTemplateResponse(
+            id=t.id,
+            tenant_id=t.tenant_id,
+            name=t.name,
+            content=t.content,
+            tipo=_val(t.tipo, "custom"),
+            active=t.active,
+            created_at=t.created_at,
+        )
+        for t in templates
+    ]
+
+
 @router.put("/templates/{template_id}")
 async def update_template(
     template_id: str,
@@ -407,7 +430,13 @@ async def update_template(
     tenant_id = UUID(user["tenant_id"])
     from uuid import UUID as U
     data = {k: v for k, v in body.model_dump().items() if v is not None}
-    template = await whatsapp_service.update_template(db, tenant_id, U(template_id), data)
+    try:
+        template = await whatsapp_service.update_template(db, tenant_id, U(template_id), data)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al actualizar plantilla: {str(e)}")
+
     return WhatsAppTemplateResponse(
         id=template.id,
         tenant_id=template.tenant_id,
@@ -427,7 +456,10 @@ async def delete_template(
 ):
     tenant_id = UUID(user["tenant_id"])
     from uuid import UUID as U
-    await whatsapp_service.delete_template(db, tenant_id, U(template_id))
+    try:
+        await whatsapp_service.delete_template(db, tenant_id, U(template_id))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al eliminar plantilla: {str(e)}")
     return {"status": "ok"}
 
 

@@ -148,15 +148,18 @@ export default function WhatsAppPage() {
   // ── 6. Templates State ──
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([])
   const [templatesLoading, setTemplatesLoading] = useState<boolean>(false)
+  const [seedingTemplates, setSeedingTemplates] = useState<boolean>(false)
   const [showTemplateModal, setShowTemplateModal] = useState<boolean>(false)
   const [editingTemplate, setEditingTemplate] = useState<WhatsAppTemplate | null>(null)
   const [templateForm, setTemplateForm] = useState({
     name: "",
-    tipo: "welcome",
+    tipo: "sorteo.optin",
     content: "",
     active: true,
   })
   const [savingTemplate, setSavingTemplate] = useState<boolean>(false)
+  const [convFilter, setConvFilter] = useState<"all" | "optin" | "unread">("all")
+  const templateTextareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   // Polling ref for QR
   const pollingRef = useRef<any>(null)
@@ -687,11 +690,44 @@ export default function WhatsAppPage() {
     try {
       const data = await api.whatsapp.listTemplates()
       setTemplates(data || [])
-    } catch {
-      toast.error("Error", "No se pudieron cargar las plantillas")
+    } catch (e: any) {
+      toast.error("Error", e?.response?.data?.detail || "No se pudieron cargar las plantillas")
     } finally {
       setTemplatesLoading(false)
     }
+  }
+
+  const handleSeedTemplates = async () => {
+    setSeedingTemplates(true)
+    try {
+      const data = await api.whatsapp.seedTemplates()
+      setTemplates(data || [])
+      toast.success("Plantillas Sincronizadas", "Se cargaron y actualizaron las plantillas oficiales de Extra Supermercado")
+    } catch (e: any) {
+      toast.error("Error al sincronizar", e?.response?.data?.detail || e?.message || "No se pudieron sincronizar las plantillas")
+    } finally {
+      setSeedingTemplates(false)
+    }
+  }
+
+  const insertVariableIntoContent = (variableKey: string) => {
+    const el = templateTextareaRef.current
+    if (!el) {
+      setTemplateForm((prev) => ({ ...prev, content: `${prev.content} {${variableKey}}` }))
+      return
+    }
+    const start = el.selectionStart || 0
+    const end = el.selectionEnd || 0
+    const text = templateForm.content
+    const before = text.substring(0, start)
+    const after = text.substring(end, text.length)
+    const newContent = `${before}{${variableKey}}${after}`
+    setTemplateForm((prev) => ({ ...prev, content: newContent }))
+    setTimeout(() => {
+      el.focus()
+      const newCursor = start + variableKey.length + 2
+      el.setSelectionRange(newCursor, newCursor)
+    }, 50)
   }
 
   const handleSaveTemplate = async (e: React.FormEvent) => {
@@ -700,7 +736,7 @@ export default function WhatsAppPage() {
     try {
       if (editingTemplate) {
         await api.whatsapp.updateTemplate(editingTemplate.id, templateForm)
-        toast.success("Plantilla Actualizada", "Los cambios fueron guardados")
+        toast.success("Plantilla Actualizada", "Los cambios fueron guardados exitosamente")
       } else {
         await api.whatsapp.createTemplate(templateForm)
         toast.success("Plantilla Creada", "La plantilla fue registrada con éxito")
@@ -708,8 +744,9 @@ export default function WhatsAppPage() {
       setShowTemplateModal(false)
       setEditingTemplate(null)
       fetchTemplates()
-    } catch {
-      toast.error("Error", "No se pudo guardar la plantilla")
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || "No se pudo guardar la plantilla"
+      toast.error("Error al guardar", detail)
     } finally {
       setSavingTemplate(false)
     }
@@ -721,21 +758,27 @@ export default function WhatsAppPage() {
       await api.whatsapp.deleteTemplate(tmplId)
       toast.success("Plantilla Eliminada", "Se removió de la base de datos")
       fetchTemplates()
-    } catch {
-      toast.error("Error", "No se pudo eliminar la plantilla")
+    } catch (err: any) {
+      toast.error("Error", err?.response?.data?.detail || "No se pudo eliminar la plantilla")
     }
   }
 
   const filteredConversations = useMemo(() => {
-    if (!searchConv.trim()) return conversations
+    let list = conversations
+    if (convFilter === "optin") {
+      list = list.filter((c: any) => c.session_data?.optin_promociones === true)
+    } else if (convFilter === "unread") {
+      list = list.filter((c: any) => (c.mensajes_no_leidos || 0) > 0)
+    }
+    if (!searchConv.trim()) return list
     const q = searchConv.toLowerCase()
-    return conversations.filter(
+    return list.filter(
       (c) =>
         c.contact_name?.toLowerCase().includes(q) ||
         c.contact_phone?.toLowerCase().includes(q) ||
         c.ultimo_mensaje?.toLowerCase().includes(q)
     )
-  }, [conversations, searchConv])
+  }, [conversations, searchConv, convFilter])
 
   // KPIs del Command Deck
   const analytics = useMemo(() => {
@@ -1144,25 +1187,63 @@ export default function WhatsAppPage() {
         <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[680px]">
           {/* Lista de Chats */}
           <div className="md:col-span-4 border-r border-slate-100 dark:border-slate-800 flex flex-col">
-            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
-              <div className="relative flex-1">
-                <input
-                  type="text"
-                  value={searchConv}
-                  onChange={(e) => setSearchConv(e.target.value)}
-                  placeholder="Buscar cliente o celular..."
-                  className="input pl-9 text-xs w-full"
-                />
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+            <div className="p-3 border-b border-slate-100 dark:border-slate-800 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    value={searchConv}
+                    onChange={(e) => setSearchConv(e.target.value)}
+                    placeholder="Buscar cliente o celular..."
+                    className="input pl-9 text-xs w-full"
+                  />
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                </div>
+                <button
+                  onClick={fetchConversations}
+                  disabled={conversationsLoading}
+                  className="btn-outline p-2 text-slate-500 hover:text-emerald-600"
+                  title="Actualizar chats"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${conversationsLoading ? "animate-spin" : ""}`} />
+                </button>
               </div>
-              <button
-                onClick={fetchConversations}
-                disabled={conversationsLoading}
-                className="btn-outline p-2 text-slate-500 hover:text-emerald-600"
-                title="Actualizar chats"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${conversationsLoading ? "animate-spin" : ""}`} />
-              </button>
+
+              {/* Filtros de Segmentación */}
+              <div className="flex items-center gap-1 text-[11px]">
+                <button
+                  onClick={() => setConvFilter("all")}
+                  className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                    convFilter === "all"
+                      ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
+                      : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  Todos ({conversations.length})
+                </button>
+                <button
+                  onClick={() => setConvFilter("optin")}
+                  className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition-all ${
+                    convFilter === "optin"
+                      ? "bg-emerald-600 text-white"
+                      : "text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                  }`}
+                  title="Clientes que respondieron SÍ y están validados para recibir ofertas"
+                >
+                  <Sparkles className="w-3 h-3" /> Promos Validadas (
+                  {conversations.filter((c: any) => c.session_data?.optin_promociones === true).length})
+                </button>
+                <button
+                  onClick={() => setConvFilter("unread")}
+                  className={`px-2 py-1 rounded-lg font-bold transition-all ${
+                    convFilter === "unread"
+                      ? "bg-amber-600 text-white"
+                      : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  No Leídos
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
@@ -1173,12 +1254,21 @@ export default function WhatsAppPage() {
               ) : filteredConversations.length === 0 ? (
                 <div className="p-8 text-center text-xs text-slate-400 space-y-2">
                   <MessageCircle className="w-8 h-8 text-slate-300 mx-auto" />
-                  <p className="font-bold text-slate-600 dark:text-slate-300">Sin conversaciones registradas</p>
-                  <p className="text-[11px]">Los mensajes entrantes de clientes y notificaciones automáticas aparecerán aquí.</p>
+                  <p className="font-bold text-slate-600 dark:text-slate-300">
+                    {convFilter === "optin"
+                      ? "Sin clientes con Opt-in confirmado aún"
+                      : "Sin conversaciones registradas"}
+                  </p>
+                  <p className="text-[11px]">
+                    {convFilter === "optin"
+                      ? "Cuando un cliente responda 'SÍ' al sorteo o invitación, aparecerá segmentado aquí automáticamente."
+                      : "Los mensajes entrantes de clientes y notificaciones automáticas aparecerán aquí."}
+                  </p>
                 </div>
               ) : (
                 filteredConversations.map((c) => {
                   const isSelected = selectedConv?.id === c.id
+                  const hasOptIn = (c as any).session_data?.optin_promociones === true
                   return (
                     <button
                       key={c.id}
@@ -1206,7 +1296,14 @@ export default function WhatsAppPage() {
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] font-mono text-slate-400 truncate">{c.contact_phone}</p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <p className="text-[11px] font-mono text-slate-400 truncate">{c.contact_phone}</p>
+                          {hasOptIn && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 flex items-center gap-0.5 shrink-0">
+                              🌟 Opt-In
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-slate-500 truncate mt-0.5">
                           {c.ultimo_mensaje || c.last_message_preview || "Sin mensajes recientes"}
                         </p>
@@ -1903,21 +2000,49 @@ export default function WhatsAppPage() {
       {/* ── TAB 6: PLANTILLAS OFICIALES ── */}
       {tab === "templates" && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
             <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">Plantillas Oficiales de Notificación</h2>
-              <p className="text-xs text-slate-500">Configurá las plantillas para sorteos, avisos de saldo, cupones y cobranzas</p>
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-emerald-500" />
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">Plantillas Oficiales de WhatsApp</h2>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Plantillas para agradecimiento de compras, cupones de sorteo, opt-in promocional, ExtraClub y cobranzas.
+              </p>
             </div>
-            <button
-              onClick={() => {
-                setEditingTemplate(null)
-                setTemplateForm({ name: "", tipo: "welcome", content: "", active: true })
-                setShowTemplateModal(true)
-              }}
-              className="btn-primary py-2 px-4 text-xs flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700"
-            >
-              <Plus className="w-4 h-4" /> Nueva Plantilla
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSeedTemplates}
+                disabled={seedingTemplates}
+                className="btn-outline py-2 px-3 text-xs flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                title="Restaura y sincroniza las 9 plantillas oficiales de Extra Supermercado"
+              >
+                {seedingTemplates ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                )}
+                Sincronizar Oficiales
+              </button>
+              <button
+                onClick={fetchTemplates}
+                disabled={templatesLoading}
+                className="btn-outline p-2 text-slate-600 dark:text-slate-300"
+                title="Recargar plantillas"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${templatesLoading ? "animate-spin" : ""}`} />
+              </button>
+              <button
+                onClick={() => {
+                  setEditingTemplate(null)
+                  setTemplateForm({ name: "", tipo: "sorteo.optin", content: "", active: true })
+                  setShowTemplateModal(true)
+                }}
+                className="btn-primary py-2 px-4 text-xs flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 shadow-sm"
+              >
+                <Plus className="w-4 h-4" /> Nueva Plantilla
+              </button>
+            </div>
           </div>
 
           {templatesLoading ? (
@@ -1929,49 +2054,102 @@ export default function WhatsAppPage() {
               <FileText className="w-10 h-10 text-slate-300 mx-auto" />
               <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">No hay plantillas registradas</h3>
               <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                Creá plantillas reutilizables para que las campañas y cupones de sorteos utilicen el formato oficial.
+                Podés inicializar rápidamente las plantillas recomendadas para Extra Supermercado haciendo clic en el botón inferior.
               </p>
+              <button
+                onClick={handleSeedTemplates}
+                disabled={seedingTemplates}
+                className="btn-primary py-2 px-4 text-xs inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 mt-2"
+              >
+                <Sparkles className="w-4 h-4" /> Cargar Plantillas Oficiales de Supermercado
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {templates.map((tmpl) => (
-                <div key={tmpl.id} className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="font-bold text-slate-900 dark:text-white text-xs">{tmpl.name}</h3>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 capitalize">
-                        {tmpl.tipo}
-                      </span>
+              {templates.map((tmpl) => {
+                const badgeColor =
+                  tmpl.tipo === "sorteo.optin"
+                    ? "bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800"
+                    : tmpl.tipo === "optin.confirmado"
+                    ? "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                    : tmpl.tipo === "extraclub.invitacion"
+                    ? "bg-sky-100 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800"
+                    : tmpl.tipo === "extraclub.saldo"
+                    ? "bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
+                    : tmpl.tipo === "extraclub.premios"
+                    ? "bg-pink-100 dark:bg-pink-950/60 text-pink-700 dark:text-pink-300 border-pink-200 dark:border-pink-800"
+                    : tmpl.tipo === "cupon.sorteo"
+                    ? "bg-orange-100 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800"
+                    : tmpl.tipo === "cuota.recordatorio"
+                    ? "bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800"
+                    : tmpl.tipo === "promocion.flash"
+                    ? "bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+
+                return (
+                  <div
+                    key={tmpl.id}
+                    className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <h3 className="font-bold text-slate-900 dark:text-white text-xs leading-tight">
+                          {tmpl.name}
+                        </h3>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${badgeColor}`}
+                        >
+                          {tmpl.tipo}
+                        </span>
+                      </div>
+                      <div className="relative group">
+                        <p className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-sans bg-slate-50 dark:bg-slate-800/60 p-3.5 rounded-xl border border-slate-100 dark:border-slate-800/80 text-[11px] leading-relaxed max-h-48 overflow-y-auto">
+                          {tmpl.content}
+                        </p>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(tmpl.content || "")
+                            toast.success("Copiado", "Texto copiado al portapapeles")
+                          }}
+                          className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm border border-slate-200 dark:border-slate-700 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity hover:text-emerald-600"
+                          title="Copiar texto"
+                        >
+                          <Copy className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap font-mono bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800 text-[11px]">
-                      {tmpl.content}
-                    </p>
+                    <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {tmpl.active !== false ? "🟢 Activa" : "⚪ Inactiva"}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            setEditingTemplate(tmpl)
+                            setTemplateForm({
+                              name: tmpl.name || "",
+                              tipo: tmpl.tipo || "custom",
+                              content: tmpl.content || "",
+                              active: tmpl.active !== false,
+                            })
+                            setShowTemplateModal(true)
+                          }}
+                          className="btn-outline py-1.5 px-3 text-xs flex items-center gap-1 text-slate-600 dark:text-slate-300 hover:text-emerald-600"
+                        >
+                          <Edit className="w-3.5 h-3.5" /> Editar
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTemplate(tmpl.id)}
+                          className="btn-outline py-1.5 px-2 text-xs text-rose-600 hover:border-rose-300"
+                          title="Eliminar plantilla"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
-                    <button
-                      onClick={() => {
-                        setEditingTemplate(tmpl)
-                        setTemplateForm({
-                          name: tmpl.name || "",
-                          tipo: tmpl.tipo || "welcome",
-                          content: tmpl.content || "",
-                          active: tmpl.active !== false,
-                        })
-                        setShowTemplateModal(true)
-                      }}
-                      className="btn-outline py-1.5 px-3 text-xs flex items-center gap-1 text-slate-600"
-                    >
-                      <Edit className="w-3.5 h-3.5" /> Editar
-                    </button>
-                    <button
-                      onClick={() => handleDeleteTemplate(tmpl.id)}
-                      className="btn-outline py-1.5 px-3 text-xs flex items-center gap-1 text-rose-600 hover:border-rose-300"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -2112,7 +2290,7 @@ export default function WhatsAppPage() {
         <Modal
           open={showTemplateModal}
           onClose={() => setShowTemplateModal(false)}
-          title={editingTemplate ? "Editar Plantilla" : "Nueva Plantilla"}
+          title={editingTemplate ? "Editar Plantilla de WhatsApp" : "Nueva Plantilla de WhatsApp"}
         >
           <form onSubmit={handleSaveTemplate} className="space-y-4">
             <div>
@@ -2122,37 +2300,150 @@ export default function WhatsAppPage() {
                 value={templateForm.name}
                 onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })}
                 className="input text-xs"
-                placeholder="Ej: Ticket Digital POS + Puntos"
+                placeholder="Ej: Agradecimiento Compra + Cupones Sorteo + Opt-In"
                 required
               />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Clave de Tipo</label>
-              <input
-                type="text"
-                value={templateForm.tipo}
-                onChange={(e) => setTemplateForm({ ...templateForm, tipo: e.target.value })}
-                className="input text-xs"
-                placeholder="Ej: venta.creada, extra_club.bienvenida"
-                required
-              />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Tipo / Propósito Oficial
+                </label>
+                <select
+                  value={templateForm.tipo}
+                  onChange={(e) => setTemplateForm({ ...templateForm, tipo: e.target.value })}
+                  className="input text-xs"
+                >
+                  <option value="sorteo.optin">🎟️ Sorteo + Cupones + Opt-In (Recomendada)</option>
+                  <option value="optin.confirmado">🎉 Confirmación Opt-In Validado</option>
+                  <option value="venta.creada">🛒 Ticket Digital POS + Puntos</option>
+                  <option value="extraclub.invitacion">👋 Invitación ExtraClub (No Socio)</option>
+                  <option value="extraclub.saldo">⭐ Consulta Saldo ExtraClub</option>
+                  <option value="extraclub.premios">🎁 Catálogo Premios Temporada</option>
+                  <option value="cupon.sorteo">🎫 Cupón Oficial Individual</option>
+                  <option value="cuota.recordatorio">🔔 Recordatorio Cuota Crédito</option>
+                  <option value="promocion.flash">🔥 Promoción Flash / Oferta del Día</option>
+                  <option value="custom">✏️ Personalizada / Otro</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Clave Técnica Identificadora
+                </label>
+                <input
+                  type="text"
+                  value={templateForm.tipo}
+                  onChange={(e) => setTemplateForm({ ...templateForm, tipo: e.target.value })}
+                  className="input text-xs font-mono"
+                  placeholder="ej: sorteo.optin"
+                  required
+                />
+              </div>
             </div>
+
+            {/* Inserción asistida de variables */}
+            <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-200/60 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-emerald-600" /> Insertar Variables Dinámicas al Mensaje:
+                </span>
+                <span className="text-[10px] text-slate-400">Clic para insertar en el cursor</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {[
+                  { key: "cliente", label: "Cliente" },
+                  { key: "ticket", label: "Ticket #" },
+                  { key: "monto", label: "Monto Gs." },
+                  { key: "puntos", label: "Puntos ExtraClub" },
+                  { key: "cupones_generados", label: "Cupones Nuevos" },
+                  { key: "campana_sorteo", label: "Campaña Sorteo" },
+                  { key: "cupones_totales", label: "Cupones Totales" },
+                  { key: "documento", label: "C.I. / RUC" },
+                  { key: "socio_numero", label: "N° Socio" },
+                  { key: "valor_monetario", label: "Equiv. Gs." },
+                  { key: "fecha", label: "Fecha" },
+                  { key: "cupon_numero", label: "N° Cupón" },
+                  { key: "oferta_titulo", label: "Oferta Título" },
+                  { key: "precio_oferta", label: "Precio Oferta" },
+                  { key: "precio_regular", label: "Precio Regular" },
+                ].map((v) => (
+                  <button
+                    key={v.key}
+                    type="button"
+                    onClick={() => insertVariableIntoContent(v.key)}
+                    className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-emerald-500 hover:text-emerald-600 transition-colors shadow-2xs"
+                  >
+                    +{`{${v.key}}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Contenido</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Cuerpo del Mensaje (Formato WhatsApp)
+              </label>
               <textarea
-                rows={5}
+                ref={templateTextareaRef}
+                rows={6}
                 value={templateForm.content}
                 onChange={(e) => setTemplateForm({ ...templateForm, content: e.target.value })}
-                className="input text-xs resize-none"
-                placeholder="Texto con variables como {ticket}, {monto}, {puntos}..."
+                className="input text-xs resize-none font-mono"
+                placeholder="Escribí aquí el texto. Podés usar *negrita*, _cursiva_ y {variables}."
                 required
               />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Tip: Usá *asteriscos* para negrita, _guiones bajos_ para cursiva y emojis para dar vida al mensaje.
+              </p>
             </div>
+
+            {/* Vista Previa Simulación WhatsApp */}
+            <div className="space-y-1">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                📱 Vista Previa en WhatsApp:
+              </span>
+              <div className="p-3.5 rounded-2xl bg-[#EFEAE2] dark:bg-[#0b141a] border border-slate-200 dark:border-slate-800 flex justify-start">
+                <div className="max-w-[85%] bg-white dark:bg-[#202c33] text-slate-900 dark:text-[#e9edef] rounded-2xl rounded-tl-none p-3 shadow-xs text-xs space-y-1.5 relative">
+                  <div className="whitespace-pre-wrap leading-relaxed text-[11.5px] font-sans">
+                    {templateForm.content || "El mensaje previsualizado aparecerá aquí..."}
+                  </div>
+                  <div className="flex items-center justify-end gap-1 text-[10px] text-slate-400 dark:text-slate-500 pt-0.5">
+                    <span>10:30</span>
+                    <CheckCheck className="w-3 h-3 text-sky-500" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <input
+                type="checkbox"
+                id="template_active"
+                checked={templateForm.active}
+                onChange={(e) => setTemplateForm({ ...templateForm, active: e.target.checked })}
+                className="rounded text-emerald-600 focus:ring-emerald-500"
+              />
+              <label htmlFor="template_active" className="text-xs text-slate-700 dark:text-slate-300">
+                Plantilla activa y lista para envíos
+              </label>
+            </div>
+
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <button type="button" onClick={() => setShowTemplateModal(false)} className="btn-outline py-2 px-4 text-xs">
+              <button
+                type="button"
+                onClick={() => setShowTemplateModal(false)}
+                className="btn-outline py-2 px-4 text-xs"
+              >
                 Cancelar
               </button>
-              <button type="submit" disabled={savingTemplate} className="btn-primary py-2 px-5 text-xs bg-emerald-600 hover:bg-emerald-700">
+              <button
+                type="submit"
+                disabled={savingTemplate}
+                className="btn-primary py-2 px-5 text-xs bg-emerald-600 hover:bg-emerald-700 flex items-center gap-1.5"
+              >
+                {savingTemplate ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                 {savingTemplate ? "Guardando..." : "Guardar Plantilla"}
               </button>
             </div>
