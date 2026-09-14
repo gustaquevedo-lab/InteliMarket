@@ -2,14 +2,15 @@ import React, { useState, useEffect, useCallback, useMemo } from "react"
 import {
   ChefHat, Plus, Loader2, CheckCircle2,
   DollarSign, Calculator, Layers, Clock, Flame, UtensilsCrossed,
-  RefreshCw, Info, Calendar, AlertCircle, Package, ArrowRight,
+  RefreshCw, Info, Calendar, AlertCircle, AlertTriangle, Package, ArrowRight,
   TrendingUp, Sparkles, Scale
 } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
+import WasteControlPanel from "../../components/operations/WasteControlPanel"
 import { formatPYG, formatDate } from "../../utils/format"
 
-type Tab = "dashboard" | "recetas" | "planes" | "rotiseria" | "calculadora"
+type Tab = "dashboard" | "recetas" | "planes" | "rotiseria" | "calculadora" | "mermas"
 
 export default function PanaderiaRotiseriaPage() {
   const toast = useToast()
@@ -276,6 +277,7 @@ export default function PanaderiaRotiseriaPage() {
           { id: "planes", label: `Planes de Horneado`, count: bakeryPlanes.length, icon: Calendar },
           { id: "rotiseria", label: `Cocción & Rotisería`, count: rotiseriaPlanes.length, icon: Flame },
           { id: "calculadora", label: "Calculadora Panadero", icon: Calculator },
+          { id: "mermas", label: "Mermas y Pérdidas", icon: AlertTriangle },
         ].map((t) => {
           const Icon = t.icon
           const active = tab === t.id
@@ -582,6 +584,13 @@ export default function PanaderiaRotiseriaPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {tab === "mermas" && (
+        <WasteControlPanel areas={[
+          { value: "panaderia", label: "Panadería" },
+          { value: "rotiseria", label: "Rotisería" },
+        ]} />
       )}
 
       {/* ── MODAL NUEVA RECETA ── */}

@@ -7,8 +7,9 @@ import {
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate } from "../../utils/format"
+import WasteControlPanel from "../../components/operations/WasteControlPanel"
 
-type Tab = "wizard" | "templates" | "ordenes" | "rendimientos"
+type Tab = "wizard" | "templates" | "ordenes" | "rendimientos" | "mermas"
 
 const ESPECIES = ["Vacuno Novillo", "Vacuno Vaquilla", "Porcino", "Ovino", "Pollos (Unidad)"]
 
@@ -236,6 +237,7 @@ export default function CarniceriaDespostePage() {
           { id: "templates", label: `Plantillas de Corte`, count: templates.length, icon: Layers },
           { id: "ordenes", label: `Historial de Órdenes`, count: orders.length, icon: ClipboardList },
           { id: "rendimientos", label: "Rendimiento por Corte", icon: TrendingUp },
+          { id: "mermas", label: "Mermas y Pérdidas", icon: AlertTriangle },
         ].map((t) => {
           const Icon = t.icon
           const active = tab === t.id
@@ -557,6 +559,11 @@ export default function CarniceriaDespostePage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* ══════════════════════ TAB 5: MERMAS Y PÉRDIDAS ══════════════════════ */}
+      {tab === "mermas" && (
+        <WasteControlPanel areas={[{ value: "carniceria", label: "Carnicería" }]} />
       )}
 
       {/* ── MODAL NUEVO TEMPLATE ── */}

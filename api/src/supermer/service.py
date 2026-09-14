@@ -44,6 +44,18 @@ async def _get_user_name(db: AsyncSession, user_id: UUID) -> Optional[str]:
     return str(row) if row else None
 
 
+def _end_of_day(hasta: Optional[datetime]) -> Optional[datetime]:
+    """Un filtro de rango "hasta" que llega como fecha pura (sin hora, ej.
+    "2026-09-14" desde un <input type=date>) se parsea a medianoche -- un
+    `fecha <= hasta` con eso excluye todo lo cargado ese mismo día después de
+    las 00:00. Si no trae hora, se empuja al último instante del día."""
+    if hasta is None:
+        return None
+    if hasta.time() == datetime.min.time():
+        return hasta + timedelta(days=1) - timedelta(microseconds=1)
+    return hasta
+
+
 async def _get_supplier_name(db: AsyncSession, supplier_id: UUID) -> Optional[str]:
     from api.src.purchases.models import Supplier
     r = await db.execute(select(Supplier.razon_social).where(Supplier.id == supplier_id))
@@ -315,7 +327,7 @@ async def list_waste(
     if desde:
         q = q.where(WasteLog.fecha >= desde)
     if hasta:
-        q = q.where(WasteLog.fecha <= hasta)
+        q = q.where(WasteLog.fecha <= _end_of_day(hasta))
     q = q.order_by(WasteLog.fecha.desc()).limit(limit).offset(offset)
     r = await db.execute(q)
     logs = r.scalars().all()
@@ -352,7 +364,7 @@ async def get_waste_by_area(
     if desde:
         q = q.where(WasteLog.fecha >= desde)
     if hasta:
-        q = q.where(WasteLog.fecha <= hasta)
+        q = q.where(WasteLog.fecha <= _end_of_day(hasta))
     q = q.group_by(WasteLog.area)
     r = await db.execute(q)
     rows = r.all()
@@ -1088,7 +1100,7 @@ async def get_production_by_area(db: AsyncSession, company_id: str, desde: Optio
     if desde:
         waste_q = waste_q.where(WasteLog.fecha >= desde)
     if hasta:
-        waste_q = waste_q.where(WasteLog.fecha <= hasta)
+        waste_q = waste_q.where(WasteLog.fecha <= _end_of_day(hasta))
     waste_q = waste_q.group_by(WasteLog.area)
     waste_r = await db.execute(waste_q)
     waste_map = {row.area: row for row in waste_r.all()}

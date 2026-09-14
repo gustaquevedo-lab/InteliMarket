@@ -7,8 +7,9 @@ import {
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate } from "../../utils/format"
+import WasteControlPanel from "../../components/operations/WasteControlPanel"
 
-type Tab = "dashboard" | "recepciones" | "frescura" | "markdown"
+type Tab = "dashboard" | "recepciones" | "frescura" | "markdown" | "mermas"
 
 export default function VerduleriaFrescosPage() {
   const toast = useToast()
@@ -269,6 +270,7 @@ export default function VerduleriaFrescosPage() {
           { id: "recepciones", label: `Recepciones`, count: recepciones.length, icon: Package },
           { id: "frescura", label: `Auditorías de Frescura`, count: auditorias.length, icon: Sparkles },
           { id: "markdown", label: `Markdowns Activos`, count: markdowns.length, icon: Tag },
+          { id: "mermas", label: "Mermas y Pérdidas", icon: AlertTriangle },
         ].map((t) => {
           const Icon = t.icon
           const active = tab === t.id
@@ -484,6 +486,10 @@ export default function VerduleriaFrescosPage() {
             </div>
           )}
         </div>
+      )}
+
+      {tab === "mermas" && (
+        <WasteControlPanel areas={[{ value: "verduleria", label: "Verdulería" }]} />
       )}
 
       {/* ── MODAL NUEVA RECEPCIÓN ── */}
