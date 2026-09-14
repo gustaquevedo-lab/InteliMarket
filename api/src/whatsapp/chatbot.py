@@ -16,6 +16,63 @@ from api.src.inventory.models import StockLot
 from api.src.companies.models import Company
 
 
+DEFAULT_CHATBOT_CONFIG = {
+    "bot_name": "ExtraBot",
+    "auto_reply": True,
+    "welcome_message": "¡Hola {cliente}! 👋 Bienvenido al canal oficial de atención de Extra Supermercado.",
+    "out_of_hours_message": "¡Hola! En este momento nuestras sucursales se encuentran cerradas. Nuestro horario de atención es de Lunes a Sábados de 07:00 a 21:00 hs y Domingos de 07:30 a 13:00 hs. Dejanos tu consulta y te responderemos ni bien abramos.",
+    "business_hours_start": "07:00",
+    "business_hours_end": "21:00",
+    "business_days": ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado"],
+    "modules_enabled": {
+        "catalog_search": True,
+        "extraclub_points": True,
+        "order_tracking": True,
+        "supermarket_info": True,
+        "human_handoff": True,
+    },
+    "keywords": [
+        {
+            "id": "kw-delivery",
+            "name": "Envíos a Domicilio",
+            "keywords": ["delivery", "envio", "envíos", "domicilio", "flete"],
+            "response": "🚚 *Envíos a Domicilio — Extra Supermercado*\n\nRealizamos entregas de Lunes a Sábados de 08:00 a 19:00 hs.\n📍 *Cobertura:* Radio de hasta 15 km de nuestras sucursales.\n💵 *Costo de envío:* Gs. 15.000 (¡Envío GRATIS en compras superiores a Gs. 300.000!).\n\nPodés pasarnos tu lista de compras por este chat indicando los productos.",
+            "active": True,
+        },
+        {
+            "id": "kw-banco",
+            "name": "Datos Bancarios y Pagos",
+            "keywords": ["transferencia", "banco", "alias", "pix", "datos bancarios", "cuenta", "pagar"],
+            "response": "💳 *Datos Bancarios Oficiales — Extra Supermercado*\n\n🏦 *Banco:* Banco Continental\n📄 *Razón Social:* GRUPO SANTA TERESA E.A.S.\n🆔 *RUC:* 80150377-9\n🔢 *Cta. Cte. Gs:* 01-2345678-01\n📲 *Alias / PIX:* compras@superextra.com.py\n\n_Por favor envianos tu comprobante por este medio una vez realizada la transferencia._",
+            "active": True,
+        },
+        {
+            "id": "kw-carniceria",
+            "name": "Carnicería y Cortes Asado",
+            "keywords": ["carniceria", "carnicería", "asado", "costilla", "vacio", "vacío", "carne"],
+            "response": "🥩 *Cortes Especiales & Carnicería — Extra Supermercado*\n\n¡Cortes frescos envasados al vacío y seleccionados para tu asado!\n🔥 Costilla de primera\n🔥 Tapa cuadril, vacío y colita\n🔥 Chorizos parrilleros artesanales\n\nEscribí el nombre del corte para consultar precio en Gs. o acercate a cualquiera de nuestras sucursales.",
+            "active": True,
+        },
+    ],
+    "custom_menu_options": [
+        {
+            "id": "opt-delivery",
+            "number": "6",
+            "title": "Envíos & Delivery a Domicilio",
+            "response": "🚚 *Envíos a Domicilio — Extra Supermercado*\n\nRealizamos entregas de Lunes a Sábados de 08:00 a 19:00 hs.\n📍 *Cobertura:* Radio de hasta 15 km de sucursales.\n💵 *Costo:* Gs. 15.000 (¡Gratis a partir de Gs. 300.000!).\n\nDejanos tu lista de productos para coordinar despacho.",
+            "active": True,
+        },
+        {
+            "id": "opt-banco",
+            "number": "7",
+            "title": "Cuentas Bancarias & Pagos",
+            "response": "💳 *Datos Bancarios Oficiales — Extra Supermercado*\n\n🏦 *Banco:* Banco Continental\n📄 *Razón Social:* GRUPO SANTA TERESA E.A.S.\n🆔 *RUC:* 80150377-9\n🔢 *Cta. Cte. Gs:* 01-2345678-01\n📲 *Alias / PIX:* compras@superextra.com.py",
+            "active": True,
+        },
+    ],
+}
+
+
 class ChatbotFlow:
     """State machine for multi-step conversations"""
 
@@ -86,7 +143,13 @@ class ChatbotEngine:
             tenant = f_res.scalar_one_or_none()
 
         t_cfg = (tenant.config or {}) if tenant else {}
-        self._config = t_cfg.get("chatbot", {})
+        user_bot_cfg = t_cfg.get("chatbot", {})
+        merged = {**DEFAULT_CHATBOT_CONFIG, **user_bot_cfg}
+        if "keywords" not in user_bot_cfg:
+            merged["keywords"] = DEFAULT_CHATBOT_CONFIG["keywords"]
+        if "custom_menu_options" not in user_bot_cfg:
+            merged["custom_menu_options"] = DEFAULT_CHATBOT_CONFIG["custom_menu_options"]
+        self._config = merged
         return self._config
 
     async def _match_keyword_rule(self, user_input: str) -> Optional[Dict[str, Any]]:
