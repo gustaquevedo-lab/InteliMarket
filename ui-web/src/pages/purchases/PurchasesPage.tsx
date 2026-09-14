@@ -1790,7 +1790,7 @@ export default function PurchasesPage() {
     // Consultar stock disponible en depósito
     setLoadingProductStock(true)
     try {
-      const stk = await api.products.getProductStock(prod.id)
+      const stk = await api.inventory.getProductStock(prod.id)
       setProductStockInfo(stk ? {
         cantidad_disponible: stk.cantidad_disponible ?? stk.cantidad_total ?? 0,
         cantidad_total: stk.cantidad_total ?? 0
