@@ -389,7 +389,7 @@ function AppRoutes() {
         <Route path="bancard" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="bancard"><BancardPage /></FeatureRoute></Suspense>} />
         {/* <Route path="dinelco" .../> DESACTIVADO: checkout viejo sin credenciales, distinto del terminal fisico real (electron/dinelco-client.cjs). Ver auditoria 2026-09-02 */}
         <Route path="loyalty" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="loyalty"><LoyaltyPage /></FeatureRoute></Suspense>} />
-        <Route path="tarjetas-extra-club" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="loyalty"><TarjetasSocioPage /></FeatureRoute></Suspense>} />
+        <Route path="tarjetas-extra-club" element={<Suspense fallback={<PageLoader />}><PermissionRoute anyPermission={["crm:update", "crm:campaigns"]}><TarjetasSocioPage /></PermissionRoute></Suspense>} />
         <Route path="portal" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="portal"><PortalPage /></FeatureRoute></Suspense>} />
         <Route path="client-app" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="client_app"><ClientAppPage /></FeatureRoute></Suspense>} />
         <Route path="manual" element={<Suspense fallback={<PageLoader />}><ManualPage /></Suspense>} />
