@@ -7571,7 +7571,23 @@ export default function POSPage() {
         if (cart.length > 0 && !showPaymentModal) {
           handleOpenPayment()
         } else if (showPaymentModal) {
-          confirmCheckoutBtnRef.current?.click()
+          // Mismo resguardo de doble-confirmacion que Enter en los campos de
+          // monto (handleCashFieldKeyDown/handleMixedFieldKeyDown). Sin esto,
+          // como Efectivo se precarga con el monto exacto apenas se abre el
+          // modal (handleOpenPayment), un segundo F12 -- por habito, doble
+          // pulsacion accidental o una tecla que repite -- cerraba la venta
+          // como CONTADO al instante, sin que el cajero llegara a ver ni
+          // tocar la pantalla de cobro. Confirmado: ventas cerradas solas
+          // en distintas cajas y cajeras, siempre como "contado".
+          if (totalRecibidoPyg >= totalPyg && totalPyg > 0 && !submitting) {
+            if (listoParaCerrar) {
+              confirmCheckoutBtnRef.current?.click()
+            } else {
+              setListoParaCerrar(true)
+            }
+          } else {
+            confirmCheckoutBtnRef.current?.click()
+          }
         }
       } else if (showPaymentModal && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName || "")) {
         if (e.key === "1") { e.preventDefault(); toggleActiveMethod("cash") }
@@ -7614,7 +7630,7 @@ export default function POSPage() {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [cart, totalPyg, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, manualWeightInput, targetWeighProduct, toggleActiveMethod])
+  }, [cart, totalPyg, totalRecibidoPyg, submitting, listoParaCerrar, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, manualWeightInput, targetWeighProduct, toggleActiveMethod])
 
   // ── PALETA DE COLORES Y CONTRASTE DINÁMICO ────────────────────────────────
   const bgMain = dark ? "bg-slate-950 text-slate-100" : "bg-slate-100 text-slate-900"
