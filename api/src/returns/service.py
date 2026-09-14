@@ -410,7 +410,7 @@ async def approve_return(db: AsyncSession, return_id: str, data: ReturnApprove) 
         credito_pagado = sum(
             Decimal(str(p.monto))
             for p in payments
-            if (p.metodo_pago or "").upper() in ("EXTRA_CLUB", "CREDITO_LOCAL", "CREDITO")
+            if (p.forma_pago or "").upper() in ("EXTRA_CLUB", "CREDITO_LOCAL", "CREDITO")
         )
 
         monto_liberar_credito = monto_ar_deducido
