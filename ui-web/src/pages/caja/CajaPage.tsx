@@ -611,8 +611,8 @@ export default function CajaPage() {
         const st = punteoStatuses[v.id] || "conforme"
         let montoFisico = v.monto_gs
         if (st === "faltante") {
-          // Un comprobante faltante no hace parte de la rendición y no debe ser considerado en la diferencia
           montoFisico = 0
+          difVouchers -= v.monto_gs
         } else if (st === "discrepante") {
           montoFisico = punteoDiscrepanciasMonto[v.id] !== undefined ? punteoDiscrepanciasMonto[v.id] : v.monto_gs
           difVouchers += (montoFisico - v.monto_gs)
@@ -4923,47 +4923,44 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   let countVouchersDiscrepantes = 0
 
                   allV.forEach((v: any) => {
+                    totVouchersEsperadoGs += Number(v.monto_gs || 0)
                     const st = punteoStatuses[v.id] || "conforme"
                     if (st === "conforme") {
-                      totVouchersEsperadoGs += Number(v.monto_gs || 0)
                       totVouchersFisicoGs += Number(v.monto_gs || 0)
                       countVouchersConformes++
                     } else if (st === "faltante") {
-                      // Un comprobante faltante NO hace parte de la rendición y no debe ser considerado en lo esperado ni resta diferencia
+                      // El comprobante no fue presentado: constituye un faltante de comprobante
                       countVouchersFaltantes++
                     } else if (st === "discrepante") {
-                      totVouchersEsperadoGs += Number(v.monto_gs || 0)
                       const m = punteoDiscrepanciasMonto[v.id] !== undefined ? Number(punteoDiscrepanciasMonto[v.id]) : Number(v.monto_gs || 0)
                       totVouchersFisicoGs += m
                       countVouchersDiscrepantes++
                     }
                   })
 
+                  // Diferencia en comprobantes: si falta comprobante, difVouchersGs es negativo (constituye faltante de comprobante)
                   const difVouchersGs = totVouchersFisicoGs - totVouchersEsperadoGs
 
-                  // 5. Doble Control y Conciliación Integral
+                  // 5. Doble Control y Conciliación
                   // A) Cotejo de Sobre de Efectivo: Recibido vs Declarado por Cajero/a
                   const difSobrePyg = recPyg - declPyg
                   const difSobreBrl = recBrl - declBrl
                   const difSobreUsd = recUsd - declUsd
                   const difSobreTotalGs = recTotalGs - declTotalGs
 
-                  // B) Conciliación de Efectivo en Gaveta
+                  // B) Conciliación de Rendición de Efectivo en Gaveta
+                  // La Rendición es exclusivamente de efectivo. Los comprobantes no forman parte de la rendición de efectivo.
                   const difEfectivoGs = recTotalGs - espNetoGs
-
-                  // C) Conciliación Total de Caja (Efectivo Gaveta + Comprobantes Físicos)
-                  const totalEsperadoCajaGs = espNetoGs + totVouchersEsperadoGs
-                  const totalRendidoCajaGs = recTotalGs + totVouchersFisicoGs
-                  const difTotalCajaGs = totalRendidoCajaGs - totalEsperadoCajaGs
-
-                  // Dictamen Oficial Integrado (Considera Efectivo Y Comprobantes Físicos de la Rendición)
-                  // Los comprobantes faltantes no hacen parte de la rendición y no generan faltante en la caja
-                  const hasFaltante = difTotalCajaGs < -5000 || difVouchersGs < -5000 || difEfectivoGs < -5000
-                  const hasSobrante = difTotalCajaGs > 5000 && difVouchersGs >= 0
-                  const estadoAuditoria = hasFaltante ? "FALTANTE" : hasSobrante ? "SOBRANTE" : "CUADRADO"
+                  const hasFaltanteEfectivo = difEfectivoGs < -5000
+                  const hasSobranteEfectivo = difEfectivoGs > 5000
+                  const estadoRendicionEfectivo = hasFaltanteEfectivo ? "FALTANTE" : hasSobranteEfectivo ? "SOBRANTE" : "CUADRADO"
 
                   const hasShortageSobre = difSobreTotalGs < -5000
                   const hasSurplusSobre = difSobreTotalGs > 5000
+
+                  // C) Estado del Cotejo de Comprobantes
+                  const hasFaltanteVouchers = countVouchersFaltantes > 0 || difVouchersGs < -5000
+                  const estadoComprobantes = (!hasFaltanteVouchers && countVouchersDiscrepantes === 0 && difVouchersGs === 0) ? "CONFORME" : "OBSERVADO"
 
                   return (
                     <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 text-white border border-slate-700/80 shadow-xl space-y-4">
@@ -5263,14 +5260,16 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
 
                         {/* Tarjeta 3: Dictamen de Custodia y Comparativo Final */}
                         <div className={`p-3.5 rounded-xl border flex flex-col justify-between space-y-2.5 ${
-                          hasFaltante || hasShortageSobre
+                          hasFaltanteEfectivo || hasShortageSobre
                             ? "bg-rose-950/40 border-rose-500/60 ring-1 ring-rose-500/30"
-                            : hasSobrante || hasSurplusSobre
+                            : hasFaltanteVouchers
+                            ? "bg-amber-950/40 border-amber-500/60 ring-1 ring-amber-500/30"
+                            : hasSobranteEfectivo || hasSurplusSobre
                             ? "bg-blue-950/40 border-blue-500/60 ring-1 ring-blue-500/30"
                             : "bg-emerald-950/20 border-emerald-600/40"
                         }`}>
                           <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider">
-                            <span className={hasFaltante || hasShortageSobre ? "text-rose-300" : hasSobrante || hasSurplusSobre ? "text-blue-300" : "text-emerald-300"}>
+                            <span className={hasFaltanteEfectivo || hasShortageSobre ? "text-rose-300" : hasFaltanteVouchers ? "text-amber-300" : hasSobranteEfectivo || hasSurplusSobre ? "text-blue-300" : "text-emerald-300"}>
                               3. Comparativo y Auditoría
                             </span>
                             <span className="text-[10px] text-slate-400 font-mono">Doble Control</span>
@@ -5308,21 +5307,21 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800 space-y-1.5">
                               <span className="text-[10px] font-bold text-slate-400 uppercase block">B) Conciliación de Valores vs Sistema</span>
                               
-                              {/* Sub-bloque 1: Efectivo Gaveta */}
+                              {/* Sub-bloque 1: Rendición de Efectivo */}
                               <div className="flex items-center justify-between text-[11px] pb-1 border-b border-slate-800/80">
                                 <div>
-                                  <span className="text-slate-300">Efectivo en Gaveta:</span>
-                                  <span className="text-[9px] text-slate-400 block">Esp: {formatPYG(espNetoGs)} | Rend: {formatPYG(recTotalGs)}</span>
+                                  <span className="text-slate-300 font-semibold">Rendición de Efectivo:</span>
+                                  <span className="text-[9px] text-slate-400 block">Esp: {formatPYG(espNetoGs)} | Rendido: {formatPYG(recTotalGs)}</span>
                                 </div>
                                 <span className={`font-mono font-bold ${Math.abs(difEfectivoGs) < 5000 ? "text-emerald-400" : difEfectivoGs < 0 ? "text-rose-400" : "text-blue-400"}`}>
                                   {difEfectivoGs !== 0 ? (difEfectivoGs > 0 ? `+${formatPYG(difEfectivoGs)}` : formatPYG(difEfectivoGs)) : "₲ 0 (Conforme)"}
                                 </span>
                               </div>
 
-                              {/* Sub-bloque 2: Comprobantes No Efectivo */}
+                              {/* Sub-bloque 2: Cotejo de Comprobantes Físicos */}
                               <div className="flex items-center justify-between text-[11px] pb-1 border-b border-slate-800/80">
                                 <div>
-                                  <span className="text-slate-300">Comprobantes en Rendición:</span>
+                                  <span className="text-slate-300 font-semibold">Comprobantes Físicos (Vouchers):</span>
                                   <span className="text-[9px] text-slate-400 block">
                                     Esp: {formatPYG(totVouchersEsperadoGs)} | Físico: {formatPYG(totVouchersFisicoGs)}
                                   </span>
@@ -5332,8 +5331,8 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                     {difVouchersGs !== 0 ? (difVouchersGs > 0 ? `+${formatPYG(difVouchersGs)}` : formatPYG(difVouchersGs)) : "₲ 0 (Conforme)"}
                                   </span>
                                   {countVouchersFaltantes > 0 && (
-                                    <span className="text-[9px] text-slate-400 font-medium block" title="Comprobantes no presentados (no hacen parte de la rendición)">
-                                      ⊘ {countVouchersFaltantes} fuera de rendición
+                                    <span className="text-[9px] text-rose-400 font-bold block">
+                                      ✕ {countVouchersFaltantes} faltante(s)
                                     </span>
                                   )}
                                   {countVouchersDiscrepantes > 0 && (
@@ -5344,20 +5343,18 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                 </div>
                               </div>
 
-                              {/* Sub-bloque 3: Total Turno a Rendir */}
-                              <div className="pt-0.5 space-y-1">
+                              {/* Sub-bloque 3: Resumen de Control */}
+                              <div className="pt-0.5 space-y-1 text-[11px]">
                                 <div className="flex items-center justify-between text-slate-300">
-                                  <span>Esperado Total Turno:</span>
-                                  <span className="font-mono font-bold text-white">{formatPYG(totalEsperadoCajaGs)}</span>
+                                  <span>Estado Rendición Efectivo:</span>
+                                  <span className={`font-mono font-bold ${Math.abs(difEfectivoGs) < 5000 ? "text-emerald-400" : difEfectivoGs < 0 ? "text-rose-400" : "text-blue-400"}`}>
+                                    {estadoRendicionEfectivo} ({difEfectivoGs >= 0 ? `+${formatPYG(difEfectivoGs)}` : formatPYG(difEfectivoGs)})
+                                  </span>
                                 </div>
                                 <div className="flex items-center justify-between text-slate-300">
-                                  <span>Total Físico Auditado:</span>
-                                  <span className="font-mono font-bold text-white">{formatPYG(totalRendidoCajaGs)}</span>
-                                </div>
-                                <div className="flex items-center justify-between pt-1 border-t border-slate-700/80">
-                                  <span className="font-bold text-slate-200">Diferencia Total Caja:</span>
-                                  <span className={`font-mono font-black text-sm ${Math.abs(difTotalCajaGs) < 5000 ? "text-emerald-400" : difTotalCajaGs < 0 ? "text-rose-400" : "text-blue-400"}`}>
-                                    {difTotalCajaGs >= 0 ? `+${formatPYG(difTotalCajaGs)}` : formatPYG(difTotalCajaGs)}
+                                  <span>Estado Cotejo Comprobantes:</span>
+                                  <span className={`font-mono font-bold ${estadoComprobantes === "CONFORME" ? "text-emerald-400" : "text-rose-400"}`}>
+                                    {estadoComprobantes === "CONFORME" ? "✓ CONFORME" : `OBSERVADO (${countVouchersFaltantes} faltante${countVouchersFaltantes !== 1 ? "s" : ""})`}
                                   </span>
                                 </div>
                               </div>
@@ -5365,33 +5362,42 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
 
                             {/* Banner de Dictamen */}
                             <div>
-                              {hasFaltante ? (
+                              {hasFaltanteEfectivo ? (
                                 <div className="p-2 rounded-lg bg-rose-900/60 border border-rose-500 text-rose-200 text-xs font-bold flex items-start gap-2">
                                   <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                                   <div>
-                                    <span className="block font-black">🔴 FALTANTE EN RENDICIÓN DE CAJA</span>
+                                    <span className="block font-black">🔴 FALTANTE EN RENDICIÓN DE EFECTIVO</span>
                                     <span className="text-[11px] font-normal leading-tight block text-rose-300">
-                                      {difVouchersGs < -5000 ? `Discrepancia en comprobantes rendidos (${formatPYG(difVouchersGs)}). ` : ""}
-                                      {difEfectivoGs < -5000 ? `Efectivo en gaveta faltante (${formatPYG(difEfectivoGs)}). ` : ""}
-                                      {hasShortageSobre ? `Faltante en sobre físico (${formatPYG(difSobreTotalGs)}). ` : ""}
-                                      Diferencia Total: <strong>{difTotalCajaGs >= 0 ? `+${formatPYG(difTotalCajaGs)}` : formatPYG(difTotalCajaGs)}</strong>
+                                      Efectivo en gaveta faltante: <strong>{formatPYG(difEfectivoGs)}</strong>.
+                                      {hasShortageSobre ? ` Vino menos en sobre de lo declarado (${formatPYG(difSobreTotalGs)}). ` : ""}
+                                      {hasFaltanteVouchers ? ` Además faltan ${countVouchersFaltantes} comprobante(s) (${formatPYG(difVouchersGs)}).` : ""}
                                     </span>
                                   </div>
-                                </div>
-                              ) : hasSobrante ? (
-                                <div className="p-2 rounded-lg bg-blue-900/60 border border-blue-500 text-blue-200 text-xs font-bold flex items-center gap-2">
-                                  <Info className="w-4 h-4 text-blue-400 shrink-0" />
-                                  <span>🔵 SOBRANTE EN CAJA: +{formatPYG(difTotalCajaGs)}.</span>
                                 </div>
                               ) : hasShortageSobre ? (
                                 <div className="p-2 rounded-lg bg-rose-900/60 border border-rose-500 text-rose-200 text-xs font-bold flex items-center gap-2">
                                   <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
                                   <span>🔴 FALTANTE EN SOBRE: Vino menos de lo declarado ({formatPYG(difSobreTotalGs)}).</span>
                                 </div>
+                              ) : hasSobranteEfectivo ? (
+                                <div className="p-2 rounded-lg bg-blue-900/60 border border-blue-500 text-blue-200 text-xs font-bold flex items-center gap-2">
+                                  <Info className="w-4 h-4 text-blue-400 shrink-0" />
+                                  <span>🔵 SOBRANTE EN EFECTIVO: +{formatPYG(difEfectivoGs)}. {hasFaltanteVouchers ? `(Con ${countVouchersFaltantes} comprobante(s) faltante(s)).` : ""}</span>
+                                </div>
+                              ) : hasFaltanteVouchers ? (
+                                <div className="p-2 rounded-lg bg-amber-900/60 border border-amber-500 text-amber-200 text-xs font-bold flex items-start gap-2">
+                                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                                  <div>
+                                    <span className="block font-black">🟡 EFECTIVO CUADRADO · COMPROBANTES CON FALTANTE</span>
+                                    <span className="text-[11px] font-normal leading-tight block text-amber-300">
+                                      La rendición de efectivo está conforme, pero faltan {countVouchersFaltantes} comprobante(s) físico(s) ({formatPYG(difVouchersGs)}).
+                                    </span>
+                                  </div>
+                                </div>
                               ) : (
                                 <div className="p-2 rounded-lg bg-emerald-900/60 border border-emerald-500 text-emerald-200 text-xs font-bold flex items-center gap-2">
                                   <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
-                                  <span>🟢 CAJA Y COMPROBANTES CONFORMES: Conteo físico coincide plenamente con el sistema.</span>
+                                  <span>🟢 EFECTIVO Y COMPROBANTES CONFORMES: Conteo físico coincide plenamente con el sistema.</span>
                                 </div>
                               )}
                             </div>
@@ -5399,13 +5405,21 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
 
                           <div className="pt-1.5 border-t border-slate-800 flex items-center justify-between text-[11px]">
                             <span className="text-slate-400">Dictamen Oficial:</span>
-                            <span className={`px-2 py-0.5 rounded font-black tracking-wider ${
-                              estadoAuditoria === "CUADRADO" ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" :
-                              estadoAuditoria === "SOBRANTE" ? "bg-blue-500/20 text-blue-300 border border-blue-500/40" :
-                              "bg-rose-500/20 text-rose-300 border border-rose-500/40"
-                            }`}>
-                              {estadoAuditoria} ({difTotalCajaGs >= 0 ? `+${formatPYG(difTotalCajaGs)}` : formatPYG(difTotalCajaGs)})
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2 py-0.5 rounded font-black tracking-wider ${
+                                estadoRendicionEfectivo === "CUADRADO" ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" :
+                                estadoRendicionEfectivo === "SOBRANTE" ? "bg-blue-500/20 text-blue-300 border border-blue-500/40" :
+                                "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                              }`}>
+                                Efectivo: {estadoRendicionEfectivo} ({difEfectivoGs >= 0 ? `+${formatPYG(difEfectivoGs)}` : formatPYG(difEfectivoGs)})
+                              </span>
+                              <span className={`px-2 py-0.5 rounded font-black tracking-wider ${
+                                estadoComprobantes === "CONFORME" ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" :
+                                "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                              }`}>
+                                Vouchers: {estadoComprobantes} {countVouchersFaltantes > 0 ? `(${countVouchersFaltantes} Falt.)` : ""}
+                              </span>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -5628,16 +5642,14 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   let countDiscrepantes = 0
 
                   allV.forEach((v: any) => {
+                    totEsperado += v.monto_gs
                     const st = punteoStatuses[v.id] || "conforme"
                     if (st === "conforme") {
-                      totEsperado += v.monto_gs
                       totFisico += v.monto_gs
                       countConformes++
                     } else if (st === "faltante") {
-                      // Un comprobante faltante no hace parte de la rendición y no se suma al esperado
                       countFaltantes++
                     } else if (st === "discrepante") {
-                      totEsperado += v.monto_gs
                       const m = punteoDiscrepanciasMonto[v.id] !== undefined ? punteoDiscrepanciasMonto[v.id] : v.monto_gs
                       totFisico += m
                       countDiscrepantes++
@@ -5645,18 +5657,18 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   })
 
                   const difVouchers = totFisico - totEsperado
-                  const isCuadrado = difVouchers === 0 && countDiscrepantes === 0
+                  const isCuadrado = difVouchers === 0 && countFaltantes === 0 && countDiscrepantes === 0
 
                   return (
                     <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 space-y-2.5">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
                           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block">
-                            Arqueo de Comprobantes Físicos en Gaveta / Sobre
+                            Arqueo de Comprobantes Físicos (Vouchers / Facturas / Vales)
                           </span>
                           <div className="flex flex-wrap items-center gap-2 mt-0.5">
                             <span className="text-xs text-slate-600 dark:text-slate-300">
-                              Esperado en Rendición: <strong className="font-mono text-slate-900 dark:text-white">{formatPYG(totEsperado)}</strong>
+                              Esperado por Sistema: <strong className="font-mono text-slate-900 dark:text-white">{formatPYG(totEsperado)}</strong>
                             </span>
                             <span className="text-slate-300 dark:text-slate-600">·</span>
                             <span className="text-xs text-slate-600 dark:text-slate-300">
@@ -5676,7 +5688,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             }`}
                           >
                             {isCuadrado
-                              ? "✓ VOUCHERS CUADRADOS"
+                              ? "✓ COMPROBANTES CUADRADOS"
                               : `DIFERENCIA: ${difVouchers >= 0 ? "+" : ""}${formatPYG(difVouchers)}`}
                           </span>
                         </div>
@@ -5685,8 +5697,8 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] pt-1.5 border-t border-slate-200 dark:border-slate-700/60 text-slate-600 dark:text-slate-400">
                         <div className="flex flex-wrap items-center gap-3">
                           <span className="text-emerald-600 dark:text-emerald-400 font-semibold">✓ {countConformes} Conformes</span>
-                          <span className={countFaltantes > 0 ? "text-slate-500 dark:text-slate-400 font-medium" : "text-slate-400 dark:text-slate-500"}>
-                            ⊘ {countFaltantes} Fuera de rendición (faltantes)
+                          <span className={countFaltantes > 0 ? "text-rose-600 dark:text-rose-400 font-bold" : "text-slate-400 dark:text-slate-500"}>
+                            ✕ {countFaltantes} Faltantes
                           </span>
                           <span className={countDiscrepantes > 0 ? "text-amber-600 dark:text-amber-400 font-bold" : "text-slate-400 dark:text-slate-500"}>
                             ≠ {countDiscrepantes} Con Discrepancia
@@ -5704,9 +5716,9 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           <button
                             type="button"
                             onClick={() => handleSetAllVoucherStatus("faltante")}
-                            className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 font-medium transition whitespace-nowrap"
+                            className="text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-300 font-semibold transition whitespace-nowrap"
                           >
-                            Marcar Todos Fuera de Rendición
+                            Marcar Todos Faltantes
                           </button>
                         </div>
                       </div>
@@ -5810,7 +5822,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                       v.es_devolucion
                                         ? "bg-purple-50/70 dark:bg-purple-950/30 text-purple-950 dark:text-purple-200 hover:bg-purple-100/70 dark:hover:bg-purple-900/30"
                                         : isFaltante
-                                        ? "bg-slate-100/80 dark:bg-slate-800/40 text-slate-500 dark:text-slate-400 opacity-80"
+                                        ? "bg-rose-50/80 dark:bg-rose-950/30 text-rose-950 dark:text-rose-200"
                                         : isDiscrepante
                                         ? "bg-amber-50/80 dark:bg-amber-950/30 text-amber-950 dark:text-amber-200"
                                         : "hover:bg-slate-50 dark:hover:bg-slate-800/40 text-slate-800 dark:text-slate-300"
@@ -5911,15 +5923,15 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                         </button>
                                         <button
                                           type="button"
-                                          title="Comprobante que no hace parte de la rendición (no afecta cuadre de caja)"
+                                          title="Comprobante físico no encontrado / faltante"
                                           onClick={() => handleSetVoucherStatus(v.id, "faltante")}
                                           className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition whitespace-nowrap ${
                                             isFaltante
-                                              ? "bg-slate-600 text-white shadow-sm"
-                                              : "text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                              ? "bg-rose-600 text-white shadow-sm"
+                                              : "text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-300 hover:bg-slate-200 dark:hover:bg-slate-700"
                                           }`}
                                         >
-                                          ⊘ Fuera de Rendición
+                                          ✕ Faltante
                                         </button>
                                         <button
                                           type="button"

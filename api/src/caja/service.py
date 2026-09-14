@@ -4253,11 +4253,11 @@ async def save_session_punteo_audit(
     faltantes = [it for it in items if it.get("estado") == "faltante"]
     discrepantes = [it for it in items if it.get("estado") == "discrepante"]
 
-    # Un comprobante faltante no hace parte de la rendición y no afecta negativamente el dictamen
-    estado_dictamen = "CONFORME" if len(discrepantes) == 0 and abs(diferencia_vouchers_gs) == 0 else "OBSERVADO"
+    # Si hay comprobantes faltantes o discrepancias de monto, el cotejo queda OBSERVADO
+    estado_dictamen = "CONFORME" if len(faltantes) == 0 and len(discrepantes) == 0 and abs(diferencia_vouchers_gs) == 0 else "OBSERVADO"
     nota_audit = (
         f"\n[COTEJO FÍSICO DE COMPROBANTES ({now_py}) por {auditor_nombre}]: "
-        f"Dictamen: {estado_dictamen} | Rendidos Conformes: {len(conformes)}, Fuera de Rendición (Faltantes): {len(faltantes)}, Con Discrepancia: {len(discrepantes)}. "
+        f"Dictamen Comprobantes: {estado_dictamen} | Conformes: {len(conformes)}, Faltantes: {len(faltantes)}, Con Discrepancia: {len(discrepantes)}. "
         f"Diferencia Comprobantes: ₲ {float(diferencia_vouchers_gs):,.0f}."
     )
     if observaciones_dictamen:
