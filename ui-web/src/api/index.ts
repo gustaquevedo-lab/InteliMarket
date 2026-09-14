@@ -2584,6 +2584,10 @@ export const api = {
     delete: (id: string) => client.delete<void>(`/v1/kits/${id}`),
     calculatePrice: (id: string) => client.get<any>(`/v1/kits/${id}/price`),
   },
+  // Salud del servidor, reportada por el vigia (solo superadmin)
+  sistema: {
+    salud: () => client.get<any>("/v1/sistema/salud"),
+  },
   loyalty: {
     getConfig: (companyId: string) => client.get<LoyaltyConfig>(`/v1/loyalty/config/${companyId}`),
     updateConfig: (companyId: string, data: Partial<LoyaltyConfig>) => client.put<LoyaltyConfig>(`/v1/loyalty/config/${companyId}`, data),

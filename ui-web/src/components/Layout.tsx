@@ -182,6 +182,7 @@ const navGroups: NavGroup[] = [
       { icon: Building, label: "Sucursales", path: "/branches" },
       { icon: Users, label: "Gestión de Usuarios", path: "/usuarios" },
       { icon: ShieldCheck, label: "Permisos & Roles (RBAC)", path: "/rbac" },
+      { icon: ShieldCheck, label: "Salud del Sistema", path: "/salud-sistema", superadminOnly: true },
     ]
   },
   {
