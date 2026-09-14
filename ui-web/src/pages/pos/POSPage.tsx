@@ -7678,7 +7678,7 @@ export default function POSPage() {
 
       // Con la ventana de cupones abierta, los atajos de la caja NO actuan por
       // detras (F2, F9, Escape...). Escape solo retrocede dentro de esa ventana
-      // y nunca anula ni salta los cupones: la venta ya esta cobrada y la
+      // y desde la pregunta sale imprimiendo la factura; nunca anula: la venta ya esta cobrada y la
       // factura todavia no se imprimio. Reportado en Caja 4 el 14-09.
       if (showCuponModal) {
         if (e.key === "Escape") {
@@ -7686,7 +7686,11 @@ export default function POSPage() {
           if (cuponModalStep === "formulario") {
             setCuponModalStep("pregunta")
           } else {
-            toast.warning("Venta ya cobrada", "Elegí \"Sí, Participar\" o \"No participar / Imprimir solo Factura\" para entregar la factura.")
+            // Pedido del dueño (14-09): Escape sale de la ventana y vuelve a la anterior.
+            // La venta ya esta cobrada, asi que salir desde la pregunta equivale a
+            // "No participar": imprime la factura sin cupones y vuelve a la caja.
+            // Nunca anula la venta (eso es solo el boton Volver a Modificar Venta).
+            void handleSkipCupon()
           }
         }
         return
@@ -7789,7 +7793,7 @@ export default function POSPage() {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [cart, totalPyg, totalRecibidoPyg, submitting, listoParaCerrar, activeMethods, hasClickedQuickCash, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, showCuponModal, cuponModalStep, manualWeightInput, targetWeighProduct, toggleActiveMethod])
+  }, [cart, totalPyg, totalRecibidoPyg, submitting, listoParaCerrar, activeMethods, hasClickedQuickCash, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, showCuponModal, cuponModalStep, pendingCuponData, manualWeightInput, targetWeighProduct, toggleActiveMethod])
 
   // ── PALETA DE COLORES Y CONTRASTE DINÁMICO ────────────────────────────────
   const bgMain = dark ? "bg-slate-950 text-slate-100" : "bg-slate-100 text-slate-900"
