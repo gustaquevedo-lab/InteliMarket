@@ -6,7 +6,7 @@ import {
   User as UserIcon, ArrowLeft, Volume2, VolumeX,
   ArrowUpRight, Flame, Bell, Download, PackageSearch, ListChecks,
   CreditCard, ClipboardCheck, Boxes, Radio, PackageCheck, Send, FileText, Inbox,
-  Pencil, Settings, MoreVertical
+  Pencil, Settings, MoreVertical, Lock
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -415,6 +415,37 @@ export default function SupervisorPage() {
   const { user, loading: authLoading, login, logout } = useAuth()
   const toast = useToast()
   const { dark, toggle: toggleTheme } = useTheme()
+
+  // ── PIN corto de autorizaciones offline en caja -- se configura acá
+  // (la app que el supervisor realmente lleva encima) en vez de forzarlo a
+  // loguearse en una caja fisica solo para setearlo. Ver ui-web/src/utils/
+  // localAuth.ts y api/src/auth/router.py::set_pos_pin. ──
+  const [showSetPinModal, setShowSetPinModal] = useState(false)
+  const [newPosPin, setNewPosPin] = useState("")
+  const [newPosPinConfirm, setNewPosPinConfirm] = useState("")
+  const [settingPosPin, setSettingPosPin] = useState(false)
+  const handleSetPosPin = async () => {
+    if (!/^\d{4,6}$/.test(newPosPin)) {
+      toast.warning("PIN inválido", "Ingresá un PIN de 4 a 6 dígitos.")
+      return
+    }
+    if (newPosPin !== newPosPinConfirm) {
+      toast.warning("Los PIN no coinciden", "Verificá que ambos campos sean iguales.")
+      return
+    }
+    setSettingPosPin(true)
+    try {
+      await api.auth.setPosPin({ pin: newPosPin })
+      toast.success("PIN configurado", "Las cajas lo van a tomar la próxima vez que sincronicen (o al instante si están online ahora).")
+      setShowSetPinModal(false)
+      setNewPosPin("")
+      setNewPosPinConfirm("")
+    } catch (e: any) {
+      toast.error("No se pudo configurar el PIN", e?.message || "Intentá de nuevo.")
+    } finally {
+      setSettingPosPin(false)
+    }
+  }
 
   // ── ESTADO DE ENLACE EN TIEMPO REAL (SSE) Y PANTALLA DESPIERTA ──────────
   const [isSseConnected, setIsSseConnected] = useState(false)
@@ -1574,6 +1605,15 @@ try {
                 <span className="text-[10px]">Silenciar</span>
               </button>
             )}
+
+            {/* Mi PIN de autorizaciones offline */}
+            <button
+              onClick={() => setShowSetPinModal(true)}
+              title="Configurar mi PIN de autorizaciones (para aprobar sin conexión en caja)"
+              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-amber-500 transition cursor-pointer"
+            >
+              <Lock className="w-4 h-4" />
+            </button>
 
             {/* Sincronizar manual */}
             <button
@@ -2791,6 +2831,58 @@ try {
               {submittingConfirm ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
               Confirmar y Registrar en Bóveda
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL CONFIGURAR PIN DE AUTORIZACIONES OFFLINE ── */}
+      {showSetPinModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full sm:max-w-sm bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] max-h-[88vh] overflow-y-auto animate-fade-in">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500 flex items-center justify-center text-white shrink-0 shadow-sm shadow-amber-500/30">
+                  <Lock className="w-4.5 h-4.5" />
+                </div>
+                <div className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>Mi PIN de Autorizaciones</div>
+              </div>
+              <button onClick={() => setShowSetPinModal(false)} className="text-slate-400 cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 leading-relaxed">
+              Distinto de tu contraseña de acceso. Las cajas lo cachean para poder pedirte que autorices acciones (descuentos, anulaciones, Extra Club, devoluciones, etc.) aunque el servidor esté caído o reiniciando.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nuevo PIN (4 a 6 dígitos):</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={newPosPin}
+                  onChange={(e) => setNewPosPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="••••"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 font-mono tabular-nums text-center text-lg tracking-widest outline-none focus:border-amber-500 text-slate-900 dark:text-white"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Confirmar PIN:</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={newPosPinConfirm}
+                  onChange={(e) => setNewPosPinConfirm(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="••••"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 font-mono tabular-nums text-center text-lg tracking-widest outline-none focus:border-amber-500 text-slate-900 dark:text-white"
+                />
+              </div>
+              <button
+                onClick={handleSetPosPin}
+                disabled={settingPosPin}
+                className="w-full py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {settingPosPin ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                Guardar PIN
+              </button>
+            </div>
           </div>
         </div>
       )}
