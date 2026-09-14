@@ -89,6 +89,7 @@ interface PausedSale {
   items: CartItem[]
   total: number
   appliedDiscount?: { type: "percentage" | "fixed"; value: number; montoPyg: number; reason: string; supervisorId: string; supervisorNombre: string } | null
+  extraPaymentLegs?: any[]
 }
 
 interface CurrencyRates {
@@ -985,6 +986,43 @@ export default function POSPage() {
   const [bancardTxnResult, setBancardTxnResult] = useState<BancardTxnResult | null>(null)
   const [bancardTxnError, setBancardTxnError] = useState<string>("")
   const [showBancardManualFallback, setShowBancardManualFallback] = useState(false)
+
+  // ── COBROS ADICIONALES DEL MISMO MEDIO (2da/3ra tarjeta, 2do/3er QR, etc.) ──
+  // Genérico y N-instancias: se suma a la "línea principal" de cada método
+  // (que sigue funcionando exactamente igual, sin tocar) en vez de reemplazarla.
+  // Ver memoria "pendiente-pagos-multiples-mismo-metodo" para el porqué.
+  type ExtraLegMethod = "bancard" | "qr" | "dinelco" | "plugpay" | "plugpay_credito"
+  interface ExtraPaymentLeg {
+    id: string
+    method: ExtraLegMethod
+    montoStr: string
+    cardType: "debito" | "credito"
+    cardCuotas: number
+    txnState: "idle" | "esperando" | "confirmando" | "aprobada" | "error_rechazo" | "error_conexion"
+    txnResult: any
+    txnError: string
+    showManualFallback: boolean
+    manualCupon: string
+    manualAuth: string
+    logId: string | null
+  }
+  const [extraPaymentLegs, setExtraPaymentLegs] = useState<ExtraPaymentLeg[]>([])
+  const updateExtraLeg = (id: string, patch: Partial<ExtraPaymentLeg>) => {
+    setExtraPaymentLegs((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+  }
+  const addExtraLeg = (method: ExtraLegMethod) => {
+    const id = `leg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    setExtraPaymentLegs((prev) => [...prev, {
+      id, method, montoStr: "", cardType: "debito", cardCuotas: 1,
+      txnState: "idle", txnResult: null, txnError: "", showManualFallback: false,
+      manualCupon: "", manualAuth: "", logId: null,
+    }])
+  }
+  const removeExtraLeg = (id: string) => {
+    setExtraPaymentLegs((prev) => prev.filter((l) => l.id !== id))
+  }
+  const extraLegsMontoTotal = (method: ExtraLegMethod) =>
+    extraPaymentLegs.filter((l) => l.method === method && (l.txnState === "aprobada" || l.manualCupon.trim())).reduce((sum, l) => sum + (parseInt(l.montoStr.replace(/\D/g, "") || "0", 10)), 0)
   const [dinelcoTxnState, setDinelcoTxnState] = useState<"idle" | "esperando_tarjeta" | "confirmando" | "aprobada" | "error_rechazo" | "error_conexion">("idle")
   const [dinelcoTxnResult, setDinelcoTxnResult] = useState<any>(null)
   const [dinelcoTxnError, setDinelcoTxnError] = useState<string>("")
@@ -1430,6 +1468,80 @@ export default function POSPage() {
         setPayCashPyg(formatPYG(remaining))
       }
     }
+  }
+
+  // Version leg-scoped de handleBancardCharge, para el 2do/3er cobro con
+  // tarjeta de la misma venta -- misma logica de protocolo, escribe en
+  // extraPaymentLegs en vez de las variables singleton de la linea principal.
+  const handleBancardChargeForLeg = async (leg: ExtraPaymentLeg) => {
+    const ip = activePosConfig.bancardIp
+    if (!ip) {
+      toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
+      return
+    }
+    const montoBancard = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    if (montoBancard <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por Bancard antes de continuar.")
+      return
+    }
+    const electronAPI = (window as any).electronAPI
+    if (!electronAPI?.bancardCall) {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.", showManualFallback: true })
+      return
+    }
+    const facturaNro = Date.now()
+    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null, showManualFallback: false })
+
+    const tipoOperacion = leg.cardType === "debito" ? "venta_debito" : (leg.cardCuotas > 1 ? `venta_credito_${leg.cardCuotas}cuotas` : "venta_credito")
+    const path1 = "/pos/venta-ux"
+    const body1: any = { facturaNro, monto: montoBancard }
+    if (leg.cardType === "credito" && leg.cardCuotas > 1) {
+      body1.cuotas = leg.cardCuotas
+      body1.plan = 1
+    }
+    const res1 = await electronAPI.bancardCall(ip, path1, body1, 90000)
+
+    if (!res1.ok) {
+      if (res1.status === 400 || res1.status === 500) {
+        updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: bancardErrorMessage(res1.body?.message) })
+        await logBancardTxn({
+          tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res1.body?.message,
+          monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res1.body,
+        })
+      } else {
+        updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: `No se pudo conectar con el terminal (${res1.message || "error de red"}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.`, showManualFallback: true })
+      }
+      return
+    }
+
+    const { bin, nsu } = res1.body || {}
+    updateExtraLeg(leg.id, { txnState: "confirmando" })
+    const body2 = { bin, nsu, monto: montoBancard }
+    const res2 = await electronAPI.bancardCall(ip, "/pos/descuento", body2, 30000)
+
+    if (!res2.ok) {
+      if (res2.status === 400 || res2.status === 500) {
+        updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: bancardErrorMessage(res2.body?.message) })
+        await logBancardTxn({
+          tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res2.body?.message,
+          bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res2.body,
+        })
+      } else {
+        updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: `Se cobró en el terminal pero no se pudo confirmar la respuesta (${res2.message || "error de red"}) -- revisá el terminal y cargá el cupón manualmente.`, showManualFallback: true })
+      }
+      return
+    }
+
+    const result = res2.body || {}
+    const logged = await logBancardTxn({
+      tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
+      bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
+      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
+      issuer_id: result.issuerId, nombre_tarjeta: result.nombreTarjeta, pan: result.pan,
+      mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
+      monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
+    })
+    updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null, manualCupon: result.nroBoleta || "" })
   }
 
   const logDinelcoTxn = async (data: Record<string, any>) => {
@@ -4746,6 +4858,7 @@ export default function POSPage() {
       setCustomer(DEFAULT_CUSTOMER)
       setAppliedDiscount(null)
       setExtraClubAdminOverride(false)
+      setExtraPaymentLegs([])
       toast.warning("Venta Cancelada", "Se anularon todos los productos del ticket.")
     } else if (action.type === "decrease_qty" && action.itemId && action.delta) {
       const itemBefore = cart.find((i) => i.id === action.itemId)
@@ -5162,12 +5275,14 @@ export default function POSPage() {
       items: [...cart],
       total: totalPyg,
       appliedDiscount,
+      extraPaymentLegs,
     }
     setPausedSales((prev) => [newPaused, ...prev])
     setCart([])
     setCustomer(DEFAULT_CUSTOMER)
     setAppliedDiscount(null)
     setExtraClubAdminOverride(false)
+    setExtraPaymentLegs([])
     toast.info("Venta en Espera", "La venta fue pausada exitosamente.")
   }
 
@@ -5175,6 +5290,7 @@ export default function POSPage() {
     setCart(paused.items)
     setCustomer(paused.customer)
     setAppliedDiscount(paused.appliedDiscount || null)
+    setExtraPaymentLegs(paused.extraPaymentLegs || [])
     setPausedSales((prev) => prev.filter((p) => p.id !== paused.id))
     setShowPausedModal(false)
     toast.success("Venta Recuperada", `Restaurados ${paused.items.length} ítems.`)
@@ -5532,6 +5648,7 @@ export default function POSPage() {
     }
     if (activeMethods.has("bancard")) {
       recibido += isMultiPayment ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += extraLegsMontoTotal("bancard")
     }
     if (activeMethods.has("dinelco")) {
       recibido += isMultiPayment ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
@@ -5563,7 +5680,7 @@ export default function POSPage() {
       saldoRestantePyg: Math.round(saldo),
       vueltoPyg: Math.round(vuelto)
     }
-  }, [activeMethods, isMultiPayment, payCashPyg, payCashBrl, payCashUsd, mixedCardPyg, mixedDinelcoPyg, mixedQrPyg, mixedParceladoPyg, mixedExtraClubPyg, totalPyg, rates])
+  }, [activeMethods, isMultiPayment, payCashPyg, payCashBrl, payCashUsd, mixedCardPyg, mixedDinelcoPyg, mixedQrPyg, mixedParceladoPyg, mixedExtraClubPyg, totalPyg, rates, extraPaymentLegs])
 
   // ── Detección inteligente de redondeo para Centro Amor y Esperanza ("Abre tu corazón") ──
   const montoSugeridoDonacion = useMemo(() => {
@@ -6011,6 +6128,12 @@ export default function POSPage() {
         if (activeMethods.has("bancard")) {
           cardMonto = isMultiPayment ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (cardMonto > 0) out.push({ forma_pago: "TARJETA_BANCARD", monto: cardMonto, moneda: "PYG" })
+          for (const leg of extraPaymentLegs.filter((l) => l.method === "bancard")) {
+            const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+            if (legMonto > 0 && (leg.txnState === "aprobada" || leg.manualCupon.trim())) {
+              out.push({ forma_pago: "TARJETA_BANCARD", monto: legMonto, moneda: "PYG" })
+            }
+          }
         }
         if (activeMethods.has("dinelco")) {
           dinelcoMonto = isMultiPayment ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
@@ -6779,6 +6902,7 @@ export default function POSPage() {
       setCustomer(DEFAULT_CUSTOMER)
       setAppliedDiscount(null)
       setExtraClubAdminOverride(false)
+      setExtraPaymentLegs([])
       toast.success(
         "¡Cobro Exitoso!",
         `Comprobante ${numeroComprobante} emitido. Vuelto: ${formatPYG(vueltoFinalPyg)}` +
@@ -9436,6 +9560,94 @@ export default function POSPage() {
                             )}
                           </div>
                         )}
+
+                        {/* COBROS ADICIONALES CON TARJETA (2da, 3ra... -- otras cuentas/tarjetas en la misma venta) */}
+                        {isMultiPayment && (
+                          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+                            {extraPaymentLegs.filter((l) => l.method === "bancard").map((leg, idx) => (
+                              <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase">Tarjeta #{idx + 2}</span>
+                                  {leg.txnState === "idle" && (
+                                    <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
+                                  )}
+                                </div>
+                                <div className="flex gap-1">
+                                  <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-lg gap-0.5">
+                                    <button type="button" disabled={leg.txnState !== "idle"} onClick={() => updateExtraLeg(leg.id, { cardType: "debito", cardCuotas: 1 })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.cardType === "debito" ? "bg-blue-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>Débito</button>
+                                    <button type="button" disabled={leg.txnState !== "idle"} onClick={() => updateExtraLeg(leg.id, { cardType: "credito" })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.cardType === "credito" ? "bg-blue-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>Crédito</button>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={leg.montoStr}
+                                    disabled={leg.txnState !== "idle"}
+                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                    onFocus={(e) => e.target.select()}
+                                    placeholder="Monto ₲"
+                                    className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
+                                  />
+                                </div>
+
+                                {leg.txnState === "idle" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleBancardChargeForLeg(leg)}
+                                    disabled={!activePosConfig.bancardIp}
+                                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 cursor-pointer"
+                                  >
+                                    <CreditCard className="w-3.5 h-3.5" />
+                                    Cobrar Tarjeta #{idx + 2}
+                                  </button>
+                                )}
+                                {(leg.txnState === "esperando" || leg.txnState === "confirmando") && (
+                                  <div className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-blue-600/60 text-white">
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    {leg.txnState === "esperando" ? "Presente la tarjeta..." : "Confirmando..."}
+                                  </div>
+                                )}
+                                {leg.txnState === "aprobada" && leg.txnResult && (
+                                  <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300 space-y-0.5">
+                                    <div className="font-black">✓ {leg.txnResult.mensajeDisplay || "Aprobada"}</div>
+                                    <div className="font-posMono tabular-nums">Aut. {leg.txnResult.codigoAutorizacion} · Boleta {leg.txnResult.nroBoleta}</div>
+                                  </div>
+                                )}
+                                {leg.txnState === "error_rechazo" && (
+                                  <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1">
+                                    <div className="font-black">✕ {leg.txnError}</div>
+                                    <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="text-[10px] font-bold underline cursor-pointer">Reintentar</button>
+                                  </div>
+                                )}
+                                {leg.txnState === "error_conexion" && (
+                                  <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
+                                    <div className="font-black">⚠ {leg.txnError}</div>
+                                    <button type="button" onClick={() => handleBancardChargeForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
+                                    <div>
+                                      <button type="button" onClick={() => updateExtraLeg(leg.id, { showManualFallback: !leg.showManualFallback })} className="text-[10px] font-bold underline cursor-pointer">
+                                        {leg.showManualFallback ? "Ocultar carga manual" : "Cargar voucher manualmente"}
+                                      </button>
+                                      {leg.showManualFallback && (
+                                        <input
+                                          type="text"
+                                          value={leg.manualCupon}
+                                          onChange={(e) => updateExtraLeg(leg.id, { manualCupon: e.target.value })}
+                                          placeholder="Nº Voucher"
+                                          className="mt-1 w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-[11px] text-emerald-600 dark:text-emerald-400 font-bold outline-none"
+                                        />
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => addExtraLeg("bancard")}
+                              className="w-full text-[11px] font-bold text-blue-600 dark:text-blue-400 border border-dashed border-blue-400/50 rounded-xl py-2 hover:bg-blue-500/5 cursor-pointer"
+                            >
+                              + Agregar otra tarjeta (otra cuenta/cliente)
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -10367,6 +10579,11 @@ export default function POSPage() {
                   onClick={() => {
                     if (activeMethods.has("bancard") && bancardTxnState !== "aprobada" && !posCardCupon.trim()) {
                       toast.warning("Bancard sin confirmar", "Cobrá con el terminal o cargá el cupón manualmente antes de continuar.")
+                      return
+                    }
+                    const legPendiente = extraPaymentLegs.find((l) => l.txnState !== "aprobada" && !l.manualCupon.trim())
+                    if (legPendiente) {
+                      toast.warning("Cobro adicional sin confirmar", "Hay una tarjeta/QR adicional cargada pero sin cobrar -- completala o quitala antes de continuar.")
                       return
                     }
                     if (activeMethods.has("dinelco") && dinelcoTxnState !== "aprobada" && !dinelcoCupon.trim()) {
