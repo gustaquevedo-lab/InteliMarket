@@ -271,6 +271,21 @@ export default function WhatsAppPage() {
     }
   }
 
+  const handleResetSession = async () => {
+    setLoadingQr(true)
+    setQrCodeData(null)
+    setPairingCode(null)
+    try {
+      await api.whatsapp.disconnect()
+      toast.info("Sesión Purgada", "Generando código QR limpio y fresco...")
+      setTimeout(async () => {
+        await handleRequestQr()
+      }, 1200)
+    } catch {
+      await handleRequestQr()
+    }
+  }
+
   const handleSendTestMessage = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!testPhone.trim()) {
@@ -1067,14 +1082,22 @@ export default function WhatsAppPage() {
                       <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
                         Abrí WhatsApp &gt; Ajustes &gt; Dispositivos vinculados &gt; Vincular un dispositivo
                       </p>
-                      <p className="text-[11px] text-slate-400">El código expira en 40 segundos. El sistema verificará automáticamente.</p>
+                      <p className="text-[11px] text-slate-400">El código expira en 30-40 segundos. Escanealo inmediatamente.</p>
                     </div>
                     {pairingCode && (
-                      <div className="mt-2 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 px-4 py-2 rounded-xl flex items-center gap-2">
-                        <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">Código numérico:</span>
+                      <div className="mt-1 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 px-4 py-2 rounded-xl flex items-center gap-2">
+                        <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">Código numérico alternativo:</span>
                         <code className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400">{pairingCode}</code>
                       </div>
                     )}
+                    <button
+                      onClick={handleResetSession}
+                      disabled={loadingQr}
+                      className="text-[11px] font-bold text-slate-500 hover:text-emerald-600 flex items-center gap-1 mt-1 underline underline-offset-2 cursor-pointer"
+                      title="Si el celular dice 'No pudo vincular', hacé clic aquí para resetear la sesión zombi"
+                    >
+                      <RotateCcw className="w-3 h-3" /> ¿Dio error al escanear? Limpiar sesión y regenerar QR
+                    </button>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center text-center gap-3 py-10">
@@ -1088,6 +1111,27 @@ export default function WhatsAppPage() {
                   </div>
                 )}
               </div>
+
+              {/* Tips si el celular dice 'No pudo vincular' */}
+              {!status?.connected && (
+                <div className="mt-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/50 text-[11px] text-amber-800 dark:text-amber-300 space-y-1">
+                  <div className="font-bold flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                    ¿Tu celular dice &quot;No se pudo vincular el dispositivo&quot;?
+                  </div>
+                  <ul className="list-disc list-inside space-y-0.5 text-[10.5px] text-amber-700 dark:text-amber-400">
+                    <li>
+                      <strong>Máximo 4 dispositivos:</strong> En tu WhatsApp, revisá <em>Dispositivos vinculados</em>. Si ya tenés 4 sesiones activas, cerrá sesión en una de ellas.
+                    </li>
+                    <li>
+                      <strong>Escaneo inmediato:</strong> Escaneá el QR apenas aparezca en pantalla antes de que expire su rotación (25-30s).
+                    </li>
+                    <li>
+                      <strong>Sesión residual:</strong> Hacé clic en <em>Limpiar sesión y regenerar QR</em> para purgar cualquier intento incompleto previo.
+                    </li>
+                  </ul>
+                </div>
+              )}
             </div>
 
             <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3">
@@ -1096,10 +1140,25 @@ export default function WhatsAppPage() {
                 Cifrado punto a punto vía Evolution Engine
               </div>
               {!status?.connected && (
-                <button onClick={handleRequestQr} disabled={loadingQr} className="btn-primary py-2 px-5 text-xs flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 shadow-sm">
-                  <QrCode className="w-4 h-4" />
-                  {loadingQr ? "Generando..." : "Generar Código QR"}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleResetSession}
+                    disabled={loadingQr}
+                    className="btn-outline py-2 px-3 text-xs flex items-center gap-1.5 text-slate-600 dark:text-slate-300"
+                    title="Cierra cualquier intento previo y genera un QR 100% fresco"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Resetear
+                  </button>
+                  <button
+                    onClick={handleRequestQr}
+                    disabled={loadingQr}
+                    className="btn-primary py-2 px-4 text-xs flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 shadow-sm"
+                  >
+                    <QrCode className="w-4 h-4" />
+                    {loadingQr ? "Generando..." : "Generar Código QR"}
+                  </button>
+                </div>
               )}
             </div>
           </div>
