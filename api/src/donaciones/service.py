@@ -7,6 +7,7 @@ from sqlalchemy import select, func, update, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.donaciones.models import DonationCampaign, DonationRecord, DonationLiquidation
+from api.src.common.dates import end_of_day
 from api.src.donaciones.schemas import (
     DonationCampaignCreate,
     DonationCampaignUpdate,
@@ -173,8 +174,8 @@ async def get_cajeros_ranking(
         don_filter.append(DonationRecord.created_at >= fecha_desde)
         sale_filter.append(Sale.fecha >= fecha_desde)
     if fecha_hasta:
-        don_filter.append(DonationRecord.created_at <= fecha_hasta)
-        sale_filter.append(Sale.fecha <= fecha_hasta)
+        don_filter.append(DonationRecord.created_at <= end_of_day(fecha_hasta))
+        sale_filter.append(Sale.fecha <= end_of_day(fecha_hasta))
 
     # 1. Total ventas por cajero / user_id
     sales_q = select(

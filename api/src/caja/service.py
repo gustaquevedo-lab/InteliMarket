@@ -33,6 +33,7 @@ from api.src.plugpay.models import PlugpayTransaction
 from api.src.financial.models import BankAccount, BankTransaction
 from api.src.auth.models import User
 from api.src.returns.models import Return
+from api.src.common.dates import end_of_day
 from api.src.fiscal.models import NotaCreditoDebito
 
 # Canales de pago oficiales desglosados aceptados en Extra Supermercado
@@ -313,7 +314,7 @@ async def list_sessions(
     if fecha_desde:
         query = query.where(CashSession.fecha_apertura >= fecha_desde)
     if fecha_hasta:
-        query = query.where(CashSession.fecha_apertura <= fecha_hasta)
+        query = query.where(CashSession.fecha_apertura <= end_of_day(fecha_hasta))
     query = query.order_by(CashSession.fecha_apertura.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     return list(result.scalars().all())
@@ -3125,7 +3126,7 @@ async def get_vault_movimientos(db: AsyncSession, company_id: str, fecha_desde: 
         .where(
             VaultEntry.company_id == uuid.UUID(company_id),
             VaultEntry.created_at >= fecha_desde,
-            VaultEntry.created_at <= fecha_hasta,
+            VaultEntry.created_at <= end_of_day(fecha_hasta),
         )
         .order_by(VaultEntry.created_at.desc())
     )

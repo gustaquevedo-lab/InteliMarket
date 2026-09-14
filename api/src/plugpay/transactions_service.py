@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import uuid
 
 from api.src.plugpay.models import PlugpayTransaction
+from api.src.common.dates import end_of_day
 
 
 async def log_transaction(db: AsyncSession, company_id: str, **kwargs) -> PlugpayTransaction:
@@ -60,7 +61,7 @@ async def list_transactions(
     if fecha_desde:
         conditions.append(PlugpayTransaction.created_at >= fecha_desde)
     if fecha_hasta:
-        conditions.append(PlugpayTransaction.created_at <= fecha_hasta)
+        conditions.append(PlugpayTransaction.created_at <= end_of_day(fecha_hasta))
     if tipo_operacion and tipo_operacion != "all":
         conditions.append(PlugpayTransaction.tipo_operacion == tipo_operacion)
     if exitosa is not None:
@@ -95,7 +96,7 @@ async def get_summary(
     if fecha_desde:
         conditions.append(PlugpayTransaction.created_at >= fecha_desde)
     if fecha_hasta:
-        conditions.append(PlugpayTransaction.created_at <= fecha_hasta)
+        conditions.append(PlugpayTransaction.created_at <= end_of_day(fecha_hasta))
 
     query = select(PlugpayTransaction).where(and_(*conditions))
     result = await db.execute(query)
