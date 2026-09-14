@@ -7755,6 +7755,14 @@ export default function POSPage() {
         setShowCustomerModal(true)
       } else if (e.key === "Escape") {
         e.preventDefault()
+        // Con un cobro en curso, Escape NO puede cerrar la ventana de cobro:
+        // cerrarla no cancela el cobro. La venta se sigue registrando y, si
+        // califica, se abren los cupones -- la cajera cree que cancelo y la
+        // venta queda cobrada. Caja 4, 14-09, venta 001-014-0034430.
+        if (submitting) {
+          toast.warning("Cobro en proceso", "Esperá a que termine: una venta que ya se está registrando no se cancela con Escape.")
+          return
+        }
         setShowPaymentModal(false)
         setShowCustomerModal(false)
         setShowScaleModal(false)
@@ -9710,7 +9718,7 @@ export default function POSPage() {
               </div>
               <button
                 type="button"
-                onClick={() => setShowPaymentModal(false)}
+                disabled={submitting} onClick={() => { if (!submitting) setShowPaymentModal(false) }}
                 className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer"
                 title="Cerrar [ESC]"
               >
@@ -12337,7 +12345,7 @@ export default function POSPage() {
               <div className="shrink-0 flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70">
                 <button
                   type="button"
-                  onClick={() => setShowPaymentModal(false)}
+                  disabled={submitting} onClick={() => { if (!submitting) setShowPaymentModal(false) }}
                   className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer flex items-center gap-1.5 shadow-xs"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
