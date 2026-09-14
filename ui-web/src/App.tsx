@@ -87,7 +87,6 @@ const CarniceriaTvDigitalPage = lazy(() => import("./pages/kiosk/CarniceriaTvDig
 const DsdPage = lazy(() => import("./pages/operations/DsdPage"))
 const EslPage = lazy(() => import("./pages/operations/EslPage"))
 const PriceCheckerKioskPage = lazy(() => import("./pages/kiosk/PriceCheckerKioskPage"))
-const CajaRapidaPage = lazy(() => import("./pages/pos/CajaRapidaPage"))
 const SelfCheckoutPage = lazy(() => import("./pages/pos/SelfCheckoutPage"))
 const TransferenciasPage = lazy(() => import("./pages/inventory/TransferenciasPage"))
 const BovedaPage = lazy(() => import("./pages/caja/BovedaPage"))
