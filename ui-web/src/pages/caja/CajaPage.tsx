@@ -6,7 +6,7 @@ import {
   Layers, Users, RefreshCw, Printer, Check, ChevronRight, Activity, ShieldAlert,
   Coins, Sparkles, Building2, Store, Lock, KeyRound, Heart, FileSpreadsheet,
   BarChart3, Calendar, Filter, PieChart, Receipt, ClipboardCheck, Info,
-  ArrowLeftRight, Trash2, Landmark, FilePlus2
+  ArrowLeftRight, Trash2, Landmark, FilePlus2, Edit3
 } from "lucide-react"
 import {
   api,
@@ -355,6 +355,13 @@ export default function CajaPage() {
   const [efectivoRecibidoUsdStr, setEfectivoRecibidoUsdStr] = useState<string>("")
   const [efectivoObsTesoreria, setEfectivoObsTesoreria] = useState("")
   const [savingEfectivoReception, setSavingEfectivoReception] = useState(false)
+  const [syncDeclarado, setSyncDeclarado] = useState(false)
+  const [editDeclaradoOpen, setEditDeclaradoOpen] = useState(false)
+  const [editDeclaradoPyg, setEditDeclaradoPyg] = useState("")
+  const [editDeclaradoBrl, setEditDeclaradoBrl] = useState("")
+  const [editDeclaradoUsd, setEditDeclaradoUsd] = useState("")
+  const [editDeclaradoMotivo, setEditDeclaradoMotivo] = useState("")
+  const [savingDeclarado, setSavingDeclarado] = useState(false)
 
   const handlePygInputChange = (raw: string) => {
     const digits = raw.replace(/\D/g, "")
@@ -499,6 +506,7 @@ export default function CajaPage() {
         monto_recibido_brl: Number(efectivoRecibidoBrl || 0),
         monto_recibido_usd: Number(efectivoRecibidoUsd || 0),
         observaciones: efectivoObsTesoreria.trim() || undefined,
+        ajustar_declarado: syncDeclarado,
       })
       toast.success("Efectivo Asentado en Tesorería", `Recuento registrado: ${formatPYG(res.monto_confirmado_pyg)} / R$ ${res.monto_confirmado_brl.toFixed(2)}. ${res.dictamen}`)
       setPunteoData((prev: any) => {
@@ -506,6 +514,8 @@ export default function CajaPage() {
         const nextHandoff = {
           ...(prev.handoff || {}),
           estado: "confirmado",
+          monto_declarado_pyg: res.monto_declarado_pyg ?? prev.handoff?.monto_declarado_pyg,
+          monto_declarado_brl: res.monto_declarado_brl ?? prev.handoff?.monto_declarado_brl,
           monto_confirmado_pyg: res.monto_confirmado_pyg,
           monto_confirmado_brl: res.monto_confirmado_brl,
           discrepancia_confirmacion: res.discrepancia,
@@ -518,6 +528,7 @@ export default function CajaPage() {
           handoff: nextHandoff,
           session_data: {
             ...prev.session_data,
+            monto_cierre: syncDeclarado ? Number(efectivoRecibidoPyg || 0) : prev.session_data?.monto_cierre,
             estado: "verificada",
             handoff: nextHandoff,
           },
@@ -529,6 +540,48 @@ export default function CajaPage() {
       toast.error("Error al asentar efectivo", err?.message || "No se pudo registrar el recuento de Tesorería.")
     } finally {
       setSavingEfectivoReception(false)
+    }
+  }
+
+  const handleSaveDeclaradoSobre = async () => {
+    if (!punteoData?.session_data?.id) return
+    setSavingDeclarado(true)
+    try {
+      const rawPyg = Number(editDeclaradoPyg.replace(/\D/g, "") || 0)
+      const rawBrl = parseFloat(editDeclaradoBrl.replace(",", ".")) || 0
+      const rawUsd = parseFloat(editDeclaradoUsd.replace(",", ".")) || 0
+      const res = await api.caja.updateSessionRendicion(punteoData.session_data.id, {
+        monto_cierre_real: rawPyg,
+        monto_cierre_brl: rawBrl,
+        monto_cierre_usd: rawUsd,
+        motivo: editDeclaradoMotivo.trim() || undefined,
+      })
+      toast.success("Rendición Declarada Actualizada", `Monto declarado en sobre ajustado a ${formatPYG(rawPyg)}.`)
+      setPunteoData((prev: any) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          recon: res.recon || prev.recon,
+          handoff: {
+            ...(prev.handoff || {}),
+            monto_declarado_pyg: rawPyg,
+            monto_declarado_brl: rawBrl,
+            monto_declarado_usd: rawUsd,
+          },
+          session_data: {
+            ...prev.session_data,
+            monto_cierre: rawPyg,
+            recon: res.recon || prev.session_data?.recon,
+          },
+        }
+      })
+      setEditDeclaradoOpen(false)
+      fetchData()
+      fetchHistorial()
+    } catch (err: any) {
+      toast.error("Error al actualizar sobre", err?.message || "No se pudo actualizar el monto declarado en sobre.")
+    } finally {
+      setSavingDeclarado(false)
     }
   }
 
@@ -5006,34 +5059,99 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                         <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/80 space-y-2">
                           <div className="flex items-center justify-between text-xs text-slate-400 font-bold uppercase tracking-wider">
                             <span>1. Declarado en Sobre</span>
-                            <span className="text-[10px] text-slate-500 font-mono">Por Cajero/a</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditDeclaradoPyg(declPyg.toString())
+                                setEditDeclaradoBrl(declBrl > 0 ? declBrl.toString() : "")
+                                setEditDeclaradoUsd(declUsd > 0 ? declUsd.toString() : "")
+                                setEditDeclaradoMotivo("")
+                                setEditDeclaradoOpen(!editDeclaradoOpen)
+                              }}
+                              className="text-[10px] bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded font-mono font-bold transition border border-indigo-500/30 flex items-center gap-1"
+                              title="Corregir monto declarado en sobre si hubo error de tipeo al cerrar"
+                            >
+                              <Edit3 className="w-2.5 h-2.5" />
+                              {editDeclaradoOpen ? "Cancelar" : "Editar Sobre"}
+                            </button>
                           </div>
-                          <div className="space-y-1">
-                            <div className="flex items-baseline justify-between">
-                              <span className="text-xs text-slate-300">Efectivo Gs:</span>
-                              <span className="font-mono font-black text-white text-base">{formatPYG(declPyg)}</span>
+
+                          {editDeclaradoOpen ? (
+                            <div className="space-y-2 p-2.5 rounded-lg bg-indigo-950/40 border border-indigo-500/40 ring-1 ring-indigo-500/20">
+                              <span className="text-[10px] text-indigo-300 font-bold uppercase block">
+                                Corrección de Sobre Declarado:
+                              </span>
+                              <div>
+                                <label className="text-[9px] text-slate-300 font-bold block mb-0.5">Efectivo Guaraníes (₲):</label>
+                                <input
+                                  type="text"
+                                  value={editDeclaradoPyg ? Number(editDeclaradoPyg.replace(/\D/g, "")).toLocaleString("es-PY") : ""}
+                                  onChange={e => {
+                                    const digits = e.target.value.replace(/\D/g, "")
+                                    setEditDeclaradoPyg(digits)
+                                  }}
+                                  placeholder="0"
+                                  className="w-full bg-slate-900 border border-indigo-500/60 rounded px-2 py-1 text-xs font-mono font-bold text-white text-right outline-none focus:ring-1 focus:ring-indigo-400"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[9px] text-slate-300 font-bold block mb-0.5">Efectivo Reales (R$):</label>
+                                <input
+                                  type="text"
+                                  value={editDeclaradoBrl}
+                                  onChange={e => setEditDeclaradoBrl(e.target.value)}
+                                  placeholder="0.00"
+                                  className="w-full bg-slate-900 border border-amber-500/60 rounded px-2 py-1 text-xs font-mono font-bold text-amber-300 text-right outline-none focus:ring-1 focus:ring-amber-400"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[9px] text-slate-300 font-bold block mb-0.5">Motivo del Ajuste:</label>
+                                <input
+                                  type="text"
+                                  value={editDeclaradoMotivo}
+                                  onChange={e => setEditDeclaradoMotivo(e.target.value)}
+                                  placeholder="Ej: Error de digitación de cajera al cerrar en POS"
+                                  className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200 outline-none focus:ring-1 focus:ring-indigo-400"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={handleSaveDeclaradoSobre}
+                                disabled={savingDeclarado}
+                                className="w-full py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow"
+                              >
+                                {savingDeclarado ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                                Guardar Corrección en Sobre
+                              </button>
                             </div>
-                            <div className="flex items-baseline justify-between">
-                              <span className="text-xs text-slate-300">Efectivo R$:</span>
-                              <span className="font-mono font-bold text-amber-400 text-sm">{formatBRL(declBrl)}</span>
+                          ) : (
+                            <div className="space-y-1">
+                              <div className="flex items-baseline justify-between">
+                                <span className="text-xs text-slate-300">Efectivo Gs:</span>
+                                <span className="font-mono font-black text-white text-base">{formatPYG(declPyg)}</span>
+                              </div>
+                              <div className="flex items-baseline justify-between">
+                                <span className="text-xs text-slate-300">Efectivo R$:</span>
+                                <span className="font-mono font-bold text-amber-400 text-sm">{formatBRL(declBrl)}</span>
+                              </div>
+                              <div className="flex items-baseline justify-between text-[11px] text-slate-400 font-mono">
+                                <span>Equiv. Reales a Gs (1:{tasaBrl}):</span>
+                                <span>{formatPYG(declBrl * tasaBrl)}</span>
+                              </div>
+                              {declUsd > 0 && (
+                                <>
+                                  <div className="flex items-baseline justify-between">
+                                    <span className="text-xs text-slate-300">Efectivo US$:</span>
+                                    <span className="font-mono font-bold text-blue-400 text-sm">{formatUSD(declUsd)}</span>
+                                  </div>
+                                  <div className="flex items-baseline justify-between text-[11px] text-slate-400 font-mono">
+                                    <span>Equiv. Dólares a Gs (1:{tasaUsd}):</span>
+                                    <span>{formatPYG(declUsd * tasaUsd)}</span>
+                                  </div>
+                                </>
+                              )}
                             </div>
-                            <div className="flex items-baseline justify-between text-[11px] text-slate-400 font-mono">
-                              <span>Equiv. Reales a Gs (1:{tasaBrl}):</span>
-                              <span>{formatPYG(declBrl * tasaBrl)}</span>
-                            </div>
-                            {declUsd > 0 && (
-                              <>
-                                <div className="flex items-baseline justify-between">
-                                  <span className="text-xs text-slate-300">Efectivo US$:</span>
-                                  <span className="font-mono font-bold text-blue-400 text-sm">{formatUSD(declUsd)}</span>
-                                </div>
-                                <div className="flex items-baseline justify-between text-[11px] text-slate-400 font-mono">
-                                  <span>Equiv. Dólares a Gs (1:{tasaUsd}):</span>
-                                  <span>{formatPYG(declUsd * tasaUsd)}</span>
-                                </div>
-                              </>
-                            )}
-                          </div>
+                          )}
                           <div className="pt-2 border-t border-slate-700/60 space-y-1 text-xs">
                             <div className="flex items-center justify-between">
                               <span className="text-slate-300 font-bold">Total Sobre Declarado:</span>
@@ -5126,6 +5244,17 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           <div className="pt-2 border-t border-emerald-500/30 flex items-center justify-between text-xs">
                             <span className="text-emerald-300 font-bold">Total Contado Tesorería:</span>
                             <span className="font-mono font-black text-emerald-300 text-base">{formatPYG(recTotalGs)}</span>
+                          </div>
+                          <div className="pt-1.5 border-t border-emerald-500/20">
+                            <label className="flex items-center gap-2 cursor-pointer text-[11px] text-emerald-300 hover:text-emerald-200 select-none">
+                              <input
+                                type="checkbox"
+                                checked={syncDeclarado}
+                                onChange={e => setSyncDeclarado(e.target.checked)}
+                                className="w-3.5 h-3.5 rounded border-emerald-500 text-emerald-600 focus:ring-emerald-400 bg-slate-900"
+                              />
+                              <span>Ajustar también declarado en sobre (si la cajera tipeó mal al cerrar)</span>
+                            </label>
                           </div>
                         </div>
 

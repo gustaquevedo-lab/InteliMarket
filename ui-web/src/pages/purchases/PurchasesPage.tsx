@@ -34,6 +34,7 @@ import {
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatCurrency } from "../../utils/format"
+import { DevolucionProveedorPrintModal } from "./DevolucionProveedorPrintModal"
 
 type MainTab = "asistente_ia" | "demandas_clientes" | "ordenes" | "recepciones" | "facturas_p2p" | "devoluciones" | "matching" | "proveedores" | "requisiciones" | "cotizaciones" | "presupuestos" | "reportes"
 
@@ -115,6 +116,7 @@ export default function PurchasesPage() {
   const [supplierProducts, setSupplierProducts] = useState<any[]>([])
   const [loadingSupplierProducts, setLoadingSupplierProducts] = useState(false)
   const [selectedProductForReturn, setSelectedProductForReturn] = useState("")
+  const [selectedProductDetails, setSelectedProductDetails] = useState<any | null>(null)
   const [productInvoices, setProductInvoices] = useState<any[]>([])
   const [loadingProductInvoices, setLoadingProductInvoices] = useState(false)
   const [selectedInvoiceForReturn, setSelectedInvoiceForReturn] = useState("")
@@ -128,13 +130,25 @@ export default function PurchasesPage() {
   const [generalReturnNotes, setGeneralReturnNotes] = useState<string>("")
   const [savingReturn, setSavingReturn] = useState(false)
 
-  // Modales de Acción sobre Devoluciones (Detalle, Rechazo, Completado)
+  // Estados avanzados de búsqueda para Proveedores y Productos en Devoluciones
+  const [supplierSearchForReturn, setSupplierSearchForReturn] = useState("")
+  const [showSupplierPickerForReturn, setShowSupplierPickerForReturn] = useState(false)
+  const [productSearchForReturn, setProductSearchForReturn] = useState("")
+  const [showProductPickerForReturn, setShowProductPickerForReturn] = useState(false)
+  const [productSearchScope, setProductSearchScope] = useState<"proveedor" | "todos">("proveedor")
+  const [globalProductResults, setGlobalProductResults] = useState<any[]>([])
+  const [loadingGlobalProducts, setLoadingGlobalProducts] = useState(false)
+  const [productStockInfo, setProductStockInfo] = useState<{ cantidad_disponible: number; cantidad_total: number } | null>(null)
+  const [loadingProductStock, setLoadingProductStock] = useState(false)
+
+  // Modales de Acción sobre Devoluciones (Detalle, Rechazo, Completado, Impresión)
   const [viewingReturnDetail, setViewingReturnDetail] = useState<any | null>(null)
   const [rejectingReturnId, setRejectingReturnId] = useState<string | null>(null)
   const [rejectReasonInput, setRejectReasonInput] = useState("")
   const [completingReturnId, setCompletingReturnId] = useState<string | null>(null)
   const [ncNumberInput, setNcNumberInput] = useState("")
   const [processingReturnAction, setProcessingReturnAction] = useState(false)
+  const [printingReturnDoc, setPrintingReturnDoc] = useState<any | null>(null)
 
   // Facturas de Proveedores (Procure-to-Pay)
   const [allSupplierInvoices, setAllSupplierInvoices] = useState<SupplierInvoice[]>([])
@@ -1694,10 +1708,26 @@ export default function PurchasesPage() {
     return filteredReturnsAndNC.slice(start, start + pageSizeReturns)
   }, [filteredReturnsAndNC, pageReturns, pageSizeReturns])
 
-  // Handlers para Circuito de Devoluciones a Proveedor
+  // ── Handlers Interactivos para Circuito de Devoluciones a Proveedor ──
+
+  // Filtro reactivo de proveedores para el selector interactivo
+  const filteredSuppliersForReturn = useMemo(() => {
+    if (!supplierSearchForReturn.trim()) return suppliers.slice(0, 30)
+    const q = supplierSearchForReturn.toLowerCase().trim()
+    return suppliers.filter(s =>
+      (s.razon_social || "").toLowerCase().includes(q) ||
+      (s.ruc || "").toLowerCase().includes(q) ||
+      ((s as any).nombre_fantasia || "").toLowerCase().includes(q)
+    ).slice(0, 30)
+  }, [suppliers, supplierSearchForReturn])
+
   const handleSelectSupplierForReturn = async (supplierId: string) => {
     setSelectedSupplierForReturn(supplierId)
+    setShowSupplierPickerForReturn(false)
+    setSupplierSearchForReturn("")
     setSelectedProductForReturn("")
+    setSelectedProductDetails(null)
+    setProductStockInfo(null)
     setProductInvoices([])
     setSelectedInvoiceForReturn("")
     setSupplierProducts([])
@@ -1714,33 +1744,134 @@ export default function PurchasesPage() {
     }
   }
 
-  const handleSelectProductForReturn = async (productId: string) => {
-    setSelectedProductForReturn(productId)
+  // Búsqueda global en todo el catálogo de supermercado (11.000+ items)
+  const searchGlobalProductsForReturn = async (term: string) => {
+    const clean = term.trim()
+    if (!clean || clean.length < 2) {
+      setGlobalProductResults([])
+      return
+    }
+    setLoadingGlobalProducts(true)
+    try {
+      const res = await api.products.list({ search: clean, limit: 30 })
+      setGlobalProductResults(res || [])
+    } catch (err: any) {
+      setGlobalProductResults([])
+    } finally {
+      setLoadingGlobalProducts(false)
+    }
+  }
+
+  // Filtro reactivo de productos del proveedor
+  const filteredSupplierProducts = useMemo(() => {
+    if (!productSearchForReturn.trim()) return supplierProducts.slice(0, 30)
+    const q = productSearchForReturn.toLowerCase().trim()
+    return supplierProducts.filter(p =>
+      (p.nombre || "").toLowerCase().includes(q) ||
+      (p.sku || "").toLowerCase().includes(q) ||
+      (p.codigo_barra || "").toLowerCase().includes(q)
+    ).slice(0, 30)
+  }, [supplierProducts, productSearchForReturn])
+
+  // Selección directa de objeto producto (sea del proveedor o global)
+  const handleSelectProductObjectForReturn = async (prod: any) => {
+    if (!prod) return
+    setSelectedProductForReturn(prod.id)
+    setSelectedProductDetails(prod)
+    setShowProductPickerForReturn(false)
+    setProductSearchForReturn("")
     setSelectedInvoiceForReturn("")
     setProductInvoices([])
-    if (!productId || !selectedSupplierForReturn) return
 
-    const prod = supplierProducts.find(p => p.id === productId)
-    if (prod) {
-      setReturnUnitPrice(String(prod.costo_promedio || 0))
+    // Costo sugerido
+    const costo = prod.costo_promedio || prod.ultimo_costo || prod.costo_unitario || 0
+    setReturnUnitPrice(String(costo))
+
+    // Consultar stock disponible en depósito
+    setLoadingProductStock(true)
+    try {
+      const stk = await api.products.getProductStock(prod.id)
+      setProductStockInfo(stk ? {
+        cantidad_disponible: stk.cantidad_disponible ?? stk.cantidad_total ?? 0,
+        cantidad_total: stk.cantidad_total ?? 0
+      } : null)
+    } catch {
+      setProductStockInfo(null)
+    } finally {
+      setLoadingProductStock(false)
     }
 
-    setLoadingProductInvoices(true)
+    // Consultar facturas de compra del proveedor donde se adquirió este producto
+    if (selectedSupplierForReturn) {
+      setLoadingProductInvoices(true)
+      try {
+        const invoices = await api.purchases.productInvoices(selectedSupplierForReturn, prod.id)
+        setProductInvoices(invoices || [])
+        if (invoices && invoices.length > 0) {
+          const first = invoices[0]
+          if (first.precio_unitario) {
+            setReturnUnitPrice(String(first.precio_unitario))
+          }
+        }
+      } catch {
+        setProductInvoices([])
+      } finally {
+        setLoadingProductInvoices(false)
+      }
+    }
+  }
+
+  // Lector de código de barras (con pistola lectora o tecla Enter)
+  const handleBarcodeOrEnterProductSearch = async (term: string) => {
+    const clean = term.trim()
+    if (!clean) return
+
+    // 1. Buscar coincidencia exacta en catálogo de proveedor
+    const matchSupplier = supplierProducts.find(
+      p => (p.codigo_barra && p.codigo_barra.toLowerCase() === clean.toLowerCase()) ||
+           (p.sku && p.sku.toLowerCase() === clean.toLowerCase())
+    )
+    if (matchSupplier) {
+      toast.success("Producto Detectado", `${matchSupplier.nombre}`)
+      await handleSelectProductObjectForReturn(matchSupplier)
+      return
+    }
+
+    // 2. Buscar en catálogo general del supermercado
+    setLoadingGlobalProducts(true)
     try {
-      const invoices = await api.purchases.productInvoices(selectedSupplierForReturn, productId)
-      setProductInvoices(invoices || [])
-    } catch (err: any) {
-      toast.error("Error al buscar facturas del producto", err.message)
+      const res = await api.products.list({ search: clean, limit: 10 })
+      if (res && res.length > 0) {
+        const exact = res.find(
+          p => (p.codigo_barra && p.codigo_barra.toLowerCase() === clean.toLowerCase()) ||
+               (p.sku && p.sku.toLowerCase() === clean.toLowerCase())
+        ) || res[0]
+        toast.success("Producto Encontrado", `${exact.nombre}`)
+        await handleSelectProductObjectForReturn(exact)
+      } else {
+        toast.error("No Encontrado", `No se encontró ningún producto con código "${clean}"`)
+      }
+    } catch (e: any) {
+      toast.error("Error al buscar producto", e.message)
     } finally {
-      setLoadingProductInvoices(false)
+      setLoadingGlobalProducts(false)
+    }
+  }
+
+  const handleSelectProductForReturn = async (productId: string) => {
+    const prod = supplierProducts.find(p => p.id === productId) || globalProductResults.find(p => p.id === productId)
+    if (prod) {
+      await handleSelectProductObjectForReturn(prod)
+    } else {
+      setSelectedProductForReturn(productId)
     }
   }
 
   const handleSelectInvoiceForReturn = (invoiceId: string) => {
     setSelectedInvoiceForReturn(invoiceId)
     if (!invoiceId) {
-      const prod = supplierProducts.find(p => p.id === selectedProductForReturn)
-      if (prod) setReturnUnitPrice(String(prod.costo_promedio || 0))
+      const prod = selectedProductDetails || supplierProducts.find(p => p.id === selectedProductForReturn)
+      if (prod) setReturnUnitPrice(String(prod.costo_promedio || prod.ultimo_costo || 0))
       return
     }
     const inv = productInvoices.find(i => i.invoice_id === invoiceId)
@@ -1765,8 +1896,16 @@ export default function PurchasesPage() {
       return
     }
 
-    const prod = supplierProducts.find(p => p.id === selectedProductForReturn)
+    const prod = selectedProductDetails || supplierProducts.find(p => p.id === selectedProductForReturn)
     const inv = productInvoices.find(i => i.invoice_id === selectedInvoiceForReturn)
+
+    // Advertencia preventiva si la cantidad a devolver supera el stock disponible
+    if (productStockInfo && qty > productStockInfo.cantidad_disponible) {
+      toast.warning(
+        "Alerta de Stock Físico",
+        `La cantidad a devolver (${qty}) supera las existencias registradas (${productStockInfo.cantidad_disponible} un.). Se registrará igualmente para revisión.`
+      )
+    }
 
     const newItem = {
       producto_id: selectedProductForReturn,
@@ -1786,6 +1925,8 @@ export default function PurchasesPage() {
 
     setReturnItemsList(prev => [...prev, newItem])
     setSelectedProductForReturn("")
+    setSelectedProductDetails(null)
+    setProductStockInfo(null)
     setSelectedInvoiceForReturn("")
     setProductInvoices([])
     setReturnQuantity("1")
@@ -3599,7 +3740,7 @@ export default function PurchasesPage() {
               </div>
             ) : (
               <div className="overflow-x-auto w-full">
-                <table className="w-full text-left text-xs min-w-[950px]">
+                <table className="w-full text-left text-xs min-w-[1050px]">
                   <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700/60">
                     <tr>
                       <th className="p-3">Tipo / N° Comprobante</th>
@@ -3607,7 +3748,8 @@ export default function PurchasesPage() {
                       <th className="p-3">Fecha</th>
                       <th className="p-3">Factura Afectada</th>
                       <th className="p-3 text-right">Monto (Gs.)</th>
-                      <th className="p-3 text-center">Estado Aprobación</th>
+                      <th className="p-3 text-center">Estado Comercial</th>
+                      <th className="p-3 text-center">Impacto en Stock & Etapa</th>
                       <th className="p-3">Motivo / Observaciones</th>
                       <th className="p-3 text-center">Acciones</th>
                     </tr>
@@ -3677,15 +3819,49 @@ export default function PurchasesPage() {
                             )}
                           </td>
 
+                          {/* Nueva Columna: Impacto en Stock & Etapa */}
+                          <td className="p-3 text-center">
+                            {estado === "completado" ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Stock Descontado</span>
+                              </span>
+                            ) : estado === "autorizado" ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-300 dark:border-blue-700">
+                                <Truck className="w-3.5 h-3.5 text-blue-600" />
+                                <span>Mercadería Separada</span>
+                              </span>
+                            ) : estado === "pendiente" ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                <Clock className="w-3.5 h-3.5 text-amber-600" />
+                                <span>Sin Egreso (Revisión)</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300 dark:border-rose-700">
+                                <Ban className="w-3.5 h-3.5 text-rose-600" />
+                                <span>Sin Impacto</span>
+                              </span>
+                            )}
+                          </td>
+
                           <td className="p-3 text-gray-600 dark:text-gray-400 text-[11px] max-w-[200px] truncate" title={item.observaciones || item.motivo}>
                             {item.observaciones || item.motivo || "—"}
                           </td>
 
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1">
+                              {/* Botón Imprimir Comprobante Oficial Remito */}
+                              <button
+                                onClick={() => setPrintingReturnDoc(item.raw || item)}
+                                className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition"
+                                title="Imprimir Remito Oficial de Devolución"
+                              >
+                                <Printer className="w-4 h-4" />
+                              </button>
+
                               {isManaged && (
                                 <button
-                                  onClick={() => setViewingReturnDetail(item.raw)}
+                                  onClick={() => setViewingReturnDetail(item.raw || item)}
                                   className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg transition"
                                   title="Ver detalle de productos devueltos"
                                 >
@@ -6510,27 +6686,96 @@ export default function PurchasesPage() {
             {/* Contenido Scrollable */}
             <div className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
               {/* Sección Proveedor y Depósito */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
-                <div>
-                  <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+                {/* Selector Inteligente de Proveedor */}
+                <div className="relative">
+                  <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
                     Proveedor Destinatario <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    value={selectedSupplierForReturn}
-                    onChange={(e) => handleSelectSupplierForReturn(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                  >
-                    <option value="">-- Seleccionar Proveedor --</option>
-                    {suppliers.map(s => (
-                      <option key={s.id} value={s.id}>
-                        {s.razon_social} {s.ruc ? `(${s.ruc})` : ""}
-                      </option>
-                    ))}
-                  </select>
+
+                  {selectedSupplierForReturn ? (
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-slate-800 border-2 border-amber-500/40 shadow-xs">
+                      <div className="flex items-center gap-2.5 overflow-hidden">
+                        <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 flex items-center justify-center shrink-0">
+                          <Building2 className="w-4 h-4" />
+                        </div>
+                        <div className="truncate">
+                          <span className="font-extrabold text-xs text-gray-900 dark:text-white block truncate">
+                            {suppliers.find(s => s.id === selectedSupplierForReturn)?.razon_social || "Proveedor Seleccionado"}
+                          </span>
+                          <span className="text-[10px] text-gray-500 font-mono">
+                            RUC: {suppliers.find(s => s.id === selectedSupplierForReturn)?.ruc || "—"} · {supplierProducts.length} productos vinculados
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedSupplierForReturn("")
+                          setSupplierProducts([])
+                          setSelectedProductForReturn("")
+                          setSelectedProductDetails(null)
+                          setProductStockInfo(null)
+                          setProductInvoices([])
+                        }}
+                        className="px-2 py-1 rounded-lg text-[10px] font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors shrink-0"
+                      >
+                        Cambiar
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <div className="relative">
+                        <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
+                        <input
+                          type="text"
+                          value={supplierSearchForReturn}
+                          onChange={(e) => {
+                            setSupplierSearchForReturn(e.target.value)
+                            setShowSupplierPickerForReturn(true)
+                          }}
+                          onFocus={() => setShowSupplierPickerForReturn(true)}
+                          placeholder="Buscar proveedor por Razón Social o RUC..."
+                          className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none text-xs"
+                        />
+                      </div>
+
+                      {showSupplierPickerForReturn && (
+                        <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-30 max-h-52 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
+                          {filteredSuppliersForReturn.length === 0 ? (
+                            <div className="p-3 text-center text-gray-400 text-xs">
+                              No se encontraron proveedores que coincidan con la búsqueda.
+                            </div>
+                          ) : (
+                            filteredSuppliersForReturn.map(s => (
+                              <button
+                                key={s.id}
+                                type="button"
+                                onClick={() => handleSelectSupplierForReturn(s.id)}
+                                className="w-full p-2.5 text-left hover:bg-amber-50 dark:hover:bg-slate-700 flex items-center justify-between transition-colors"
+                              >
+                                <div className="truncate">
+                                  <p className="font-bold text-xs text-gray-900 dark:text-white truncate">
+                                    {s.razon_social}
+                                  </p>
+                                  <p className="text-[10px] text-gray-500 font-mono">
+                                    RUC: {s.ruc || "—"} {(s as any).nombre_fantasia ? `· ${(s as any).nombre_fantasia}` : ""}
+                                  </p>
+                                </div>
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-600 text-gray-600 dark:text-gray-300 font-mono shrink-0">
+                                  Seleccionar
+                                </span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
                     Depósito de Salida Físico
                   </label>
                   <select
@@ -6543,168 +6788,336 @@ export default function PurchasesPage() {
                       <option key={w.id} value={w.id}>{w.nombre || w.codigo}</option>
                     ))}
                   </select>
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Depósito desde el cual egresará físicamente la mercadería devuelta.
+                  </p>
                 </div>
               </div>
 
-              {/* Selector Dinámico de Producto y Factura */}
+              {/* Selector Dinámico e Integral de Productos (Lector de Barras, SKU y Nombre) */}
               {selectedSupplierForReturn && (
-                <div className="p-4 rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-950/20 space-y-4">
-                  <div className="flex items-center justify-between border-b border-amber-200/60 dark:border-amber-800/40 pb-2">
-                    <span className="font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5 text-sm">
+                <div className="p-4 rounded-2xl border border-amber-200 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-950/20 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200/60 dark:border-amber-800/40 pb-2.5">
+                    <div className="flex items-center gap-2">
                       <Box className="w-4 h-4 text-amber-600" />
-                      Agregar Mercadería a Devolver
-                    </span>
-                    {loadingSupplierProducts && (
-                      <span className="text-[11px] text-amber-700 dark:text-amber-400 flex items-center gap-1">
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando catálogo del proveedor...
+                      <span className="font-extrabold text-amber-950 dark:text-amber-300 text-sm">
+                        Búsqueda y Carga de Mercadería a Devolver
                       </span>
-                    )}
-                  </div>
+                    </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Producto */}
-                    <div>
-                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                        Producto del Proveedor <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        value={selectedProductForReturn}
-                        onChange={(e) => handleSelectProductForReturn(e.target.value)}
-                        disabled={loadingSupplierProducts || supplierProducts.length === 0}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none disabled:opacity-50"
+                    {/* Scope Switch: Catálogo del Proveedor vs Catálogo General del Supermercado */}
+                    <div className="flex items-center gap-1 bg-white dark:bg-slate-800 p-1 rounded-xl border border-amber-200 dark:border-slate-700 text-[10px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProductSearchScope("proveedor")
+                          setShowProductPickerForReturn(false)
+                        }}
+                        className={`px-2.5 py-1 rounded-lg transition-colors ${
+                          productSearchScope === "proveedor"
+                            ? "bg-amber-600 text-white shadow-xs"
+                            : "text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        }`}
                       >
-                        <option value="">
-                          {supplierProducts.length === 0 && !loadingSupplierProducts
-                            ? "-- No se encontraron productos para este proveedor --"
-                            : "-- Seleccionar Producto --"}
-                        </option>
-                        {supplierProducts.map(p => (
-                          <option key={p.id} value={p.id}>
-                            {p.nombre} {p.sku ? `[${p.sku}]` : ""} {p.costo_unitario ? `(Costo: ${formatPYG(p.costo_unitario)})` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Factura Afectada */}
-                    <div>
-                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                        Factura de Compra Afectada (P2P)
-                      </label>
-                      <select
-                        value={selectedInvoiceForReturn}
-                        onChange={(e) => handleSelectInvoiceForReturn(e.target.value)}
-                        disabled={!selectedProductForReturn || loadingProductInvoices}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none disabled:opacity-50"
+                        Catálogo Proveedor ({supplierProducts.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProductSearchScope("todos")
+                          setShowProductPickerForReturn(false)
+                          if (productSearchForReturn.length >= 2) {
+                            searchGlobalProductsForReturn(productSearchForReturn)
+                          }
+                        }}
+                        className={`px-2.5 py-1 rounded-lg transition-colors ${
+                          productSearchScope === "todos"
+                            ? "bg-amber-600 text-white shadow-xs"
+                            : "text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        }`}
                       >
-                        <option value="">Sin factura específica (Ajuste directo)</option>
-                        {productInvoices.map(inv => (
-                          <option key={inv.invoice_id} value={inv.invoice_id}>
-                            {inv.numero_factura} — {formatDate(inv.fecha_emision)} — Costo: {formatPYG(inv.precio_unitario)} (Comprado: {inv.cantidad_facturada})
-                          </option>
-                        ))}
-                      </select>
+                        Todo el Supermercado (11.000+)
+                      </button>
                     </div>
                   </div>
 
-                  {/* Detalle del ítem */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div>
-                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                        Motivo <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        value={returnReason}
-                        onChange={(e) => setReturnReason(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  {/* Input de Búsqueda con Soporte de Pistola de Código de Barras / SKU */}
+                  {!selectedProductForReturn ? (
+                    <div className="relative">
+                      <div className="relative flex items-center">
+                        <Barcode className="w-5 h-5 absolute left-3 text-amber-600 dark:text-amber-400" />
+                        <input
+                          type="text"
+                          value={productSearchForReturn}
+                          onChange={(e) => {
+                            const val = e.target.value
+                            setProductSearchForReturn(val)
+                            setShowProductPickerForReturn(true)
+                            if (productSearchScope === "todos" && val.trim().length >= 2) {
+                              searchGlobalProductsForReturn(val)
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault()
+                              handleBarcodeOrEnterProductSearch(productSearchForReturn)
+                            }
+                          }}
+                          onFocus={() => setShowProductPickerForReturn(true)}
+                          placeholder="Pistolear código de barras, ingresar SKU interno o escribir nombre del producto... [Enter para autoseleccionar]"
+                          className="w-full pl-10 pr-24 py-2.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-800 text-gray-900 dark:text-white font-medium focus:ring-2 focus:ring-amber-500 focus:outline-none text-xs shadow-xs"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleBarcodeOrEnterProductSearch(productSearchForReturn)}
+                          className="absolute right-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold rounded-lg transition-colors"
+                        >
+                          Buscar
+                        </button>
+                      </div>
+
+                      {/* Dropdown de Resultados de Búsqueda */}
+                      {showProductPickerForReturn && (
+                        <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl z-30 max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
+                          {loadingSupplierProducts || loadingGlobalProducts ? (
+                            <div className="p-4 text-center text-gray-400 text-xs flex items-center justify-center gap-2">
+                              <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
+                              <span>Buscando artículos en catálogo...</span>
+                            </div>
+                          ) : (productSearchScope === "proveedor" ? filteredSupplierProducts : globalProductResults).length === 0 ? (
+                            <div className="p-4 text-center text-gray-400 text-xs">
+                              <p className="font-bold">No se encontraron artículos con esa búsqueda.</p>
+                              {productSearchScope === "proveedor" && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setProductSearchScope("todos")
+                                    searchGlobalProductsForReturn(productSearchForReturn)
+                                  }}
+                                  className="mt-2 px-3 py-1 bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-bold rounded-lg text-[10px] hover:bg-amber-200"
+                                >
+                                  Buscar en todo el catálogo de 11.000+ productos
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            (productSearchScope === "proveedor" ? filteredSupplierProducts : globalProductResults).map(p => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => handleSelectProductObjectForReturn(p)}
+                                className="w-full p-2.5 text-left hover:bg-amber-50 dark:hover:bg-slate-700 flex items-center justify-between gap-3 transition-colors"
+                              >
+                                <div className="truncate">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-bold text-xs text-gray-900 dark:text-white">
+                                      {p.nombre}
+                                    </span>
+                                    {p.codigo_barra && (
+                                      <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 font-mono text-[9px] text-gray-600 dark:text-gray-300 flex items-center gap-1">
+                                        <Barcode className="w-3 h-3" /> {p.codigo_barra}
+                                      </span>
+                                    )}
+                                    {p.sku && (
+                                      <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/50 font-mono text-[9px] text-amber-800 dark:text-amber-300 font-bold">
+                                        SKU: {p.sku}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-gray-500 mt-0.5">
+                                    Costo Referencial: <strong>{formatPYG(p.costo_promedio || p.ultimo_costo || p.costo_unitario || 0)}</strong> · Unidad: {p.unidad_medida || "UN"}
+                                  </p>
+                                </div>
+                                <span className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-bold shrink-0">
+                                  Elegir
+                                </span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Tarjeta del Producto Seleccionado */
+                    <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border-2 border-amber-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-black text-sm text-gray-900 dark:text-white">
+                            {selectedProductDetails?.nombre || "Producto Seleccionado"}
+                          </span>
+                          {selectedProductDetails?.codigo_barra && (
+                            <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-700 font-mono text-[10px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                              <Barcode className="w-3.5 h-3.5 text-amber-600" /> {selectedProductDetails.codigo_barra}
+                            </span>
+                          )}
+                          {selectedProductDetails?.sku && (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/60 font-mono text-[10px] font-bold text-amber-800 dark:text-amber-300">
+                              SKU: {selectedProductDetails.sku}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-3 text-[11px] text-gray-600 dark:text-gray-300 font-mono">
+                          <span>
+                            Stock en Depósito:{" "}
+                            {loadingProductStock ? (
+                              <Loader2 className="w-3 h-3 inline animate-spin" />
+                            ) : (
+                              <strong className={productStockInfo && productStockInfo.cantidad_disponible > 0 ? "text-emerald-600" : "text-amber-600"}>
+                                {productStockInfo ? `${productStockInfo.cantidad_disponible} UN` : "Consultando..."}
+                              </strong>
+                            )}
+                          </span>
+                          <span>·</span>
+                          <span>
+                            Costo Sugerido: <strong>{formatPYG(returnUnitPrice)}</strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedProductForReturn("")
+                          setSelectedProductDetails(null)
+                          setProductStockInfo(null)
+                          setSelectedInvoiceForReturn("")
+                          setProductInvoices([])
+                        }}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-800 shrink-0"
                       >
-                        <option value="vencido">Vencido / Próximo a vencer</option>
-                        <option value="danado">Dañado / Defectuoso</option>
-                        <option value="sobrestock">Exceso de stock / Acordado</option>
-                        <option value="error_envio">Error en envío de mercadería</option>
-                        <option value="otro">Otro motivo</option>
-                      </select>
+                        Cambiar Producto
+                      </button>
                     </div>
+                  )}
 
-                    <div>
-                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                        Cantidad a Devolver <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        step="any"
-                        min="0.001"
-                        value={returnQuantity}
-                        onChange={(e) => setReturnQuantity(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                      />
+                  {/* Factura Afectada y Formulario de Carga del Ítem */}
+                  {selectedProductForReturn && (
+                    <div className="space-y-4 pt-2">
+                      {/* Factura Afectada */}
+                      <div>
+                        <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                          Factura de Compra Afectada (P2P)
+                        </label>
+                        <select
+                          value={selectedInvoiceForReturn}
+                          onChange={(e) => handleSelectInvoiceForReturn(e.target.value)}
+                          disabled={loadingProductInvoices}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none disabled:opacity-50"
+                        >
+                          <option value="">Sin factura específica (Ajuste directo)</option>
+                          {productInvoices.map(inv => (
+                            <option key={inv.invoice_id} value={inv.invoice_id}>
+                              Fact. #{inv.numero_factura} — {formatDate(inv.fecha_emision)} — Costo: {formatPYG(inv.precio_unitario)} (Comprado: {inv.cantidad_comprada ?? (inv as any).cantidad_facturada} un.)
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[10px] text-gray-400 mt-0.5">
+                          {productInvoices.length > 0
+                            ? `Se encontraron ${productInvoices.length} facturas previas de compra de este producto con este proveedor.`
+                            : "Este producto no registra facturas de compra previas con este proveedor (se procesará como ajuste directo)."}
+                        </p>
+                      </div>
+
+                      {/* Parámetros del Ítem */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div>
+                          <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                            Motivo <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            value={returnReason}
+                            onChange={(e) => setReturnReason(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                          >
+                            <option value="vencido">Vencido / Próximo a vencer</option>
+                            <option value="danado">Dañado / Defectuoso</option>
+                            <option value="sobrestock">Exceso de stock / Acordado</option>
+                            <option value="error_envio">Error en envío de mercadería</option>
+                            <option value="otro">Otro motivo</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                            Cantidad a Devolver <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0.001"
+                            value={returnQuantity}
+                            onChange={(e) => setReturnQuantity(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono font-bold"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                            Valor Unitario (Gs.) <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            value={returnUnitPrice}
+                            onChange={(e) => setReturnUnitPrice(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono font-bold"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                            Lote (Opcional)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ej: L-9821"
+                            value={returnLot}
+                            onChange={(e) => setReturnLot(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                            Fecha Vencimiento (Opcional)
+                          </label>
+                          <input
+                            type="date"
+                            value={returnExpiryDate}
+                            onChange={(e) => setReturnExpiryDate(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                            Detalle / Observación del ítem
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ej: Empaque roto al desembalar"
+                            value={returnDetailNotes}
+                            onChange={(e) => setReturnDetailNotes(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end pt-1">
+                        <button
+                          type="button"
+                          onClick={handleAddReturnItem}
+                          className="px-5 py-2.5 rounded-xl font-bold bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-2 shadow-sm transition-colors"
+                        >
+                          <Plus className="w-4 h-4" /> Agregar Ítem a la Devolución
+                        </button>
+                      </div>
                     </div>
-
-                    <div>
-                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                        Valor Unitario (Gs.) <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={returnUnitPrice}
-                        onChange={(e) => setReturnUnitPrice(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                        Lote (Opcional)
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Ej: L-9821"
-                        value={returnLot}
-                        onChange={(e) => setReturnLot(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                        Fecha Vencimiento (Opcional)
-                      </label>
-                      <input
-                        type="date"
-                        value={returnExpiryDate}
-                        onChange={(e) => setReturnExpiryDate(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                        Detalle / Observación del ítem
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Ej: Empaque roto al desembalar"
-                        value={returnDetailNotes}
-                        onChange={(e) => setReturnDetailNotes(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end pt-1">
-                    <button
-                      type="button"
-                      onClick={handleAddReturnItem}
-                      disabled={!selectedProductForReturn}
-                      className="px-4 py-2 rounded-xl font-bold bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-colors"
-                    >
-                      <Plus className="w-4 h-4" /> Agregar a la Devolución
-                    </button>
-                  </div>
+                  )}
                 </div>
               )}
 
@@ -6724,7 +7137,8 @@ export default function PurchasesPage() {
                     <table className="w-full text-left text-xs">
                       <thead className="bg-slate-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 font-bold">
                         <tr>
-                          <th className="py-2.5 px-3">Producto</th>
+                          <th className="py-2.5 px-3">Producto / SKU</th>
+                          <th className="py-2.5 px-3">Cód. Barras</th>
                           <th className="py-2.5 px-3">Factura Afectada</th>
                           <th className="py-2.5 px-3">Motivo</th>
                           <th className="py-2.5 px-3 text-right">Cant.</th>
@@ -6738,24 +7152,30 @@ export default function PurchasesPage() {
                           <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                             <td className="py-2.5 px-3">
                               <span className="font-semibold text-gray-900 dark:text-white">{it.producto_nombre}</span>
-                              {it.sku && <span className="block text-[10px] text-gray-400 font-mono">SKU: {it.sku}</span>}
-                              {it.lote && <span className="block text-[10px] text-amber-600">Lote: {it.lote}</span>}
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {it.sku && <span className="text-[10px] text-amber-700 dark:text-amber-400 font-mono font-bold">SKU: {it.sku}</span>}
+                                {it.lote && <span className="text-[10px] text-gray-500 font-mono">Lote: {it.lote}</span>}
+                                {it.fecha_vencimiento && <span className="text-[10px] text-rose-600 font-mono">Vto: {it.fecha_vencimiento}</span>}
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-gray-700 dark:text-gray-300">
+                              {it.codigo_barra || "—"}
                             </td>
                             <td className="py-2.5 px-3 font-mono text-gray-600 dark:text-gray-300">
-                              {it.factura_numero || "Ajuste directo"}
+                              {it.factura_numero ? `#${it.factura_numero}` : "Ajuste directo"}
                             </td>
                             <td className="py-2.5 px-3">
                               <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300">
                                 {it.motivo}
                               </span>
                             </td>
-                            <td className="py-2.5 px-3 text-right font-bold text-gray-900 dark:text-white">
+                            <td className="py-2.5 px-3 text-right font-bold text-gray-900 dark:text-white font-mono">
                               {it.cantidad}
                             </td>
-                            <td className="py-2.5 px-3 text-right text-gray-700 dark:text-gray-300">
+                            <td className="py-2.5 px-3 text-right text-gray-700 dark:text-gray-300 font-mono">
                               {formatPYG(it.valor_unitario)}
                             </td>
-                            <td className="py-2.5 px-3 text-right font-bold text-amber-600 dark:text-amber-400">
+                            <td className="py-2.5 px-3 text-right font-bold text-amber-600 dark:text-amber-400 font-mono">
                               {formatPYG(it.valor_total)}
                             </td>
                             <td className="py-2.5 px-3 text-center">
@@ -6772,10 +7192,10 @@ export default function PurchasesPage() {
                       </tbody>
                       <tfoot className="bg-slate-50 dark:bg-slate-800/80 font-bold border-t border-slate-200 dark:border-slate-700">
                         <tr>
-                          <td colSpan={5} className="py-2.5 px-3 text-right text-gray-700 dark:text-gray-300">
+                          <td colSpan={6} className="py-2.5 px-3 text-right text-gray-700 dark:text-gray-300">
                             Total Estimado Devolución:
                           </td>
-                          <td className="py-2.5 px-3 text-right text-sm text-amber-600 dark:text-amber-400">
+                          <td className="py-2.5 px-3 text-right text-sm text-amber-600 dark:text-amber-400 font-mono">
                             {formatPYG(returnItemsList.reduce((acc, curr) => acc + curr.valor_total, 0))}
                           </td>
                           <td></td>
@@ -6873,16 +7293,68 @@ export default function PurchasesPage() {
                 </p>
               </div>
 
-              <button
-                onClick={() => setViewingReturnDetail(null)}
-                className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPrintingReturnDoc(viewingReturnDetail.raw || viewingReturnDetail)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-sm transition-colors"
+                >
+                  <Printer className="w-4 h-4" /> Imprimir Remito
+                </button>
+                <button
+                  onClick={() => setViewingReturnDetail(null)}
+                  className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Contenido */}
             <div className="p-6 overflow-y-auto space-y-4 flex-1 text-xs">
+              {/* Banner de Impacto en Stock */}
+              {viewingReturnDetail.estado === "completado" && (
+                <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 flex items-start gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-emerald-900 dark:text-emerald-200">
+                      Impacto en Stock: Egresado y Confirmado
+                    </div>
+                    <div className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-0.5">
+                      Las unidades salieron físicamente del inventario bajo el movimiento Kardex <code>devolucion_proveedor</code>. El saldo de compra fue afectado.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {viewingReturnDetail.estado === "autorizado" && (
+                <div className="p-3.5 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50 flex items-start gap-3">
+                  <Clock className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-blue-900 dark:text-blue-200">
+                      Impacto en Stock: Salida Autorizada (Pendiente de Retiro)
+                    </div>
+                    <div className="text-[11px] text-blue-700 dark:text-blue-300 mt-0.5">
+                      Devolución aprobada comercialmente. La mercadería debe prepararse para el transportista. El egreso de stock definitivo se consolidará al marcar la devolución como completada.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {viewingReturnDetail.estado === "pendiente" && (
+                <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-amber-900 dark:text-amber-200">
+                      Impacto en Stock: En Trámite (Sin Egreso de Inventario)
+                    </div>
+                    <div className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
+                      La solicitud está en espera de aprobación del proveedor. No se ha realizado aún ningún descuento contable ni físico de mercadería.
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {viewingReturnDetail.motivo_rechazo && (
                 <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/50 text-red-800 dark:text-red-300">
                   <strong className="block font-bold mb-0.5">Motivo del Rechazo:</strong>
@@ -6902,7 +7374,7 @@ export default function PurchasesPage() {
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 font-bold">
                     <tr>
-                      <th className="py-2.5 px-3">Producto</th>
+                      <th className="py-2.5 px-3">Producto / Código</th>
                       <th className="py-2.5 px-3">Factura</th>
                       <th className="py-2.5 px-3">Motivo</th>
                       <th className="py-2.5 px-3 text-right">Cant.</th>
@@ -6914,8 +7386,13 @@ export default function PurchasesPage() {
                     {(viewingReturnDetail.raw?.items || []).map((it: any, idx: number) => (
                       <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                         <td className="py-2.5 px-3">
-                          <span className="font-semibold text-gray-900 dark:text-white">{it.producto_nombre}</span>
-                          {it.lote && <span className="block text-[10px] text-gray-400">Lote: {it.lote}</span>}
+                          <span className="font-semibold text-gray-900 dark:text-white block">{it.producto_nombre}</span>
+                          <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 font-mono">
+                            {it.codigo_barras && <span>CB: {it.codigo_barras}</span>}
+                            {it.codigo_interno && <span>SKU: {it.codigo_interno}</span>}
+                            {it.lote && <span>Lote: {it.lote}</span>}
+                            {it.fecha_vencimiento && <span>Vto: {it.fecha_vencimiento}</span>}
+                          </div>
                         </td>
                         <td className="py-2.5 px-3 font-mono text-gray-600 dark:text-gray-300">
                           {it.factura_numero || "Ajuste directo"}
@@ -6952,7 +7429,14 @@ export default function PurchasesPage() {
             </div>
 
             {/* Footer */}
-            <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2 bg-slate-50/50 dark:bg-slate-800/40">
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 bg-slate-50/50 dark:bg-slate-800/40">
+              <button
+                type="button"
+                onClick={() => setPrintingReturnDoc(viewingReturnDetail.raw || viewingReturnDetail)}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-sm transition-colors"
+              >
+                <Printer className="w-4 h-4" /> Imprimir Remito Oficial
+              </button>
               <button
                 type="button"
                 onClick={() => setViewingReturnDetail(null)}
@@ -7378,6 +7862,16 @@ export default function PurchasesPage() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: REMITO OFICIAL DE IMPRESIÓN DE DEVOLUCIÓN A PROVEEDOR
+      ────────────────────────────────────────────────────────────────────────── */}
+      {printingReturnDoc && (
+        <DevolucionProveedorPrintModal
+          devolucion={printingReturnDoc}
+          onClose={() => setPrintingReturnDoc(null)}
+        />
       )}
     </div>
   )

@@ -1421,8 +1421,10 @@ export const api = {
     sessionPunteo: (sessionId: string) => client.get<any>(`/v1/cash-sessions/${sessionId}/punteo`),
     savePunteoAudit: (sessionId: string, data: { items: any[]; observaciones_dictamen?: string; diferencia_vouchers_gs?: number; monto_recibido_pyg?: number; monto_recibido_brl?: number; monto_recibido_usd?: number; observaciones_efectivo?: string }) =>
       client.post<any>(`/v1/cash-sessions/${sessionId}/punteo/asentar`, data),
-    confirmSessionCash: (sessionId: string, data: { monto_recibido_pyg: number; monto_recibido_brl?: number; monto_recibido_usd?: number; observaciones?: string }) =>
+    confirmSessionCash: (sessionId: string, data: { monto_recibido_pyg: number; monto_recibido_brl?: number; monto_recibido_usd?: number; observaciones?: string; ajustar_declarado?: boolean }) =>
       client.post<any>(`/v1/cash-sessions/${sessionId}/confirm-cash-reception`, data),
+    updateSessionRendicion: (sessionId: string, data: { monto_cierre_real: number; monto_cierre_brl?: number; monto_cierre_usd?: number; motivo?: string }) =>
+      client.patch<any>(`/v1/cash-sessions/${sessionId}/rendicion`, data),
     downloadSessionPunteoPdf: (sessionId: string) =>
       downloadAuthenticated(`/v1/cash-sessions/${sessionId}/export/punteo.pdf`, undefined, `planilla_punteo_${sessionId.slice(0, 8)}.pdf`),
     downloadActaVerificacionPdf: (sessionId: string, filename?: string) =>

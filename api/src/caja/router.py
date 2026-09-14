@@ -22,7 +22,7 @@ from api.src.caja.schemas import (
     PaymentMethodBankMappingUpdate, PaymentMethodBankMappingResponse,
     CashShortageConfigUpdate, CashShortageConfigResponse,
     ResolveCashShortageRequest, IncorporateSessionVaultAndBanksRequest,
-    ConfirmSessionCashReceptionRequest,
+    ConfirmSessionCashReceptionRequest, CashSessionRendicionUpdate,
     CreatePaymentAdjustmentRequest, PaymentAdjustmentResponse,
 )
 from api.src.caja import service
@@ -180,6 +180,33 @@ async def update_session_fondo(
             monto_pyg=body.monto_apertura,
             monto_brl=body.monto_apertura_brl,
             monto_usd=body.monto_apertura_usd,
+            motivo=body.motivo,
+            supervisor_user=user,
+        )
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.patch("/cash-sessions/{session_id}/rendicion")
+async def update_session_rendicion(
+    session_id: str,
+    body: CashSessionRendicionUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_rol = (user.get("rol") or "").lower()
+    if user_rol not in ("supervisor", "admin", "superadmin", "gerente"):
+        raise HTTPException(status_code=403, detail="Solo supervisores o administradores pueden ajustar el monto rendido de caja")
+
+    try:
+        updated = await service.update_session_rendicion(
+            db=db,
+            session_id=session_id,
+            company_id=user["company_id"],
+            monto_cierre_real=body.monto_cierre_real,
+            monto_cierre_brl=body.monto_cierre_brl,
+            monto_cierre_usd=body.monto_cierre_usd,
             motivo=body.motivo,
             supervisor_user=user,
         )
@@ -460,6 +487,7 @@ async def confirm_session_cash_reception(
             monto_recibido_brl=body.monto_recibido_brl,
             monto_recibido_usd=body.monto_recibido_usd,
             observaciones=body.observaciones,
+            ajustar_declarado=getattr(body, "ajustar_declarado", False) or False,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

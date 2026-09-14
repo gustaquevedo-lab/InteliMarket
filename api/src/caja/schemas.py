@@ -212,6 +212,14 @@ class ConfirmSessionCashReceptionRequest(BaseModel):
     monto_recibido_brl: Decimal = Decimal("0")
     monto_recibido_usd: Decimal = Decimal("0")
     observaciones: Optional[str] = None
+    ajustar_declarado: Optional[bool] = False
+
+
+class CashSessionRendicionUpdate(BaseModel):
+    monto_cierre_real: Decimal
+    monto_cierre_brl: Decimal = Decimal("0")
+    monto_cierre_usd: Decimal = Decimal("0")
+    motivo: Optional[str] = None
 
 
 class PaymentMethodBankMappingUpdate(BaseModel):

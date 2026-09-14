@@ -1069,12 +1069,8 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     fondo_brl = Decimal(str(session_obj.monto_apertura_brl or 0))
     fondo_usd = Decimal(str(session_obj.monto_apertura_usd or 0))
 
-    if is_supervisora:
-        fondo_pyg = Decimal("0")
-        fondo_brl = Decimal("0.00")
-        fondo_usd = Decimal("0.00")
-    else:
-        if fondo_pyg <= 0 and fondo_brl <= 0:
+    if fondo_pyg <= 0 and fondo_brl <= 0:
+        if not is_supervisora:
             fondo_pyg = Decimal("500000")
             fondo_brl = Decimal("300.00")
 
@@ -4082,6 +4078,7 @@ async def confirm_session_cash_reception(
     monto_recibido_brl: Decimal = Decimal("0"),
     monto_recibido_usd: Decimal = Decimal("0"),
     observaciones: str | None = None,
+    ajustar_declarado: bool = False,
 ) -> dict:
     """Asienta formalmente el recuento y recepción física del sobre de efectivo en Tesorería.
     Compara lo efectivamente contado en Tesorería contra lo declarado por la cajera/supervisora al cierre."""
@@ -4120,14 +4117,27 @@ async def confirm_session_cash_reception(
             cash_count_id=count_id,
             entregado_por=session_obj.user_id,
             entregado_por_nombre=session_obj.cajero_nombre,
-            monto_pyg=contado_neto_pyg,
-            monto_brl=contado_neto_brl,
-            monto_usd=contado_neto_usd,
+            monto_pyg=monto_recibido_pyg if ajustar_declarado else contado_neto_pyg,
+            monto_brl=monto_recibido_brl if ajustar_declarado else contado_neto_brl,
+            monto_usd=monto_recibido_usd if ajustar_declarado else contado_neto_usd,
             estado="pendiente",
         )
         db.add(handoff)
         await db.flush()
-    elif handoff.estado == "pendiente":
+    elif ajustar_declarado:
+        handoff.monto_pyg = monto_recibido_pyg
+        handoff.monto_brl = monto_recibido_brl
+        handoff.monto_usd = monto_recibido_usd
+        session_obj.monto_cierre = monto_recibido_pyg
+        count_res = await db.execute(
+            select(CashCount).where(CashCount.session_id == sid).order_by(CashCount.created_at.desc()).limit(1)
+        )
+        count = count_res.scalar_one_or_none()
+        if count:
+            count.monto_efectivo = monto_recibido_pyg
+            count.monto_efectivo_brl = monto_recibido_brl
+            count.monto_efectivo_usd = monto_recibido_usd
+    elif handoff.estado == "pendiente" and (handoff.monto_pyg is None or handoff.monto_pyg <= 0):
         handoff.monto_pyg = contado_neto_pyg
         handoff.monto_brl = contado_neto_brl
         handoff.monto_usd = contado_neto_usd
@@ -4308,6 +4318,119 @@ async def update_session_fondo_inicial(
     await db.commit()
     await db.refresh(session_obj)
     return session_obj
+
+
+async def update_session_rendicion(
+    db: AsyncSession,
+    session_id: str,
+    company_id: str,
+    monto_cierre_real: Decimal,
+    monto_cierre_brl: Decimal = Decimal("0"),
+    monto_cierre_usd: Decimal = Decimal("0"),
+    motivo: str | None = None,
+    supervisor_user: dict | None = None,
+) -> dict:
+    """Permite al Supervisor / Administrador ajustar el monto de efectivo declarado/rendido en el sobre
+    al cierre de la sesión (ej. por error de tipeo del cajero en el POS), actualizando la sesión,
+    el arqueo físico (CashCount), la entrega (CashHandoff), y recalculando los esperados y diferencias."""
+    cid = uuid.UUID(company_id)
+    sid = uuid.UUID(session_id)
+
+    res = await db.execute(
+        select(CashSession, CashRegister)
+        .join(CashRegister, CashRegister.id == CashSession.register_id)
+        .where(CashSession.id == sid, CashRegister.company_id == cid)
+    )
+    row = res.first()
+    if not row:
+        raise ValueError("Sesión de caja no encontrada")
+    session_obj, register = row
+
+    old_pyg = float(session_obj.monto_cierre or 0)
+    session_obj.monto_cierre = monto_cierre_real
+
+    # Actualizar o crear CashCount
+    count_res = await db.execute(
+        select(CashCount).where(CashCount.session_id == sid).order_by(CashCount.created_at.desc()).limit(1)
+    )
+    count = count_res.scalar_one_or_none()
+    if count:
+        count.monto_efectivo = monto_cierre_real
+        count.monto_efectivo_brl = monto_cierre_brl
+        count.monto_efectivo_usd = monto_cierre_usd
+    else:
+        count = CashCount(
+            session_id=sid,
+            monto_efectivo=monto_cierre_real,
+            monto_efectivo_brl=monto_cierre_brl,
+            monto_efectivo_usd=monto_cierre_usd,
+            monto_total=monto_cierre_real,
+            diferencia=Decimal("0"),
+        )
+        db.add(count)
+        await db.flush()
+
+    # Actualizar o crear CashHandoff
+    h_res = await db.execute(
+        select(CashHandoff).where(CashHandoff.session_id == sid).order_by(CashHandoff.created_at.desc()).limit(1)
+    )
+    handoff = h_res.scalar_one_or_none()
+    if handoff:
+        handoff.monto_pyg = monto_cierre_real
+        handoff.monto_brl = monto_cierre_brl
+        handoff.monto_usd = monto_cierre_usd
+        if handoff.monto_confirmado_pyg is not None:
+            handoff.discrepancia_confirmacion = bool(
+                handoff.monto_confirmado_pyg != handoff.monto_pyg
+                or (handoff.monto_confirmado_brl or Decimal("0")) != (handoff.monto_brl or Decimal("0"))
+                or (handoff.monto_confirmado_usd or Decimal("0")) != (handoff.monto_usd or Decimal("0"))
+            )
+    else:
+        handoff = CashHandoff(
+            company_id=cid,
+            session_id=sid,
+            cash_count_id=count.id,
+            entregado_por=session_obj.user_id,
+            entregado_por_nombre=session_obj.cajero_nombre,
+            monto_pyg=monto_cierre_real,
+            monto_brl=monto_cierre_brl,
+            monto_usd=monto_cierre_usd,
+            estado="pendiente",
+        )
+        db.add(handoff)
+
+    # Recalcular reconciliación completa
+    await db.flush()
+    recon = await get_session_reconciliation_data(db, sid)
+    if recon and count:
+        tasa_brl = Decimal(str(recon.get("tasa_brl") or 1))
+        tasa_usd = Decimal(str(recon.get("tasa_usd") or 1))
+        c_tot = monto_cierre_real + (monto_cierre_brl * tasa_brl) + (monto_cierre_usd * tasa_usd)
+        count.monto_total = c_tot
+        count.diferencia = Decimal(str(recon["diferencia_consolidada_gs"]))
+        count.diferencia_brl = Decimal(str(recon["diferencia_brl"]))
+        count.diferencia_usd = Decimal(str(recon["diferencia_usd"]))
+
+    sup_nombre = (supervisor_user or {}).get("user_nombre") or (supervisor_user or {}).get("user_email") or "Supervisor"
+    now_str = datetime.now(TZ_ASUNCION).strftime("%d/%m/%Y %H:%M")
+    nota = f"\n[ARQUEO/RENDICIÓN EN SOBRE AJUSTADO ({now_str}) por {sup_nombre}]: ₲ {old_pyg:,.0f} -> ₲ {float(monto_cierre_real):,.0f}"
+    if monto_cierre_brl > 0:
+        nota += f" | R$ {float(monto_cierre_brl):.2f}"
+    if motivo:
+        nota += f" (Motivo: {motivo})"
+    session_obj.observaciones = (session_obj.observaciones or "") + nota
+
+    await db.commit()
+    await db.refresh(session_obj)
+
+    return {
+        "status": "ok",
+        "session_id": str(sid),
+        "monto_cierre": float(monto_cierre_real),
+        "monto_cierre_brl": float(monto_cierre_brl),
+        "monto_cierre_usd": float(monto_cierre_usd),
+        "recon": recon,
+    }
 
 
 # ── Reportes Especializados de Ventas por Cajero y Medios de Pago ─────

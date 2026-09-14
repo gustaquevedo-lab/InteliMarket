@@ -3,12 +3,13 @@ import {
   Search, RotateCcw, Eye, Loader2, CheckCircle, XCircle, X,
   DollarSign, Clock, Undo2, Check, RefreshCw, PackageCheck, AlertCircle,
   FileText, Plus, Building2, Tag, Truck, ArrowUpRight, ShieldCheck,
-  AlertTriangle, Filter, ChevronRight
+  AlertTriangle, Filter, ChevronRight, Printer
 } from "lucide-react"
 import { api, type ReturnType, type ReturnItemType, type Sale, type Warehouse } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG, formatDate } from "../../utils/format"
+import { DevolucionProveedorPrintModal } from "../purchases/DevolucionProveedorPrintModal"
 
 interface SupplierCreditNote {
   id: string
@@ -33,6 +34,10 @@ interface SupplierReturn {
   monto: number
   moneda: string
   observaciones: string
+  estado?: string
+  almacen_nombre?: string
+  items?: any[]
+  raw?: any
 }
 
 const MOTIVOS_LABELS: Record<string, string> = {
@@ -89,6 +94,7 @@ export default function ReturnsPage() {
   const [supRetSearch, setSupRetSearch] = useState("")
   const [loadingSupRet, setLoadingSupRet] = useState(true)
   const [viewingSupRet, setViewingSupRet] = useState<SupplierReturn | null>(null)
+  const [printingSupplierReturn, setPrintingSupplierReturn] = useState<any | null>(null)
 
   const [refreshing, setRefreshing] = useState(false)
 
@@ -143,8 +149,48 @@ export default function ReturnsPage() {
   const fetchSupplierReturns = async () => {
     setLoadingSupRet(true)
     try {
-      const data = await api.financial.supplierReturns()
-      setSupplierReturns(Array.isArray(data) ? data : [])
+      const [finData, managedData] = await Promise.allSettled([
+        api.financial.supplierReturns().catch(() => []),
+        api.purchases.returns.list().catch(() => []),
+      ])
+      const finList: any[] = finData.status === "fulfilled" && Array.isArray(finData.value) ? finData.value : []
+      const managedList: any[] = managedData.status === "fulfilled" && Array.isArray(managedData.value) ? managedData.value : []
+
+      const normalizedManaged: SupplierReturn[] = managedList.map((m: any) => ({
+        id: m.id,
+        supplier_id: m.proveedor_id || m.supplier_id || "",
+        supplier_nombre: m.proveedor_nombre || m.supplier_nombre || "Proveedor",
+        numero_factura_origen: m.items?.[0]?.factura_numero || m.factura_numero || "",
+        numero_nota_credito: m.codigo || m.numero || `DEV-${m.id?.slice(0, 8)}`,
+        fecha: m.fecha || m.created_at,
+        monto: Number(m.monto_total || m.monto || 0),
+        moneda: m.moneda || "PYG",
+        observaciones: m.observaciones || m.motivo || "",
+        estado: m.estado || "pendiente",
+        almacen_nombre: m.almacen_nombre,
+        items: m.items || [],
+        raw: m,
+      }))
+
+      const managedIds = new Set(normalizedManaged.map(m => m.id))
+      const combined: SupplierReturn[] = [
+        ...normalizedManaged,
+        ...finList.filter((f: any) => !managedIds.has(f.id)).map((f: any) => ({
+          id: f.id,
+          supplier_id: f.supplier_id || "",
+          supplier_nombre: f.supplier_nombre || "Proveedor",
+          numero_factura_origen: f.numero_factura_origen || "",
+          numero_nota_credito: f.numero_nota_credito || `DEV-${f.id?.slice(0, 8)}`,
+          fecha: f.fecha,
+          monto: Number(f.monto || 0),
+          moneda: f.moneda || "PYG",
+          observaciones: f.observaciones || "Devolución física a proveedor",
+          estado: f.estado || "completado",
+          raw: f,
+        })),
+      ]
+
+      setSupplierReturns(combined)
     } catch {
       setSupplierReturns([])
     } finally {
@@ -820,10 +866,11 @@ export default function ReturnsPage() {
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
                   <tr>
-                    <th className="p-4">Nº Nota de Crédito</th>
-                    <th className="p-4">Fecha Devolución</th>
+                    <th className="p-4">Nº Devolución / Código</th>
+                    <th className="p-4">Fecha</th>
                     <th className="p-4">Proveedor</th>
                     <th className="p-4">Factura Afectada</th>
+                    <th className="p-4">Impacto en Stock & Etapa</th>
                     <th className="p-4">Observaciones / Motivo</th>
                     <th className="p-4 text-right">Monto Devuelto</th>
                     <th className="p-4 text-center">Acciones</th>
@@ -832,14 +879,14 @@ export default function ReturnsPage() {
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
                   {loadingSupRet ? (
                     <tr>
-                      <td colSpan={7} className="p-12 text-center text-slate-400">
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
                         <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-rose-500" />
                         <span>Cargando devoluciones a proveedores...</span>
                       </td>
                     </tr>
                   ) : filteredSupplierReturns.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-12 text-center text-slate-400">
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
                         No se encontraron devoluciones a proveedores.
                       </td>
                     </tr>
@@ -855,26 +902,56 @@ export default function ReturnsPage() {
                         <td className="p-4 text-slate-500 font-mono text-[11px]">
                           {sr.fecha ? formatDate(sr.fecha) : "—"}
                         </td>
-                        <td className="p-4 font-bold text-slate-800 dark:text-slate-200 max-w-[200px] truncate">
+                        <td className="p-4 font-bold text-slate-800 dark:text-slate-200 max-w-[180px] truncate">
                           {sr.supplier_nombre || "Proveedor"}
                         </td>
                         <td className="p-4 font-mono text-slate-500 text-[11px]">
                           {sr.numero_factura_origen ? `#${sr.numero_factura_origen}` : "—"}
                         </td>
-                        <td className="p-4 text-slate-600 dark:text-slate-300 max-w-[220px] truncate">
+                        <td className="p-4">
+                          {sr.estado === "completado" ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/60">
+                              <CheckCircle className="w-3 h-3 text-emerald-600" /> Stock Descontado (Egresado)
+                            </span>
+                          ) : sr.estado === "autorizado" ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800/60">
+                              <Clock className="w-3 h-3 text-blue-600" /> Mercadería Separada (Autorizado)
+                            </span>
+                          ) : sr.estado === "rechazado" ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-50 text-red-700 border border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800/60">
+                              <XCircle className="w-3 h-3 text-red-600" /> Rechazado / Anulado
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/60">
+                              <AlertCircle className="w-3 h-3 text-amber-600" /> Sin Egreso (En Trámite)
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-4 text-slate-600 dark:text-slate-300 max-w-[200px] truncate">
                           {sr.observaciones || "Devolución física a proveedor"}
                         </td>
                         <td className="p-4 text-right font-mono font-black text-amber-600 dark:text-amber-400">
                           {formatPYG(Number(sr.monto || 0))}
                         </td>
                         <td className="p-4 text-center">
-                          <button
-                            onClick={() => setViewingSupRet(sr)}
-                            className="p-2 text-slate-400 hover:text-amber-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                            title="Ver Detalle"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setViewingSupRet(sr)}
+                              className="p-1.5 text-slate-400 hover:text-amber-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                              title="Ver Detalle"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPrintingSupplierReturn(sr.raw || sr)}
+                              className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                              title="Imprimir Remito Oficial"
+                            >
+                              <Printer className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -1200,6 +1277,177 @@ export default function ReturnsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── MODAL: VER DETALLE DEVOLUCIÓN PROVEEDOR ── */}
+      {viewingSupRet && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                    {(viewingSupRet.estado || "pendiente").toUpperCase()}
+                  </span>
+                  <span className="text-xs text-gray-400 font-mono">
+                    Comprobante: {viewingSupRet.numero_nota_credito}
+                  </span>
+                </div>
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                  <Truck className="w-5 h-5 text-amber-600" />
+                  Devolución a {viewingSupRet.supplier_nombre}
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPrintingSupplierReturn(viewingSupRet.raw || viewingSupRet)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-sm transition-colors"
+                >
+                  <Printer className="w-4 h-4" /> Imprimir Remito
+                </button>
+                <button onClick={() => setViewingSupRet(null)} className="text-slate-400 hover:text-slate-600 p-1 rounded-xl">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Banner de Impacto en Stock */}
+            {viewingSupRet.estado === "completado" && (
+              <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 flex items-start gap-3 text-xs">
+                <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-emerald-900 dark:text-emerald-200">
+                    Impacto en Stock: Egresado y Confirmado
+                  </div>
+                  <div className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-0.5">
+                    Las unidades salieron físicamente del inventario bajo el movimiento Kardex <code>devolucion_proveedor</code>. El saldo de compra fue afectado.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {viewingSupRet.estado === "autorizado" && (
+              <div className="p-3.5 rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50 flex items-start gap-3 text-xs">
+                <Clock className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-blue-900 dark:text-blue-200">
+                    Impacto en Stock: Salida Autorizada (Pendiente de Retiro)
+                  </div>
+                  <div className="text-[11px] text-blue-700 dark:text-blue-300 mt-0.5">
+                    Devolución aprobada comercialmente. La mercadería debe prepararse para el transportista. El egreso de stock definitivo se consolidará al marcar la devolución como completada.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {(!viewingSupRet.estado || viewingSupRet.estado === "pendiente") && (
+              <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 flex items-start gap-3 text-xs">
+                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-amber-900 dark:text-amber-200">
+                    Impacto en Stock: En Trámite (Sin Egreso de Inventario)
+                  </div>
+                  <div className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
+                    La solicitud está en espera de aprobación del proveedor. No se ha realizado aún ningún descuento contable ni físico de mercadería.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Datos Generales */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/70 rounded-2xl space-y-1.5 text-xs">
+              <div className="flex justify-between"><span className="text-slate-400">Proveedor:</span><strong className="text-slate-900 dark:text-white">{viewingSupRet.supplier_nombre}</strong></div>
+              <div className="flex justify-between"><span className="text-slate-400">Factura Afectada:</span><span className="font-mono text-slate-700 dark:text-slate-300">{viewingSupRet.numero_factura_origen ? `#${viewingSupRet.numero_factura_origen}` : "Ajuste directo / Sin factura"}</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Fecha de Registro:</span><span className="font-mono text-slate-700 dark:text-slate-300">{viewingSupRet.fecha ? formatDate(viewingSupRet.fecha) : "—"}</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Depósito / Almacén:</span><span className="font-medium text-slate-700 dark:text-slate-300">{viewingSupRet.almacen_nombre || "Depósito Central"}</span></div>
+              {viewingSupRet.observaciones && (
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-[11px]">
+                  <strong>Observaciones:</strong> {viewingSupRet.observaciones}
+                </div>
+              )}
+            </div>
+
+            {/* Lista de Ítems */}
+            {viewingSupRet.items && viewingSupRet.items.length > 0 ? (
+              <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden text-xs">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 font-bold">
+                    <tr>
+                      <th className="py-2.5 px-3">Producto / Código</th>
+                      <th className="py-2.5 px-3">Motivo</th>
+                      <th className="py-2.5 px-3 text-right">Cant.</th>
+                      <th className="py-2.5 px-3 text-right">Unitario</th>
+                      <th className="py-2.5 px-3 text-right">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {viewingSupRet.items.map((it: any, idx: number) => (
+                      <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                        <td className="py-2 px-3">
+                          <span className="font-semibold text-gray-900 dark:text-white block">{it.producto_nombre || it.descripcion}</span>
+                          <div className="flex items-center gap-2 text-[10px] text-gray-400 font-mono">
+                            {it.codigo_barras && <span>CB: {it.codigo_barras}</span>}
+                            {it.codigo_interno && <span>SKU: {it.codigo_interno}</span>}
+                            {it.lote && <span>Lote: {it.lote}</span>}
+                          </div>
+                        </td>
+                        <td className="py-2 px-3">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300">
+                            {it.motivo || "Devolución"}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 text-right font-bold text-gray-900 dark:text-white">
+                          {it.cantidad}
+                        </td>
+                        <td className="py-2 px-3 text-right text-gray-700 dark:text-gray-300 font-mono">
+                          {formatPYG(Number(it.valor_unitario || it.precio_unitario || 0))}
+                        </td>
+                        <td className="py-2 px-3 text-right font-bold text-amber-600 dark:text-amber-400 font-mono">
+                          {formatPYG(Number(it.valor_total || it.total || 0))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {/* Total */}
+            <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-slate-800 text-sm font-black">
+              <span>Monto Total Devolución:</span>
+              <span className="font-mono text-amber-600 dark:text-amber-400 text-base">
+                {formatPYG(Number(viewingSupRet.monto || 0))}
+              </span>
+            </div>
+
+            {/* Footer */}
+            <div className="pt-2 flex justify-between items-center">
+              <button
+                type="button"
+                onClick={() => setPrintingSupplierReturn(viewingSupRet.raw || viewingSupRet)}
+                className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition"
+              >
+                <Printer className="w-4 h-4" /> Imprimir Remito Oficial
+              </button>
+              <button
+                onClick={() => setViewingSupRet(null)}
+                className="px-5 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: REMITO OFICIAL DE IMPRESIÓN ── */}
+      {printingSupplierReturn && (
+        <DevolucionProveedorPrintModal
+          devolucion={printingSupplierReturn}
+          onClose={() => setPrintingSupplierReturn(null)}
+        />
       )}
     </div>
   )
