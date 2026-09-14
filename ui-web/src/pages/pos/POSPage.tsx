@@ -7676,6 +7676,22 @@ export default function POSPage() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (showAperturaModal || showCierreTurnoModal || showSupervisorModal || showPosConfigModal) return
 
+      // Con la ventana de cupones abierta, los atajos de la caja NO actuan por
+      // detras (F2, F9, Escape...). Escape solo retrocede dentro de esa ventana
+      // y nunca anula ni salta los cupones: la venta ya esta cobrada y la
+      // factura todavia no se imprimio. Reportado en Caja 4 el 14-09.
+      if (showCuponModal) {
+        if (e.key === "Escape") {
+          e.preventDefault()
+          if (cuponModalStep === "formulario") {
+            setCuponModalStep("pregunta")
+          } else {
+            toast.warning("Venta ya cobrada", "Elegí \"Sí, Participar\" o \"No participar / Imprimir solo Factura\" para entregar la factura.")
+          }
+        }
+        return
+      }
+
       if (showManualWeightModal) {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault()
@@ -7773,7 +7789,7 @@ export default function POSPage() {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [cart, totalPyg, totalRecibidoPyg, submitting, listoParaCerrar, activeMethods, hasClickedQuickCash, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, manualWeightInput, targetWeighProduct, toggleActiveMethod])
+  }, [cart, totalPyg, totalRecibidoPyg, submitting, listoParaCerrar, activeMethods, hasClickedQuickCash, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, showCuponModal, cuponModalStep, manualWeightInput, targetWeighProduct, toggleActiveMethod])
 
   // ── PALETA DE COLORES Y CONTRASTE DINÁMICO ────────────────────────────────
   const bgMain = dark ? "bg-slate-950 text-slate-100" : "bg-slate-100 text-slate-900"
