@@ -1087,28 +1087,52 @@ export default function POSPage() {
     montoStr: string
     cardType: "debito" | "credito"
     cardCuotas: number
-    txnState: "idle" | "esperando" | "confirmando" | "aprobada" | "error_rechazo" | "error_conexion"
+    txnState: "idle" | "esperando" | "generando" | "confirmando" | "aprobada" | "error_rechazo" | "error_conexion"
     txnResult: any
     txnError: string
     showManualFallback: boolean
     manualCupon: string
     manualAuth: string
     logId: string | null
+    // QR Bancard "Pantalla" (bancard_cloud) -- generación + polling propios por leg
+    qrUrl?: string
+    qrData?: string
+    hookAlias?: string
+    // Dinelco tiene tarjeta y QR/PIX bajo el mismo activeMethods("dinelco"),
+    // igual que la UI de la linea principal (dinelcoSubMethod) -- dinelcoOpType
+    // distingue las dos secciones de legs adicionales entre si.
+    dinelcoOpType?: "card" | "qr"
+    dinelcoQrMode?: "qr" | "pix"
+    pixCpf?: string
+    // PlugPay (PIX y Parcelado Brasil)
+    plugpayCpf?: string
+    plugpayPhone?: string
+    plugpayQrImageUrl?: string
+    plugpayBrlValue?: number | null
   }
+  const extraLegPollRefs = useRef<Map<string, any>>(new Map())
   const [extraPaymentLegs, setExtraPaymentLegs] = useState<ExtraPaymentLeg[]>([])
   const updateExtraLeg = (id: string, patch: Partial<ExtraPaymentLeg>) => {
     setExtraPaymentLegs((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)))
   }
-  const addExtraLeg = (method: ExtraLegMethod) => {
+  const addExtraLeg = (method: ExtraLegMethod, dinelcoOpType: "card" | "qr" = "card") => {
     const id = `leg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     setExtraPaymentLegs((prev) => [...prev, {
       id, method, montoStr: "", cardType: "debito", cardCuotas: 1,
       txnState: "idle", txnResult: null, txnError: "", showManualFallback: false,
-      manualCupon: "", manualAuth: "", logId: null,
+      manualCupon: "", manualAuth: "", logId: null, dinelcoOpType, dinelcoQrMode: "qr", pixCpf: "",
+      plugpayCpf: "", plugpayPhone: "", plugpayQrImageUrl: "", plugpayBrlValue: null,
     }])
   }
   const removeExtraLeg = (id: string) => {
+    const interval = extraLegPollRefs.current.get(id)
+    if (interval) { clearInterval(interval); extraLegPollRefs.current.delete(id) }
     setExtraPaymentLegs((prev) => prev.filter((l) => l.id !== id))
+  }
+  const clearAllExtraLegs = () => {
+    for (const interval of extraLegPollRefs.current.values()) clearInterval(interval)
+    extraLegPollRefs.current.clear()
+    setExtraPaymentLegs([])
   }
   const extraLegsMontoTotal = (method: ExtraLegMethod) =>
     extraPaymentLegs.filter((l) => l.method === method && (l.txnState === "aprobada" || l.manualCupon.trim())).reduce((sum, l) => sum + (parseInt(l.montoStr.replace(/\D/g, "") || "0", 10)), 0)
@@ -1350,6 +1374,130 @@ export default function POSPage() {
     }
   }
 
+  // Version leg-scoped de handlePlugpayPix, para el 2do/3er PIX de la
+  // misma venta. El polling se guarda en extraLegPollRefs (Map por leg id),
+  // igual que el QR Bancard "Pantalla".
+  const handlePlugpayPixForLeg = async (leg: ExtraPaymentLeg) => {
+    const cleanCpf = (leg.plugpayCpf || "").replace(/\D/g, "")
+    if (!cleanCpf || cleanCpf.length !== 11) {
+      toast.warning("CPF inválido", "El CPF brasileño debe tener exactamente 11 números.")
+      return
+    }
+    const montoPyg = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    if (montoPyg <= 0) {
+      toast.warning("Monto inválido", "Ingrese un monto mayor a 0.")
+      return
+    }
+    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null })
+    const existing = extraLegPollRefs.current.get(leg.id)
+    if (existing) clearInterval(existing)
+
+    try {
+      const quoteRes = await api.plugpay.quotePix({ monto: montoPyg, moneda: "PYG" })
+      if (!quoteRes.ok) throw new Error(quoteRes.error_message || "Error al obtener cotización.")
+      const valBrl = quoteRes.data?.valorEmBRL || quoteRes.data?.valueBRL || (rates.BRL > 0 ? (montoPyg / rates.BRL) : 0)
+      const valBrlNum = parseFloat(valBrl)
+      if (!valBrlNum || valBrlNum <= 0) throw new Error("La cotización devolvió un monto en Reales inválido.")
+
+      const pixRes = await api.plugpay.createPix({ monto: montoPyg, moneda: "PYG", customer_cpf: cleanCpf })
+      if (!pixRes.ok) throw new Error(pixRes.error_message || "Error al generar cobro PIX.")
+
+      let qrImg = ""
+      if (pixRes.data?.qrCodeCopiaCola) {
+        try { qrImg = await QRCode.toDataURL(pixRes.data.qrCodeCopiaCola, { margin: 1, width: 320 }) } catch { /* sin QR visual, no bloquea */ }
+      }
+      updateExtraLeg(leg.id, {
+        txnResult: pixRes.data, plugpayQrImageUrl: qrImg,
+        plugpayBrlValue: pixRes.data?.valueBRL ? parseFloat(pixRes.data.valueBRL) : valBrlNum,
+      })
+      const refInterna = pixRes.data.referenciaInterna
+
+      const interval = setInterval(async () => {
+        try {
+          const statusRes = await api.plugpay.pixStatus(refInterna)
+          if (statusRes.ok && statusRes.data) {
+            const status = statusRes.data.status
+            if (status === 1) {
+              clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+              updateExtraLeg(leg.id, {
+                txnState: "aprobada",
+                logId: String(statusRes.data.IdTransacao || Date.now()),
+              })
+              toast.success("Pago Aprobado", "La transacción PIX fue aprobada con éxito.")
+            } else if (status === 6) {
+              clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+              updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: "La transacción fue cancelada o expiró en PlugPay." })
+            }
+          }
+        } catch (err) {
+          console.error("Error en polling PIX (leg):", err)
+        }
+      }, 5000)
+      extraLegPollRefs.current.set(leg.id, interval)
+    } catch (e: any) {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: e.message || "No se pudo procesar el PIX." })
+    }
+  }
+
+  // Version leg-scoped de handlePlugpayParcelado, para el 2do/3er crédito
+  // parcelado Brasil de la misma venta.
+  const handlePlugpayParceladoForLeg = async (leg: ExtraPaymentLeg) => {
+    const cleanCpf = (leg.plugpayCpf || "").replace(/\D/g, "")
+    if (!cleanCpf || cleanCpf.length !== 11) {
+      toast.warning("CPF inválido", "El CPF brasileño debe tener exactamente 11 números.")
+      return
+    }
+    const cleanPhone = (leg.plugpayPhone || "").replace(/\D/g, "")
+    if (!cleanPhone || cleanPhone.length < 8) {
+      toast.warning("Teléfono inválido", "Ingrese un número de teléfono válido para el cliente.")
+      return
+    }
+    const montoPyg = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    if (montoPyg <= 0) {
+      toast.warning("Monto inválido", "Ingrese un monto mayor a 0.")
+      return
+    }
+    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null })
+    const existing = extraLegPollRefs.current.get(leg.id)
+    if (existing) clearInterval(existing)
+
+    try {
+      const simRes = await api.plugpay.calcularParcelado({ monto: montoPyg, moneda: "PYG", cuotas: leg.cardCuotas })
+      if (!simRes.ok) throw new Error(simRes.error_message || "Error al simular parcelado.")
+      const valBrl = simRes.data?.valorEmBRL || simRes.data?.calculoParcelas?.valorOriginal || (rates.BRL > 0 ? (montoPyg / rates.BRL) : 0)
+      updateExtraLeg(leg.id, { plugpayBrlValue: parseFloat(valBrl) })
+
+      const startRes = await api.plugpay.startParcelado({
+        monto: montoPyg, moneda: "PYG", cuotas: leg.cardCuotas, customer_cpf: cleanCpf, customer_phone: cleanPhone,
+      })
+      if (!startRes.ok) throw new Error(startRes.error_message || "Error al iniciar Crédito Parcelado.")
+      updateExtraLeg(leg.id, { txnResult: startRes.data })
+      const refInterna = startRes.data.serialNumber || startRes.data.SerialNumber || startRes.data.referenciaInterna || String(startRes.data.IdInitialTransaction || "")
+
+      const interval = setInterval(async () => {
+        try {
+          const statusRes = await api.plugpay.parceladoStatus(refInterna)
+          if (statusRes.ok && statusRes.data) {
+            const txn = statusRes.data.transaction || statusRes.data
+            if (txn.token || txn.payment_method_id || txn.status === 1 || txn.status === "approved") {
+              clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+              updateExtraLeg(leg.id, { txnState: "aprobada", logId: String(txn.id || Date.now()) })
+              toast.success("Crédito Aprobado", "La transacción con tarjeta de Brasil fue aprobada con éxito.")
+            } else if (txn.status === 6 || txn.status === "rejected" || txn.status === "cancelled") {
+              clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+              updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: "El pago con tarjeta fue rechazado." })
+            }
+          }
+        } catch (err) {
+          console.error("Error en polling parcelado (leg):", err)
+        }
+      }, 4000)
+      extraLegPollRefs.current.set(leg.id, interval)
+    } catch (e: any) {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: e.message || "No se pudo procesar el crédito." })
+    }
+  }
+
   useEffect(() => {
     return () => {
       clearPlugpayPoll()
@@ -1437,6 +1585,61 @@ export default function POSPage() {
     setBancardCloudQrState("idle")
     setBancardCloudQrData(null)
     setBancardCloudQrError("")
+  }
+
+  // Version leg-scoped de handleGenerateBancardCloudQr (QR "Pantalla"), para
+  // el 2do/3er QR de la misma venta. El interval de polling se guarda en
+  // extraLegPollRefs (Map por leg id) en vez de un ref unico -- varios QR
+  // en pantalla a la vez, cada uno con su propio reloj de 5 minutos.
+  const handleGenerateBancardCloudQrForLeg = async (leg: ExtraPaymentLeg) => {
+    const monto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    if (monto <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
+      return
+    }
+    updateExtraLeg(leg.id, { txnState: "generando", txnError: "" })
+    try {
+      const res = await api.bancardQr.generate({ amount: monto, description: `Venta Caja ${puntoEmision} (adicional)`, punto_emision: puntoEmision })
+      updateExtraLeg(leg.id, { txnState: "esperando", qrUrl: res.qr_url || "", qrData: res.qr_data || "", hookAlias: res.hook_alias })
+      const existing = extraLegPollRefs.current.get(leg.id)
+      if (existing) clearInterval(existing)
+      const generatedAt = Date.now()
+      const QR_TIMEOUT_MS = 5 * 60 * 1000
+      const interval = setInterval(async () => {
+        if (Date.now() - generatedAt >= QR_TIMEOUT_MS) {
+          clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+          api.bancardQr.revert(res.hook_alias).catch(() => {})
+          updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "El QR expiró sin pago (5 minutos) y fue cancelado automáticamente." })
+          return
+        }
+        try {
+          const st = await api.bancardQr.status(res.hook_alias)
+          if (st.status === "confirmed") {
+            updateExtraLeg(leg.id, { txnState: "aprobada" })
+            clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+          } else if (st.status === "failed" || st.status === "reverted") {
+            updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: st.response_description || "El pago no se pudo confirmar." })
+            clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+          }
+        } catch { /* red caida en un tick -- se reintenta solo en el proximo */ }
+      }, 3000)
+      extraLegPollRefs.current.set(leg.id, interval)
+    } catch (e: any) {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: e instanceof Error ? e.message : "No se pudo generar el QR con Bancard." })
+    }
+  }
+
+  const handleCancelBancardCloudQrForLeg = async (leg: ExtraPaymentLeg) => {
+    const interval = extraLegPollRefs.current.get(leg.id)
+    if (interval) { clearInterval(interval); extraLegPollRefs.current.delete(leg.id) }
+    if (leg.hookAlias) {
+      try {
+        await api.bancardQr.revert(leg.hookAlias)
+      } catch (e: any) {
+        toast.warning("No se pudo reversar en Bancard", e instanceof Error ? e.message : "El QR puede seguir activo del lado de Bancard -- verificá antes de generar uno nuevo.")
+      }
+    }
+    updateExtraLeg(leg.id, { txnState: "idle", qrUrl: undefined, qrData: undefined, hookAlias: undefined, txnError: "" })
   }
 
   // El terminal Bancard no tiene forma via API de forzar la limpieza de una
@@ -1786,6 +1989,122 @@ export default function POSPage() {
     })
   }
 
+  // Version leg-scoped de handleDinelcoCharge, para el 2do/3er cobro con
+  // tarjeta Dinelco de la misma venta.
+  const handleDinelcoChargeForLeg = async (leg: ExtraPaymentLeg) => {
+    const ip = activePosConfig.dinelcoIp
+    if (!ip) {
+      toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Dinelco para esta caja en \"Configurar Terminales POS\".")
+      return
+    }
+    const montoDinelco = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    if (montoDinelco <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por Dinelco antes de continuar.")
+      return
+    }
+    const electronAPI = (window as any).electronAPI
+    if (!electronAPI?.dinelcoCall) {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.", showManualFallback: true })
+      return
+    }
+    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null, showManualFallback: false })
+
+    const tipoOperacion = leg.cardType === "credito" && leg.cardCuotas > 1 ? `dinelco_venta_credito_${leg.cardCuotas}cuotas` : `dinelco_venta_${leg.cardType}`
+    const res1 = await electronAPI.dinelcoCall(ip, "venta_inicio", { op: "01", monto: montoDinelco }, null, 90000)
+
+    if (!res1.ok) {
+      updateExtraLeg(leg.id, {
+        txnState: res1.error ? "error_conexion" : "error_rechazo",
+        txnError: res1.error ? `No se pudo conectar con el terminal (${res1.error}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.` : (res1.desc || "El terminal rechazó la operación."),
+        showManualFallback: !!res1.error,
+      })
+      await logDinelcoTxn({
+        tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res1.desc || res1.error,
+        monto: montoDinelco, terminal_ip: ip, raw_response: res1,
+      })
+      return
+    }
+
+    updateExtraLeg(leg.id, { txnState: "confirmando" })
+    const cuotasParam = leg.cardType === "credito" && leg.cardCuotas > 1 ? leg.cardCuotas : 0
+    const res2 = await electronAPI.dinelcoCall(ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 90000)
+
+    if (!res2.ok) {
+      updateExtraLeg(leg.id, {
+        txnState: res2.error ? "error_conexion" : "error_rechazo",
+        txnError: res2.error ? `Se inició el cobro en el terminal pero no se pudo confirmar la respuesta (${res2.error}) -- revisá el terminal y cargá el cupón manualmente.` : (res2.desc || "El terminal rechazó la operación."),
+        showManualFallback: !!res2.error,
+      })
+      await logDinelcoTxn({
+        tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res2.desc || res2.error,
+        monto: montoDinelco, terminal_ip: ip, raw_response: res2,
+      })
+      electronAPI.dinelcoCancel?.(res1.sessionId).catch(() => {})
+      return
+    }
+
+    const c = res2.campos || []
+    const result = {
+      codigoAutorizacion: c[0] || "", authorizer: c[1] || "", opType: c[2] || "",
+      nroBoleta: c[3] || "", terminal: c[4] || "", comercio: c[5] || "", ultimos4: c[6] || "", puntos: c[7] || "",
+    }
+    const logged = await logDinelcoTxn({
+      tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
+      monto: montoDinelco, terminal_ip: ip,
+      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.comercio,
+      mensaje_display: "APROBADA", raw_response: result,
+    })
+    updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null, manualCupon: result.nroBoleta || "" })
+  }
+
+  // Version leg-scoped de handleDinelcoQR (QR Guaraníes / PIX Brasil).
+  const handleDinelcoQRForLeg = async (leg: ExtraPaymentLeg) => {
+    const ip = activePosConfig.dinelcoIp
+    if (!ip) {
+      toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Dinelco para esta caja en \"Configurar Terminales POS\".")
+      return
+    }
+    const montoQrDinelco = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    if (montoQrDinelco <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
+      return
+    }
+    if (leg.dinelcoQrMode === "pix" && (leg.pixCpf || "").replace(/\D/g, "").length !== 11) {
+      toast.warning("CPF inválido", "El CPF del comprador debe tener 11 dígitos para procesar PIX.")
+      return
+    }
+    const electronAPI = (window as any).electronAPI
+    if (!electronAPI?.dinelcoCall) {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá." })
+      return
+    }
+    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "" })
+
+    const res = leg.dinelcoQrMode === "pix"
+      ? await electronAPI.dinelcoCall(ip, "pix", { monto: montoQrDinelco, cpf: (leg.pixCpf || "").replace(/\D/g, "") }, null, 90000)
+      : await electronAPI.dinelcoCall(ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
+
+    const tipoOperacion = leg.dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr"
+
+    if (!res.ok) {
+      updateExtraLeg(leg.id, {
+        txnState: res.error ? "error_conexion" : "error_rechazo",
+        txnError: res.error ? `No se pudo conectar con el terminal (${res.error}).` : (res.desc || "El terminal rechazó la operación."),
+      })
+      await logDinelcoTxn({
+        tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true,
+        error_message: res.desc || res.error, monto: montoQrDinelco, terminal_ip: ip, raw_response: res,
+      })
+      return
+    }
+
+    updateExtraLeg(leg.id, { txnState: "aprobada" })
+    await logDinelcoTxn({
+      tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
+      monto: montoQrDinelco, terminal_ip: ip, mensaje_display: "APROBADA", raw_response: res,
+    })
+  }
+
   const handleBancardQR = async () => {
     console.log(`[BANCARD-TRACE] QR handler invocado, bancardIp=${activePosConfig.bancardIp || "(vacio)"}`)
     const ip = activePosConfig.bancardIp
@@ -1842,6 +2161,55 @@ export default function POSPage() {
       monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
     })
     setBancardQrLogId((logged as any)?.id || null)
+  }
+
+  // Version leg-scoped de handleBancardQR (QR Zimple), para el 2do/3er
+  // cobro con QR de la misma venta.
+  const handleBancardQRForLeg = async (leg: ExtraPaymentLeg) => {
+    const ip = activePosConfig.bancardIp
+    if (!ip) {
+      toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
+      return
+    }
+    const montoQr = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    if (montoQr <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
+      return
+    }
+    const electronAPI = (window as any).electronAPI
+    if (!electronAPI?.bancardCall) {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá." })
+      return
+    }
+    const facturaNro = Date.now()
+    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null })
+
+    const bodyQr = { facturaNro, monto: montoQr, montoVuelto: 0 }
+    const res = await electronAPI.bancardCall(ip, "/pos/venta-qr", bodyQr, 180000)
+
+    if (!res.ok) {
+      if (res.status === 400 || res.status === 500) {
+        updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: bancardErrorMessage(res.body?.message) })
+        await logBancardTxn({
+          tipo_operacion: "venta_qr", exitosa: false, verificado_automaticamente: true, error_message: res.body?.message,
+          monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res.body,
+        })
+      } else {
+        updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: `No se pudo conectar con el terminal (${res.message || "error de red"}).` })
+      }
+      return
+    }
+
+    const result = res.body || {}
+    const logged = await logBancardTxn({
+      tipo_operacion: "venta_qr", exitosa: true, verificado_automaticamente: true,
+      monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
+      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
+      issuer_id: result.issuerId, nombre_tarjeta: result.nombreTarjeta, pan: result.pan,
+      mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
+      monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
+    })
+    updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null })
   }
 
 
@@ -4952,7 +5320,7 @@ export default function POSPage() {
       setCustomer(DEFAULT_CUSTOMER)
       setAppliedDiscount(null)
       setExtraClubAdminOverride(false)
-      setExtraPaymentLegs([])
+      clearAllExtraLegs()
       toast.warning("Venta Cancelada", "Se anularon todos los productos del ticket.")
     } else if (action.type === "decrease_qty" && action.itemId && action.delta) {
       const itemBefore = cart.find((i) => i.id === action.itemId)
@@ -5377,7 +5745,7 @@ export default function POSPage() {
     setCustomer(DEFAULT_CUSTOMER)
     setAppliedDiscount(null)
     setExtraClubAdminOverride(false)
-    setExtraPaymentLegs([])
+    clearAllExtraLegs()
     toast.info("Venta en Espera", "La venta fue pausada exitosamente.")
   }
 
@@ -5775,12 +6143,15 @@ export default function POSPage() {
     }
     if (activeMethods.has("dinelco")) {
       recibido += isMultiPayment ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += extraLegsMontoTotal("dinelco")
     }
     if (activeMethods.has("qr")) {
       recibido += isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += extraLegsMontoTotal("qr")
     }
     if (activeMethods.has("plugpay") || activeMethods.has("plugpay_credito")) {
       recibido += isMultiPayment ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += extraLegsMontoTotal("plugpay") + extraLegsMontoTotal("plugpay_credito")
     }
     if (activeMethods.has("extra_club")) {
       recibido += isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
@@ -6288,6 +6659,15 @@ export default function POSPage() {
             else if (dinelcoSubMethod === "pix") fp = "PIX"
             out.push({ forma_pago: fp, monto: dinelcoMonto, moneda: "PYG" })
           }
+          for (const leg of extraPaymentLegs.filter((l) => l.method === "dinelco")) {
+            const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+            if (legMonto > 0 && (leg.txnState === "aprobada" || leg.manualCupon.trim())) {
+              let legFp = "TARJETA DEBITO"
+              if (leg.dinelcoOpType === "qr") legFp = leg.dinelcoQrMode === "pix" ? "PIX" : "QR"
+              else if (leg.cardType === "credito") legFp = "TARJETA CREDITO"
+              out.push({ forma_pago: legFp, monto: legMonto, moneda: "PYG" })
+            }
+          }
         }
         if (activeMethods.has("plugpay")) {
           plugpayMonto = isMultiPayment ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
@@ -6295,14 +6675,32 @@ export default function POSPage() {
             let fp = plugpaySubMethod === "pix" ? "PIX" : "TARJETA CREDITO"
             out.push({ forma_pago: fp, monto: plugpayMonto, moneda: "PYG" })
           }
+          for (const leg of extraPaymentLegs.filter((l) => l.method === "plugpay")) {
+            const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+            if (legMonto > 0 && (leg.txnState === "aprobada" || leg.manualCupon.trim())) {
+              out.push({ forma_pago: "PIX", monto: legMonto, moneda: "PYG" })
+            }
+          }
         }
         if (activeMethods.has("qr")) {
           qrMonto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (qrMonto > 0) out.push({ forma_pago: "QR", monto: qrMonto, moneda: "PYG" })
+          for (const leg of extraPaymentLegs.filter((l) => l.method === "qr")) {
+            const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+            if (legMonto > 0 && (leg.txnState === "aprobada" || leg.manualCupon.trim())) {
+              out.push({ forma_pago: "QR", monto: legMonto, moneda: "PYG" })
+            }
+          }
         }
         if (activeMethods.has("plugpay_credito")) {
           parceladoMonto = isMultiPayment ? parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (parceladoMonto > 0) out.push({ forma_pago: "TARJETA CREDITO", monto: parceladoMonto, moneda: "PYG" })
+          for (const leg of extraPaymentLegs.filter((l) => l.method === "plugpay_credito")) {
+            const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+            if (legMonto > 0 && (leg.txnState === "aprobada" || leg.manualCupon.trim())) {
+              out.push({ forma_pago: "TARJETA CREDITO", monto: legMonto, moneda: "PYG" })
+            }
+          }
         }
         if (activeMethods.has("extra_club")) {
           extraClubMonto = isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
@@ -6316,7 +6714,8 @@ export default function POSPage() {
           }
         }
         if (activeMethods.has("cash")) {
-          const otrosNonCash = cardMonto + dinelcoMonto + plugpayMonto + qrMonto + parceladoMonto + extraClubMonto + otrosMonto
+          const extraLegsTotal = extraLegsMontoTotal("bancard") + extraLegsMontoTotal("qr") + extraLegsMontoTotal("dinelco") + extraLegsMontoTotal("plugpay") + extraLegsMontoTotal("plugpay_credito")
+          const otrosNonCash = cardMonto + dinelcoMonto + plugpayMonto + qrMonto + parceladoMonto + extraClubMonto + otrosMonto + extraLegsTotal
           let remainingPyg = Math.max(0, totalPyg - otrosNonCash)
 
           const brlInput = parseFloat(payCashBrl.replace(",", ".")) || 0
@@ -7080,7 +7479,7 @@ export default function POSPage() {
       setCustomer(DEFAULT_CUSTOMER)
       setAppliedDiscount(null)
       setExtraClubAdminOverride(false)
-      setExtraPaymentLegs([])
+      clearAllExtraLegs()
       toast.success(
         "¡Cobro Exitoso!",
         `Comprobante ${numeroComprobante} emitido. Vuelto: ${formatPYG(vueltoFinalPyg)}` +
@@ -9993,6 +10392,81 @@ export default function POSPage() {
                                 <div className="font-posMono tabular-nums">Autorización {bancardQrResult.codigoAutorizacion} · Boleta {bancardQrResult.nroBoleta}</div>
                               </div>
                             )}
+
+                            {/* COBROS ADICIONALES CON QR ZIMPLE (2do, 3er QR -- otras cuentas/clientes en la misma venta) */}
+                            {isMultiPayment && (
+                              <div className="w-full max-w-sm pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5 text-left">
+                                {extraPaymentLegs.filter((l) => l.method === "qr").map((leg, idx) => (
+                                  <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-purple-600 dark:text-purple-400 uppercase">QR #{idx + 2}</span>
+                                      {leg.txnState === "idle" && (
+                                        <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
+                                      )}
+                                    </div>
+                                    <input
+                                      type="text"
+                                      value={leg.montoStr}
+                                      disabled={leg.txnState !== "idle"}
+                                      onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                      onFocus={(e) => e.target.select()}
+                                      placeholder="Monto ₲"
+                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                                    />
+                                    {(leg.txnState === "idle" || leg.txnState === "esperando") && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleBancardQRForLeg(leg)}
+                                        disabled={!activePosConfig.bancardIp || leg.txnState === "esperando"}
+                                        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer"
+                                      >
+                                        {leg.txnState === "esperando" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <QrCode className="w-3.5 h-3.5" />}
+                                        {leg.txnState === "esperando" ? "Esperando el pago..." : `Generar QR #${idx + 2}`}
+                                      </button>
+                                    )}
+                                    {leg.txnState === "aprobada" && leg.txnResult && (
+                                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300 space-y-0.5">
+                                        <div className="font-black">✓ {leg.txnResult.mensajeDisplay || "Pago Exitoso"}</div>
+                                        <div className="font-posMono tabular-nums">Aut. {leg.txnResult.codigoAutorizacion} · Boleta {leg.txnResult.nroBoleta}</div>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "error_rechazo" && (
+                                      <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1">
+                                        <div className="font-black">✕ {leg.txnError}</div>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="text-[10px] font-bold underline cursor-pointer">Reintentar</button>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "error_conexion" && (
+                                      <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
+                                        <div className="font-black">⚠ {leg.txnError}</div>
+                                        <button type="button" onClick={() => handleBancardQRForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
+                                        <div>
+                                          <button type="button" onClick={() => updateExtraLeg(leg.id, { showManualFallback: !leg.showManualFallback })} className="text-[10px] font-bold underline cursor-pointer">
+                                            {leg.showManualFallback ? "Ocultar carga manual" : "Cargar voucher manualmente"}
+                                          </button>
+                                          {leg.showManualFallback && (
+                                            <input
+                                              type="text"
+                                              value={leg.manualCupon}
+                                              onChange={(e) => updateExtraLeg(leg.id, { manualCupon: e.target.value })}
+                                              placeholder="Nº Boleta"
+                                              className="mt-1 w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-[11px] text-emerald-600 dark:text-emerald-400 font-bold outline-none"
+                                            />
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => addExtraLeg("qr")}
+                                  className="w-full text-[11px] font-bold text-purple-600 dark:text-purple-400 border border-dashed border-purple-400/50 rounded-xl py-2 hover:bg-purple-500/5 cursor-pointer"
+                                >
+                                  + Agregar otro QR (otra cuenta/cliente)
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -10056,6 +10530,74 @@ export default function POSPage() {
                               <div className="w-full max-w-sm p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
                                 <div className="font-black">✕ {bancardCloudQrError}</div>
                                 <button type="button" onClick={handleGenerateBancardCloudQr} className="text-xs font-bold underline cursor-pointer">Generar QR nuevamente</button>
+                              </div>
+                            )}
+
+                            {/* COBROS ADICIONALES CON QR PANTALLA (2do, 3er QR -- otras cuentas/clientes en la misma venta) */}
+                            {isMultiPayment && (
+                              <div className="w-full max-w-sm pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5 text-left">
+                                {extraPaymentLegs.filter((l) => l.method === "qr").map((leg, idx) => (
+                                  <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase">QR #{idx + 2}</span>
+                                      {leg.txnState === "idle" && (
+                                        <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
+                                      )}
+                                    </div>
+                                    {leg.txnState === "idle" && (
+                                      <>
+                                        <input
+                                          type="text"
+                                          value={leg.montoStr}
+                                          onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                          onFocus={(e) => e.target.select()}
+                                          placeholder="Monto ₲"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => handleGenerateBancardCloudQrForLeg(leg)}
+                                          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-blue-600 hover:bg-blue-500 text-white cursor-pointer"
+                                        >
+                                          <QrCode className="w-3.5 h-3.5" />
+                                          Generar QR #{idx + 2}
+                                        </button>
+                                      </>
+                                    )}
+                                    {leg.txnState === "generando" && (
+                                      <div className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Generando QR...
+                                      </div>
+                                    )}
+                                    {leg.txnState === "esperando" && (
+                                      <div className="flex flex-col items-center gap-1.5">
+                                        {leg.qrUrl && <img src={leg.qrUrl} alt={`QR #${idx + 2}`} className="w-32 h-32 rounded-lg border border-slate-200 dark:border-slate-700 bg-white p-1.5" />}
+                                        <div className="flex items-center gap-1 text-[11px] font-bold text-blue-600 dark:text-blue-400">
+                                          <Loader2 className="w-3 h-3 animate-spin" /> Esperando el pago...
+                                        </div>
+                                        <button type="button" onClick={() => handleCancelBancardCloudQrForLeg(leg)} className="text-[10px] font-bold text-rose-500 hover:text-rose-600 underline cursor-pointer">Cancelar QR</button>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "aprobada" && (
+                                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300">
+                                        <div className="font-black">✓ Pago QR confirmado</div>
+                                      </div>
+                                    )}
+                                    {(leg.txnState === "error_rechazo" || leg.txnState === "error_conexion") && (
+                                      <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1">
+                                        <div className="font-black">✕ {leg.txnError}</div>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="text-[10px] font-bold underline cursor-pointer">Generar QR nuevamente</button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => addExtraLeg("qr")}
+                                  className="w-full text-[11px] font-bold text-blue-600 dark:text-blue-400 border border-dashed border-blue-400/50 rounded-xl py-2 hover:bg-blue-500/5 cursor-pointer"
+                                >
+                                  + Agregar otro QR (otra cuenta/cliente)
+                                </button>
                               </div>
                             )}
                           </div>
@@ -10266,6 +10808,93 @@ export default function POSPage() {
                                 )}
                               </div>
                             )}
+
+                            {/* COBROS ADICIONALES CON TARJETA DINELCO (2da, 3ra... -- otras cuentas/tarjetas en la misma venta) */}
+                            {isMultiPayment && (
+                              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+                                {extraPaymentLegs.filter((l) => l.method === "dinelco" && l.dinelcoOpType !== "qr").map((leg, idx) => (
+                                  <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-purple-600 dark:text-purple-400 uppercase">Tarjeta Dinelco #{idx + 2}</span>
+                                      {leg.txnState === "idle" && (
+                                        <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
+                                      )}
+                                    </div>
+                                    <div className="flex gap-1">
+                                      <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-lg gap-0.5">
+                                        <button type="button" disabled={leg.txnState !== "idle"} onClick={() => updateExtraLeg(leg.id, { cardType: "debito", cardCuotas: 1 })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.cardType === "debito" ? "bg-purple-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>Débito</button>
+                                        <button type="button" disabled={leg.txnState !== "idle"} onClick={() => updateExtraLeg(leg.id, { cardType: "credito" })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.cardType === "credito" ? "bg-purple-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>Crédito</button>
+                                      </div>
+                                      <input
+                                        type="text"
+                                        value={leg.montoStr}
+                                        disabled={leg.txnState !== "idle"}
+                                        onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                        onFocus={(e) => e.target.select()}
+                                        placeholder="Monto ₲"
+                                        className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                                      />
+                                    </div>
+                                    {leg.txnState === "idle" && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDinelcoChargeForLeg(leg)}
+                                        disabled={!activePosConfig.dinelcoIp}
+                                        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer"
+                                      >
+                                        <CreditCard className="w-3.5 h-3.5" />
+                                        Cobrar Dinelco #{idx + 2}
+                                      </button>
+                                    )}
+                                    {(leg.txnState === "esperando" || leg.txnState === "confirmando") && (
+                                      <div className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-purple-600/60 text-white">
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        {leg.txnState === "esperando" ? "Presente la tarjeta..." : "Confirmando..."}
+                                      </div>
+                                    )}
+                                    {leg.txnState === "aprobada" && leg.txnResult && (
+                                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300 space-y-0.5">
+                                        <div className="font-black">✓ Aprobada</div>
+                                        <div className="font-posMono tabular-nums">Aut. {leg.txnResult.codigoAutorizacion} · Boleta {leg.txnResult.nroBoleta}</div>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "error_rechazo" && (
+                                      <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1">
+                                        <div className="font-black">✕ {leg.txnError}</div>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="text-[10px] font-bold underline cursor-pointer">Reintentar</button>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "error_conexion" && (
+                                      <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
+                                        <div className="font-black">⚠ {leg.txnError}</div>
+                                        <button type="button" onClick={() => handleDinelcoChargeForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
+                                        <div>
+                                          <button type="button" onClick={() => updateExtraLeg(leg.id, { showManualFallback: !leg.showManualFallback })} className="text-[10px] font-bold underline cursor-pointer">
+                                            {leg.showManualFallback ? "Ocultar carga manual" : "Cargar voucher manualmente"}
+                                          </button>
+                                          {leg.showManualFallback && (
+                                            <input
+                                              type="text"
+                                              value={leg.manualCupon}
+                                              onChange={(e) => updateExtraLeg(leg.id, { manualCupon: e.target.value })}
+                                              placeholder="Nº Voucher"
+                                              className="mt-1 w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-[11px] text-emerald-600 dark:text-emerald-400 font-bold outline-none"
+                                            />
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => addExtraLeg("dinelco")}
+                                  className="w-full text-[11px] font-bold text-purple-600 dark:text-purple-400 border border-dashed border-purple-400/50 rounded-xl py-2 hover:bg-purple-500/5 cursor-pointer"
+                                >
+                                  + Agregar otra tarjeta Dinelco (otra cuenta/cliente)
+                                </button>
+                              </div>
+                            )}
                           </>
                         )}
 
@@ -10337,6 +10966,85 @@ export default function POSPage() {
                               <div className="w-full max-w-md p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
                                 <div className="font-black">⚠ {dinelcoQrError}</div>
                                 <button type="button" onClick={handleDinelcoQR} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                              </div>
+                            )}
+
+                            {/* COBROS ADICIONALES CON QR/PIX DINELCO (2do, 3er QR -- otras cuentas/clientes en la misma venta) */}
+                            {isMultiPayment && (
+                              <div className="w-full max-w-md pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5 text-left">
+                                {extraPaymentLegs.filter((l) => l.method === "dinelco" && l.dinelcoOpType === "qr").map((leg, idx) => (
+                                  <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-purple-600 dark:text-purple-400 uppercase">Dinelco QR/PIX #{idx + 2}</span>
+                                      {leg.txnState === "idle" && (
+                                        <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
+                                      )}
+                                    </div>
+                                    {leg.txnState === "idle" && (
+                                      <>
+                                        <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-lg gap-0.5 w-fit">
+                                          <button type="button" onClick={() => updateExtraLeg(leg.id, { dinelcoQrMode: "qr" })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.dinelcoQrMode === "qr" ? "bg-purple-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>QR Gs.</button>
+                                          <button type="button" onClick={() => updateExtraLeg(leg.id, { dinelcoQrMode: "pix" })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.dinelcoQrMode === "pix" ? "bg-orange-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>PIX BR</button>
+                                        </div>
+                                        {leg.dinelcoQrMode === "pix" && (
+                                          <input
+                                            type="text"
+                                            value={leg.pixCpf || ""}
+                                            onChange={(e) => updateExtraLeg(leg.id, { pixCpf: e.target.value.replace(/\D/g, "").slice(0, 11) })}
+                                            placeholder="CPF (11 dígitos)"
+                                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-mono text-[11px] text-center font-bold outline-none"
+                                          />
+                                        )}
+                                        <input
+                                          type="text"
+                                          value={leg.montoStr}
+                                          onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                          onFocus={(e) => e.target.select()}
+                                          placeholder="Monto ₲"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDinelcoQRForLeg(leg)}
+                                          disabled={!activePosConfig.dinelcoIp}
+                                          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer"
+                                        >
+                                          <QrCode className="w-3.5 h-3.5" />
+                                          {leg.dinelcoQrMode === "pix" ? "Generar PIX" : "Generar QR"} #{idx + 2}
+                                        </button>
+                                      </>
+                                    )}
+                                    {leg.txnState === "esperando" && (
+                                      <div className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-purple-600/60 text-white">
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Esperando el pago...
+                                      </div>
+                                    )}
+                                    {leg.txnState === "aprobada" && (
+                                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300">
+                                        <div className="font-black">✓ Transacción {leg.dinelcoQrMode === "pix" ? "PIX" : "QR"} Aprobada</div>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "error_rechazo" && (
+                                      <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1">
+                                        <div className="font-black">✕ {leg.txnError}</div>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="text-[10px] font-bold underline cursor-pointer">Reintentar</button>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "error_conexion" && (
+                                      <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
+                                        <div className="font-black">⚠ {leg.txnError}</div>
+                                        <button type="button" onClick={() => handleDinelcoQRForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => addExtraLeg("dinelco", "qr")}
+                                  className="w-full text-[11px] font-bold text-purple-600 dark:text-purple-400 border border-dashed border-purple-400/50 rounded-xl py-2 hover:bg-purple-500/5 cursor-pointer"
+                                >
+                                  + Agregar otro QR/PIX Dinelco (otra cuenta/cliente)
+                                </button>
                               </div>
                             )}
                           </div>
@@ -10522,6 +11230,84 @@ export default function POSPage() {
                                 <div>ID Transacción: {plugpayResult?.IdTransacao || plugpayResult?.serialNumber}</div>
                               </div>
                             )}
+
+                            {/* COBROS ADICIONALES CON PIX (2do, 3er PIX -- otras cuentas/clientes en la misma venta) */}
+                            {isMultiPayment && (
+                              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+                                {extraPaymentLegs.filter((l) => l.method === "plugpay").map((leg, idx) => (
+                                  <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-orange-600 dark:text-orange-400 uppercase">PIX #{idx + 2}</span>
+                                      {leg.txnState === "idle" && (
+                                        <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
+                                      )}
+                                    </div>
+                                    {leg.txnState === "idle" && (
+                                      <>
+                                        <input
+                                          type="text"
+                                          value={leg.plugpayCpf || ""}
+                                          onChange={(e) => updateExtraLeg(leg.id, { plugpayCpf: e.target.value.replace(/\D/g, "").slice(0, 11) })}
+                                          placeholder="CPF (11 dígitos)"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-mono text-[11px] text-center font-bold outline-none"
+                                        />
+                                        <input
+                                          type="text"
+                                          value={leg.montoStr}
+                                          onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                          onFocus={(e) => e.target.select()}
+                                          placeholder="Monto ₲"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-orange-600 dark:text-orange-400 outline-none focus:border-orange-500"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => handlePlugpayPixForLeg(leg)}
+                                          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-orange-600 hover:bg-orange-500 text-white cursor-pointer"
+                                        >
+                                          <QrCode className="w-3.5 h-3.5" />
+                                          Generar PIX #{idx + 2}
+                                        </button>
+                                      </>
+                                    )}
+                                    {leg.txnState === "esperando" && (
+                                      <div className="flex flex-col items-center gap-1.5">
+                                        {(leg.plugpayQrImageUrl || (leg.txnResult as any)?.qrCodeStringImage) && (
+                                          <img
+                                            src={leg.plugpayQrImageUrl || `data:image/png;base64,${(leg.txnResult as any).qrCodeStringImage}`}
+                                            className="w-28 h-28 rounded-lg border border-orange-300 bg-white p-1.5"
+                                            alt={`PIX QR #${idx + 2}`}
+                                          />
+                                        )}
+                                        <div className="text-[11px] font-black text-orange-600 dark:text-orange-400">
+                                          R$ {(leg.txnResult as any)?.valueBRL || (leg.plugpayBrlValue ? leg.plugpayBrlValue.toFixed(2) : "0.00")}
+                                        </div>
+                                        <div className="flex items-center gap-1 text-[11px] font-bold text-orange-600 dark:text-orange-400">
+                                          <Loader2 className="w-3 h-3 animate-spin" /> Esperando el pago...
+                                        </div>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "aprobada" && (
+                                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300">
+                                        <div className="font-black">✓ Transacción PIX Aprobada</div>
+                                      </div>
+                                    )}
+                                    {(leg.txnState === "error_rechazo" || leg.txnState === "error_conexion") && (
+                                      <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1">
+                                        <div className="font-black">✕ {leg.txnError}</div>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="text-[10px] font-bold underline cursor-pointer">Reintentar</button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => addExtraLeg("plugpay")}
+                                  className="w-full text-[11px] font-bold text-orange-600 dark:text-orange-400 border border-dashed border-orange-400/50 rounded-xl py-2 hover:bg-orange-500/5 cursor-pointer"
+                                >
+                                  + Agregar otro PIX (otra cuenta/cliente)
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -10642,6 +11428,104 @@ export default function POSPage() {
                                   className="px-2.5 py-1 bg-rose-600 text-white rounded-lg text-[10px] font-bold cursor-pointer"
                                 >
                                   Reintentar
+                                </button>
+                              </div>
+                            )}
+
+                            {/* COBROS ADICIONALES CON CRÉDITO PARCELADO (2do, 3er crédito -- otras cuentas/clientes en la misma venta) */}
+                            {isMultiPayment && (
+                              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+                                {extraPaymentLegs.filter((l) => l.method === "plugpay_credito").map((leg, idx) => (
+                                  <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase">Parcelado #{idx + 2}</span>
+                                      {leg.txnState === "idle" && (
+                                        <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
+                                      )}
+                                    </div>
+                                    {leg.txnState === "idle" && (
+                                      <>
+                                        <div className="grid grid-cols-3 gap-1.5">
+                                          <input
+                                            type="text"
+                                            value={leg.plugpayCpf || ""}
+                                            onChange={(e) => updateExtraLeg(leg.id, { plugpayCpf: e.target.value.replace(/\D/g, "").slice(0, 11) })}
+                                            placeholder="CPF"
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-mono text-[10px] text-center font-bold outline-none"
+                                          />
+                                          <input
+                                            type="text"
+                                            value={leg.plugpayPhone || ""}
+                                            onChange={(e) => updateExtraLeg(leg.id, { plugpayPhone: e.target.value.replace(/\D/g, "") })}
+                                            placeholder="WhatsApp"
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-mono text-[10px] text-center font-bold outline-none"
+                                          />
+                                          <select
+                                            value={leg.cardCuotas}
+                                            onChange={(e) => updateExtraLeg(leg.id, { cardCuotas: Number(e.target.value) })}
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 text-[10px] font-bold outline-none"
+                                          >
+                                            {[1, 2, 3, 4, 5, 6, 9, 12, 18, 24].map((c) => (
+                                              <option key={c} value={c}>{c}x</option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                        <input
+                                          type="text"
+                                          value={leg.montoStr}
+                                          onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                          onFocus={(e) => e.target.select()}
+                                          placeholder="Monto ₲"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => handlePlugpayParceladoForLeg(leg)}
+                                          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-blue-600 hover:bg-blue-500 text-white cursor-pointer"
+                                        >
+                                          <CreditCard className="w-3.5 h-3.5" />
+                                          Iniciar Parcelado #{idx + 2}
+                                        </button>
+                                      </>
+                                    )}
+                                    {leg.txnState === "esperando" && (
+                                      <div className="space-y-1.5">
+                                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-blue-700 dark:text-blue-300">
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                                          <span>Esperando cobro con tarjeta...</span>
+                                        </div>
+                                        {(leg.txnResult as any)?.UrlPaymentForm && (
+                                          <a
+                                            href={(leg.txnResult as any).UrlPaymentForm}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] rounded-lg shadow-xs cursor-pointer"
+                                          >
+                                            <span>Abrir Pasarela</span>
+                                            <ExternalLink className="w-3 h-3" />
+                                          </a>
+                                        )}
+                                      </div>
+                                    )}
+                                    {leg.txnState === "aprobada" && (
+                                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300">
+                                        <div className="font-black">✓ Crédito Parcelado Aprobado</div>
+                                      </div>
+                                    )}
+                                    {(leg.txnState === "error_rechazo" || leg.txnState === "error_conexion") && (
+                                      <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1">
+                                        <div className="font-black">✕ {leg.txnError}</div>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="text-[10px] font-bold underline cursor-pointer">Reintentar</button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => addExtraLeg("plugpay_credito")}
+                                  className="w-full text-[11px] font-bold text-blue-600 dark:text-blue-400 border border-dashed border-blue-400/50 rounded-xl py-2 hover:bg-blue-500/5 cursor-pointer"
+                                >
+                                  + Agregar otro crédito parcelado (otra cuenta/cliente)
                                 </button>
                               </div>
                             )}
