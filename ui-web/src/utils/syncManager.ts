@@ -2,6 +2,7 @@
 
 import { offlineDB, type CachedProduct, type CachedCustomer, type PendingSale, type CachedReceipt } from "./offlineDB"
 import { api } from "../api"
+import { syncSupervisorPins } from "./localAuth"
 
 const CART_SAVE_INTERVAL = 5000
 const MAX_RETRIES = 10
@@ -77,6 +78,11 @@ export async function syncFullCatalog(): Promise<{ products: number; customers: 
       offlineDB.products.setAll(cachedProducts),
       offlineDB.customers.setAll(cachedCustomers),
     ])
+
+    // No bloquea el resultado del sync de catalogo -- si falla (sin
+    // conexion en este preciso instante) se mantiene el cache de PINs
+    // anterior, que es exactamente el comportamiento que se busca.
+    syncSupervisorPins().catch(() => {})
 
     await offlineDB.syncState.set({
       last_full_sync: new Date().toISOString(),

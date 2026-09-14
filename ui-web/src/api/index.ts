@@ -1076,6 +1076,8 @@ export const api = {
     myTenants: () => client.get<Array<{ tenant_id: string; tenant_nombre: string; tenant_slug: string; plan: string; rol: string }>>("/v1/auth/me/tenants"),
     changePassword: (data: { current_password: string; new_password: string }) => client.post<{ message: string }>("/v1/auth/change-password", data),
     verifySupervisor: (data: { email: string; password: string }) => client.post<{ valid: boolean; id?: string; nombre?: string; rol?: string }>("/v1/auth/verify-supervisor", data),
+    setPosPin: (data: { pin: string }) => client.post<{ ok: boolean }>("/v1/auth/set-pos-pin", data),
+    posSupervisorPins: () => client.get<{ supervisors: { id: string; nombre: string; rol: string; pin_hash: string }[] }>("/v1/auth/pos-supervisor-pins"),
     users: {
       list: () => client.get<TenantUser[]>("/v1/auth/users"),
       create: (data: { email: string; password?: string; nombre: string; telefono?: string; rol?: string; role_id?: string }) =>

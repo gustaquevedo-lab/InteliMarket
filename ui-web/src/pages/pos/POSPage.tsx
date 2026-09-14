@@ -21,6 +21,7 @@ import { DEFAULT_RECEIPT_CONFIG } from "../../constants/receiptDefaults"
 import { loadCachedPOSData, persistPOSCatalog } from "../../utils/posOfflineSync"
 import { offlineDB } from "../../utils/offlineDB"
 import { syncPendingSales, syncPendingCupones } from "../../utils/syncManager"
+import { verifySupervisorPinLocal, syncSupervisorPins } from "../../utils/localAuth"
 import QRCode from "qrcode"
 
 
@@ -646,6 +647,35 @@ export default function POSPage() {
   const [showManualWeightModal, setShowManualWeightModal] = useState<boolean>(false)
   const [manualWeightInput, setManualWeightInput] = useState<string>("")
   const [targetWeighProduct, setTargetWeighProduct] = useState<Product | null>(null)
+
+  // ── PIN corto de autorizaciones offline (solo supervisor/admin) ─────────
+  const [showSetPinModal, setShowSetPinModal] = useState(false)
+  const [newPosPin, setNewPosPin] = useState("")
+  const [newPosPinConfirm, setNewPosPinConfirm] = useState("")
+  const [settingPosPin, setSettingPosPin] = useState(false)
+  const handleSetPosPin = async () => {
+    if (!/^\d{4,6}$/.test(newPosPin)) {
+      toast.warning("PIN inválido", "Ingresá un PIN de 4 a 6 dígitos.")
+      return
+    }
+    if (newPosPin !== newPosPinConfirm) {
+      toast.warning("Los PIN no coinciden", "Verificá que ambos campos sean iguales.")
+      return
+    }
+    setSettingPosPin(true)
+    try {
+      await api.auth.setPosPin({ pin: newPosPin })
+      await syncSupervisorPins().catch(() => {})
+      toast.success("PIN configurado", "Ya podés usarlo para autorizar sin conexión en cualquier caja.")
+      setShowSetPinModal(false)
+      setNewPosPin("")
+      setNewPosPinConfirm("")
+    } catch (e: any) {
+      toast.error("No se pudo configurar el PIN", e?.message || "Intentá de nuevo.")
+    } finally {
+      setSettingPosPin(false)
+    }
+  }
 
   // ── CONFIGURACIÓN DE ASIGNACIÓN DE POS BANCARD & DINELCO POR CAJA ───────────
   const [showPosConfigModal, setShowPosConfigModal] = useState(false)
@@ -4343,10 +4373,18 @@ export default function POSPage() {
     }
     setReimprimirSupervisorVerifying(true)
     try {
-      const res = await api.auth.verifySupervisor({
-        email: reimprimirSupervisorEmail,
-        password: reimprimirSupervisorPin,
-      })
+      const selectedStaff = supervisorStaffOptions.find((s) => s.email === reimprimirSupervisorEmail)
+      let res: { valid: boolean; id?: string; nombre?: string; rol?: string } | null = null
+      if (selectedStaff) {
+        const local = await verifySupervisorPinLocal(reimprimirSupervisorPin, selectedStaff.id)
+        if (local.valid) res = { valid: true, id: local.id, nombre: local.nombre, rol: local.rol }
+      }
+      if (!res) {
+        res = await api.auth.verifySupervisor({
+          email: reimprimirSupervisorEmail,
+          password: reimprimirSupervisorPin,
+        })
+      }
       if (!res?.valid) {
         toast.warning("Autorización rechazada", "Contraseña incorrecta o la cuenta no tiene nivel de supervisor.")
         return
@@ -5362,7 +5400,26 @@ export default function POSPage() {
     }
     setVerifyingSupervisor(true)
     try {
-      const res = await api.auth.verifySupervisor({ email: supervisorEmail, password: supervisorPin })
+      // Offline-first real: si el PIN corto del supervisor ya esta cacheado
+      // localmente (ver localAuth.ts), se verifica 100% en el cliente, sin
+      // depender de que el servidor este arriba -- esto es lo que resuelve
+      // de raiz el "bullicio" en caja cuando la API se reinicia. Si no hay
+      // match local (PIN no cacheado, o la cuenta todavia usa la clave real
+      // de login), se cae al camino remoto de siempre.
+      const selectedStaff = supervisorStaffOptions.find((s) => s.email === supervisorEmail)
+      let res: { valid: boolean; id?: string; nombre?: string; rol?: string } | null = null
+      if (selectedStaff) {
+        const local = await verifySupervisorPinLocal(supervisorPin, selectedStaff.id)
+        if (local.valid) res = { valid: true, id: local.id, nombre: local.nombre, rol: local.rol }
+      }
+      if (!res) {
+        try {
+          res = await api.auth.verifySupervisor({ email: supervisorEmail, password: supervisorPin })
+        } catch (netErr) {
+          toast.error("Sin conexión y sin PIN local válido", "No se pudo verificar al supervisor -- pedile que configure su PIN de caja (Perfil → PIN de autorizaciones) para poder aprobar sin conexión la próxima vez.")
+          return
+        }
+      }
       if (!res?.valid) {
         toast.warning("Autorización Rechazada", "Contraseña incorrecta o la cuenta no tiene nivel de supervisor.")
         return
@@ -7608,6 +7665,18 @@ export default function POSPage() {
               </div>
             </div>
 
+            {isSupervisorUser && (
+              <button
+                onClick={() => setShowSetPinModal(true)}
+                title="Configurar mi PIN de autorizaciones (para aprobar sin conexión)"
+                className={`flex items-center justify-center w-7 h-7 rounded-lg border text-xs font-bold transition-colors cursor-pointer shrink-0 ml-1 ${
+                  dark ? "bg-slate-800 text-amber-400 border-slate-700 hover:bg-amber-900/40" : "bg-slate-200 text-amber-600 border-slate-300 hover:bg-amber-100"
+                }`}
+              >
+                <Lock className="w-3.5 h-3.5" />
+              </button>
+            )}
+
             <button
               onClick={() => { api.auth.endPosShift().catch(() => {}); logout(); window.location.reload() }}
               title="Cerrar Sesión"
@@ -8773,6 +8842,63 @@ export default function POSPage() {
       )}
 
       {/* ── 6. MODAL DE ASIGNACIÓN DE TERMINALES POS (BANCARD & DINELCO) POR CAJA ─ */}
+      {showSetPinModal && (
+        <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl max-w-sm w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
+            <div className="flex items-center justify-between mb-3 border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center text-white shrink-0 shadow-sm shadow-amber-500/30">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-slate-900 dark:text-white font-posDisplay tracking-tight">Mi PIN de Autorizaciones</h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Para aprobar acciones en caja sin necesitar conexión al servidor.</p>
+                </div>
+              </div>
+              <button onClick={() => setShowSetPinModal(false)} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 leading-relaxed">
+              Este PIN es distinto de tu contraseña de acceso. Se usa solo para autorizar acciones en las cajas (descuentos, anulaciones, Extra Club, devoluciones, etc.) -- incluso si el servidor está caído o reiniciando.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nuevo PIN (4 a 6 dígitos):</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={newPosPin}
+                  onChange={(e) => setNewPosPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="••••"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-posMono tabular-nums text-center text-lg tracking-widest outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Confirmar PIN:</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={newPosPinConfirm}
+                  onChange={(e) => setNewPosPinConfirm(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="••••"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-posMono tabular-nums text-center text-lg tracking-widest outline-none focus:border-amber-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleSetPosPin}
+                disabled={settingPosPin}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-black bg-amber-600 hover:bg-amber-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-amber-600/20"
+              >
+                {settingPosPin ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                Guardar PIN
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showPosConfigModal && (
         <div className="fixed inset-0 z-[120] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl max-w-xl w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in max-h-[90vh] overflow-y-auto">

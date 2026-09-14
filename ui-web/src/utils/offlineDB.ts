@@ -1,5 +1,5 @@
 const DB_NAME = "intelimarket_offline"
-const DB_VERSION = 5
+const DB_VERSION = 6
 const STORE_CART = "cart"
 const STORE_PENDING_SALES = "pending_sales"
 const STORE_PENDING_CUPONES = "pending_cupones"
@@ -13,6 +13,7 @@ const STORE_COMPANY_CONFIG = "company_config"
 const STORE_INVOICES = "invoices"
 const STORE_STAFF = "staff_authorizers"
 const STORE_RATES = "currency_rates"
+const STORE_SUPERVISOR_PINS = "supervisor_pins"
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -65,6 +66,11 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE_STAFF)) db.createObjectStore(STORE_STAFF, { keyPath: "id" })
       if (!db.objectStoreNames.contains(STORE_RATES)) db.createObjectStore(STORE_RATES, { keyPath: "id" })
+      // Hashes de PIN de supervisor/admin para autorizar acciones sensibles
+      // en caja SIN depender del servidor -- separado de STORE_STAFF (que
+      // solo tiene datos de exhibicion, nunca credenciales) a proposito.
+      // Ver api/src/auth/router.py::pos_supervisor_pins.
+      if (!db.objectStoreNames.contains(STORE_SUPERVISOR_PINS)) db.createObjectStore(STORE_SUPERVISOR_PINS, { keyPath: "id" })
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
@@ -196,6 +202,14 @@ export interface PendingSale {
   retry_count: number
   last_retry: string
   next_retry: string
+}
+
+export interface SupervisorPin {
+  id: string
+  nombre: string
+  rol: string
+  pin_hash: string
+  synced_at?: string
 }
 
 export interface PendingCupon {
@@ -347,6 +361,11 @@ export const offlineDB = {
     setAll: (staff: any[]) => clearStore(STORE_STAFF).then(() => putMany(STORE_STAFF, staff)),
     clear: () => clearStore(STORE_STAFF),
   },
+  supervisorPins: {
+    getAll: () => getStore<SupervisorPin>(STORE_SUPERVISOR_PINS),
+    setAll: (pins: SupervisorPin[]) => clearStore(STORE_SUPERVISOR_PINS).then(() => putMany(STORE_SUPERVISOR_PINS, pins)),
+    clear: () => clearStore(STORE_SUPERVISOR_PINS),
+  },
   rates: {
     getAll: () => getStore<any>(STORE_RATES),
     setAll: (rates: any[]) => clearStore(STORE_RATES).then(() => putMany(STORE_RATES, rates)),
@@ -367,7 +386,7 @@ export const offlineDB = {
     clear: () => clearStore(STORE_RECEIPTS),
   },
   clearAll: async () => {
-    const stores = [STORE_CART, STORE_PENDING_SALES, STORE_PENDING_CUPONES, STORE_PRODUCTS, STORE_CUSTOMERS, STORE_SYNC_STATE, STORE_RECEIPTS, STORE_TIMBRADOS, STORE_PAYMENT_METHODS, STORE_COMPANY_CONFIG, STORE_INVOICES, STORE_STAFF, STORE_RATES]
+    const stores = [STORE_CART, STORE_PENDING_SALES, STORE_PENDING_CUPONES, STORE_PRODUCTS, STORE_CUSTOMERS, STORE_SYNC_STATE, STORE_RECEIPTS, STORE_TIMBRADOS, STORE_PAYMENT_METHODS, STORE_COMPANY_CONFIG, STORE_INVOICES, STORE_STAFF, STORE_RATES, STORE_SUPERVISOR_PINS]
     for (const s of stores) await clearStore(s)
   },
   timbrados: {

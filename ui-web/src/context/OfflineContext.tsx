@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
 import { offlineDB, type PendingSale, type OfflineCartItem, type CachedProduct, type CachedCustomer, type CachedReceipt } from "../utils/offlineDB"
 import { syncFullCatalog, getCachedCatalog, syncPendingSales, syncPendingCupones, scheduleSyncRetry, cancelSyncRetry, saveOfflineReceipt, getOfflineReceipt, generateOfflineReceipt } from "../utils/syncManager"
+import { syncSupervisorPins } from "../utils/localAuth"
 import { api } from "../api"
 
 interface OfflineContextType {
@@ -80,6 +81,16 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
       cancelSyncRetry()
     }
     return () => cancelSyncRetry()
+  }, [isOnline])
+
+  // Refresco periodico de los PINs de autorizacion de supervisor, sin
+  // depender de que la conexion "flapee" -- si la caja queda online varias
+  // horas seguidas (turno completo), igual conviene refrescar de tanto en
+  // tanto para reflejar PINs nuevos o cuentas dadas de baja.
+  useEffect(() => {
+    if (!isOnline) return
+    const t = setInterval(() => { syncSupervisorPins().catch(() => {}) }, 10 * 60 * 1000)
+    return () => clearInterval(t)
   }, [isOnline])
 
   const saveCartOffline = async (items: OfflineCartItem[]) => {
