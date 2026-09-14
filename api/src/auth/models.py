@@ -22,6 +22,13 @@ class User(Base):
     activo = Column(Boolean, default=True)
     foto_url = Column(String(500), nullable=True)
     current_session_id = Column(String(64), nullable=True)
+    # PIN corto (4-6 digitos) para autorizaciones offline en caja -- ver
+    # api/src/auth/router.py::set_pos_pin / pos_supervisor_pins. Distinto de
+    # password_hash a proposito: se distribuye (hasheado) a las estaciones
+    # POS para verificacion local, y no queremos que eso exponga la cuenta
+    # real si se compromete el cache de una caja.
+    pos_pin_hash = Column(String(255), nullable=True)
+    pos_pin_updated_at = Column(DateTime(timezone=True), nullable=True)
     last_login = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

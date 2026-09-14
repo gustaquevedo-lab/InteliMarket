@@ -17,6 +17,7 @@ from api.src.auth.schemas import (
     AdminCreateUserRequest, AdminCreateUserResponse, UpdateUserRequest, TenantUserResponse,
     VerifySupervisorRequest, VerifySupervisorResponse,
     PosStaffItem, PosStaffListResponse, ActiveSupervisorResponse,
+    SetPosPinRequest, PosSupervisorPin, PosSupervisorPinsResponse,
 )
 from api.src.auth.middleware import get_current_user
 from api.src.common.rate_limit import login_rate_limit
@@ -199,6 +200,61 @@ async def verify_supervisor(
         return VerifySupervisorResponse(valid=False)
 
     return VerifySupervisorResponse(valid=True, id=str(user.id), nombre=user.nombre, rol=user.rol)
+
+
+@router.post("/set-pos-pin")
+async def set_pos_pin(
+    body: SetPosPinRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Cada supervisor/admin configura su propio PIN corto de autorizaciones
+    en caja (self-service, nunca lo setea otra persona por el). Solo cuentas
+    con nivel de supervisor/admin pueden tener uno -- no tiene sentido para
+    un cajero, que nunca autoriza nada. Este PIN (hasheado) es lo que se
+    distribuye despues a las cajas via /pos-supervisor-pins para verificar
+    autorizaciones sin depender del servidor -- ver offlineDB.ts."""
+    user_id = current_user.get("id") or current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Sesión inválida")
+
+    result = await db.execute(select(User).where(User.id == uuid.UUID(str(user_id))))
+    user = result.scalar_one_or_none()
+    if not user or not user.activo:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    if user.rol not in ("admin", "supervisor") and not user.is_superadmin:
+        raise HTTPException(status_code=403, detail="Solo cuentas de supervisor o administrador pueden configurar un PIN de autorizaciones.")
+
+    user.pos_pin_hash = hash_password(body.pin)
+    user.pos_pin_updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/pos-supervisor-pins", response_model=PosSupervisorPinsResponse)
+async def pos_supervisor_pins(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Distribuye los hashes de PIN de los supervisores/admins activos de la
+    empresa a la estacion POS, para que quede cacheado localmente (offlineDB)
+    y las autorizaciones de supervisor funcionen sin round-trip al servidor.
+    Requiere sesion valida (no es publico) -- se distribuye material de
+    credencial aunque sea hasheado, por eso el PIN es corto y separado de
+    la contrasena real (ver set_pos_pin)."""
+    result = await db.execute(
+        select(User).where(
+            User.rol.in_(["admin", "supervisor"]),
+            User.activo == True,
+            User.pos_pin_hash.isnot(None),
+        )
+    )
+    users = result.scalars().all()
+    return PosSupervisorPinsResponse(supervisors=[
+        PosSupervisorPin(id=str(u.id), nombre=u.nombre, rol=u.rol, pin_hash=u.pos_pin_hash)
+        for u in users
+    ])
 
 
 @router.get("/pos-staff", response_model=PosStaffListResponse)

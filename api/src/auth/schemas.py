@@ -24,6 +24,23 @@ class VerifySupervisorResponse(BaseModel):
     rol: Optional[str] = None
 
 
+class SetPosPinRequest(BaseModel):
+    # 4-6 digitos numericos -- corto a proposito, se tipea muchas veces por
+    # turno en caja. No es la contrasena real de login.
+    pin: str = Field(min_length=4, max_length=6, pattern=r"^\d{4,6}$")
+
+
+class PosSupervisorPin(BaseModel):
+    id: str
+    nombre: str
+    rol: str
+    pin_hash: str
+
+
+class PosSupervisorPinsResponse(BaseModel):
+    supervisors: list[PosSupervisorPin]
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=3)
