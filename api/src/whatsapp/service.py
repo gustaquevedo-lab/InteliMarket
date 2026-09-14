@@ -7,7 +7,7 @@ from typing import Optional
 from uuid import UUID
 
 import httpx
-from sqlalchemy import select, update, func, text
+from sqlalchemy import select, update, func, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.whatsapp.models import (
@@ -71,25 +71,37 @@ async def save_config(db: AsyncSession, tenant_id: UUID, data: dict) -> WhatsApp
     return config
 
 
-
 async def get_or_create_conversation(
     db: AsyncSession, tenant_id: UUID, phone: str, name: Optional[str] = None
 ) -> WhatsAppConversation:
-    clean_phone = re.sub(r"[^\d+]", "", phone)
+    norm_digits = normalize_phone_e164(phone) or re.sub(r"\D", "", phone)
+    plus_phone = f"+{norm_digits}" if not norm_digits.startswith("+") else norm_digits
+    raw_digits = re.sub(r"\D", "", phone)
+
     result = await db.execute(
         select(WhatsAppConversation)
         .where(WhatsAppConversation.tenant_id == tenant_id)
-        .where(WhatsAppConversation.contact_phone == clean_phone)
+        .where(
+            or_(
+                WhatsAppConversation.contact_phone == plus_phone,
+                WhatsAppConversation.contact_phone == norm_digits,
+                WhatsAppConversation.contact_phone == raw_digits,
+                WhatsAppConversation.contact_phone == phone,
+            )
+        )
     )
-    conv = result.scalar_one_or_none()
+    conv = result.scalars().first()
     if conv:
+        if name and (not conv.contact_name or conv.contact_name == conv.contact_phone):
+            conv.contact_name = name
         conv.last_message_at = datetime.now(timezone.utc)
         await db.commit()
         return conv
+
     conv = WhatsAppConversation(
         tenant_id=tenant_id,
-        contact_phone=clean_phone,
-        contact_name=name,
+        contact_phone=plus_phone,
+        contact_name=name or plus_phone,
         last_message_at=datetime.now(timezone.utc),
     )
     db.add(conv)
@@ -109,7 +121,9 @@ async def get_conversation_messages(
         .limit(limit)
         .offset(offset)
     )
-    return list(result.scalars().all())
+    msgs = list(result.scalars().all())
+    msgs.reverse()
+    return msgs
 
 
 async def archive_conversation(db: AsyncSession, tenant_id: UUID, conversation_id: UUID):

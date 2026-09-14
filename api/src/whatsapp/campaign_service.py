@@ -564,6 +564,7 @@ async def chatbot_test(
             tenant_id=tenant_id,
             contact_name="Test Simulador",
             contact_phone="+595990000000",
+            status="simulated",
             session_state="idle",
         )
         db.add(conversation)

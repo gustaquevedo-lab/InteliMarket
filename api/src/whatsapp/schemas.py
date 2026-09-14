@@ -58,6 +58,8 @@ class WhatsAppConversationResponse(BaseModel):
     status: str
     session_state: Optional[str] = "idle"
     session_data: Optional[dict] = None
+    last_message_preview: Optional[str] = None
+    total_messages: Optional[int] = 0
     created_at: datetime
 
 

@@ -300,6 +300,7 @@ export default function WhatsAppPage() {
       })
       if (res.success) {
         toast.success("¡Mensaje Enviado!", `Despachado exitosamente (ID: ${res.message_id || "OK"})`)
+        fetchConversations()
       } else {
         toast.error("Fallo al enviar", "El gateway rechazó el envío")
       }
@@ -307,6 +308,38 @@ export default function WhatsAppPage() {
       toast.error("Error de envío", e?.response?.data?.detail || e?.message || "Error enviando WhatsApp")
     } finally {
       setSendingTest(false)
+    }
+  }
+
+  const handleDeleteConversation = async (convId: string) => {
+    if (!window.confirm("¿Estás seguro de que deseás eliminar esta conversación y todo su historial?")) {
+      return
+    }
+    try {
+      await api.whatsapp.deleteConversation(convId)
+      toast.success("Conversación eliminada", "El chat y sus mensajes fueron eliminados")
+      if (selectedConv?.id === convId) {
+        setSelectedConv(null)
+        setMessages([])
+      }
+      fetchConversations()
+    } catch (e: any) {
+      toast.error("Error al eliminar", e?.response?.data?.detail || "No se pudo eliminar la conversación")
+    }
+  }
+
+  const handleCleanupTests = async () => {
+    if (!window.confirm("¿Deseás eliminar todas las conversaciones ficticias y de pruebas residuales?")) {
+      return
+    }
+    try {
+      const res = await api.whatsapp.cleanupTests()
+      toast.success("Limpieza completa", `Se eliminaron ${res.deleted_count} conversaciones de prueba`)
+      setSelectedConv(null)
+      setMessages([])
+      fetchConversations()
+    } catch (e: any) {
+      toast.error("Error al limpiar", e?.response?.data?.detail || "No se pudieron limpiar las pruebas")
     }
   }
 
@@ -1266,6 +1299,13 @@ export default function WhatsAppPage() {
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${conversationsLoading ? "animate-spin" : ""}`} />
                 </button>
+                <button
+                  onClick={handleCleanupTests}
+                  className="btn-outline p-2 text-slate-400 hover:text-amber-600 hover:border-amber-300"
+                  title="Limpiar pruebas residuales"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
               </div>
 
               {/* Filtros de Segmentación */}
@@ -1396,10 +1436,17 @@ export default function WhatsAppPage() {
                     </span>
                     <button
                       onClick={() => fetchMessages(selectedConv.id)}
-                      className="p-1.5 text-slate-400 hover:text-slate-600"
+                      className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
                       title="Refrescar mensajes"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteConversation(selectedConv.id)}
+                      className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30"
+                      title="Eliminar conversación"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>

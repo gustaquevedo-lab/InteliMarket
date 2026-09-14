@@ -1,9 +1,11 @@
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Header
+from sqlalchemy import select, delete, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
@@ -15,7 +17,16 @@ from api.src.whatsapp.schemas import (
     TwilioWebhook, SendMessageRequest, WhatsAppStats,
 )
 from api.src.whatsapp import service as whatsapp_service
-from api.src.whatsapp.models import WhatsAppConversation
+from api.src.whatsapp.models import (
+    WhatsAppConversation,
+    WhatsAppMessage,
+    MessageDirection,
+    MessageStatus,
+    ConversationStatus,
+)
+from api.src.whatsapp.evolution_client import evolution_client, normalize_phone_e164
+
+logger = logging.getLogger("whatsapp.router")
 
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp"])
@@ -158,11 +169,6 @@ async def save_chatbot_config(
 
     return {"status": "ok", "config": body}
 
-
-
-from api.src.whatsapp.evolution_client import evolution_client
-
-
 @router.get("/status")
 async def get_gateway_status(
     user: dict = Depends(require_auth),
@@ -200,8 +206,10 @@ async def disconnect_gateway(
 async def test_send_message(
     body: dict,
     user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Envía un mensaje de prueba a través de Evolution API."""
+    """Envía un mensaje de prueba a través de Evolution API y registra la conversación."""
+    tenant_id = UUID(user["tenant_id"])
     phone = body.get("phone")
     message = body.get("message") or "Mensaje de prueba desde Extra Supermercado (InteliMarket)"
     if not phone:
@@ -210,6 +218,29 @@ async def test_send_message(
     result = await evolution_client.send_text_message(phone, message)
     if not result.get("success"):
         raise HTTPException(status_code=500, detail=result.get("detail", "Error al enviar mensaje"))
+
+    # Crear / actualizar conversación para que aparezca de inmediato en la bandeja de Chat en Vivo
+    try:
+        conv = await whatsapp_service.get_or_create_conversation(db, tenant_id, phone, name=phone)
+        msg_id = (
+            result.get("data", {}).get("key", {}).get("id")
+            or result.get("message_id")
+            or f"test-{datetime.now(timezone.utc).timestamp()}"
+        )
+        outbound_msg = WhatsAppMessage(
+            tenant_id=tenant_id,
+            conversation_id=conv.id,
+            direction=MessageDirection.outbound,
+            content=message,
+            message_id=msg_id,
+            status=MessageStatus.sent,
+        )
+        db.add(outbound_msg)
+        conv.last_message_at = datetime.now(timezone.utc)
+        await db.commit()
+    except Exception as e:
+        logger.error(f"Error registrando mensaje de prueba en BD: {e}", exc_info=True)
+
     return result
 
 
@@ -221,6 +252,7 @@ async def test_message_legacy(
     user: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
+    tenant_id = UUID(user["tenant_id"])
     target_phone = phone
     target_content = content or "Mensaje de prueba desde InteliMarket"
     try:
@@ -236,6 +268,28 @@ async def test_message_legacy(
     result = await evolution_client.send_text_message(target_phone, target_content)
     if not result.get("success"):
         raise HTTPException(status_code=500, detail=result.get("detail", "Error enviando mensaje"))
+
+    try:
+        conv = await whatsapp_service.get_or_create_conversation(db, tenant_id, target_phone, name=target_phone)
+        msg_id = (
+            result.get("data", {}).get("key", {}).get("id")
+            or result.get("message_id")
+            or f"test-{datetime.now(timezone.utc).timestamp()}"
+        )
+        outbound_msg = WhatsAppMessage(
+            tenant_id=tenant_id,
+            conversation_id=conv.id,
+            direction=MessageDirection.outbound,
+            content=target_content,
+            message_id=msg_id,
+            status=MessageStatus.sent,
+        )
+        db.add(outbound_msg)
+        conv.last_message_at = datetime.now(timezone.utc)
+        await db.commit()
+    except Exception as e:
+        logger.error(f"Error registrando mensaje de prueba legacy en BD: {e}", exc_info=True)
+
     return {"status": "ok", "message": "Mensaje enviado", "result": result}
 
 
@@ -247,13 +301,52 @@ async def list_conversations(
     user: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    from sqlalchemy import select
     tenant_id = UUID(user["tenant_id"])
     query = select(WhatsAppConversation).where(WhatsAppConversation.tenant_id == tenant_id)
     if status:
         query = query.where(WhatsAppConversation.status == status)
-    query = query.order_by(WhatsAppConversation.last_message_at.desc()).limit(limit).offset(offset)
+    else:
+        # Por defecto excluir pruebas simuladas o números ficticios
+        query = query.where(WhatsAppConversation.status != "simulated")
+        query = query.where(WhatsAppConversation.contact_phone != "+595990000000")
+
+    query = query.order_by(
+        WhatsAppConversation.last_message_at.desc().nulls_last(),
+        WhatsAppConversation.created_at.desc()
+    ).limit(limit).offset(offset)
     result = await db.execute(query)
+    convs = list(result.scalars().all())
+    if not convs:
+        return []
+
+    conv_ids = [c.id for c in convs]
+
+    # Último mensaje para preview
+    subq = (
+        select(
+            WhatsAppMessage.conversation_id,
+            WhatsAppMessage.content,
+            func.row_number().over(
+                partition_by=WhatsAppMessage.conversation_id,
+                order_by=WhatsAppMessage.created_at.desc()
+            ).label("rn")
+        )
+        .where(WhatsAppMessage.conversation_id.in_(conv_ids))
+        .subquery()
+    )
+    latest_msgs_res = await db.execute(
+        select(subq.c.conversation_id, subq.c.content).where(subq.c.rn == 1)
+    )
+    previews = {row[0]: row[1] for row in latest_msgs_res.all()}
+
+    # Total de mensajes por conversación
+    count_res = await db.execute(
+        select(WhatsAppMessage.conversation_id, func.count(WhatsAppMessage.id))
+        .where(WhatsAppMessage.conversation_id.in_(conv_ids))
+        .group_by(WhatsAppMessage.conversation_id)
+    )
+    counts = {row[0]: row[1] for row in count_res.all()}
+
     return [
         WhatsAppConversationResponse(
             id=c.id,
@@ -263,9 +356,13 @@ async def list_conversations(
             contact_phone=c.contact_phone,
             last_message_at=c.last_message_at,
             status=_val(c.status, "active"),
+            session_state=c.session_state or "idle",
+            session_data=c.session_data,
+            last_message_preview=previews.get(c.id),
+            total_messages=counts.get(c.id, 0),
             created_at=c.created_at,
         )
-        for c in result.scalars().all()
+        for c in convs
     ]
 
 
@@ -354,6 +451,61 @@ async def archive_conversation(
     from uuid import UUID as U
     await whatsapp_service.archive_conversation(db, tenant_id, U(conv_id))
     return {"status": "ok"}
+
+
+@router.delete("/conversations/{conv_id}")
+async def delete_conversation(
+    conv_id: str,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Elimina una conversación y todo su historial de mensajes."""
+    tenant_id = UUID(user["tenant_id"])
+    from uuid import UUID as U
+    c_uuid = U(conv_id)
+    await db.execute(
+        delete(WhatsAppMessage)
+        .where(WhatsAppMessage.tenant_id == tenant_id)
+        .where(WhatsAppMessage.conversation_id == c_uuid)
+    )
+    res = await db.execute(
+        delete(WhatsAppConversation)
+        .where(WhatsAppConversation.tenant_id == tenant_id)
+        .where(WhatsAppConversation.id == c_uuid)
+    )
+    await db.commit()
+    return {"status": "ok", "deleted": res.rowcount}
+
+
+@router.delete("/conversations/cleanup/tests")
+@router.post("/conversations/cleanup/tests")
+async def cleanup_test_conversations(
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Limpia las conversaciones residuales de pruebas y del simulador."""
+    tenant_id = UUID(user["tenant_id"])
+    test_conv_res = await db.execute(
+        select(WhatsAppConversation.id).where(
+            WhatsAppConversation.tenant_id == tenant_id,
+            or_(
+                WhatsAppConversation.contact_phone.like("%0000000%"),
+                WhatsAppConversation.contact_name == "Test Simulador",
+                WhatsAppConversation.status == "simulated",
+            )
+        )
+    )
+    test_ids = [row[0] for row in test_conv_res.all()]
+    if test_ids:
+        await db.execute(
+            delete(WhatsAppMessage).where(WhatsAppMessage.conversation_id.in_(test_ids))
+        )
+        await db.execute(
+            delete(WhatsAppConversation).where(WhatsAppConversation.id.in_(test_ids))
+        )
+        await db.commit()
+    return {"status": "ok", "deleted_count": len(test_ids)}
+
 
 
 @router.get("/templates")
@@ -522,7 +674,6 @@ async def evolution_webhook(
 
     event = payload.get("event")
     instance = payload.get("instance")
-    logger = logging.getLogger("whatsapp.webhook")
     logger.info(f"[Evolution Webhook] Evento recibido: '{event}' para instancia '{instance}'")
 
     if event in ("messages.upsert", "MESSAGES_UPSERT"):
@@ -535,7 +686,8 @@ async def evolution_webhook(
         if not remote_jid or remote_jid.endswith("@g.us") or remote_jid == "status@broadcast":
             return {"status": "ignored", "detail": "Group or broadcast"}
 
-        clean_phone = re.sub(r"@(s\.whatsapp\.net|lid)$", "", remote_jid)
+        raw_phone = remote_jid.split("@")[0].split(":")[0]
+        clean_phone = re.sub(r"[^\d+]", "", raw_phone)
         push_name = msg_data.get("pushName") or clean_phone
 
         # Extraer texto del mensaje
@@ -570,22 +722,26 @@ async def evolution_webhook(
             status=MessageStatus.delivered,
         )
         db.add(inbound_msg)
+        conv.last_message_at = datetime.now(timezone.utc)
         await db.commit()
 
         # Si el chatbot o respuesta automática está configurada
-        cfg = await whatsapp_service.get_config(db, tenant.id)
-        if cfg and cfg.auto_reply:
-            from api.src.companies.models import Company
-            from api.src.whatsapp.chatbot import ChatbotEngine, update_conversation_state
-            comp_res = await db.execute(select(Company).where(Company.tenant_id == tenant.id).limit(1))
-            company = comp_res.scalar_one_or_none()
-            if company:
-                chatbot = ChatbotEngine(db, company.id)
-                resp_data = await chatbot.process_message(conv, content)
-                if resp_data and resp_data.get("text"):
-                    await whatsapp_service.reply_to_conversation(db, tenant.id, conv.id, resp_data["text"])
-                    if resp_data.get("next_state"):
-                        await update_conversation_state(db, conv.id, resp_data["next_state"])
+        try:
+            cfg = await whatsapp_service.get_config(db, tenant.id)
+            if cfg and cfg.auto_reply:
+                from api.src.companies.models import Company
+                from api.src.whatsapp.chatbot import ChatbotEngine, update_conversation_state
+                comp_res = await db.execute(select(Company).where(Company.tenant_id == tenant.id).limit(1))
+                company = comp_res.scalar_one_or_none()
+                if company:
+                    chatbot = ChatbotEngine(db, company.id)
+                    resp_data = await chatbot.process_message(conv, content)
+                    if resp_data and resp_data.get("text"):
+                        await whatsapp_service.reply_to_conversation(db, tenant.id, conv.id, resp_data["text"])
+                        if resp_data.get("next_state"):
+                            await update_conversation_state(db, conv.id, resp_data["next_state"])
+        except Exception as bot_err:
+            logger.error(f"[Evolution Webhook] Error en respuesta de chatbot: {bot_err}", exc_info=True)
 
         return {"status": "ok", "conversation_id": str(conv.id), "message_id": key.get("id")}
 
