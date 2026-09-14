@@ -79,9 +79,30 @@ export default function WhatsAppPage() {
       supermarket_info: true,
       human_handoff: true,
     },
+    keywords: [],
+    custom_menu_options: [],
   })
   const [loadingChatbotConfig, setLoadingChatbotConfig] = useState<boolean>(false)
   const [savingChatbotConfig, setSavingChatbotConfig] = useState<boolean>(false)
+
+  // Modales de Reglas de Palabras Clave y Menú Personalizado
+  const [showKeywordModal, setShowKeywordModal] = useState<boolean>(false)
+  const [editingKeyword, setEditingKeyword] = useState<any | null>(null)
+  const [keywordForm, setKeywordForm] = useState<{ id?: string; name: string; keywords: string; response: string; active: boolean }>({
+    name: "",
+    keywords: "",
+    response: "",
+    active: true,
+  })
+
+  const [showMenuOptionModal, setShowMenuOptionModal] = useState<boolean>(false)
+  const [editingMenuOption, setEditingMenuOption] = useState<any | null>(null)
+  const [menuOptionForm, setMenuOptionForm] = useState<{ id?: string; number: string; title: string; response: string; active: boolean }>({
+    number: "6",
+    title: "",
+    response: "",
+    active: true,
+  })
 
   // Chatbot Live Simulator
   const [simMessages, setSimMessages] = useState<Array<{ sender: "user" | "bot"; text: string; time: string; buttons?: any[] }>>([
@@ -331,16 +352,167 @@ export default function WhatsAppPage() {
     }
   }
 
-  const handleSaveChatbotConfig = async () => {
+  const handleSaveChatbotConfig = async (overrideCfg?: any) => {
     setSavingChatbotConfig(true)
     try {
-      await api.whatsapp.saveChatbotConfig(chatbotConfig)
+      const cfgToSave = overrideCfg || chatbotConfig
+      await api.whatsapp.saveChatbotConfig(cfgToSave)
+      setChatbotConfig(cfgToSave)
       toast.success("Configuración Guardada", "Las opciones del Chatbot IA fueron actualizadas")
     } catch (e: any) {
       toast.error("Error al guardar", e?.message || "No se pudo guardar la configuración")
     } finally {
       setSavingChatbotConfig(false)
     }
+  }
+
+  // ── Manejadores de Palabras Clave (Keywords & FAQ) ──
+  const handleOpenKeywordModal = (kw?: any) => {
+    if (kw) {
+      setEditingKeyword(kw)
+      setKeywordForm({
+        id: kw.id,
+        name: kw.name || "",
+        keywords: Array.isArray(kw.keywords) ? kw.keywords.join(", ") : (kw.keywords || ""),
+        response: kw.response || "",
+        active: kw.active !== false,
+      })
+    } else {
+      setEditingKeyword(null)
+      setKeywordForm({
+        name: "",
+        keywords: "",
+        response: "",
+        active: true,
+      })
+    }
+    setShowKeywordModal(true)
+  }
+
+  const handleSaveKeyword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const kwList = keywordForm.keywords
+      .split(",")
+      .map((k) => k.trim().toLowerCase())
+      .filter(Boolean)
+
+    if (kwList.length === 0) {
+      toast.error("Error", "Ingresá al menos una palabra clave")
+      return
+    }
+
+    const currentKeywords = Array.isArray(chatbotConfig.keywords) ? [...chatbotConfig.keywords] : []
+    let updated: any[]
+    if (editingKeyword) {
+      updated = currentKeywords.map((k) =>
+        k.id === editingKeyword.id
+          ? { ...k, name: keywordForm.name, keywords: kwList, response: keywordForm.response, active: keywordForm.active }
+          : k
+      )
+    } else {
+      const newRule = {
+        id: `kw-${Date.now()}`,
+        name: keywordForm.name || `Regla ${currentKeywords.length + 1}`,
+        keywords: kwList,
+        response: keywordForm.response,
+        active: keywordForm.active,
+      }
+      updated = [...currentKeywords, newRule]
+    }
+
+    const newCfg = { ...chatbotConfig, keywords: updated }
+    setChatbotConfig(newCfg)
+    setShowKeywordModal(false)
+    await handleSaveChatbotConfig(newCfg)
+  }
+
+  const handleToggleKeyword = async (id: string) => {
+    const currentKeywords = Array.isArray(chatbotConfig.keywords) ? [...chatbotConfig.keywords] : []
+    const updated = currentKeywords.map((k) => (k.id === id ? { ...k, active: !k.active } : k))
+    const newCfg = { ...chatbotConfig, keywords: updated }
+    setChatbotConfig(newCfg)
+    await handleSaveChatbotConfig(newCfg)
+  }
+
+  const handleDeleteKeyword = async (id: string) => {
+    const currentKeywords = Array.isArray(chatbotConfig.keywords) ? [...chatbotConfig.keywords] : []
+    const updated = currentKeywords.filter((k) => k.id !== id)
+    const newCfg = { ...chatbotConfig, keywords: updated }
+    setChatbotConfig(newCfg)
+    await handleSaveChatbotConfig(newCfg)
+  }
+
+  // ── Manejadores de Opciones Extras del Menú Principal ──
+  const handleOpenMenuOptionModal = (opt?: any) => {
+    if (opt) {
+      setEditingMenuOption(opt)
+      setMenuOptionForm({
+        id: opt.id,
+        number: opt.number || "6",
+        title: opt.title || "",
+        response: opt.response || "",
+        active: opt.active !== false,
+      })
+    } else {
+      setEditingMenuOption(null)
+      const existing = Array.isArray(chatbotConfig.custom_menu_options) ? chatbotConfig.custom_menu_options : []
+      const nextNum = existing.length > 0 ? String(existing.length + 6) : "6"
+      setMenuOptionForm({
+        number: nextNum,
+        title: "",
+        response: "",
+        active: true,
+      })
+    }
+    setShowMenuOptionModal(true)
+  }
+
+  const handleSaveMenuOption = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!menuOptionForm.title.trim() || !menuOptionForm.response.trim()) {
+      toast.error("Error", "Completá el título y la respuesta de la opción")
+      return
+    }
+
+    const currentOpts = Array.isArray(chatbotConfig.custom_menu_options) ? [...chatbotConfig.custom_menu_options] : []
+    let updated: any[]
+    if (editingMenuOption) {
+      updated = currentOpts.map((o) =>
+        o.id === editingMenuOption.id
+          ? { ...o, number: menuOptionForm.number, title: menuOptionForm.title, response: menuOptionForm.response, active: menuOptionForm.active }
+          : o
+      )
+    } else {
+      const newOpt = {
+        id: `opt-${Date.now()}`,
+        number: menuOptionForm.number,
+        title: menuOptionForm.title,
+        response: menuOptionForm.response,
+        active: menuOptionForm.active,
+      }
+      updated = [...currentOpts, newOpt]
+    }
+
+    const newCfg = { ...chatbotConfig, custom_menu_options: updated }
+    setChatbotConfig(newCfg)
+    setShowMenuOptionModal(false)
+    await handleSaveChatbotConfig(newCfg)
+  }
+
+  const handleToggleMenuOption = async (id: string) => {
+    const currentOpts = Array.isArray(chatbotConfig.custom_menu_options) ? [...chatbotConfig.custom_menu_options] : []
+    const updated = currentOpts.map((o) => (o.id === id ? { ...o, active: !o.active } : o))
+    const newCfg = { ...chatbotConfig, custom_menu_options: updated }
+    setChatbotConfig(newCfg)
+    await handleSaveChatbotConfig(newCfg)
+  }
+
+  const handleDeleteMenuOption = async (id: string) => {
+    const currentOpts = Array.isArray(chatbotConfig.custom_menu_options) ? [...chatbotConfig.custom_menu_options] : []
+    const updated = currentOpts.filter((o) => o.id !== id)
+    const newCfg = { ...chatbotConfig, custom_menu_options: updated }
+    setChatbotConfig(newCfg)
+    await handleSaveChatbotConfig(newCfg)
   }
 
   const handleSimulateMessage = async (msgText: string) => {
@@ -1150,129 +1322,314 @@ export default function WhatsAppPage() {
       {/* ── TAB 3: CHATBOT IA & ASISTENTE EXTRA SUPERMERCADO (OPCIONES INTELLIZAPP) ── */}
       {tab === "chatbot" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Panel de Opciones del Chatbot */}
-          <div className="lg:col-span-6 bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 flex items-center justify-center">
-                  <Bot className="w-5 h-5" />
+          {/* Panel Izquierdo: Configuración, Palabras Clave y Menú Personalizado */}
+          <div className="lg:col-span-6 space-y-6">
+            {/* Card 1: Configuración Base */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-5">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 flex items-center justify-center">
+                    <Bot className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900 dark:text-white">Configuración del Chatbot IA</h2>
+                    <p className="text-xs text-slate-500">Parámetros de atención automática de Extra Supermercado</p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-base font-bold text-slate-900 dark:text-white">Configuración del Chatbot IA</h2>
-                  <p className="text-xs text-slate-500">Parámetros de atención automática de Extra Supermercado</p>
-                </div>
+
+                {/* Toggle Auto-responder */}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Auto-Responder:</span>
+                  <input
+                    type="checkbox"
+                    checked={chatbotConfig.auto_reply}
+                    onChange={(e) => setChatbotConfig({ ...chatbotConfig, auto_reply: e.target.checked })}
+                    className="w-4 h-4 accent-emerald-600 rounded"
+                  />
+                  <span className={`text-xs font-bold ${chatbotConfig.auto_reply ? "text-emerald-600" : "text-slate-400"}`}>
+                    {chatbotConfig.auto_reply ? "Activo" : "Pausado"}
+                  </span>
+                </label>
               </div>
 
-              {/* Toggle Auto-responder */}
-              <label className="flex items-center gap-2 cursor-pointer">
-                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Auto-Responder:</span>
-                <input
-                  type="checkbox"
-                  checked={chatbotConfig.auto_reply}
-                  onChange={(e) => setChatbotConfig({ ...chatbotConfig, auto_reply: e.target.checked })}
-                  className="w-4 h-4 accent-emerald-600 rounded"
-                />
-                <span className={`text-xs font-bold ${chatbotConfig.auto_reply ? "text-emerald-600" : "text-slate-400"}`}>
-                  {chatbotConfig.auto_reply ? "Activo" : "Pausado"}
-                </span>
-              </label>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Nombre del Asistente Virtual</label>
+                  <input
+                    type="text"
+                    value={chatbotConfig.bot_name}
+                    onChange={(e) => setChatbotConfig({ ...chatbotConfig, bot_name: e.target.value })}
+                    className="input text-xs"
+                    placeholder="Ej: ExtraBot"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Horario Apertura</label>
+                    <input
+                      type="time"
+                      value={chatbotConfig.business_hours_start}
+                      onChange={(e) => setChatbotConfig({ ...chatbotConfig, business_hours_start: e.target.value })}
+                      className="input text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Horario Cierre</label>
+                    <input
+                      type="time"
+                      value={chatbotConfig.business_hours_end}
+                      onChange={(e) => setChatbotConfig({ ...chatbotConfig, business_hours_end: e.target.value })}
+                      className="input text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Mensaje de Saludo & Bienvenida</label>
+                  <textarea
+                    rows={3}
+                    value={chatbotConfig.welcome_message}
+                    onChange={(e) => setChatbotConfig({ ...chatbotConfig, welcome_message: e.target.value })}
+                    className="input text-xs resize-none"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Usá &#123;cliente&#125; para personalizar con el nombre del contacto.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Mensaje Fuera de Horario Comercial</label>
+                  <textarea
+                    rows={3}
+                    value={chatbotConfig.out_of_hours_message}
+                    onChange={(e) => setChatbotConfig({ ...chatbotConfig, out_of_hours_message: e.target.value })}
+                    className="input text-xs resize-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">Módulos Activos en el Menú:</label>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    {[
+                      { key: "catalog_search", label: "📦 Catálogo & Precios en Gs." },
+                      { key: "extraclub_points", label: "⭐ Puntos ExtraClub" },
+                      { key: "order_tracking", label: "📋 Rastreo de Compras" },
+                      { key: "supermarket_info", label: "ℹ️ Horarios & Sucursal" },
+                      { key: "human_handoff", label: "👤 Derivación a Humano" },
+                    ].map((m) => (
+                      <label key={m.key} className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={chatbotConfig.modules_enabled?.[m.key] !== false}
+                          onChange={(e) =>
+                            setChatbotConfig({
+                              ...chatbotConfig,
+                              modules_enabled: {
+                                ...chatbotConfig.modules_enabled,
+                                [m.key]: e.target.checked,
+                              },
+                            })
+                          }
+                          className="w-3.5 h-3.5 accent-emerald-600 rounded"
+                        />
+                        <span className="text-slate-700 dark:text-slate-300 font-medium">{m.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+                  <button
+                    onClick={handleSaveChatbotConfig}
+                    disabled={savingChatbotConfig}
+                    className="btn-primary py-2.5 px-6 text-xs flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700"
+                  >
+                    {savingChatbotConfig ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    Guardar Configuración General
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Nombre del Asistente Virtual</label>
-                <input
-                  type="text"
-                  value={chatbotConfig.bot_name}
-                  onChange={(e) => setChatbotConfig({ ...chatbotConfig, bot_name: e.target.value })}
-                  className="input text-xs"
-                  placeholder="Ej: ExtraBot"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Horario Apertura</label>
-                  <input
-                    type="time"
-                    value={chatbotConfig.business_hours_start}
-                    onChange={(e) => setChatbotConfig({ ...chatbotConfig, business_hours_start: e.target.value })}
-                    className="input text-xs"
-                  />
+            {/* Card 2: Respuestas Rápidas por Palabras Clave (Keywords & FAQ) */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center">
+                    <Zap className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">Respuestas por Palabras Clave</h3>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400">
+                        {Array.isArray(chatbotConfig.keywords) ? chatbotConfig.keywords.length : 0} reglas
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">Si el mensaje del cliente contiene estas palabras clave, el bot responde de inmediato</p>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Horario Cierre</label>
-                  <input
-                    type="time"
-                    value={chatbotConfig.business_hours_end}
-                    onChange={(e) => setChatbotConfig({ ...chatbotConfig, business_hours_end: e.target.value })}
-                    className="input text-xs"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Mensaje de Saludo & Bienvenida</label>
-                <textarea
-                  rows={3}
-                  value={chatbotConfig.welcome_message}
-                  onChange={(e) => setChatbotConfig({ ...chatbotConfig, welcome_message: e.target.value })}
-                  className="input text-xs resize-none"
-                />
-                <p className="text-[10px] text-slate-400 mt-1">Usá &#123;cliente&#125; para personalizar con el nombre del contacto.</p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Mensaje Fuera de Horario Comercial</label>
-                <textarea
-                  rows={3}
-                  value={chatbotConfig.out_of_hours_message}
-                  onChange={(e) => setChatbotConfig({ ...chatbotConfig, out_of_hours_message: e.target.value })}
-                  className="input text-xs resize-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">Módulos Activos en el Menú:</label>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  {[
-                    { key: "catalog_search", label: "📦 Catálogo & Precios en Gs." },
-                    { key: "extraclub_points", label: "⭐ Puntos ExtraClub" },
-                    { key: "order_tracking", label: "📋 Rastreo de Compras" },
-                    { key: "supermarket_info", label: "ℹ️ Horarios & Sucursal" },
-                    { key: "human_handoff", label: "👤 Derivación a Humano" },
-                  ].map((m) => (
-                    <label key={m.key} className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={chatbotConfig.modules_enabled?.[m.key] !== false}
-                        onChange={(e) =>
-                          setChatbotConfig({
-                            ...chatbotConfig,
-                            modules_enabled: {
-                              ...chatbotConfig.modules_enabled,
-                              [m.key]: e.target.checked,
-                            },
-                          })
-                        }
-                        className="w-3.5 h-3.5 accent-emerald-600 rounded"
-                      />
-                      <span className="text-slate-700 dark:text-slate-300 font-medium">{m.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end">
                 <button
-                  onClick={handleSaveChatbotConfig}
-                  disabled={savingChatbotConfig}
-                  className="btn-primary py-2.5 px-6 text-xs flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700"
+                  onClick={() => handleOpenKeywordModal()}
+                  className="btn-primary py-2 px-3 text-xs flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white"
                 >
-                  {savingChatbotConfig ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                  Guardar Opciones del Chatbot
+                  <Plus className="w-3.5 h-3.5" /> Nueva Regla
                 </button>
               </div>
+
+              {/* Lista de Palabras Clave */}
+              {(!chatbotConfig.keywords || chatbotConfig.keywords.length === 0) ? (
+                <div className="p-8 text-center border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
+                  <HelpCircle className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-xs text-slate-500">No tenés reglas de palabras clave configuradas.</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Creá una regla como "delivery" o "transferencia" para responder automáticamente.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {chatbotConfig.keywords.map((kw: any) => (
+                    <div
+                      key={kw.id}
+                      className={`p-4 rounded-2xl border transition ${
+                        kw.active !== false
+                          ? "bg-slate-50/70 dark:bg-slate-800/40 border-slate-200/80 dark:border-slate-800"
+                          : "bg-slate-100/40 dark:bg-slate-900/40 border-dashed border-slate-200 dark:border-slate-800 opacity-60"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs text-slate-900 dark:text-white">{kw.name}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${kw.active !== false ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>
+                            {kw.active !== false ? "Activo" : "Pausado"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleToggleKeyword(kw.id)}
+                            className="p-1 text-slate-400 hover:text-emerald-600"
+                            title={kw.active !== false ? "Pausar regla" : "Activar regla"}
+                          >
+                            <CheckCircle2 className={`w-4 h-4 ${kw.active !== false ? "text-emerald-500" : "text-slate-300"}`} />
+                          </button>
+                          <button
+                            onClick={() => handleOpenKeywordModal(kw)}
+                            className="p-1 text-slate-400 hover:text-indigo-600"
+                            title="Editar regla"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteKeyword(kw.id)}
+                            className="p-1 text-slate-400 hover:text-rose-600"
+                            title="Eliminar regla"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Chips de Palabras Clave */}
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {(Array.isArray(kw.keywords) ? kw.keywords : (kw.keywords ? [kw.keywords] : [])).map((w: string, idx: number) => (
+                          <span key={idx} className="text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-amber-100/70 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 font-mono">
+                            #{w}
+                          </span>
+                        ))}
+                      </div>
+
+                      {/* Preview de la respuesta */}
+                      <p className="text-xs text-slate-600 dark:text-slate-300 font-mono bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200/50 dark:border-slate-800 whitespace-pre-wrap line-clamp-2">
+                        {kw.response}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Card 3: Opciones Extras del Menú Principal */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-teal-50 dark:bg-teal-950/40 text-teal-600 flex items-center justify-center">
+                    <MessageSquare className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">Opciones Extras de Menú</h3>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400">
+                        {Array.isArray(chatbotConfig.custom_menu_options) ? chatbotConfig.custom_menu_options.length : 0} opciones
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">Agregá ítems (6, 7...) al menú principal con respuestas personalizadas</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleOpenMenuOptionModal()}
+                  className="btn-primary py-2 px-3 text-xs flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 text-white"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Nueva Opción
+                </button>
+              </div>
+
+              {/* Lista de Opciones Extras */}
+              {(!chatbotConfig.custom_menu_options || chatbotConfig.custom_menu_options.length === 0) ? (
+                <div className="p-8 text-center border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
+                  <HelpCircle className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-xs text-slate-500">No hay opciones personalizadas añadidas al menú.</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Podés agregar una opción 6 como "Ofertas de Carnicería" o "Atención Mayorista".</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {chatbotConfig.custom_menu_options.map((opt: any) => (
+                    <div
+                      key={opt.id}
+                      className={`p-4 rounded-2xl border transition ${
+                        opt.active !== false
+                          ? "bg-slate-50/70 dark:bg-slate-800/40 border-slate-200/80 dark:border-slate-800"
+                          : "bg-slate-100/40 dark:bg-slate-900/40 border-dashed border-slate-200 dark:border-slate-800 opacity-60"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-lg bg-teal-600 text-white font-bold text-xs flex items-center justify-center">
+                            {opt.number}
+                          </span>
+                          <span className="font-bold text-xs text-slate-900 dark:text-white">{opt.title}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${opt.active !== false ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>
+                            {opt.active !== false ? "Activo" : "Pausado"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleToggleMenuOption(opt.id)}
+                            className="p-1 text-slate-400 hover:text-emerald-600"
+                            title={opt.active !== false ? "Pausar opción" : "Activar opción"}
+                          >
+                            <CheckCircle2 className={`w-4 h-4 ${opt.active !== false ? "text-emerald-500" : "text-slate-300"}`} />
+                          </button>
+                          <button
+                            onClick={() => handleOpenMenuOptionModal(opt)}
+                            className="p-1 text-slate-400 hover:text-indigo-600"
+                            title="Editar opción"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteMenuOption(opt.id)}
+                            className="p-1 text-slate-400 hover:text-rose-600"
+                            title="Eliminar opción"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Preview de la respuesta */}
+                      <p className="text-xs text-slate-600 dark:text-slate-300 font-mono bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200/50 dark:border-slate-800 whitespace-pre-wrap line-clamp-2">
+                        {opt.response}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -1797,6 +2154,136 @@ export default function WhatsAppPage() {
               </button>
               <button type="submit" disabled={savingTemplate} className="btn-primary py-2 px-5 text-xs bg-emerald-600 hover:bg-emerald-700">
                 {savingTemplate ? "Guardando..." : "Guardar Plantilla"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ── MODAL: PALABRA CLAVE / RESPUESTA RÁPIDA ── */}
+      {showKeywordModal && (
+        <Modal
+          open={showKeywordModal}
+          onClose={() => setShowKeywordModal(false)}
+          title={editingKeyword ? "Editar Respuesta Rápida" : "Nueva Respuesta Rápida (Palabra Clave)"}
+        >
+          <form onSubmit={handleSaveKeyword} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Nombre Descriptivo</label>
+              <input
+                type="text"
+                value={keywordForm.name}
+                onChange={(e) => setKeywordForm({ ...keywordForm, name: e.target.value })}
+                className="input text-xs"
+                placeholder="Ej: Envíos y Delivery a Domicilio"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Palabras Clave Disparadoras (separadas por comas)
+              </label>
+              <input
+                type="text"
+                value={keywordForm.keywords}
+                onChange={(e) => setKeywordForm({ ...keywordForm, keywords: e.target.value })}
+                className="input text-xs"
+                placeholder="Ej: delivery, envio, envios, flete, moto, domicilio"
+                required
+              />
+              <p className="text-[11px] text-slate-400 mt-1">Si el cliente incluye cualquiera de estas palabras en su mensaje, se enviará esta respuesta.</p>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Texto de Respuesta Automática</label>
+              <textarea
+                rows={5}
+                value={keywordForm.response}
+                onChange={(e) => setKeywordForm({ ...keywordForm, response: e.target.value })}
+                className="input text-xs resize-none font-mono text-[11px]"
+                placeholder="Escribí la información detallada que enviará el bot..."
+                required
+              />
+              <p className="text-[10px] text-slate-400 mt-1">Podés usar formato de WhatsApp: *negrita*, _cursiva_, etc.</p>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer pt-1">
+              <input
+                type="checkbox"
+                checked={keywordForm.active}
+                onChange={(e) => setKeywordForm({ ...keywordForm, active: e.target.checked })}
+                className="w-4 h-4 accent-emerald-600 rounded"
+              />
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Regla Activa</span>
+            </label>
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button type="button" onClick={() => setShowKeywordModal(false)} className="btn-outline py-2 px-4 text-xs">
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primary py-2 px-5 text-xs bg-emerald-600 hover:bg-emerald-700">
+                Guardar Regla
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ── MODAL: OPCIÓN EXTRA DEL MENÚ PRINCIPAL ── */}
+      {showMenuOptionModal && (
+        <Modal
+          open={showMenuOptionModal}
+          onClose={() => setShowMenuOptionModal(false)}
+          title={editingMenuOption ? "Editar Opción del Menú" : "Nueva Opción del Menú Principal"}
+        >
+          <form onSubmit={handleSaveMenuOption} className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">N° de Opción</label>
+                <input
+                  type="text"
+                  value={menuOptionForm.number}
+                  onChange={(e) => setMenuOptionForm({ ...menuOptionForm, number: e.target.value })}
+                  className="input text-xs text-center font-bold"
+                  placeholder="6"
+                  required
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Título Visible en el Menú</label>
+                <input
+                  type="text"
+                  value={menuOptionForm.title}
+                  onChange={(e) => setMenuOptionForm({ ...menuOptionForm, title: e.target.value })}
+                  className="input text-xs"
+                  placeholder="Ej: Envíos & Delivery a Domicilio"
+                  required
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Texto de Respuesta del Bot</label>
+              <textarea
+                rows={5}
+                value={menuOptionForm.response}
+                onChange={(e) => setMenuOptionForm({ ...menuOptionForm, response: e.target.value })}
+                className="input text-xs resize-none font-mono text-[11px]"
+                placeholder="Texto que recibirá el cliente cuando seleccione este número..."
+                required
+              />
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer pt-1">
+              <input
+                type="checkbox"
+                checked={menuOptionForm.active}
+                onChange={(e) => setMenuOptionForm({ ...menuOptionForm, active: e.target.checked })}
+                className="w-4 h-4 accent-emerald-600 rounded"
+              />
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Opción Activa en Menú</span>
+            </label>
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button type="button" onClick={() => setShowMenuOptionModal(false)} className="btn-outline py-2 px-4 text-xs">
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primary py-2 px-5 text-xs bg-emerald-600 hover:bg-emerald-700">
+                Guardar Opción
               </button>
             </div>
           </form>

@@ -44,6 +44,7 @@ class ChatbotEngine:
         self.db = db
         self.entity_id = company_or_tenant_id
         self._company_id: Optional[UUID] = None
+        self._config: Optional[Dict[str, Any]] = None
 
     async def get_company_id(self) -> UUID:
         if self._company_id:
@@ -66,6 +67,46 @@ class ChatbotEngine:
         self._company_id = UUID("00000000-0000-0000-0000-000000000010")
         return self._company_id
 
+    async def get_config(self) -> Dict[str, Any]:
+        if self._config is not None:
+            return self._config
+        from api.src.tenants.models import Tenant
+        tenant = None
+        stmt = select(Tenant).where(Tenant.id == self.entity_id)
+        res = await self.db.execute(stmt)
+        tenant = res.scalar_one_or_none()
+        if not tenant:
+            c_res = await self.db.execute(select(Company.tenant_id).where(Company.id == self.entity_id))
+            tid = c_res.scalar_one_or_none()
+            if tid:
+                t_res = await self.db.execute(select(Tenant).where(Tenant.id == tid))
+                tenant = t_res.scalar_one_or_none()
+        if not tenant:
+            f_res = await self.db.execute(select(Tenant).limit(1))
+            tenant = f_res.scalar_one_or_none()
+
+        t_cfg = (tenant.config or {}) if tenant else {}
+        self._config = t_cfg.get("chatbot", {})
+        return self._config
+
+    async def _match_keyword_rule(self, user_input: str) -> Optional[Dict[str, Any]]:
+        cfg = await self.get_config()
+        keywords_rules = cfg.get("keywords") or []
+        for rule in keywords_rules:
+            if not rule.get("active", True):
+                continue
+            kws = rule.get("keywords") or []
+            for kw in kws:
+                kw_clean = kw.strip().lower()
+                if kw_clean and kw_clean in user_input:
+                    resp_text = rule.get("response", "")
+                    return {
+                        "text": f"{resp_text}\n\n_Enviá 0 para volver al menú principal._",
+                        "buttons": [{"id": "0", "title": "⬅️ Menú Principal"}],
+                        "next_state": "idle",
+                    }
+        return None
+
     async def process_message(
         self,
         conversation: WhatsAppConversation,
@@ -79,6 +120,11 @@ class ChatbotEngine:
         # Comandos globales de salida o reseteo
         if user_input in ["0", "menu", "inicio", "volver", "cancelar"]:
             return await self._show_main_menu(conversation)
+
+        # Regla de palabras clave / respuestas rápidas FAQ
+        kw_match = await self._match_keyword_rule(user_input)
+        if kw_match:
+            return kw_match
 
         if current_state == "idle":
             return await self._handle_idle(conversation, user_input)
@@ -109,25 +155,66 @@ class ChatbotEngine:
         return await self._show_main_menu(conversation)
 
     async def _show_main_menu(self, conversation: WhatsAppConversation) -> Dict[str, Any]:
+        cfg = await self.get_config()
         client_name = conversation.contact_name or "Estimado cliente"
-        text = (
-            f"🛒 *¡Hola {client_name}!* 👋\n"
-            f"Bienvenido al canal oficial de atención de *Extra Supermercado*.\n\n"
-            f"Elegí una opción enviando el número correspondiente:\n\n"
-            f"1️⃣ *Catálogo & Consulta de Precios*\n"
-            f"2️⃣ *Mis Puntos ExtraClub*\n"
-            f"3️⃣ *Rastreo de Compras & Pedidos*\n"
-            f"4️⃣ *Horarios, Sucursales & Ubicación*\n"
-            f"5️⃣ *Hablar con un Agente Humano*"
-        )
+        welcome_tpl = cfg.get("welcome_message") or "¡Hola {cliente}! 👋\nBienvenido al canal oficial de atención de *Extra Supermercado*."
+        welcome_text = welcome_tpl.replace("{cliente}", client_name)
+
+        modules = cfg.get("modules_enabled") or {}
+        lines = [f"🛒 *{welcome_text}*\n\nElegí una opción enviando el número correspondiente:\n"]
+        buttons = []
+
+        if modules.get("catalog_search", True):
+            lines.append("1️⃣ *Catálogo & Consulta de Precios*")
+            buttons.append({"id": "1", "title": "📦 Catálogo"})
+        if modules.get("extraclub_points", True):
+            lines.append("2️⃣ *Mis Puntos ExtraClub*")
+            buttons.append({"id": "2", "title": "⭐ ExtraClub"})
+        if modules.get("order_tracking", True):
+            lines.append("3️⃣ *Rastreo de Compras & Pedidos*")
+            buttons.append({"id": "3", "title": "📋 Pedidos"})
+        if modules.get("supermarket_info", True):
+            lines.append("4️⃣ *Horarios, Sucursales & Ubicación*")
+            buttons.append({"id": "4", "title": "ℹ️ Horarios"})
+        if modules.get("human_handoff", True):
+            lines.append("5️⃣ *Hablar con un Agente Humano*")
+            buttons.append({"id": "5", "title": "👤 Agente"})
+
+        # Opciones personalizadas extras añadidas por el usuario
+        custom_opts = cfg.get("custom_menu_options") or []
+        for opt in custom_opts:
+            if opt.get("active", True):
+                num = str(opt.get("number", "")).strip()
+                title = opt.get("title", "").strip()
+                num_emoji = f"{num}️⃣" if num.isdigit() and len(num) == 1 else f"🔹 *{num}.*"
+                lines.append(f"{num_emoji} *{title}*")
+                if len(buttons) < 3:
+                    buttons.append({"id": num, "title": title[:20]})
+
         return {
-            "text": text,
-            "buttons": self._get_main_menu_buttons(),
+            "text": "\n".join(lines),
+            "buttons": buttons[:3],
             "next_state": "menu_main"
         }
 
     async def _handle_main_menu(self, conversation: WhatsAppConversation, user_input: str) -> Dict[str, Any]:
         """Navegación del menú principal"""
+        cfg = await self.get_config()
+        # 1. Verificar opciones personalizadas añadidas
+        custom_opts = cfg.get("custom_menu_options") or []
+        for opt in custom_opts:
+            if not opt.get("active", True):
+                continue
+            opt_num = str(opt.get("number", "")).strip().lower()
+            opt_title = str(opt.get("title", "")).strip().lower()
+            if user_input == opt_num or (len(user_input) >= 4 and user_input in opt_title):
+                return {
+                    "text": f"{opt.get('response', '')}\n\n_Enviá 0 para volver al menú principal._",
+                    "buttons": [{"id": "0", "title": "⬅️ Volver"}],
+                    "next_state": "menu_main"
+                }
+
+        # 2. Opciones estándar
         if user_input in ["1", "productos", "catalogo", "catálogo", "precios", "precio", "buscar"]:
             return {
                 "text": (
@@ -179,7 +266,7 @@ class ChatbotEngine:
             if len(user_input) >= 3:
                 return await self._search_products(conversation, user_input)
             return {
-                "text": "❓ Opción no reconocida. Por favor seleccioná un número del 1 al 5:\n\n1️⃣ Catálogo\n2️⃣ ExtraClub\n3️⃣ Pedidos\n4️⃣ Horarios\n5️⃣ Agente",
+                "text": "❓ Opción no reconocida. Por favor seleccioná un número del menú o escribí el nombre del producto que buscás.",
                 "buttons": self._get_main_menu_buttons(),
                 "next_state": "menu_main"
             }

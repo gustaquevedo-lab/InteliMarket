@@ -82,9 +82,53 @@ async def get_chatbot_config(
             "order_tracking": True,
             "supermarket_info": True,
             "human_handoff": True,
-        }
+        },
+        "keywords": [
+            {
+                "id": "kw-delivery",
+                "name": "Envíos a Domicilio",
+                "keywords": ["delivery", "envio", "envíos", "domicilio", "flete"],
+                "response": "🚚 *Envíos a Domicilio — Extra Supermercado*\n\nRealizamos entregas de Lunes a Sábados de 08:00 a 19:00 hs.\n📍 *Cobertura:* Radio de hasta 15 km de nuestras sucursales.\n💵 *Costo de envío:* Gs. 15.000 (¡Envío GRATIS en compras superiores a Gs. 300.000!).\n\nPodés pasarnos tu lista de compras por este chat indicando los productos.",
+                "active": True,
+            },
+            {
+                "id": "kw-banco",
+                "name": "Datos Bancarios y Pagos",
+                "keywords": ["transferencia", "banco", "alias", "pix", "datos bancarios", "cuenta", "pagar"],
+                "response": "💳 *Datos Bancarios Oficiales — Extra Supermercado*\n\n🏦 *Banco:* Banco Continental\n📄 *Razón Social:* GRUPO SANTA TERESA E.A.S.\n🆔 *RUC:* 80150377-9\n🔢 *Cta. Cte. Gs:* 01-2345678-01\n📲 *Alias / PIX:* compras@superextra.com.py\n\n_Por favor envianos tu comprobante por este medio una vez realizada la transferencia._",
+                "active": True,
+            },
+            {
+                "id": "kw-carniceria",
+                "name": "Carnicería y Cortes Asado",
+                "keywords": ["carniceria", "carnicería", "asado", "costilla", "vacio", "vacío", "carne"],
+                "response": "🥩 *Cortes Especiales & Carnicería — Extra Supermercado*\n\n¡Cortes frescos envasados al vacío y seleccionados para tu asado!\n🔥 Costilla de primera\n🔥 Tapa cuadril, vacío y colita\n🔥 Chorizos parrilleros artesanales\n\nEscribí el nombre del corte para consultar precio en Gs. o acercate a cualquiera de nuestras sucursales.",
+                "active": True,
+            },
+        ],
+        "custom_menu_options": [
+            {
+                "id": "opt-delivery",
+                "number": "6",
+                "title": "Envíos & Delivery a Domicilio",
+                "response": "🚚 *Envíos a Domicilio — Extra Supermercado*\n\nRealizamos entregas de Lunes a Sábados de 08:00 a 19:00 hs.\n📍 *Cobertura:* Radio de hasta 15 km de sucursales.\n💵 *Costo:* Gs. 15.000 (¡Gratis a partir de Gs. 300.000!).\n\nDejanos tu lista de productos para coordinar despacho.",
+                "active": True,
+            },
+            {
+                "id": "opt-banco",
+                "number": "7",
+                "title": "Cuentas Bancarias & Pagos",
+                "response": "💳 *Datos Bancarios Oficiales — Extra Supermercado*\n\n🏦 *Banco:* Banco Continental\n📄 *Razón Social:* GRUPO SANTA TERESA E.A.S.\n🆔 *RUC:* 80150377-9\n🔢 *Cta. Cte. Gs:* 01-2345678-01\n📲 *Alias / PIX:* compras@superextra.com.py",
+                "active": True,
+            },
+        ],
     }
     merged = {**default_config, **bot_cfg}
+    # Asegurar que keywords y custom_menu_options existan en el resultado
+    if "keywords" not in merged:
+        merged["keywords"] = default_config["keywords"]
+    if "custom_menu_options" not in merged:
+        merged["custom_menu_options"] = default_config["custom_menu_options"]
     merged["auto_reply"] = cfg.auto_reply if cfg else True
     return merged
 
