@@ -6419,6 +6419,15 @@ export default function POSPage() {
   ) => {
     if (e.key === "Enter") {
       e.preventDefault()
+      // El campo de efectivo se auto-enfoca apenas se abre el modal
+      // (handleOpenPayment), con el monto exacto ya precargado -- asi que un
+      // Enter puede llegar aca sin que el cajero haya tocado nada de verdad,
+      // igual que el caso de F12 en el keydown global. Mismo guardado.
+      const cashSinTocar = activeMethods.size === 1 && activeMethods.has("cash") && !hasClickedQuickCash
+      if (cashSinTocar) {
+        toast.warning("Confirmá el monto primero", "Tocá \"Exacto\" o cargá el monto recibido antes de cerrar la venta.")
+        return
+      }
       if (totalRecibidoPyg >= totalPyg && totalPyg > 0 && !submitting) {
         if (listoParaCerrar) {
           handleProcessCheckout()
@@ -7683,15 +7692,29 @@ export default function POSPage() {
         if (cart.length > 0 && !showPaymentModal) {
           handleOpenPayment()
         } else if (showPaymentModal) {
-          // Mismo resguardo de doble-confirmacion que Enter en los campos de
-          // monto (handleCashFieldKeyDown/handleMixedFieldKeyDown). Sin esto,
-          // como Efectivo se precarga con el monto exacto apenas se abre el
-          // modal (handleOpenPayment), un segundo F12 -- por habito, doble
-          // pulsacion accidental o una tecla que repite -- cerraba la venta
-          // como CONTADO al instante, sin que el cajero llegara a ver ni
-          // tocar la pantalla de cobro. Confirmado: ventas cerradas solas
-          // en distintas cajas y cajeras, siempre como "contado".
-          if (totalRecibidoPyg >= totalPyg && totalPyg > 0 && !submitting) {
+          // Resguardo de doble-confirmacion, igual que Enter en los campos de
+          // monto (handleCashFieldKeyDown/handleMixedFieldKeyDown). No alcanza
+          // por si solo: Efectivo se precarga con el monto exacto apenas se
+          // abre el modal (handleOpenPayment), asi que sin este segundo chequeo
+          // un cajero que habitualmente toca F12 dos o tres veces seguidas --
+          // ANTES de llegar a hacer clic en el metodo que realmente queria
+          // (Extra Club, Bancard, etc.) -- cerraba la venta sola como CONTADO.
+          // Confirmado dos veces el mismo dia (Caja 3 y Caja 4, con y sin el
+          // guardado de abajo) via auditoria: "CAMBIO DE FORMA DE PAGO --
+          // EFECTIVO -> EXTRA_CLUB, Motivo: fallo de sistema".
+          //
+          // cashSinTocar: si Efectivo es el UNICO metodo activo y el cajero
+          // todavia no interactuo con el monto (no escribio nada, no toco
+          // "Exacto" ni ningun billete rapido -- hasClickedQuickCash sigue en
+          // false desde que se abrio el modal), el monto exacto precargado NO
+          // cuenta como una confirmacion real. F12 no hace nada en ese caso:
+          // obliga a que el cajero primero interactue con la pantalla (tocar
+          // un metodo, "Exacto", o tipear un monto) antes de poder cerrar la
+          // venta por atajo de teclado.
+          const cashSinTocar = activeMethods.size === 1 && activeMethods.has("cash") && !hasClickedQuickCash
+          if (cashSinTocar) {
+            toast.warning("Confirmá el monto primero", "Tocá \"Exacto\" o cargá el monto recibido antes de cerrar la venta.")
+          } else if (totalRecibidoPyg >= totalPyg && totalPyg > 0 && !submitting) {
             if (listoParaCerrar) {
               confirmCheckoutBtnRef.current?.click()
             } else {
@@ -7742,7 +7765,7 @@ export default function POSPage() {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [cart, totalPyg, totalRecibidoPyg, submitting, listoParaCerrar, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, manualWeightInput, targetWeighProduct, toggleActiveMethod])
+  }, [cart, totalPyg, totalRecibidoPyg, submitting, listoParaCerrar, activeMethods, hasClickedQuickCash, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, manualWeightInput, targetWeighProduct, toggleActiveMethod])
 
   // ── PALETA DE COLORES Y CONTRASTE DINÁMICO ────────────────────────────────
   const bgMain = dark ? "bg-slate-950 text-slate-100" : "bg-slate-100 text-slate-900"
@@ -10201,6 +10224,7 @@ export default function POSPage() {
                             onChange={(e) => {
                               const clean = e.target.value.replace(/\D/g, "")
                               setPayCashPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
+                              setHasClickedQuickCash(true)
                             }}
                             onKeyDown={(e) => handleCashFieldKeyDown(e, payCashBrlInputRef, "BRL")}
                             onFocus={(e) => e.target.select()}
@@ -10217,7 +10241,7 @@ export default function POSPage() {
                             ref={payCashBrlInputRef}
                             type="text"
                             value={payCashBrl}
-                            onChange={(e) => setPayCashBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
+                            onChange={(e) => { setPayCashBrl(e.target.value.replace(/[^0-9.,]/g, "")); setHasClickedQuickCash(true) }}
                             onKeyDown={(e) => handleCashFieldKeyDown(e, payCashUsdInputRef, "USD")}
                             onFocus={(e) => e.target.select()}
                             onClick={(e) => e.currentTarget.select()}
@@ -10233,7 +10257,7 @@ export default function POSPage() {
                             ref={payCashUsdInputRef}
                             type="text"
                             value={payCashUsd}
-                            onChange={(e) => setPayCashUsd(e.target.value.replace(/[^0-9.,]/g, ""))}
+                            onChange={(e) => { setPayCashUsd(e.target.value.replace(/[^0-9.,]/g, "")); setHasClickedQuickCash(true) }}
                             onKeyDown={(e) => handleCashFieldKeyDown(e, payCashPygInputRef, "PYG")}
                             onFocus={(e) => e.target.select()}
                             onClick={(e) => e.currentTarget.select()}
