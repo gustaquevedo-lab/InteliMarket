@@ -3857,9 +3857,22 @@ export default function POSPage() {
     ciudad: string
     items: any[]
     origenDoc?: string
+    vueltoBreakdown?: {
+      totalPyg: number
+      brl: number
+      saldoGs: number
+    }
     printInvoiceCallback?: () => Promise<void>
   } | null>(null)
   const [savingCupon, setSavingCupon] = useState(false)
+  const [lastSaleDraft, setLastSaleDraft] = useState<{
+    cart: CartItem[]
+    customer: Customer
+    appliedDiscount: any
+    extraClubAdminOverride: boolean
+    saleId?: string | null
+    offlineSaleId?: string | null
+  } | null>(null)
 
   const lastLookedUpDocRef = useRef<string>("")
   const lookupDocTimerRef = useRef<any>(null)
@@ -4096,6 +4109,7 @@ export default function POSPage() {
       }
       setShowCuponModal(false)
       setPendingCuponData(null)
+      setLastSaleDraft(null)
     } catch (err: any) {
       console.error("Error emitiendo cupones:", err)
       toast.error("Error al emitir cupones", err?.message || "No se pudo completar la emisión.")
@@ -4110,6 +4124,55 @@ export default function POSPage() {
     }
     setShowCuponModal(false)
     setPendingCuponData(null)
+    setLastSaleDraft(null)
+  }
+
+  const handleReturnToSale = async () => {
+    if (!lastSaleDraft) {
+      setShowCuponModal(false)
+      setPendingCuponData(null)
+      return
+    }
+
+    const confirmReopen = window.confirm(
+      "¿Desea volver a la venta activa para agregar productos o modificar datos del cliente?\n\nLa venta provisoria actual (aún no impresa) será anulada y el carrito será restaurado exactamente como estaba."
+    )
+    if (!confirmReopen) return
+
+    try {
+      if (lastSaleDraft.saleId) {
+        try {
+          await api.sales.cancel(lastSaleDraft.saleId)
+        } catch (cancelErr) {
+          console.warn("[POS] No se pudo anular venta en backend al retornar:", cancelErr)
+        }
+      }
+      if (lastSaleDraft.offlineSaleId) {
+        try {
+          await offlineDB.pendingSales.remove(lastSaleDraft.offlineSaleId)
+        } catch (dbErr) {
+          console.warn("[POS] No se pudo remover venta offline al retornar:", dbErr)
+        }
+      }
+
+      // Restaurar carrito y cliente
+      setCart(lastSaleDraft.cart)
+      setCustomer(lastSaleDraft.customer)
+      setAppliedDiscount(lastSaleDraft.appliedDiscount)
+      setExtraClubAdminOverride(lastSaleDraft.extraClubAdminOverride)
+
+      setShowCuponModal(false)
+      setPendingCuponData(null)
+      setLastSaleDraft(null)
+
+      toast.info(
+        "Venta Restaurada para Modificación",
+        "El carrito y el cliente fueron recuperados. Puede agregar más items o modificar datos antes de volver a cobrar."
+      )
+    } catch (err: any) {
+      console.error("Error al retornar a la venta:", err)
+      toast.error("Error al volver a la venta", err?.message || "Ocurrió un problema.")
+    }
   }
 
 
@@ -6849,6 +6912,7 @@ export default function POSPage() {
       let numeroInterno: string | null = null
       let ventaYaCreadaSinRecibo = false
       let createdSaleId: string | null = null
+      let createdOfflineSaleId: string | null = null
       let saleCreatePromise: Promise<any> | null = null
       if (tpl.usar_numero_interno_venta) {
         try {
@@ -7028,7 +7092,15 @@ export default function POSPage() {
               <tr style="font-weight: bold; font-size: 10.5px;">
                 <td style="padding-top: 2px;">VUELTO:</td>
                 <td style="text-align: right; padding-top: 2px; white-space: nowrap;">
-                  Gs. ${fmtGs(vueltoFinalPyg)} ${rates.BRL > 0 ? `(R$ ${(vueltoFinalPyg / rates.BRL).toFixed(2)})` : ''}
+                  ${(() => {
+                    const brlEnt = parseFloat(vueltoMixtoBrl) || 0
+                    if (brlEnt > 0 && rates.BRL > 0) {
+                      const brlEnGs = Math.round(brlEnt * rates.BRL)
+                      const saldoGs = Math.max(0, vueltoFinalPyg - brlEnGs)
+                      return `R$ ${brlEnt.toFixed(2)} + Gs. ${fmtGs(saldoGs)} <span style="font-size: 8px; font-weight: normal; color: #555;">(Total Gs. ${fmtGs(vueltoFinalPyg)})</span>`
+                    }
+                    return `Gs. ${fmtGs(vueltoFinalPyg)} ${rates.BRL > 0 ? `(R$ ${(vueltoFinalPyg / rates.BRL).toFixed(2)})` : ''}`
+                  })()}
                 </td>
               </tr>
             </table>
@@ -7145,6 +7217,7 @@ export default function POSPage() {
           console.warn("[POS] API central no disponible o demorada, encolando venta offline en IndexedDB...", apiErr)
           try {
             const offlineId = `off-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+            createdOfflineSaleId = offlineId
             await offlineDB.pendingSales.add({
               id: offlineId,
               data: { ...saleBasePayload, recibo_html: receiptHtml },
@@ -7331,10 +7404,18 @@ export default function POSPage() {
             t += ESCPOS_BOLD_ON + escposTwoCol('DONACION SOLIDARIA:', fmtGs(montoDonacionEfectiva)) + ESCPOS_BOLD_OFF + '\n'
             t += ' (Centro Amor y Esperanza)\n'
           }
-          const vueltoTxt = tpl.mostrar_vuelto_extranjero && rates.BRL > 0 && vueltoFinalPyg > 0
-            ? `${fmtGs(vueltoFinalPyg)} (R$ ${(vueltoFinalPyg / rates.BRL).toFixed(2)})`
-            : fmtGs(vueltoFinalPyg)
-          t += ESCPOS_BOLD_ON + escposTwoCol('VUELTO:', vueltoTxt) + ESCPOS_BOLD_OFF + '\n'
+          const brlEnt = parseFloat(vueltoMixtoBrl) || 0
+          if (brlEnt > 0 && rates.BRL > 0) {
+            const brlEnGs = Math.round(brlEnt * rates.BRL)
+            const saldoGs = Math.max(0, vueltoFinalPyg - brlEnGs)
+            t += ESCPOS_BOLD_ON + escposTwoCol('VUELTO (R$ + GS):', `R$ ${brlEnt.toFixed(2)} + ${fmtGs(saldoGs)}`) + ESCPOS_BOLD_OFF + '\n'
+            t += escposTwoCol(' (TOTAL VUELTO):', fmtGs(vueltoFinalPyg)) + '\n'
+          } else {
+            const vueltoTxt = tpl.mostrar_vuelto_extranjero && rates.BRL > 0 && vueltoFinalPyg > 0
+              ? `${fmtGs(vueltoFinalPyg)} (R$ ${(vueltoFinalPyg / rates.BRL).toFixed(2)})`
+              : fmtGs(vueltoFinalPyg)
+            t += ESCPOS_BOLD_ON + escposTwoCol('VUELTO:', vueltoTxt) + ESCPOS_BOLD_OFF + '\n'
+          }
         }
 
           if (tpl.habilitar_recuadro_ahorro !== false) {
@@ -7502,7 +7583,26 @@ export default function POSPage() {
               initialTelNum = initialTelNum.slice(3)
             }
 
+            // Si la venta se estaba creando en background, esperamos el id
+            let finalSaleId = createdSaleId
+            if (!finalSaleId && saleCreatePromise) {
+              try {
+                const createdRes = await saleCreatePromise
+                if (createdRes?.id) finalSaleId = createdRes.id
+              } catch (e) {}
+            }
+
+            const brlEntregado = parseFloat(vueltoMixtoBrl) || 0
+            const brlEnGs = Math.round(brlEntregado * (rates.BRL > 0 ? rates.BRL : 1))
+            const saldoGs = Math.max(0, vueltoFinalPyg - brlEnGs)
+            const vueltoBreakdown = vueltoFinalPyg > 0 ? {
+              totalPyg: vueltoFinalPyg,
+              brl: brlEntregado,
+              saldoGs: brlEntregado > 0 ? saldoGs : vueltoFinalPyg
+            } : undefined
+
             setPendingCuponData({
+              saleId: finalSaleId || undefined,
               saleNumero: numeroComprobante,
               montoCompra: totalPyg,
               totalCupones: evalRes.total_cupones,
@@ -7514,8 +7614,20 @@ export default function POSPage() {
               barrio: (customer as any)?.barrio || "Centro",
               ciudad: (customer as any)?.ciudad || "Pedro Juan Caballero",
               items: itemsEvaluacion,
+              vueltoBreakdown,
               printInvoiceCallback: executePrintInvoice
             })
+
+            // Guardamos snapshot para poder volver a la venta sin perder nada
+            setLastSaleDraft({
+              cart: [...cart],
+              customer: { ...customer },
+              appliedDiscount: appliedDiscount ? { ...appliedDiscount } : null,
+              extraClubAdminOverride,
+              saleId: finalSaleId,
+              offlineSaleId: createdOfflineSaleId,
+            })
+
             setCuponModalStep("pregunta")
             setShowCuponModal(true)
           }
@@ -9691,58 +9803,114 @@ export default function POSPage() {
                     </div>
 
                     {/* Calculadora de Vuelto Mixto (R$ + Gs.) */}
-                    {vueltoFinalPyg > 0 && rates.BRL > 0 && (
-                      <div className="mt-2 pt-2 border-t border-emerald-500/30 text-left space-y-1.5 bg-white/70 dark:bg-slate-900/70 p-2.5 rounded-xl">
-                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                          <span>💱 Vuelto Mixto (R$ + Gs.):</span>
-                          {vueltoMixtoBrl && (
-                            <button
-                              type="button"
-                              onClick={() => setVueltoMixtoBrl("")}
-                              className="text-[10px] text-slate-400 hover:text-rose-500 underline"
-                            >
-                              Limpiar
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-bold text-amber-600 dark:text-amber-400">R$</span>
-                          <input
-                            type="number"
-                            step="any"
-                            value={vueltoMixtoBrl}
-                            onChange={e => setVueltoMixtoBrl(e.target.value)}
-                            placeholder="¿Cuánto entregás en R$?"
-                            className="w-full text-xs font-mono font-bold px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                          />
-                        </div>
-                        {parseFloat(vueltoMixtoBrl) > 0 && (() => {
-                          const brlEntregado = parseFloat(vueltoMixtoBrl) || 0
-                          const brlEnGs = Math.round(brlEntregado * rates.BRL)
-                          const saldoGs = vueltoFinalPyg - brlEnGs
-                          if (saldoGs < 0) {
+                    {vueltoFinalPyg > 0 && rates.BRL > 0 && (() => {
+                      const maxBrlPosible = Math.floor(vueltoFinalPyg / rates.BRL)
+                      const billetesComunes = [2, 5, 10, 20, 50, 100].filter(b => b <= maxBrlPosible)
+                      return (
+                        <div className="mt-2 pt-2 border-t border-emerald-500/30 text-left space-y-2 bg-white/80 dark:bg-slate-900/80 p-3 rounded-2xl shadow-xs">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                            <span className="flex items-center gap-1.5">
+                              <span>💱 Vuelto Multimoneda (R$ + Gs.):</span>
+                            </span>
+                            {vueltoMixtoBrl && (
+                              <button
+                                type="button"
+                                onClick={() => setVueltoMixtoBrl("")}
+                                className="text-[10px] text-slate-400 hover:text-rose-500 font-bold underline cursor-pointer"
+                              >
+                                Limpiar
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Chips de Billetes Rápidos en Reales */}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[10px] font-bold text-slate-400">Fijar R$:</span>
+                            {billetesComunes.map(b => (
+                              <button
+                                key={b}
+                                type="button"
+                                onClick={() => setVueltoMixtoBrl(String(b))}
+                                className={`px-2 py-0.5 rounded-lg text-xs font-black transition cursor-pointer border ${
+                                  parseFloat(vueltoMixtoBrl) === b
+                                    ? "bg-amber-500 text-white border-amber-600 shadow-xs"
+                                    : "bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/30 text-amber-800 dark:text-amber-300"
+                                }`}
+                              >
+                                {b} R$
+                              </button>
+                            ))}
+                            {maxBrlPosible > 0 && !billetesComunes.includes(maxBrlPosible) && (
+                              <button
+                                type="button"
+                                onClick={() => setVueltoMixtoBrl(String(maxBrlPosible))}
+                                className="px-2 py-0.5 rounded-lg text-xs font-black bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-900 dark:text-amber-200 transition cursor-pointer"
+                              >
+                                Máx ({maxBrlPosible} R$)
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Input directo con incremento */}
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5 flex-1">
+                              <span className="text-xs font-black text-amber-600 dark:text-amber-400">R$</span>
+                              <input
+                                type="number"
+                                step="any"
+                                value={vueltoMixtoBrl}
+                                onChange={e => setVueltoMixtoBrl(e.target.value)}
+                                placeholder="¿Cuánto entregás en R$? (ej: 5)"
+                                className="w-full text-xs font-mono font-black px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500"
+                              />
+                            </div>
+                            {/* Botones de incremento rápido */}
+                            <div className="flex items-center gap-1 shrink-0">
+                              {[2, 5, 10].map(inc => (
+                                <button
+                                  key={inc}
+                                  type="button"
+                                  onClick={() => setVueltoMixtoBrl(prev => String(Math.min(maxBrlPosible, (parseFloat(prev) || 0) + inc)))}
+                                  className="px-1.5 py-1 rounded-lg text-[10px] font-black bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 cursor-pointer"
+                                  title={`Sumar ${inc} R$`}
+                                >
+                                  +{inc}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {parseFloat(vueltoMixtoBrl) > 0 && (() => {
+                            const brlEntregado = parseFloat(vueltoMixtoBrl) || 0
+                            const brlEnGs = Math.round(brlEntregado * rates.BRL)
+                            const saldoGs = vueltoFinalPyg - brlEnGs
+                            if (saldoGs < 0) {
+                              return (
+                                <div className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 text-[11px] text-rose-600 dark:text-rose-400 font-bold">
+                                  ⚠️ Supera el vuelto total por R$ {Math.abs(saldoGs / rates.BRL).toFixed(2)} ({formatPYG(Math.abs(saldoGs))})
+                                </div>
+                              )
+                            }
                             return (
-                              <div className="text-[11px] text-rose-500 font-bold">
-                                ⚠️ Supera el vuelto total (sobran R$ {Math.abs(saldoGs / rates.BRL).toFixed(2)})
+                              <div className="p-2.5 rounded-xl bg-gradient-to-r from-emerald-500/15 to-amber-500/15 border-2 border-emerald-500/50 text-xs">
+                                <span className="text-[10px] text-emerald-800 dark:text-emerald-300 font-black uppercase tracking-wider block">
+                                  Saldo a entregar en Guaraníes:
+                                </span>
+                                <span className="text-lg font-black font-posMono text-emerald-800 dark:text-emerald-200 leading-tight block">
+                                  {formatPYG(saldoGs)}
+                                </span>
+                                <div className="text-xs text-slate-800 dark:text-slate-200 mt-1 font-bold flex items-center gap-1">
+                                  <span>👉 Entregar:</span>
+                                  <span className="text-amber-600 dark:text-amber-400 font-black font-posMono text-sm">R$ {brlEntregado.toFixed(2)}</span>
+                                  <span>+</span>
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-black font-posMono text-sm">{formatPYG(saldoGs)}</span>
+                                </div>
                               </div>
                             )
-                          }
-                          return (
-                            <div className="p-2 rounded-lg bg-emerald-100/70 dark:bg-emerald-950/60 border border-emerald-500/40 text-xs">
-                              <span className="text-[10px] text-emerald-700 dark:text-emerald-300 font-semibold block">
-                                Saldo a entregar en Guaraníes:
-                              </span>
-                              <span className="text-base font-black font-posMono text-emerald-800 dark:text-emerald-200">
-                                {formatPYG(saldoGs)}
-                              </span>
-                              <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5 font-medium">
-                                👉 Entregar: <strong>R$ {brlEntregado.toFixed(2)}</strong> + <strong>{formatPYG(saldoGs)}</strong>
-                              </div>
-                            </div>
-                          )
-                        })()}
-                      </div>
-                    )}
+                          })()}
+                        </div>
+                      )
+                    })()}
                   </div>
 
                 )}
@@ -15167,7 +15335,45 @@ export default function POSPage() {
       {/* ── MODAL DE PARTICIPACIÓN EN SORTEO & IMPRESIÓN DE CUPONES (MULTI-CAMPAÑA) ── */}
       {showCuponModal && pendingCuponData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border-2 border-orange-500/50 p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-6">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border-2 border-orange-500/50 p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-5">
+            {/* Banner de Recordatorio de Vuelto a Entregar */}
+            {pendingCuponData.vueltoBreakdown && pendingCuponData.vueltoBreakdown.totalPyg > 0 && (
+              <div className="p-3.5 bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-amber-500/15 border-2 border-emerald-500/80 rounded-2xl flex items-center justify-between shadow-xs">
+                <div className="flex items-center gap-2.5 text-left">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center font-black text-lg shadow-sm shrink-0">
+                    💵
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-emerald-800 dark:text-emerald-300 tracking-wider block">
+                      Recordatorio: Vuelto a Entregar
+                    </span>
+                    {pendingCuponData.vueltoBreakdown.brl > 0 ? (
+                      <div className="text-base font-black font-posMono text-slate-900 dark:text-white">
+                        <span className="text-amber-600 dark:text-amber-400">R$ {pendingCuponData.vueltoBreakdown.brl.toFixed(2)}</span>
+                        <span className="text-slate-400 mx-1.5">+</span>
+                        <span className="text-emerald-600 dark:text-emerald-400">{formatPYG(pendingCuponData.vueltoBreakdown.saldoGs)}</span>
+                        <span className="text-[11px] text-slate-500 ml-2 font-normal font-sans">
+                          (Total {formatPYG(pendingCuponData.vueltoBreakdown.totalPyg)})
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-base font-black font-posMono text-emerald-600 dark:text-emerald-400">
+                        {formatPYG(pendingCuponData.vueltoBreakdown.totalPyg)}
+                        {rates.BRL > 0 && (
+                          <span className="text-xs text-amber-600 dark:text-amber-400 ml-2 font-normal font-sans">
+                            (≈ R$ {(pendingCuponData.vueltoBreakdown.totalPyg / rates.BRL).toFixed(2)})
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black tracking-wide shrink-0 animate-pulse">
+                  ENTREGAR AHORA
+                </span>
+              </div>
+            )}
+
             {cuponModalStep === "pregunta" ? (
               <div className="text-center space-y-4">
                 <div className="w-16 h-16 bg-gradient-to-tr from-orange-500 to-amber-400 text-white rounded-3xl mx-auto flex items-center justify-center shadow-lg shadow-orange-500/30 animate-bounce">
@@ -15221,6 +15427,18 @@ export default function POSPage() {
                   >
                     <span>Sí, Participar</span>
                     <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Opción para volver a modificar la venta */}
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={handleReturnToSale}
+                    className="w-full py-2.5 px-3 rounded-2xl border border-amber-300 dark:border-amber-700/60 bg-amber-50/80 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 font-bold text-xs hover:bg-amber-100 dark:hover:bg-amber-900/50 flex items-center justify-center gap-2 transition cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    <span>Volver a Modificar Venta (Agregar Items / Cambiar Cliente)</span>
                   </button>
                 </div>
               </div>
@@ -15361,6 +15579,27 @@ export default function POSPage() {
                     </>
                   )}
                 </button>
+
+                {/* Barra de opciones de salida / volver a la venta */}
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCuponModalStep("pregunta")}
+                    className="py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-1 cursor-pointer"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Atrás</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleReturnToSale}
+                    className="py-2 px-3 rounded-xl border border-amber-300 dark:border-amber-700/60 bg-amber-50/80 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 font-bold text-xs hover:bg-amber-100 dark:hover:bg-amber-900/50 flex items-center gap-1.5 transition cursor-pointer ml-auto"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    <span>Volver a Modificar Venta</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
