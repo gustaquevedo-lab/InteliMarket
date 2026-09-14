@@ -43,18 +43,29 @@ class PettyCashFundCreate(BaseModel):
     branch_id: Optional[str] = None
     nombre: str
     custodio_id: Optional[str] = None
+    cost_center_id: Optional[str] = None
     monto_autorizado: Decimal
+    monto_maximo_por_gasto: Optional[Decimal] = Decimal("500000")
+    dotacion_inicial: Optional[bool] = False
+    medio_dotacion: Optional[str] = "EFECTIVO_BOVEDA"  # EFECTIVO_BOVEDA | BANCO_TRANSFERENCIA
+    caja_boveda_id: Optional[str] = None
+    bank_account_id: Optional[str] = None
 
 
 class PettyCashFundUpdate(BaseModel):
     nombre: Optional[str] = None
     custodio_id: Optional[str] = None
+    cost_center_id: Optional[str] = None
+    monto_autorizado: Optional[Decimal] = None
+    monto_maximo_por_gasto: Optional[Decimal] = None
     activo: Optional[bool] = None
 
 
 class FundReplenishRequest(BaseModel):
     monto: Decimal
     bank_account_id: Optional[str] = None
+    caja_boveda_id: Optional[str] = None
+    medio_reposicion: Optional[str] = "EFECTIVO_BOVEDA"
     referencia: Optional[str] = None
     observaciones: Optional[str] = None
 
@@ -69,8 +80,11 @@ class PettyCashFundResponse(BaseModel):
     nombre: str
     custodio_id: Optional[UUID] = None
     custodio_nombre: Optional[str] = None
+    cost_center_id: Optional[UUID] = None
+    cost_center_nombre: Optional[str] = None
     monto_autorizado: float
     saldo_actual: float
+    monto_maximo_por_gasto: Optional[float] = 500000
     activo: bool
     created_at: Optional[datetime] = None
 
@@ -101,12 +115,20 @@ class ExpenseCreate(BaseModel):
     comprobante_url: Optional[str] = None
     tipo_pago: str = "efectivo"
     fecha_gasto: Optional[date] = None
+    # Campos Fiscales Paraguayos
     ruc: Optional[str] = None
     timbrado: Optional[str] = None
     numero_factura: Optional[str] = None
+    tipo_comprobante: Optional[str] = "FACTURA_CONTADO"
+    gravado_10: Optional[Decimal] = None
+    gravado_5: Optional[Decimal] = None
+    exentas: Optional[Decimal] = None
     iva_10: Optional[Decimal] = None
     iva_5: Optional[Decimal] = None
-    exentas: Optional[Decimal] = None
+    # Clasificación Inversión vs Gasto
+    es_inversion: Optional[bool] = False
+    vida_util_meses: Optional[int] = None
+    categoria_activo: Optional[str] = None
     notas: Optional[str] = None
 
 
@@ -121,6 +143,15 @@ class ExpenseUpdate(BaseModel):
     ruc: Optional[str] = None
     timbrado: Optional[str] = None
     numero_factura: Optional[str] = None
+    tipo_comprobante: Optional[str] = None
+    gravado_10: Optional[Decimal] = None
+    gravado_5: Optional[Decimal] = None
+    exentas: Optional[Decimal] = None
+    iva_10: Optional[Decimal] = None
+    iva_5: Optional[Decimal] = None
+    es_inversion: Optional[bool] = None
+    vida_util_meses: Optional[int] = None
+    categoria_activo: Optional[str] = None
     notas: Optional[str] = None
 
 
@@ -179,14 +210,34 @@ class ExpenseResponse(BaseModel):
     company_id: Optional[UUID] = None
     branch_id: Optional[UUID] = None
     fund_id: Optional[UUID] = None
+    rendicion_id: Optional[UUID] = None
     category_id: Optional[UUID] = None
     cost_center_id: Optional[UUID] = None
+    cost_center_nombre: Optional[str] = None
     monto: float
     descripcion: str
     proveedor: Optional[str] = None
     comprobante_url: Optional[str] = None
     tipo_pago: Optional[str] = None
     fecha_gasto: Optional[date] = None
+    # Campos Fiscales
+    ruc: Optional[str] = None
+    timbrado: Optional[str] = None
+    numero_factura: Optional[str] = None
+    tipo_comprobante: Optional[str] = "FACTURA_CONTADO"
+    gravado_10: Optional[float] = 0
+    gravado_5: Optional[float] = 0
+    exentas: Optional[float] = 0
+    iva_10: Optional[float] = 0
+    iva_5: Optional[float] = 0
+    # Inversión y Activos Fijos
+    es_inversion: bool = False
+    fixed_asset_id: Optional[UUID] = None
+    vida_util_meses: Optional[int] = None
+    categoria_activo: Optional[str] = None
+    # Auditoría
+    auditoria_estado: Optional[str] = "pendiente"
+    auditoria_motivo: Optional[str] = None
     registrado_por: Optional[UUID] = None
     aprobado_por: Optional[UUID] = None
     aprobado_at: Optional[datetime] = None
@@ -200,6 +251,80 @@ class ExpenseResponse(BaseModel):
     estado: str = "pendiente"
     notas: Optional[str] = None
     created_at: Optional[datetime] = None
+
+
+# ── Modelos de Rendición de Cuentas y Reposición Formal ──────────
+
+class PettyCashRendicionCreate(BaseModel):
+    fund_id: str
+    expense_ids: list[str]
+    efectivo_remanente_contado: Decimal
+    observaciones: Optional[str] = None
+
+
+class PettyCashRendicionAuditItem(BaseModel):
+    expense_id: str
+    estado: str  # aprobado | observado | rechazado
+    motivo: Optional[str] = None
+
+
+class PettyCashRendicionAuditRequest(BaseModel):
+    items: list[PettyCashRendicionAuditItem]
+    observaciones: Optional[str] = None
+
+
+class PettyCashRendicionReplenishRequest(BaseModel):
+    medio_reposicion: str = "EFECTIVO_BOVEDA"  # EFECTIVO_BOVEDA | BANCO_TRANSFERENCIA | CHEQUE
+    caja_boveda_id: Optional[str] = None
+    bank_account_id: Optional[str] = None
+    comprobante_pago_ref: Optional[str] = None
+    observaciones: Optional[str] = None
+
+
+class PettyCashRendicionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    company_id: UUID
+    fund_id: UUID
+    fund_nombre: Optional[str] = None
+    numero_rendicion: str
+    custodio_id: UUID
+    custodio_nombre: str
+    auditado_por_id: Optional[UUID] = None
+    auditado_por_nombre: Optional[str] = None
+    estado: str
+    monto_fondo_autorizado: float
+    efectivo_remanente_contado: float
+    total_comprobantes_presentados: float
+    total_comprobantes_aprobados: float
+    total_comprobantes_rechazados: float
+    diferencia_arqueo: float
+    total_gravado_10: float
+    total_gravado_5: float
+    total_exentas: float
+    total_iva_10: float
+    total_iva_5: float
+    total_inversion_activos: float
+    total_gasto_operativo: float
+    monto_repuesto: float
+    medio_reposicion: Optional[str] = None
+    caja_boveda_id: Optional[UUID] = None
+    bank_account_id: Optional[UUID] = None
+    comprobante_pago_ref: Optional[str] = None
+    asiento_contable_id: Optional[UUID] = None
+    fecha_presentacion: Optional[datetime] = None
+    fecha_aprobacion: Optional[datetime] = None
+    fecha_pago: Optional[datetime] = None
+    observaciones_custodio: Optional[str] = None
+    observaciones_tesoreria: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class PettyCashRendicionDetailResponse(BaseModel):
+    rendicion: PettyCashRendicionResponse
+    expenses: list[ExpenseResponse]
+    fund: PettyCashFundResponse
 
 
 class ExpenseSummary(BaseModel):

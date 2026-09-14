@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Text, Date
+from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Text, Date, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from api.src.db import Base
@@ -46,8 +46,10 @@ class PettyCashFund(Base):
     branch_id = Column(UUID(as_uuid=True), index=True)
     nombre = Column(String(100), nullable=False)
     custodio_id = Column(UUID(as_uuid=True))
+    cost_center_id = Column(UUID(as_uuid=True), ForeignKey("cost_centers.id"))
     monto_autorizado = Column(Numeric(15, 0), nullable=False)
     saldo_actual = Column(Numeric(15, 0), nullable=False)
+    monto_maximo_por_gasto = Column(Numeric(15, 0), default=500000)
     activo = Column(Boolean, nullable=False, server_default="true")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -99,22 +101,103 @@ class PettyCashFundCount(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class PettyCashRendicion(Base):
+    """Expediente de Rendición de Cuentas y Solicitud de Reposición de Fondo Fijo."""
+    __tablename__ = "petty_cash_rendiciones"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    fund_id = Column(UUID(as_uuid=True), ForeignKey("petty_cash_funds.id"), nullable=False, index=True)
+    numero_rendicion = Column(String(50), nullable=False, index=True)  # REND-202609-0001
+
+    # Responsables
+    custodio_id = Column(UUID(as_uuid=True), nullable=False)
+    custodio_nombre = Column(String(100), nullable=False)
+    auditado_por_id = Column(UUID(as_uuid=True))
+    auditado_por_nombre = Column(String(100))
+
+    # Estado: borrador | presentada | en_revision | aprobada | pagada | rechazada
+    estado = Column(String(30), nullable=False, default="borrador", index=True)
+
+    # Cuadre de Arqueo Físico al Rendir
+    monto_fondo_autorizado = Column(Numeric(15, 0), nullable=False)
+    efectivo_remanente_contado = Column(Numeric(15, 0), nullable=False, default=0)
+    total_comprobantes_presentados = Column(Numeric(15, 0), nullable=False, default=0)
+    total_comprobantes_aprobados = Column(Numeric(15, 0), nullable=False, default=0)
+    total_comprobantes_rechazados = Column(Numeric(15, 0), nullable=False, default=0)
+    diferencia_arqueo = Column(Numeric(15, 0), nullable=False, default=0)
+
+    # Desglose Fiscal Consolidado de Comprobantes Aprobados
+    total_gravado_10 = Column(Numeric(15, 0), default=0)
+    total_gravado_5 = Column(Numeric(15, 0), default=0)
+    total_exentas = Column(Numeric(15, 0), default=0)
+    total_iva_10 = Column(Numeric(15, 0), default=0)
+    total_iva_5 = Column(Numeric(15, 0), default=0)
+    total_inversion_activos = Column(Numeric(15, 0), default=0)
+    total_gasto_operativo = Column(Numeric(15, 0), default=0)
+
+    # Datos de Reposición por Tesorería
+    monto_repuesto = Column(Numeric(15, 0), default=0)
+    medio_reposicion = Column(String(30))  # EFECTIVO_BOVEDA | BANCO_TRANSFERENCIA | CHEQUE
+    caja_boveda_id = Column(UUID(as_uuid=True))
+    cash_movement_id = Column(UUID(as_uuid=True))
+    bank_account_id = Column(UUID(as_uuid=True))
+    bank_transaction_id = Column(UUID(as_uuid=True))
+    comprobante_pago_ref = Column(String(100))
+
+    # Integración Contable
+    asiento_contable_id = Column(UUID(as_uuid=True))
+
+    # Auditoría y Trazabilidad
+    fecha_presentacion = Column(DateTime(timezone=True))
+    fecha_aprobacion = Column(DateTime(timezone=True))
+    fecha_pago = Column(DateTime(timezone=True))
+    observaciones_custodio = Column(Text)
+    observaciones_tesoreria = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Expense(Base):
-    """Caja chica — daily expense tracking"""
+    """Caja chica — daily expense tracking with fiscal & asset support"""
     __tablename__ = "expenses"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     branch_id = Column(UUID(as_uuid=True))
-    fund_id = Column(UUID(as_uuid=True), index=True)
+    fund_id = Column(UUID(as_uuid=True), ForeignKey("petty_cash_funds.id"), index=True)
+    rendicion_id = Column(UUID(as_uuid=True), ForeignKey("petty_cash_rendiciones.id"), index=True)
     category_id = Column(UUID(as_uuid=True))
-    cost_center_id = Column(UUID(as_uuid=True))
+    cost_center_id = Column(UUID(as_uuid=True), ForeignKey("cost_centers.id"))
     monto = Column(Numeric(15, 2), nullable=False)
     descripcion = Column(String(300), nullable=False)
     proveedor = Column(String(100))
-    comprobante_url = Column(String(500))  # receipt photo
+    comprobante_url = Column(String(500))  # receipt photo / pdf
     tipo_pago = Column(String(20))  # efectivo | tarjeta | transferencia
     fecha_gasto = Column(Date, nullable=False, server_default=func.current_date())
+
+    # Campos Fiscales Paraguayos (DNIT / SET)
+    ruc = Column(String(20), index=True)
+    timbrado = Column(String(20))
+    numero_factura = Column(String(50), index=True)
+    tipo_comprobante = Column(String(30), default="FACTURA_CONTADO")  # FACTURA_CONTADO | AUTOFACTURA | RECIBO | BOLETA
+    gravado_10 = Column(Numeric(15, 0), default=0)
+    gravado_5 = Column(Numeric(15, 0), default=0)
+    exentas = Column(Numeric(15, 0), default=0)
+    iva_10 = Column(Numeric(15, 0), default=0)
+    iva_5 = Column(Numeric(15, 0), default=0)
+
+    # Clasificación Inversión vs Gasto (Activos Fijos)
+    es_inversion = Column(Boolean, nullable=False, default=False)
+    fixed_asset_id = Column(UUID(as_uuid=True), ForeignKey("fixed_assets.id"))
+    vida_util_meses = Column(Integer)
+    categoria_activo = Column(String(100))
+
+    # Auditoría comprobante por comprobante
+    auditoria_estado = Column(String(20), default="pendiente")  # pendiente | aprobado | observado | rechazado
+    auditoria_motivo = Column(Text)
+
+    # Control de Estados
     registrado_por = Column(UUID(as_uuid=True))
     aprobado_por = Column(UUID(as_uuid=True))
     aprobado_at = Column(DateTime(timezone=True))
@@ -128,3 +211,4 @@ class Expense(Base):
     anulado_motivo = Column(Text)
     notas = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
