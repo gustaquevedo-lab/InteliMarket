@@ -3787,8 +3787,8 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     for ret_p, nc_num, s_num in returns_punteo_rows:
         m_gs_dev = float(ret_p.total or 0)
         orig_pays = sale_payments_map.get(ret_p.sale_id, [])
-        target_ch = "EXTRA_CLUB"
-        target_label = "Extra Club"
+        target_ch = None
+        target_label = None
         for op in orig_pays:
             op_fp = (op.forma_pago or "").upper().strip()
             if "EFECTIVO" not in op_fp:
@@ -3797,6 +3797,12 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
                 op_plug_op = getattr(op, "plug_tipo_operacion", None)
                 target_ch, target_label, _, _ = classify_payment_channel(op_fp, op.moneda, op_pos_op, op_pos_nom, op_plug_op)
                 break
+
+        # Si la venta original se pagó en efectivo:
+        # La devolución fue en efectivo físico de gaveta (ya contemplada en el arqueo de billetes).
+        # NO genera comprobante físico de pago no-efectivo para cotejar/puntear en Tesorería.
+        if not target_ch:
+            continue
 
         voucher_dev = {
             "id": f"dev_{str(ret_p.id)}",
