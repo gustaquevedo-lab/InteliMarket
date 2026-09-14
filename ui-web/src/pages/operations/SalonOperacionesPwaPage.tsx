@@ -10,31 +10,16 @@ import {
   Flame, ShoppingCart, Layers, ExternalLink,
   Volume2, ShieldCheck, Sparkles, Scale,
   ChevronRight, ArrowRight, CheckCircle2,
-  LogIn, UserCheck
+  LogIn, UserCheck, Camera, CameraOff,
+  Flashlight, Zap, Package, Compass, History, ShieldAlert
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { useTheme } from "../../context/ThemeContext"
 import { api, type Product } from "../../api"
 import { soundAlerts } from "../../utils/audioAlerts"
-import { DEFAULT_TV_CONFIG, DEFAULT_CORTES, type TvCarniceriaConfig } from "../kiosk/CarniceriaTvDigitalPage"
 
-const FALLBACK_PRODUCTS: Product[] = [
-  { id: "p-fb-1", nombre: "Tapa Cuadril (Picaña) Vacuno Extra", codigo_barra: "7840001000011", sku: "CARN-001", precio_venta: 72000, costo_promedio: 48000, categoria: { id: "cat-1", nombre: "Carnicería" } as any },
-  { id: "p-fb-2", nombre: "Costilla de Primera Vacuna", codigo_barra: "7840001000028", sku: "CARN-002", precio_venta: 42000, costo_promedio: 28000, categoria: { id: "cat-1", nombre: "Carnicería" } as any },
-  { id: "p-fb-3", nombre: "Vacío Parrillero Novillo", codigo_barra: "7840001000035", sku: "CARN-003", precio_venta: 46000, costo_promedio: 31000, categoria: { id: "cat-1", nombre: "Carnicería" } as any },
-  { id: "p-fb-4", nombre: "Chorizo Casero Parrillero Extra 1Kg", codigo_barra: "7840001000042", sku: "CARN-004", precio_venta: 34000, costo_promedio: 22000, categoria: { id: "cat-1", nombre: "Carnicería" } as any },
-  { id: "p-fb-5", nombre: "Pan Francés Tradicional (Kg)", codigo_barra: "7840002000010", sku: "PAN-001", precio_venta: 9500, costo_promedio: 5500, categoria: { id: "cat-2", nombre: "Panadería" } as any },
-  { id: "p-fb-6", nombre: "Pan Rallado Artesanal Extra 1Kg", codigo_barra: "7840002000027", sku: "PAN-002", precio_venta: 11000, costo_promedio: 5800, categoria: { id: "cat-2", nombre: "Panadería" } as any },
-  { id: "p-fb-7", nombre: "Chipa Almidón Tradicional (Un)", codigo_barra: "7840002000034", sku: "PAN-003", precio_venta: 6000, costo_promedio: 3000, categoria: { id: "cat-2", nombre: "Panadería" } as any },
-  { id: "p-fb-8", nombre: "Zapallo Kabutiá en Cubos 500g", codigo_barra: "7840003000019", sku: "VERD-001", precio_venta: 7500, costo_promedio: 3500, categoria: { id: "cat-3", nombre: "Verdulería" } as any },
-  { id: "p-fb-9", nombre: "Mandioca Pelada Seleccionada 1Kg", codigo_barra: "7840003000026", sku: "VERD-002", precio_venta: 6500, costo_promedio: 2800, categoria: { id: "cat-3", nombre: "Verdulería" } as any },
-  { id: "p-fb-10", nombre: "Yerba Mate Kurupí Menta y Limón 500g", codigo_barra: "7840058001887", sku: "ALM-001", precio_venta: 15000, costo_promedio: 9800, categoria: { id: "cat-4", nombre: "Almacén" } as any },
-  { id: "p-fb-11", nombre: "Aceite de Girasol 900ml", codigo_barra: "7891018427582", sku: "ALM-002", precio_venta: 12500, costo_promedio: 8900, categoria: { id: "cat-4", nombre: "Almacén" } as any },
-  { id: "p-fb-12", nombre: "Leche Entera Larga Vida 1L", codigo_barra: "7840004000018", sku: "LAC-001", precio_venta: 6800, costo_promedio: 5100, categoria: { id: "cat-5", nombre: "Lácteos" } as any },
-]
-
-// Tipos Maestros de Salón de Ventas (5 Módulos del Encargado)
+// Tipos Maestros de Salón de Ventas
 type SalonTab = "gondola" | "produccion" | "mermas" | "reposicion" | "haccp"
 type ProduccionSector = "carniceria" | "panaderia" | "verduleria"
 
@@ -135,8 +120,11 @@ export default function SalonOperacionesPwaPage() {
 
   const [tab, setTab] = useState<SalonTab>("gondola")
   const [produccionSector, setProduccionSector] = useState<ProduccionSector>("carniceria")
+  
+  // Catálogo en memoria y estado de búsqueda
   const [products, setProducts] = useState<Product[]>([])
   const [loadingProducts, setLoadingProducts] = useState(false)
+  const [searchingProduct, setSearchingProduct] = useState(false)
 
   // ── COLA DE IMPRESIÓN DE ETIQUETAS (PERSISTENCIA COMPARTIDA) ──
   const [labelQueue, setLabelQueue] = useState<LabelQueueItem[]>(() => {
@@ -159,64 +147,57 @@ export default function SalonOperacionesPwaPage() {
   // ── ESTADOS DEL ESCÁNER & AUDITORÍA DE GÓNDOLA ──
   const [barcodeQuery, setBarcodeQuery] = useState("")
   const [scannedProduct, setScannedProduct] = useState<Product | null>(null)
+  const [scannedStock, setScannedStock] = useState<any | null>(null)
+  const [loadingStock, setLoadingStock] = useState(false)
   const [precioVistoGondola, setPrecioVistoGondola] = useState("")
 
-  // ── ESTADOS DE PRODUCCIÓN & TRANSFORMACIÓN REAL ──
-  const [lotesProduccion, setLotesProduccion] = useState<LoteProduccion[]>([
-    {
-      id: "lp-101",
-      sector: "Carnicería",
-      receta_nombre: "Elaboración de Chorizo Parrillero Casero Extra",
-      insumo_origen: "Trimmings de Res (Recortes) + Tocino de Cerdo",
-      cantidad_insumo: 45,
-      producto_obtenido: "Chorizo Casero Parrillero Extra",
-      cantidad_obtenida: 43.5,
-      unidad: "Kg",
-      costo_unitario: 24500,
-      lote_codigo: "CH-260903-01",
-      hora: "07:30"
-    },
-    {
-      id: "lp-102",
-      sector: "Panadería",
-      receta_nombre: "Residuo Cero: Pan Francés de Ayer ➔ Pan Rallado",
-      insumo_origen: "Pan Francés Seco (Sobrante)",
-      cantidad_insumo: 30,
-      producto_obtenido: "Pan Rallado Artesanal Extra 1Kg",
-      cantidad_obtenida: 29.2,
-      unidad: "Kg",
-      costo_unitario: 6200,
-      lote_codigo: "PR-260903-A",
-      hora: "08:15"
-    },
-    {
-      id: "lp-103",
-      sector: "Verdulería",
-      receta_nombre: "Fraccionamiento Fresh Cut: Zapallo en Cubos",
-      insumo_origen: "Zapallo Kabutiá a granel",
-      cantidad_insumo: 50,
-      producto_obtenido: "Bandejas Zapallo Pelado en Cubos 500g",
-      cantidad_obtenida: 76,
-      unidad: "Bandejas",
-      costo_unitario: 4100,
-      lote_codigo: "VC-260903-Z",
-      hora: "08:45"
-    }
-  ])
+  // ── ESTADOS DE CÁMARA Y ESCÁNER EN VIVO (BARCODE DETECTOR) ──
+  const [cameraActive, setCameraActive] = useState(false)
+  const [torchActive, setTorchActive] = useState(false)
+  const [hasTorch, setHasTorch] = useState(false)
+  const [facingMode, setFacingMode] = useState<"environment" | "user">("environment")
+  const [lastScannedCode, setLastScannedCode] = useState<string>("")
+  const [cameraError, setCameraError] = useState<string | null>(null)
 
-  // Formulario de Producción de Embutidos / Carnicería
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const scanLoopRef = useRef<number | null>(null)
+  const isProcessingBarcode = useRef<boolean>(false)
+
+  // ── BUFFER DEL ESCÁNER DE HARDWARE (PISTOLA LÁSER USB / BLUETOOTH) ──
+  const barcodeBuffer = useRef("")
+  const lastKeyTime = useRef(0)
+
+  // ── ESTADOS DE PRODUCCIÓN & TRANSFORMACIÓN REAL ──
+  const [lotesProduccion, setLotesProduccion] = useState<LoteProduccion[]>(() => {
+    try {
+      const saved = localStorage.getItem("extra_salon_lotes_prod")
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  })
+
+  const saveLotesProduccion = (newList: LoteProduccion[]) => {
+    setLotesProduccion(newList)
+    try {
+      localStorage.setItem("extra_salon_lotes_prod", JSON.stringify(newList))
+    } catch {}
+  }
+
+  // Formulario de Carnicería
   const [carneReceta, setCarneReceta] = useState("Chorizo Parrillero Casero Extra")
   const [carneKgTrimmings, setCarneKgTrimmings] = useState("30")
   const [carneKgTocino, setCarneKgTocino] = useState("10")
 
-  // Formulario de Panadería (Amasado y Transformación)
+  // Formulario de Panadería
   const [panModo, setPanModo] = useState<"amasado" | "sobrante">("sobrante")
   const [panKgHarina, setPanKgHarina] = useState("50")
   const [panTipoAmasado, setPanTipoAmasado] = useState("Pan Francés Tradicional")
   const [panKgSobrante, setPanKgSobrante] = useState("25")
   const [panDestinoSobrante, setPanDestinoSobrante] = useState("Pan Rallado Artesanal Extra")
 
-  // Formulario de Verdulería (Fraccionamiento & Fresh Cut)
+  // Formulario de Verdulería
   const [verduraInsumo, setVerduraInsumo] = useState("Zapallo Kabutiá")
   const [verduraKgBrutos, setVerduraKgBrutos] = useState("40")
   const [verduraBandejasDestino, setVerduraBandejasDestino] = useState("Bandejas Zapallo en Cubos 500g")
@@ -232,30 +213,51 @@ export default function SalonOperacionesPwaPage() {
   const [submittingMerma, setSubmittingMerma] = useState(false)
 
   // ── ESTADOS DE REPOSICIÓN SALÓN ➔ DEPÓSITO ──
-  const [reposiciones, setReposiciones] = useState<ReposicionItem[]>([
-    { id: "rep-1", producto_id: "p1", producto_nombre: "Yerba Mate Kurupí Menta y Limón 500g", cantidad: 24, urgencia: "alta", estado: "en_camino", sector: "Almacén Secos", hora: "08:45" },
-    { id: "rep-2", producto_id: "p2", producto_nombre: "Aceite de Girasol 900ml", cantidad: 36, urgencia: "normal", estado: "pendiente", sector: "Almacén Secos", hora: "09:30" },
-  ])
+  const [reposiciones, setReposiciones] = useState<ReposicionItem[]>(() => {
+    try {
+      const saved = localStorage.getItem("extra_salon_reposiciones")
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  })
+
+  const saveReposiciones = (newList: ReposicionItem[]) => {
+    setReposiciones(newList)
+    try {
+      localStorage.setItem("extra_salon_reposiciones", JSON.stringify(newList))
+    } catch {}
+  }
+
   const [repoProd, setRepoProd] = useState<Product | null>(null)
   const [repoQty, setRepoQty] = useState("")
   const [repoUrgencia, setRepoUrgencia] = useState<"alta" | "normal">("alta")
 
   // ── ESTADOS DE TEMPERATURAS & HACCP ──
-  const [temperaturas, setTemperaturas] = useState<TemperaturaItem[]>([
-    { id: "t-1", equipo: "Cámara de Reses (Carnicería)", sector: "Carnicería", temperatura: 1.8, rango_min: 0, rango_max: 4, estado: "optimo", hora: "08:00", responsable: "Encargado de Salón" },
-    { id: "t-2", equipo: "Batea Exhibidora de Cortes", sector: "Carnicería", temperatura: 3.2, rango_min: 0, rango_max: 4, estado: "optimo", hora: "08:15", responsable: "Encargado de Salón" },
-    { id: "t-3", equipo: "Heladera Mural de Lácteos", sector: "Lácteos", temperatura: 4.1, rango_min: 1, rango_max: 5, estado: "optimo", hora: "08:30", responsable: "Encargado de Salón" },
-    { id: "t-4", equipo: "Cámara de Congelados", sector: "Congelados", temperatura: -18.5, rango_min: -22, rango_max: -16, estado: "optimo", hora: "08:30", responsable: "Encargado de Salón" },
-    { id: "t-5", equipo: "Vitrina Caliente de Rotisería", sector: "Rotisería", temperatura: 68.0, rango_min: 65, rango_max: 85, estado: "optimo", hora: "09:00", responsable: "Encargado de Salón" },
-  ])
+  const [temperaturas, setTemperaturas] = useState<TemperaturaItem[]>(() => {
+    try {
+      const saved = localStorage.getItem("extra_salon_temperaturas")
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  })
+
+  const saveTemperaturas = (newList: TemperaturaItem[]) => {
+    setTemperaturas(newList)
+    try {
+      localStorage.setItem("extra_salon_temperaturas", JSON.stringify(newList))
+    } catch {}
+  }
+
   const [tempEquipo, setTempEquipo] = useState("Cámara de Reses (Carnicería)")
   const [tempValor, setTempValor] = useState("")
 
-  // ── ESTADOS DE DESPOSTE DE CARNES (CALCULADORA REAL DE RENDIMIENTO) ──
+  // ── DESPOSTE DE CARNES ──
   const [despostePesoEntrada, setDespostePesoEntrada] = useState<number>(240)
   const [desposteCostoTotal, setDesposteCostoTotal] = useState<number>(5500000)
 
-  // Estado para Login rápido si el operador entra a la PWA sin sesión
+  // ── LOGIN RÁPIDO PWA ──
   const { login } = useAuth()
   const [showLoginModal, setShowLoginModal] = useState(false)
   const [loginEmail, setLoginEmail] = useState("")
@@ -264,30 +266,25 @@ export default function SalonOperacionesPwaPage() {
 
   const hasFetchedRef = useRef(false)
 
-  // Cargar Catálogo de Productos con Fallback Seguro y Silencioso
+  // ── CARGA INICIAL DE CATÁLOGO DESDE LA BASE DE DATOS REAL DE EXTRA ──
   const loadCatalog = useCallback(async () => {
     setLoadingProducts(true)
     try {
-      const res = await api.products.list({ limit: 400 })
+      const res = await api.products.list({ limit: 100 })
       const list = Array.isArray(res) ? res : ((res as any)?.items || [])
-      if (list.length > 0) {
-        setProducts(list)
-      } else {
-        setProducts(FALLBACK_PRODUCTS)
-      }
-    } catch {
-      // Fallback silencioso con catálogo base de supermercado sin saturar la pantalla con toasts
-      setProducts(FALLBACK_PRODUCTS)
+      setProducts(list)
+    } catch (err) {
+      console.warn("No se pudo precargar catálogo inicial:", err)
     } finally {
       setLoadingProducts(false)
     }
   }, [])
 
-  // Cargar Mermas Oficiales del Backend
+  // ── CARGAR MERMAS OFICIALES DEL BACKEND ──
   const loadMermas = useCallback(async () => {
     setLoadingMermas(true)
     try {
-      const res = await api.supermer.waste.list()
+      const res = await api.supermer.waste.list({ desde: new Date().toISOString().split("T")[0] })
       if (Array.isArray(res) && res.length > 0) {
         const mapped: MermaItem[] = res.map((w: any) => ({
           id: String(w.id),
@@ -304,10 +301,66 @@ export default function SalonOperacionesPwaPage() {
         }))
         setMermasList(mapped)
       }
-    } catch {
-      // Fallback silencioso
+    } catch (err) {
+      console.warn("No se pudieron cargar mermas del backend:", err)
     } finally {
       setLoadingMermas(false)
+    }
+  }, [])
+
+  // ── CARGAR SUGERENCIAS DE REPOSICIÓN REALES ──
+  const loadSugerenciasReposicion = useCallback(async () => {
+    try {
+      const res = await api.supermer.suggestions.list({ estado: "pendiente" })
+      if (Array.isArray(res) && res.length > 0) {
+        const mapped: ReposicionItem[] = res.map((s: any) => ({
+          id: String(s.id),
+          producto_id: String(s.producto_id),
+          producto_nombre: s.producto_nombre || "Producto en góndola",
+          cantidad: Number(s.sugerido || s.cantidad || 12),
+          urgencia: (s.urgencia === "critica" || s.prioridad === "alta") ? "alta" : "normal",
+          estado: "pendiente",
+          sector: s.sector || s.categoria || "Góndola",
+          hora: new Date(s.created_at || Date.now()).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
+        }))
+        // Unir con las existentes evitando duplicados
+        setReposiciones(prev => {
+          const ids = new Set(prev.map(p => p.id))
+          const fresh = mapped.filter(m => !ids.has(m.id))
+          return [...fresh, ...prev]
+        })
+      }
+    } catch (err) {
+      console.warn("No se pudieron cargar sugerencias de reposición:", err)
+    }
+  }, [])
+
+  // ── CARGAR LOTES DE PRODUCCIÓN REALES ──
+  const loadLotesProduccion = useCallback(async () => {
+    try {
+      const res = await api.supermer.batches.list()
+      if (Array.isArray(res) && res.length > 0) {
+        const mapped: LoteProduccion[] = res.slice(0, 20).map((b: any) => ({
+          id: String(b.id),
+          sector: (b.sector || (b.producto_nombre?.toLowerCase().includes("chorizo") ? "Carnicería" : "Panadería")) as any,
+          receta_nombre: b.receta_nombre || b.producto_nombre || "Elaboración de Salón",
+          insumo_origen: b.insumo_origen || "Materia Prima Fraccionada",
+          cantidad_insumo: Number(b.cantidad_insumo || b.cantidad || 0),
+          producto_obtenido: b.producto_nombre || "Elaborado Extra",
+          cantidad_obtenida: Number(b.cantidad || 0),
+          unidad: b.unidad || "Kg",
+          costo_unitario: Number(b.costo_unitario || 0),
+          lote_codigo: b.lote_codigo || b.codigo || `LOT-${b.id}`,
+          hora: new Date(b.created_at || Date.now()).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
+        }))
+        setLotesProduccion(prev => {
+          const ids = new Set(prev.map(p => p.id))
+          const fresh = mapped.filter(m => !ids.has(m.id))
+          return [...fresh, ...prev]
+        })
+      }
+    } catch (err) {
+      console.warn("No se pudieron cargar lotes de producción:", err)
     }
   }, [])
 
@@ -316,53 +369,252 @@ export default function SalonOperacionesPwaPage() {
     hasFetchedRef.current = true
     loadCatalog()
     loadMermas()
-  }, [loadCatalog, loadMermas])
+    loadSugerenciasReposicion()
+    loadLotesProduccion()
+  }, [loadCatalog, loadMermas, loadSugerenciasReposicion, loadLotesProduccion])
 
-  const handleQuickLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!loginEmail || !loginPassword) {
-      toast.warning("Datos requeridos", "Ingrese su usuario/correo y contraseña.")
-      return
-    }
-    setLoggingIn(true)
+  // ── OBTENER STOCK REAL DE UN PRODUCTO ──
+  const fetchProductStock = async (prodId: string) => {
+    setLoadingStock(true)
     try {
-      await login(loginEmail, loginPassword)
-      toast.success("Sesión Iniciada", "Conectado al servidor de Extra Supermercado.")
-      setShowLoginModal(false)
-      loadCatalog()
-      loadMermas()
+      const stockData = await api.inventory.getProductStock(prodId)
+      setScannedStock(stockData)
     } catch {
-      toast.error("Error de Autenticación", "Usuario o contraseña incorrectos.")
+      setScannedStock(null)
     } finally {
-      setLoggingIn(false)
+      setLoadingStock(false)
     }
   }
 
-  // ── ACCIÓN: ESCANEAR O BUSCAR PRODUCTO CON SONIDO ──
+  // ── BUSCADOR REAL DE PRODUCTO (CÓDIGO DE BARRAS O NOMBRE) ──
+  const processScannedCode = useCallback(async (codeOrText: string) => {
+    const raw = codeOrText.trim()
+    if (!raw) return
+
+    setSearchingProduct(true)
+    setLastScannedCode(raw)
+
+    try {
+      // 1. Buscar primero en la memoria local
+      const q = raw.toLowerCase()
+      let found = products.find(p => 
+        (p.codigo_barra && p.codigo_barra.toLowerCase() === q) ||
+        (p.sku && p.sku.toLowerCase() === q) ||
+        p.id === raw
+      )
+
+      // 2. Si no está en memoria, consultar directamente a la base de datos real de Extra (11.628 productos)
+      if (!found) {
+        const searchRes = await api.products.list({ search: raw, limit: 10 })
+        const items = Array.isArray(searchRes) ? searchRes : ((searchRes as any)?.items || [])
+        
+        if (items.length > 0) {
+          // Priorizar coincidencia exacta de código de barras
+          found = items.find((p: Product) => p.codigo_barra === raw) || items[0]
+          
+          // Agregarlo al catálogo local para futuras lecturas rápidas
+          setProducts(prev => {
+            const exists = prev.some(p => p.id === found!.id)
+            return exists ? prev : [found!, ...prev]
+          })
+        }
+      }
+
+      if (found) {
+        soundAlerts.playScanSuccess()
+        if (navigator.vibrate) navigator.vibrate([40, 60, 80])
+        setScannedProduct(found)
+        setPrecioVistoGondola("")
+        setBarcodeQuery("")
+        fetchProductStock(found.id)
+        toast.success("Producto Identificado", `${found.nombre} • ${formatPYG(found.precio_venta || found.precio || 0)}`)
+      } else {
+        soundAlerts.playPriceMismatchAlert()
+        if (navigator.vibrate) navigator.vibrate([100, 100, 100])
+        toast.error("No Registrado", `No se encontró ningún producto con código '${raw}' en el sistema Extra.`)
+      }
+    } catch (err: any) {
+      soundAlerts.playPriceMismatchAlert()
+      toast.error("Error al consultar", err?.message || "Error al verificar producto en el servidor.")
+    } finally {
+      setSearchingProduct(false)
+    }
+  }, [products, toast])
+
+  // ── DETECCIÓN CONTINUA CON BARCODE DETECTOR NATIVO DE CÁMARA ──
+  const startCamera = async (mode: "environment" | "user" = facingMode) => {
+    setCameraError(null)
+    try {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop())
+        streamRef.current = null
+      }
+
+      const constraints: MediaStreamConstraints = {
+        video: {
+          facingMode: { ideal: mode },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
+      streamRef.current = stream
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play()
+      }
+
+      setCameraActive(true)
+
+      // Verificar si tiene soporte de linterna (Torch)
+      const track = stream.getVideoTracks()[0]
+      if (track) {
+        const capabilities: any = track.getCapabilities ? track.getCapabilities() : {}
+        setHasTorch(!!capabilities.torch)
+      }
+
+      // Iniciar bucle de BarcodeDetector si está soportado
+      if ("BarcodeDetector" in window) {
+        const barcodeDetector = new (window as any).BarcodeDetector({
+          formats: ["ean_13", "ean_8", "code_128", "qr_code", "upc_a", "code_39"],
+        })
+
+        const detectLoop = async () => {
+          if (!videoRef.current || videoRef.current.readyState < 2) {
+            scanLoopRef.current = requestAnimationFrame(detectLoop)
+            return
+          }
+
+          if (!isProcessingBarcode.current) {
+            try {
+              const barcodes = await barcodeDetector.detect(videoRef.current)
+              if (barcodes.length > 0) {
+                const rawValue = barcodes[0].rawValue
+                if (rawValue && rawValue !== lastScannedCode) {
+                  isProcessingBarcode.current = true
+                  await processScannedCode(rawValue)
+                  // Pausa de 1.8 segundos para evitar spam continuado
+                  setTimeout(() => {
+                    isProcessingBarcode.current = false
+                  }, 1800)
+                }
+              }
+            } catch (err) {
+              // Frame no analizado, continuar silenciosamente
+            }
+          }
+
+          scanLoopRef.current = requestAnimationFrame(detectLoop)
+        }
+
+        scanLoopRef.current = requestAnimationFrame(detectLoop)
+      } else {
+        toast.info(
+          "Lector Visual Activado",
+          "Tu navegador no tiene la API BarcodeDetector nativa. Apuntá el producto y usá la búsqueda rápida o pistola lectora."
+        )
+      }
+    } catch (err: any) {
+      console.error("Error al iniciar cámara:", err)
+      setCameraError(err?.message || "No se pudo acceder a la cámara. Compruebe los permisos del navegador.")
+      setCameraActive(false)
+      toast.error("Error de Cámara", "Asegúrese de otorgar permisos de cámara en el navegador.")
+    }
+  }
+
+  const stopCamera = () => {
+    if (scanLoopRef.current) {
+      cancelAnimationFrame(scanLoopRef.current)
+      scanLoopRef.current = null
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
+    }
+    setCameraActive(false)
+    setTorchActive(false)
+  }
+
+  const toggleTorch = async () => {
+    if (!streamRef.current) return
+    const track = streamRef.current.getVideoTracks()[0]
+    if (!track) return
+
+    try {
+      const nextTorch = !torchActive
+      await (track as any).applyConstraints({
+        advanced: [{ torch: nextTorch }],
+      })
+      setTorchActive(nextTorch)
+    } catch (err) {
+      toast.warning("Linterna No Disponible", "Este dispositivo no soporta control de linterna.")
+    }
+  }
+
+  const switchCamera = () => {
+    const nextMode = facingMode === "environment" ? "user" : "environment"
+    setFacingMode(nextMode)
+    stopCamera()
+    setTimeout(() => startCamera(nextMode), 200)
+  }
+
+  // Apagar cámara al desmontar o cambiar de tab
+  useEffect(() => {
+    if (tab !== "gondola") {
+      stopCamera()
+    }
+    return () => {
+      stopCamera()
+    }
+  }, [tab])
+
+  // ── LISTENER PARA PISTOLA LÁSER FÍSICA USB / BLUETOOTH (ZEBRA / HONEYWELL) ──
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Si el foco está en un input normal que no sea el escáner, no interferir salvo que sea rápido
+      const activeEl = document.activeElement as HTMLElement
+      const isInput = activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")
+      const isQuickInput = activeEl && activeEl.id === "salon-barcode-input"
+
+      const now = Date.now()
+      const diff = now - lastKeyTime.current
+      lastKeyTime.current = now
+
+      // Los lectores láser envían caracteres con < 60ms entre cada pulsación
+      if (diff > 80) {
+        barcodeBuffer.current = ""
+      }
+
+      if (e.key === "Enter") {
+        if (barcodeBuffer.current.length >= 3) {
+          e.preventDefault()
+          const scanned = barcodeBuffer.current
+          barcodeBuffer.current = ""
+          processScannedCode(scanned)
+        }
+      } else if (e.key.length === 1) {
+        barcodeBuffer.current += e.key
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [processScannedCode])
+
+  // ── ENVÍO MANUAL DEL BUSCADOR ──
   const handleScanSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    const q = barcodeQuery.trim().toLowerCase()
-    if (!q) return
-
-    const match = products.find((p) =>
-      (p.codigo_barra && p.codigo_barra.toLowerCase() === q) ||
-      (p.sku && p.sku.toLowerCase() === q) ||
-      p.nombre.toLowerCase().includes(q)
-    )
-
-    if (match) {
-      soundAlerts.playScanSuccess()
-      setScannedProduct(match)
-      setPrecioVistoGondola("")
-      setBarcodeQuery("")
-      toast.success("Producto Localizado", match.nombre)
-    } else {
-      soundAlerts.playPriceMismatchAlert()
-      toast.error("No Encontrado", `No se encontró ningún producto con código o nombre '${barcodeQuery}'`)
-    }
+    if (!barcodeQuery.trim()) return
+    processScannedCode(barcodeQuery)
   }
 
-  // ── ACCIÓN: ENVIAR A COLA DE IMPRESIÓN DE ETIQUETAS ──
+  // ── ACCIÓN: ENVIAR A COLA DE IMPRESIÓN DE ETIQUETAS FLEJE ──
   const handleAddToLabelQueue = (
     prod: Product,
     motivo: LabelQueueItem["motivo"] = "falta_fleje",
@@ -390,119 +642,10 @@ export default function SalonOperacionesPwaPage() {
 
     const updated = [newItem, ...labelQueue]
     saveLabelQueue(updated)
-    toast.success("Etiqueta en Cola", `${qty} etiqueta(s) agregadas para ${prod.nombre}`)
+    toast.success("Fleje Agregado a Cola", `${qty} etiqueta(s) en cola para ${prod.nombre}`)
   }
 
-  // ── ACCIÓN: REGISTRAR PRODUCCIÓN DE CARNICERÍA (EMBUTIDOS / MILANESAS) ──
-  const handleConfirmProduccionCarne = (e: React.FormEvent) => {
-    e.preventDefault()
-    const trimmings = parseFloat(carneKgTrimmings) || 0
-    const tocino = parseFloat(carneKgTocino) || 0
-    if (trimmings <= 0) {
-      toast.warning("Faltan insumos", "Ingrese los Kilos de recortes/trimmings.")
-      return
-    }
-
-    const kgObtenidos = (trimmings + tocino) * 0.97 // 3% merma de embutido
-    const loteCod = `EMB-${Date.now().toString().slice(-4)}`
-    const nuevoLote: LoteProduccion = {
-      id: `lp-${Date.now()}`,
-      sector: "Carnicería",
-      receta_nombre: carneReceta,
-      insumo_origen: `${trimmings}kg Trimmings + ${tocino}kg Tocino`,
-      cantidad_insumo: trimmings + tocino,
-      producto_obtenido: carneReceta,
-      cantidad_obtenida: Math.round(kgObtenidos * 10) / 10,
-      unidad: "Kg",
-      costo_unitario: 23500,
-      lote_codigo: loteCod,
-      hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
-    }
-
-    soundAlerts.playScanSuccess()
-    setLotesProduccion([nuevoLote, ...lotesProduccion])
-    toast.success("Producción Registrada", `${kgObtenidos.toFixed(1)} Kg de ${carneReceta} listos con lote ${loteCod}.`)
-  }
-
-  // ── ACCIÓN: REGISTRAR PRODUCCIÓN DE PANADERÍA (SOBRANTES O AMASADO) ──
-  const handleConfirmProduccionPan = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (panModo === "sobrante") {
-      const sobrante = parseFloat(panKgSobrante) || 0
-      if (sobrante <= 0) {
-        toast.warning("Faltan datos", "Ingrese los Kilos de pan sobrante a moler.")
-        return
-      }
-      const obtenido = sobrante * 0.96 // 4% merma molino
-      const loteCod = `RES-${Date.now().toString().slice(-4)}`
-      const nuevoLote: LoteProduccion = {
-        id: `lp-${Date.now()}`,
-        sector: "Panadería",
-        receta_nombre: "Transformación Residuo Cero (Pan Seco ➔ Pan Rallado)",
-        insumo_origen: `${sobrante}kg Pan Francés de Ayer`,
-        cantidad_insumo: sobrante,
-        producto_obtenido: panDestinoSobrante,
-        cantidad_obtenida: Math.round(obtenido * 10) / 10,
-        unidad: "Kg",
-        costo_unitario: 5800,
-        lote_codigo: loteCod,
-        hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
-      }
-      soundAlerts.playScanSuccess()
-      setLotesProduccion([nuevoLote, ...lotesProduccion])
-      toast.success("Residuo Cero Registrado", `Convertidos ${sobrante}kg de pan seco en ${obtenido.toFixed(1)}kg de Pan Rallado.`)
-    } else {
-      const harina = parseFloat(panKgHarina) || 0
-      const obtenido = harina * 1.35 // Rendimiento panadería 135% por agua/levadura
-      const loteCod = `PAN-${Date.now().toString().slice(-4)}`
-      const nuevoLote: LoteProduccion = {
-        id: `lp-${Date.now()}`,
-        sector: "Panadería",
-        receta_nombre: `Amasado Diario: ${panTipoAmasado}`,
-        insumo_origen: `${harina}kg Harina 000 + Insumos`,
-        cantidad_insumo: harina,
-        producto_obtenido: panTipoAmasado,
-        cantidad_obtenida: Math.round(obtenido * 10) / 10,
-        unidad: "Kg",
-        costo_unitario: 8200,
-        lote_codigo: loteCod,
-        hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
-      }
-      soundAlerts.playScanSuccess()
-      setLotesProduccion([nuevoLote, ...lotesProduccion])
-      toast.success("Horneada Registrada", `Producidos ${obtenido.toFixed(1)}kg de ${panTipoAmasado}.`)
-    }
-  }
-
-  // ── ACCIÓN: REGISTRAR PRODUCCIÓN DE VERDULERÍA (FRESH CUT / FRACCIONAMIENTO) ──
-  const handleConfirmProduccionVerdura = (e: React.FormEvent) => {
-    e.preventDefault()
-    const brutos = parseFloat(verduraKgBrutos) || 0
-    if (brutos <= 0) {
-      toast.warning("Faltan datos", "Ingrese los Kilos brutos fraccionados.")
-      return
-    }
-    const bandejas = Math.floor((brutos * 0.85) / 0.5) // 15% merma cascara, bandejas de 500g
-    const loteCod = `FC-${Date.now().toString().slice(-4)}`
-    const nuevoLote: LoteProduccion = {
-      id: `lp-${Date.now()}`,
-      sector: "Verdulería",
-      receta_nombre: `Fresh Cut: ${verduraBandejasDestino}`,
-      insumo_origen: `${brutos}kg ${verduraInsumo} a granel`,
-      cantidad_insumo: brutos,
-      producto_obtenido: verduraBandejasDestino,
-      cantidad_obtenida: bandejas,
-      unidad: "Bandejas",
-      costo_unitario: 4300,
-      lote_codigo: loteCod,
-      hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
-    }
-    soundAlerts.playScanSuccess()
-    setLotesProduccion([nuevoLote, ...lotesProduccion])
-    toast.success("Fraccionamiento Terminado", `Empacadas ${bandejas} bandejas listas para batea refrigerada.`)
-  }
-
-  // ── ACCIÓN: REGISTRAR MERMA OFICIAL EN BACKEND ──
+  // ── ACCIÓN: REGISTRAR MERMA OFICIAL EN BACKEND REAL ──
   const handleConfirmMerma = async (e: React.FormEvent) => {
     e.preventDefault()
     const prod = mermaProd || scannedProduct
@@ -518,13 +661,14 @@ export default function SalonOperacionesPwaPage() {
 
     setSubmittingMerma(true)
     try {
+      const costoUni = prod.ultimo_costo || prod.costo_promedio || 0
       const payload = {
         area: mermaArea,
         producto_id: prod.id,
         cantidad: cant,
         tipo_merma: mermaTipo,
         motivo: mermaObs.trim() || `Registrado por encargado en salón (${mermaArea})`,
-        costo_unitario: prod.ultimo_costo || prod.costo_promedio || 0,
+        costo_unitario: costoUni,
       }
 
       await api.supermer.waste.create(payload)
@@ -536,7 +680,7 @@ export default function SalonOperacionesPwaPage() {
       setMermaProd(null)
       loadMermas()
     } catch {
-      // Fallback local con persistencia para no trabar al operador
+      // Fallback local con persistencia para no trabar al operador en caso de corte
       const costoUni = prod.ultimo_costo || prod.costo_promedio || 0
       const fallbackItem: MermaItem = {
         id: `mer-${Date.now()}`,
@@ -548,7 +692,7 @@ export default function SalonOperacionesPwaPage() {
         motivo: mermaObs || "Merma de salón registrada",
         costo_unitario: costoUni,
         costo_total: costoUni * cant,
-        fecha: "Hoy " + new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }),
+        fecha: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }),
         registrado_por: user?.nombre || "Encargado de Salón",
       }
       setMermasList([fallbackItem, ...mermasList])
@@ -584,8 +728,9 @@ export default function SalonOperacionesPwaPage() {
     }
 
     soundAlerts.playRestockChime()
-    setReposiciones([nuevaRepo, ...reposiciones])
-    toast.success("Pedido al Depósito Enviado", `Solicitada bajada de ${cant} un. de ${prod.nombre}.`)
+    const updated = [nuevaRepo, ...reposiciones]
+    saveReposiciones(updated)
+    toast.success("Solicitud Enviada a Depósito", `Pedido de ${cant} un. de ${prod.nombre} enviado.`)
     setRepoQty("")
     setRepoProd(null)
   }
@@ -616,7 +761,9 @@ export default function SalonOperacionesPwaPage() {
       responsable: user?.nombre || "Encargado de Salón",
     }
 
-    setTemperaturas([nuevaTemp, ...temperaturas])
+    const updated = [nuevaTemp, ...temperaturas]
+    saveTemperaturas(updated)
+
     if (esOptimo) {
       soundAlerts.playScanSuccess()
       toast.success("Control HACCP Guardado", `${tempEquipo}: ${val}°C (Dentro de rango seguro).`)
@@ -627,10 +774,117 @@ export default function SalonOperacionesPwaPage() {
     setTempValor("")
   }
 
-  // ── IMPRIMIR COLA DE ETIQUETAS (NATIVO / NAVEGADOR) ──
-  const handlePrintAllQueue = () => {
-    if (labelQueue.length === 0) return
-    window.print()
+  // ── ACCIÓN: REGISTRAR PRODUCCIÓN DE CARNICERÍA ──
+  const handleConfirmProduccionCarne = (e: React.FormEvent) => {
+    e.preventDefault()
+    const trimmings = parseFloat(carneKgTrimmings) || 0
+    const tocino = parseFloat(carneKgTocino) || 0
+    if (trimmings <= 0) {
+      toast.warning("Faltan insumos", "Ingrese los Kilos de recortes/trimmings.")
+      return
+    }
+
+    const kgObtenidos = (trimmings + tocino) * 0.97
+    const loteCod = `EMB-${Date.now().toString().slice(-4)}`
+    const nuevoLote: LoteProduccion = {
+      id: `lp-${Date.now()}`,
+      sector: "Carnicería",
+      receta_nombre: carneReceta,
+      insumo_origen: `${trimmings}kg Trimmings + ${tocino}kg Tocino`,
+      cantidad_insumo: trimmings + tocino,
+      producto_obtenido: carneReceta,
+      cantidad_obtenida: Math.round(kgObtenidos * 10) / 10,
+      unidad: "Kg",
+      costo_unitario: 23500,
+      lote_codigo: loteCod,
+      hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
+    }
+
+    soundAlerts.playScanSuccess()
+    const updated = [nuevoLote, ...lotesProduccion]
+    saveLotesProduccion(updated)
+    toast.success("Producción Registrada", `${kgObtenidos.toFixed(1)} Kg de ${carneReceta} con lote ${loteCod}.`)
+  }
+
+  // ── ACCIÓN: REGISTRAR PRODUCCIÓN DE PANADERÍA ──
+  const handleConfirmProduccionPan = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (panModo === "sobrante") {
+      const sobrante = parseFloat(panKgSobrante) || 0
+      if (sobrante <= 0) {
+        toast.warning("Faltan datos", "Ingrese los Kilos de pan sobrante a moler.")
+        return
+      }
+      const obtenido = sobrante * 0.96
+      const loteCod = `RES-${Date.now().toString().slice(-4)}`
+      const nuevoLote: LoteProduccion = {
+        id: `lp-${Date.now()}`,
+        sector: "Panadería",
+        receta_nombre: "Transformación Residuo Cero (Pan Seco ➔ Pan Rallado)",
+        insumo_origen: `${sobrante}kg Pan Francés de Ayer`,
+        cantidad_insumo: sobrante,
+        producto_obtenido: panDestinoSobrante,
+        cantidad_obtenida: Math.round(obtenido * 10) / 10,
+        unidad: "Kg",
+        costo_unitario: 5800,
+        lote_codigo: loteCod,
+        hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
+      }
+      soundAlerts.playScanSuccess()
+      const updated = [nuevoLote, ...lotesProduccion]
+      saveLotesProduccion(updated)
+      toast.success("Residuo Cero Registrado", `Convertidos ${sobrante}kg de pan en ${obtenido.toFixed(1)}kg de Pan Rallado.`)
+    } else {
+      const harina = parseFloat(panKgHarina) || 0
+      const obtenido = harina * 1.35
+      const loteCod = `PAN-${Date.now().toString().slice(-4)}`
+      const nuevoLote: LoteProduccion = {
+        id: `lp-${Date.now()}`,
+        sector: "Panadería",
+        receta_nombre: `Amasado Diario: ${panTipoAmasado}`,
+        insumo_origen: `${harina}kg Harina 000 + Insumos`,
+        cantidad_insumo: harina,
+        producto_obtenido: panTipoAmasado,
+        cantidad_obtenida: Math.round(obtenido * 10) / 10,
+        unidad: "Kg",
+        costo_unitario: 8200,
+        lote_codigo: loteCod,
+        hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
+      }
+      soundAlerts.playScanSuccess()
+      const updated = [nuevoLote, ...lotesProduccion]
+      saveLotesProduccion(updated)
+      toast.success("Horneada Registrada", `Producidos ${obtenido.toFixed(1)}kg de ${panTipoAmasado}.`)
+    }
+  }
+
+  // ── ACCIÓN: REGISTRAR PRODUCCIÓN DE VERDULERÍA ──
+  const handleConfirmProduccionVerdura = (e: React.FormEvent) => {
+    e.preventDefault()
+    const brutos = parseFloat(verduraKgBrutos) || 0
+    if (brutos <= 0) {
+      toast.warning("Faltan datos", "Ingrese los Kilos brutos fraccionados.")
+      return
+    }
+    const bandejas = Math.floor((brutos * 0.85) / 0.5)
+    const loteCod = `FC-${Date.now().toString().slice(-4)}`
+    const nuevoLote: LoteProduccion = {
+      id: `lp-${Date.now()}`,
+      sector: "Verdulería",
+      receta_nombre: `Fresh Cut: ${verduraBandejasDestino}`,
+      insumo_origen: `${brutos}kg ${verduraInsumo} a granel`,
+      cantidad_insumo: brutos,
+      producto_obtenido: verduraBandejasDestino,
+      cantidad_obtenida: bandejas,
+      unidad: "Bandejas",
+      costo_unitario: 4300,
+      lote_codigo: loteCod,
+      hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
+    }
+    soundAlerts.playScanSuccess()
+    const updated = [nuevoLote, ...lotesProduccion]
+    saveLotesProduccion(updated)
+    toast.success("Fraccionamiento Terminado", `Empacadas ${bandejas} bandejas listas para venta refrigerada.`)
   }
 
   // Cálculos de Desposte en Gancho
@@ -662,185 +916,403 @@ export default function SalonOperacionesPwaPage() {
     return mermasList.reduce((acc, m) => acc + (m.costo_total || m.cantidad * (m.costo_unitario || 8000)), 0)
   }, [mermasList])
 
+  // Login Rápido
+  const handleQuickLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!loginEmail || !loginPassword) {
+      toast.warning("Datos requeridos", "Ingrese su usuario/correo y contraseña.")
+      return
+    }
+    setLoggingIn(true)
+    try {
+      await login(loginEmail, loginPassword)
+      toast.success("Sesión Iniciada", "Conectado al servidor de Extra Supermercado.")
+      setShowLoginModal(false)
+      loadCatalog()
+      loadMermas()
+      loadSugerenciasReposicion()
+    } catch {
+      toast.error("Error de Autenticación", "Usuario o contraseña incorrectos.")
+    } finally {
+      setLoggingIn(false)
+    }
+  }
+
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white pb-24 transition-colors font-sans">
+    <div className="relative min-h-screen w-full max-w-full overflow-x-hidden bg-slate-950 text-slate-100 pb-28 font-sans selection:bg-amber-500 selection:text-slate-950">
       
-      {/* ── HEADER SALÓN DE OPERACIONES ── */}
-      <div className="sticky top-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800/80 px-3 sm:px-4 pt-[env(safe-area-inset-top)] shadow-xs">
-        <div className="flex items-center justify-between py-2.5 sm:py-3 max-w-4xl mx-auto gap-2">
-          
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-600 via-amber-500 to-emerald-500 flex items-center justify-center text-slate-950 font-black shadow-md shadow-amber-500/25 shrink-0">
-              <UtensilsCrossed className="w-5 h-5 text-slate-950" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="font-black text-sm uppercase tracking-wider truncate" style={displayFont}>
-                  EXTRA SALÓN
-                </span>
-                <span className="text-[8.5px] font-black uppercase px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
-                  Floor Ops
-                </span>
-              </div>
-              <div className="text-[10.5px] text-slate-500 dark:text-slate-400 truncate">
-                Encargado: <strong className="text-slate-700 dark:text-slate-300">{user?.nombre || "Encargado General"}</strong>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            {/* Botón Descarga APK Extra Salón */}
-            <a
-              href="/download/extra-salon.apk"
-              download="extra-salon.apk"
-              className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25 transition cursor-pointer flex items-center gap-1.5 text-xs font-black"
-              title="Descargar APK Extra Salón para Celular/Tablet"
-            >
-              <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">APK Salón</span>
-            </a>
-
-            {/* Botón Flotante de Cola de Impresión */}
-            <button
-              onClick={() => setShowQueueModal(true)}
-              className="relative px-2.5 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 transition cursor-pointer flex items-center gap-1.5 text-xs font-black"
-              title="Ver Cola de Impresión de Etiquetas"
-            >
-              <Printer className="w-4 h-4" />
-              <span className="hidden sm:inline">Cola</span>
-              <span className="bg-amber-500 text-slate-950 px-1.5 py-0.2 rounded-full text-[10px] font-black">
-                {labelQueue.length}
-              </span>
-            </button>
-
-            {/* Botón Iniciar Sesión si no está autenticado */}
-            {!user && (
-              <button
-                onClick={() => setShowLoginModal(true)}
-                className="px-2.5 py-1.5 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-500/25 transition cursor-pointer flex items-center gap-1 text-xs font-black"
-                title="Iniciar Sesión"
-              >
-                <LogIn className="w-4 h-4" />
-                <span className="hidden sm:inline">Ingresar</span>
-              </button>
-            )}
-
-            <button
-              onClick={toggleTheme}
-              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 cursor-pointer"
-              title="Cambiar Tema"
-            >
-              {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-          </div>
-        </div>
-
-        {/* ── TIRA DE MÉTRICAS CLAVE DEL SALÓN ── */}
-        <div className="grid grid-cols-4 gap-2 pb-3 max-w-4xl mx-auto">
-          <div className="rounded-xl p-2 text-center border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
-            <div className="font-black text-base text-slate-900 dark:text-white" style={monoFont}>
-              {lotesProduccion.length}
-            </div>
-            <div className="text-[8.5px] uppercase font-bold text-slate-500 dark:text-slate-400 tracking-wider truncate">
-              Lotes Prod.
-            </div>
-          </div>
-
-          <div className={`rounded-xl p-2 text-center border transition ${
-            labelQueue.length > 0 ? "bg-amber-50 dark:bg-amber-500/15 border-amber-300 dark:border-amber-500/30" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
-          }`}>
-            <div className={`font-black text-base ${labelQueue.length > 0 ? "text-amber-600 dark:text-amber-400" : ""}`} style={monoFont}>
-              {labelQueue.length}
-            </div>
-            <div className="text-[8.5px] uppercase font-bold text-slate-500 dark:text-slate-400 tracking-wider truncate">
-              Etiquetas
-            </div>
-          </div>
-
-          <div className={`rounded-xl p-2 text-center border transition ${
-            mermasList.length > 0 ? "bg-rose-50 dark:bg-rose-500/15 border-rose-300 dark:border-rose-500/30" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
-          }`}>
-            <div className={`font-black text-base ${mermasList.length > 0 ? "text-rose-600 dark:text-rose-400" : ""}`} style={monoFont}>
-              {mermasList.length}
-            </div>
-            <div className="text-[8.5px] uppercase font-bold text-slate-500 dark:text-slate-400 tracking-wider truncate">
-              Mermas
-            </div>
-          </div>
-
-          <div className={`rounded-xl p-2 text-center border transition ${
-            reposiciones.filter(r => r.estado === "pendiente").length > 0 ? "bg-indigo-50 dark:bg-indigo-500/15 border-indigo-300 dark:border-indigo-500/30" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
-          }`}>
-            <div className={`font-black text-base text-indigo-600 dark:text-indigo-400`} style={monoFont}>
-              {reposiciones.filter(r => r.estado === "pendiente").length}
-            </div>
-            <div className="text-[8.5px] uppercase font-bold text-slate-500 dark:text-slate-400 tracking-wider truncate">
-              Quiebres
-            </div>
-          </div>
-        </div>
+      {/* ── AMBIENT GLASS BACKGROUND (AURORA GLOWS) ── */}
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+        <div className="absolute -top-[20%] -left-[15%] w-[60vw] h-[60vw] rounded-full bg-gradient-to-tr from-amber-500/15 via-orange-600/10 to-transparent blur-[120px]" />
+        <div className="absolute top-[40%] -right-[15%] w-[55vw] h-[55vw] rounded-full bg-gradient-to-br from-emerald-500/10 via-teal-600/10 to-transparent blur-[140px]" />
+        <div className="absolute -bottom-[20%] left-[20%] w-[50vw] h-[50vw] rounded-full bg-gradient-to-tr from-indigo-600/15 to-transparent blur-[130px]" />
       </div>
 
-      {/* ── CUERPO PRINCIPAL DEL SALÓN ── */}
-      <div className="p-3 sm:p-4 max-w-4xl mx-auto space-y-4">
-        
-        {/* ══════════════════════ TAB 1: AUDITORÍA DE GÓNDOLA & ESCÁNER ══════════════════════ */}
-        {tab === "gondola" && (
-          <div className="space-y-4 animate-fade-in">
+      {/* ── HEADER SALÓN DE OPERACIONES (GLASS FLOATING ISLAND) ── */}
+      <header className="sticky top-2 z-40 mx-3 sm:mx-6 max-w-4xl lg:mx-auto mt-2">
+        <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-3 sm:p-4 shadow-[0_20px_50px_rgba(0,0,0,0.5)] transition-all">
+          <div className="flex items-center justify-between gap-3">
             
-            {/* Buscador / Escáner de Código de Barras */}
-            <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 shadow-sm">
+            {/* Logotipo & Operador */}
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="relative">
+                <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-amber-500 via-amber-400 to-emerald-400 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-amber-500/25 shrink-0">
+                  <UtensilsCrossed className="w-5 h-5 text-slate-950" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border-2 border-slate-900"></span>
+                </span>
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-black text-sm tracking-wider uppercase bg-gradient-to-r from-amber-400 via-white to-amber-200 bg-clip-text text-transparent" style={displayFont}>
+                    EXTRA SALÓN
+                  </span>
+                  <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    Floor Ops • PYG ₲
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 truncate flex items-center gap-1.5 mt-0.5">
+                  <span>Operador:</span>
+                  <strong className="text-slate-200 font-semibold">{user?.nombre || "Encargado de Salón"}</strong>
+                  <span className="text-slate-600">•</span>
+                  <span className="text-emerald-400/90 font-mono text-[10px]">11.628 Prod.</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Acciones de Cabecera */}
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Botón Descarga APK */}
+              <a
+                href="/download/extra-salon.apk"
+                download="extra-salon.apk"
+                className="px-3 py-2 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-emerald-400 transition cursor-pointer flex items-center gap-1.5 text-xs font-bold backdrop-blur-md"
+                title="Descargar APK para Colector de Datos Android"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">APK</span>
+              </a>
+
+              {/* Botón Cola de Impresión */}
+              <button
+                onClick={() => setShowQueueModal(true)}
+                className="relative px-3 py-2 rounded-2xl bg-amber-500/15 border border-amber-500/30 hover:bg-amber-500/25 text-amber-300 transition cursor-pointer flex items-center gap-1.5 text-xs font-black backdrop-blur-md"
+                title="Ver Cola de Flejes"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Flejes</span>
+                <span className="bg-amber-500 text-slate-950 px-1.5 py-0.2 rounded-full text-[10px] font-black shadow-xs">
+                  {labelQueue.length}
+                </span>
+              </button>
+
+              {!user && (
+                <button
+                  onClick={() => setShowLoginModal(true)}
+                  className="px-3 py-2 rounded-2xl bg-blue-500/20 border border-blue-500/30 text-blue-300 hover:bg-blue-500/30 transition cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Acceso</span>
+                </button>
+              )}
+
+              <button
+                onClick={toggleTheme}
+                className="p-2 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-400 cursor-pointer"
+                title="Cambiar Contraste"
+              >
+                {dark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-300" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Mini Tira de Estado Operativo */}
+          <div className="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-white/5">
+            <div className="rounded-2xl p-2 text-center bg-white/[0.03] border border-white/5 backdrop-blur-sm">
+              <div className="font-black text-sm text-slate-200" style={monoFont}>
+                {lotesProduccion.length}
+              </div>
+              <div className="text-[9px] uppercase font-bold text-slate-500 tracking-wider truncate">
+                Lotes Prod.
+              </div>
+            </div>
+
+            <div className={`rounded-2xl p-2 text-center border transition backdrop-blur-sm ${
+              labelQueue.length > 0 ? "bg-amber-500/10 border-amber-500/30 text-amber-300" : "bg-white/[0.03] border-white/5 text-slate-400"
+            }`}>
+              <div className="font-black text-sm" style={monoFont}>
+                {labelQueue.length}
+              </div>
+              <div className="text-[9px] uppercase font-bold tracking-wider truncate">
+                Flejes Cola
+              </div>
+            </div>
+
+            <div className={`rounded-2xl p-2 text-center border transition backdrop-blur-sm ${
+              mermasList.length > 0 ? "bg-rose-500/10 border-rose-500/30 text-rose-300" : "bg-white/[0.03] border-white/5 text-slate-400"
+            }`}>
+              <div className="font-black text-sm" style={monoFont}>
+                {mermasList.length}
+              </div>
+              <div className="text-[9px] uppercase font-bold tracking-wider truncate">
+                Mermas Hoy
+              </div>
+            </div>
+
+            <div className={`rounded-2xl p-2 text-center border transition backdrop-blur-sm ${
+              reposiciones.filter(r => r.estado === "pendiente").length > 0 ? "bg-indigo-500/10 border-indigo-500/30 text-indigo-300" : "bg-white/[0.03] border-white/5 text-slate-400"
+            }`}>
+              <div className="font-black text-sm" style={monoFont}>
+                {reposiciones.filter(r => r.estado === "pendiente").length}
+              </div>
+              <div className="text-[9px] uppercase font-bold tracking-wider truncate">
+                Quiebres
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* ── CUERPO PRINCIPAL DEL SALÓN ── */}
+      <main className="relative z-10 p-3 sm:p-6 max-w-4xl mx-auto space-y-5 mt-2">
+        
+        {/* ══════════════════════ TAB 1: AUDITORÍA DE GÓNDOLA & ESCÁNER CÁMARA ══════════════════════ */}
+        {tab === "gondola" && (
+          <div className="space-y-5 animate-fade-in">
+            
+            {/* ── BARRA DE BÚSQUEDA Y BOTÓN DE CÁMARA EN VIVO ── */}
+            <div className="backdrop-blur-2xl bg-slate-900/65 border border-white/10 p-4 sm:p-5 rounded-3xl shadow-xl space-y-3">
               <form onSubmit={handleScanSubmit} className="flex items-center gap-2">
                 <div className="relative flex-1">
-                  <Scan className="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <Scan className="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-amber-400" />
                   <input
+                    id="salon-barcode-input"
                     type="text"
                     value={barcodeQuery}
                     onChange={(e) => setBarcodeQuery(e.target.value)}
-                    placeholder="Escanear código de barra o nombre de producto..."
+                    placeholder="Escanear código de barra (EAN-13) o buscar por nombre..."
                     autoFocus
-                    className="w-full pl-11 pr-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-sm font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500 transition"
+                    className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-slate-950/80 border border-white/15 text-sm font-bold text-white placeholder-slate-500 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 transition shadow-inner"
                   />
+                  {searchingProduct && (
+                    <Loader2 className="w-4 h-4 animate-spin absolute right-3.5 top-1/2 -translate-y-1/2 text-amber-400" />
+                  )}
                 </div>
+
                 <button
                   type="submit"
-                  disabled={loadingProducts}
-                  className="px-4 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-slate-950 font-black text-sm flex items-center gap-1.5 shadow-md shadow-amber-500/25 cursor-pointer shrink-0"
+                  disabled={searchingProduct}
+                  className="px-4 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:brightness-110 text-slate-950 font-black text-sm flex items-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer shrink-0 active:scale-95 transition-all"
                 >
                   <Search className="w-4 h-4" />
                   <span className="hidden sm:inline">Buscar</span>
                 </button>
+
+                {/* BOTÓN TOGGLE CÁMARA */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (cameraActive) {
+                      stopCamera()
+                    } else {
+                      startCamera()
+                    }
+                  }}
+                  className={`px-3.5 py-3.5 rounded-2xl font-black text-sm flex items-center gap-2 cursor-pointer shrink-0 transition-all border active:scale-95 ${
+                    cameraActive
+                      ? "bg-rose-600/20 border-rose-500/40 text-rose-400 shadow-lg shadow-rose-600/20"
+                      : "bg-emerald-500/20 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/30 shadow-lg shadow-emerald-500/20"
+                  }`}
+                  title={cameraActive ? "Detener Cámara" : "Activar Escáner Cámara"}
+                >
+                  {cameraActive ? <CameraOff className="w-4 h-4" /> : <Camera className="w-4 h-4 animate-pulse" />}
+                  <span className="hidden sm:inline">{cameraActive ? "Cerrar" : "Cámara"}</span>
+                </button>
               </form>
+
+              <div className="flex items-center justify-between text-[11px] text-slate-400 px-1 pt-1">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                  <span>Pistola Láser USB/Bluetooth lista en tiempo real</span>
+                </div>
+                <div className="font-mono text-slate-500 text-[10px]">
+                  Catálogo: 11.628 ítems conectados
+                </div>
+              </div>
             </div>
 
-            {/* Ficha Técnica del Producto Escaneado */}
+            {/* ── VISOR HOLOGRÁFICO DE CÁMARA (GLASSMORPHIC VIEWPORT) ── */}
+            {cameraActive && (
+              <div className="relative rounded-3xl overflow-hidden border-2 border-amber-500/60 shadow-[0_0_50px_rgba(245,158,11,0.25)] bg-black animate-fade-in">
+                
+                {/* Video feed */}
+                <video
+                  ref={videoRef}
+                  playsInline
+                  muted
+                  className="w-full h-64 sm:h-80 object-cover"
+                />
+
+                {/* Overlay de Puntería Cibernética (HUD) */}
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                  <div className="relative w-64 sm:w-80 h-36 sm:h-44 border border-amber-400/40 rounded-2xl backdrop-contrast-125">
+                    {/* Esquinas Neón */}
+                    <div className="absolute -top-1.5 -left-1.5 w-6 h-6 border-t-4 border-l-4 border-amber-400 rounded-tl-xl shadow-[0_0_10px_#f59e0b]" />
+                    <div className="absolute -top-1.5 -right-1.5 w-6 h-6 border-t-4 border-r-4 border-amber-400 rounded-tr-xl shadow-[0_0_10px_#f59e0b]" />
+                    <div className="absolute -bottom-1.5 -left-1.5 w-6 h-6 border-b-4 border-l-4 border-amber-400 rounded-bl-xl shadow-[0_0_10px_#f59e0b]" />
+                    <div className="absolute -bottom-1.5 -right-1.5 w-6 h-6 border-b-4 border-r-4 border-amber-400 rounded-br-xl shadow-[0_0_10px_#f59e0b]" />
+
+                    {/* Láser escaneador animado */}
+                    <div className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-amber-400 to-transparent shadow-[0_0_12px_#f59e0b] animate-bounce top-1/2 -translate-y-1/2" />
+                  </div>
+                </div>
+
+                {/* Controles Flotantes del Visor */}
+                <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-auto">
+                  <div className="px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 text-white text-[11px] font-bold flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                    <span>Enfocá el código de barras</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {hasTorch && (
+                      <button
+                        onClick={toggleTorch}
+                        className={`p-2 rounded-full backdrop-blur-md border transition cursor-pointer ${
+                          torchActive
+                            ? "bg-amber-400 text-slate-950 border-amber-300 shadow-lg shadow-amber-400/50"
+                            : "bg-black/60 text-white border-white/20 hover:bg-black/80"
+                        }`}
+                        title="Linterna"
+                      >
+                        <Flashlight className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    <button
+                      onClick={switchCamera}
+                      className="p-2 rounded-full bg-black/60 text-white border border-white/20 hover:bg-black/80 backdrop-blur-md cursor-pointer"
+                      title="Cambiar Cámara Delantera/Trasera"
+                    >
+                      <RefreshCcw className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      onClick={stopCamera}
+                      className="p-2 rounded-full bg-rose-600/80 text-white border border-rose-400/40 hover:bg-rose-600 backdrop-blur-md cursor-pointer"
+                      title="Cerrar Cámara"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Subtítulo inferior en video */}
+                <div className="absolute bottom-3 left-3 right-3 text-center pointer-events-none">
+                  <span className="inline-block px-3 py-1 rounded-xl bg-black/70 backdrop-blur-md text-[10.5px] font-medium text-slate-300 border border-white/10">
+                    Soporta EAN-13, EAN-8, Code-128, QR Code y UPC
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Error de cámara */}
+            {cameraError && (
+              <div className="p-4 rounded-3xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-3">
+                <AlertCircle className="w-5 h-5 shrink-0 text-rose-400" />
+                <div className="flex-1">
+                  <strong>Acceso a Cámara:</strong> {cameraError}
+                </div>
+              </div>
+            )}
+
+            {/* ── FICHA TÉCNICA DEL PRODUCTO ESCANEADO (GLASSMORPHIC CARD) ── */}
             {scannedProduct ? (
-              <div className="rounded-3xl bg-white dark:bg-slate-900 border-2 border-amber-500/40 p-5 shadow-xl animate-fade-in space-y-4">
-                <div className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
-                  <div>
-                    <div className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                      {scannedProduct.categoria?.nombre || "Producto de Góndola"}
+              <div className="rounded-3xl backdrop-blur-2xl bg-slate-900/80 border-2 border-amber-500/40 p-5 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.6)] animate-fade-in space-y-5">
+                
+                {/* Cabecera del Producto */}
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-white/10 pb-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        {scannedProduct.categoria?.nombre || "Salón de Ventas"}
+                      </span>
+                      {(scannedProduct as any).departamento && (
+                        <span className="text-[10px] font-bold text-slate-400">
+                          • {(scannedProduct as any).departamento}
+                        </span>
+                      )}
                     </div>
-                    <h2 className="font-black text-lg text-slate-900 dark:text-white mt-0.5">
+
+                    <h2 className="font-black text-xl sm:text-2xl text-white tracking-tight">
                       {scannedProduct.nombre}
                     </h2>
-                    <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 font-mono">
-                      <span>EAN: {scannedProduct.codigo_barra || "Sin Código"}</span>
-                      <span>· SKU: {scannedProduct.sku || "-"}</span>
+
+                    <div className="flex items-center gap-3 text-xs text-slate-400 font-mono">
+                      <span>EAN: <strong className="text-slate-200">{scannedProduct.codigo_barra || "Sin Código"}</strong></span>
+                      <span>•</span>
+                      <span>SKU: <strong className="text-slate-200">{scannedProduct.sku || "-"}</strong></span>
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
+
+                  {/* Display de Precio Oficial Caja */}
+                  <div className="sm:text-right shrink-0 p-3 rounded-2xl bg-white/[0.04] border border-white/10 backdrop-blur-md">
                     <div className="text-[10px] uppercase font-bold text-slate-400">Precio Oficial Caja</div>
-                    <div className="font-black text-2xl text-slate-900 dark:text-white" style={monoFont}>
+                    <div className="font-black text-2xl sm:text-3xl text-amber-400" style={monoFont}>
                       {formatPYG(scannedProduct.precio_venta || scannedProduct.precio || 0)}
+                    </div>
+                    {scannedProduct.precio_mayorista && (
+                      <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                        Mayorista: {formatPYG(scannedProduct.precio_mayorista)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Fila de Stock Real en Vivo */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5">
+                    <div className="text-[10px] uppercase font-bold text-slate-500">Stock Góndola</div>
+                    <div className="font-black text-base text-slate-200" style={monoFont}>
+                      {loadingStock ? <Loader2 className="w-4 h-4 animate-spin text-amber-400" /> : `${scannedStock?.stock_salon ?? (scannedProduct as any).stock_actual ?? (scannedProduct as any).stock ?? 0} un.`}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5">
+                    <div className="text-[10px] uppercase font-bold text-slate-500">Stock Trastienda</div>
+                    <div className="font-black text-base text-slate-200" style={monoFont}>
+                      {loadingStock ? <Loader2 className="w-4 h-4 animate-spin text-amber-400" /> : `${scannedStock?.stock_deposito ?? 0} un.`}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5">
+                    <div className="text-[10px] uppercase font-bold text-slate-500">Costo Reposición</div>
+                    <div className="font-black text-base text-slate-200" style={monoFont}>
+                      {formatPYG(scannedProduct.ultimo_costo || scannedProduct.costo_promedio || 0)}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5">
+                    <div className="text-[10px] uppercase font-bold text-slate-500">Margen Teórico</div>
+                    <div className="font-black text-base text-emerald-400" style={monoFont}>
+                      {(() => {
+                        const p = scannedProduct.precio_venta || scannedProduct.precio || 0
+                        const c = scannedProduct.ultimo_costo || scannedProduct.costo_promedio || 0
+                        if (!p || !c) return "—"
+                        const m = ((p - c) / p) * 100
+                        return `${m.toFixed(1)}%`
+                      })()}
                     </div>
                   </div>
                 </div>
 
                 {/* Validador de Precio en Góndola con Alarma Sonora */}
-                <div className="bg-slate-50 dark:bg-slate-950/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
-                  <label className="text-[10.5px] font-black uppercase tracking-wider text-slate-500 block mb-1.5">
-                    ¿Qué precio tiene el fleje en la góndola?
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-2">
+                  <label className="text-[11px] font-black uppercase tracking-wider text-slate-400 block">
+                    ¿Qué precio exhibe el fleje en góndola?
                   </label>
                   <div className="flex items-center gap-2">
                     <input
@@ -858,22 +1330,23 @@ export default function SalonOperacionesPwaPage() {
                         }
                       }}
                       placeholder="Ingrese precio visto en góndola (₲)..."
-                      className="flex-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                      className="flex-1 bg-slate-950/90 border border-white/20 rounded-xl px-4 py-3 text-base font-black text-white outline-none focus:border-amber-400"
                       style={monoFont}
                     />
+
                     {precioVistoGondola && (() => {
                       const visto = parseFloat(precioVistoGondola) || 0
                       const oficial = scannedProduct.precio_venta || scannedProduct.precio || 0
                       if (visto === oficial) {
                         return (
-                          <div className="px-3 py-2 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-black text-xs flex items-center gap-1 shrink-0">
-                            <Check className="w-4 h-4" /> Correcto
+                          <div className="px-3.5 py-3 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-black text-xs flex items-center gap-1.5 shrink-0 shadow-lg shadow-emerald-500/10">
+                            <CheckCircle2 className="w-4 h-4" /> Fleje Correcto
                           </div>
                         )
                       }
                       return (
-                        <div className="px-3 py-2 rounded-xl bg-rose-500/20 text-rose-600 dark:text-rose-400 font-black text-xs flex items-center gap-1 shrink-0 animate-pulse">
-                          <AlertTriangle className="w-4 h-4" /> ¡Diferencia!
+                        <div className="px-3.5 py-3 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/40 font-black text-xs flex items-center gap-1.5 shrink-0 animate-pulse shadow-lg shadow-rose-500/20">
+                          <AlertTriangle className="w-4 h-4" /> ¡Discrepancia!
                         </div>
                       )
                     })()}
@@ -881,18 +1354,18 @@ export default function SalonOperacionesPwaPage() {
                 </div>
 
                 {/* Acciones Rápidas del Encargado en Góndola */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
                   <button
                     onClick={() => handleAddToLabelQueue(scannedProduct, "falta_fleje", 1)}
-                    className="py-3 px-2 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex flex-col items-center justify-center gap-1 shadow-md shadow-amber-500/20 cursor-pointer transition active:scale-[0.98]"
+                    className="py-3 px-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex flex-col items-center justify-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95 transition-all"
                   >
                     <Printer className="w-4 h-4" />
-                    <span>+ Etiqueta Góndola</span>
+                    <span>+ Fleje Góndola</span>
                   </button>
 
                   <button
                     onClick={() => handleAddToLabelQueue(scannedProduct, "markdown", 1, 30)}
-                    className="py-3 px-2 rounded-2xl bg-yellow-500 hover:bg-yellow-400 text-slate-950 font-black text-xs flex flex-col items-center justify-center gap-1 shadow-md shadow-yellow-500/20 cursor-pointer transition active:scale-[0.98]"
+                    className="py-3 px-3 rounded-2xl bg-yellow-500 hover:bg-yellow-400 text-slate-950 font-black text-xs flex flex-col items-center justify-center gap-1.5 shadow-lg shadow-yellow-500/20 cursor-pointer active:scale-95 transition-all"
                   >
                     <Percent className="w-4 h-4" />
                     <span>Rebaja -30% Vencimiento</span>
@@ -903,7 +1376,7 @@ export default function SalonOperacionesPwaPage() {
                       setMermaProd(scannedProduct)
                       setTab("mermas")
                     }}
-                    className="py-3 px-2 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 font-black text-xs flex flex-col items-center justify-center gap-1 cursor-pointer transition"
+                    className="py-3 px-3 rounded-2xl bg-rose-600/20 border border-rose-500/30 text-rose-300 hover:bg-rose-600/30 font-black text-xs flex flex-col items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
                   >
                     <Trash2 className="w-4 h-4" />
                     <span>Declarar Merma</span>
@@ -914,7 +1387,7 @@ export default function SalonOperacionesPwaPage() {
                       setRepoProd(scannedProduct)
                       setTab("reposicion")
                     }}
-                    className="py-3 px-2 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 font-black text-xs flex flex-col items-center justify-center gap-1 cursor-pointer transition"
+                    className="py-3 px-3 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-600/30 font-black text-xs flex flex-col items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
                   >
                     <Boxes className="w-4 h-4" />
                     <span>Pedir Reposición</span>
@@ -922,15 +1395,28 @@ export default function SalonOperacionesPwaPage() {
                 </div>
               </div>
             ) : (
-              <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center shadow-xs">
-                <div className="w-14 h-14 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto mb-3">
-                  <Scan className="w-7 h-7" />
+              /* Estado Inicial de Auditoría */
+              <div className="backdrop-blur-2xl bg-slate-900/50 border border-white/10 rounded-3xl p-8 sm:p-12 text-center space-y-4 shadow-xl">
+                <div className="w-16 h-16 rounded-3xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto shadow-inner">
+                  <Scan className="w-8 h-8" />
                 </div>
-                <div className="font-black text-base text-slate-900 dark:text-white">
-                  Auditoría Rápida de Góndola
+                <div>
+                  <h3 className="font-black text-lg text-white" style={displayFont}>
+                    Auditoría de Góndola en Vivo
+                  </h3>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto mt-1">
+                    Presioná el botón <strong className="text-emerald-400">"Cámara"</strong> para escanear con la cámara del dispositivo, o usá una pistola lectora láser conectada por USB o Bluetooth. Conectado a la base oficial de Extra Supermercado.
+                  </p>
                 </div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto mt-1">
-                  Escanée el código de barras de cualquier producto en góndola para comprobar su precio oficial de caja registradora, generar etiquetas faltantes o registrar mermas al instante.
+
+                <div className="flex items-center justify-center gap-2 pt-2">
+                  <button
+                    onClick={() => startCamera()}
+                    className="px-5 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-emerald-500/25 cursor-pointer active:scale-95 transition-all"
+                  >
+                    <Camera className="w-4 h-4" />
+                    Activar Cámara Ahora
+                  </button>
                 </div>
               </div>
             )}
@@ -939,26 +1425,26 @@ export default function SalonOperacionesPwaPage() {
 
         {/* ══════════════════════ TAB 2: PRODUCCIÓN & TRANSFORMACIÓN REAL EN SECTORES ══════════════════════ */}
         {tab === "produccion" && (
-          <div className="space-y-4 animate-fade-in">
+          <div className="space-y-5 animate-fade-in">
             
-            {/* Selector de Sector Productivo */}
-            <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+            {/* Selector de Sector Productivo Glass */}
+            <div className="backdrop-blur-2xl bg-slate-900/65 border border-white/10 p-2 rounded-3xl grid grid-cols-3 gap-2">
               {[
                 { id: "carniceria", label: "🥩 Carnicería", sub: "Desposte & Embutidos" },
                 { id: "panaderia", label: "🥖 Panadería", sub: "Amasado & Residuo Cero" },
-                { id: "verduleria", label: "🥕 Verdulería", sub: "Fresh Cut & Fraccionado" },
+                { id: "verduleria", label: "🥕 Verdulería", sub: "Fresh Cut & Conveniencia" },
               ].map((s) => (
                 <button
                   key={s.id}
                   onClick={() => setProduccionSector(s.id as ProduccionSector)}
-                  className={`flex-1 p-2.5 rounded-2xl text-left transition cursor-pointer ${
+                  className={`p-3 rounded-2xl text-left transition-all cursor-pointer ${
                     produccionSector === s.id
-                      ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950 shadow-md"
-                      : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800"
+                      ? "bg-amber-500 text-slate-950 font-black shadow-lg shadow-amber-500/20"
+                      : "bg-white/[0.03] hover:bg-white/[0.06] text-slate-300 border border-white/5"
                   }`}
                 >
-                  <div className="font-black text-xs">{s.label}</div>
-                  <div className="text-[9.5px] opacity-70 truncate">{s.sub}</div>
+                  <div className="font-black text-xs truncate">{s.label}</div>
+                  <div className="text-[10px] opacity-75 truncate">{s.sub}</div>
                 </button>
               ))}
             </div>
@@ -968,19 +1454,19 @@ export default function SalonOperacionesPwaPage() {
               <div className="space-y-4 animate-fade-in">
                 
                 {/* Desposte de Res */}
-                <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                  <div className="flex items-center justify-between border-b border-white/10 pb-3">
                     <div>
-                      <h2 className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
+                      <h2 className="font-black text-sm text-white" style={displayFont}>
                         Desposte de Media Res (Cuarteo Gancho)
                       </h2>
-                      <div className="text-[11px] text-slate-500">
+                      <div className="text-[11px] text-slate-400">
                         Deconstrucción de media res a cortes nobles, recortes y hueso.
                       </div>
                     </div>
                     <button
                       onClick={() => window.open("/tv/carniceria", "_blank")}
-                      className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-[11px] font-black flex items-center gap-1 shadow-xs cursor-pointer"
+                      className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-[11px] font-black flex items-center gap-1 shadow-lg shadow-red-600/20 cursor-pointer"
                     >
                       <Monitor className="w-3.5 h-3.5" />
                       <span>TV 55"</span>
@@ -989,68 +1475,68 @@ export default function SalonOperacionesPwaPage() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                         Peso en Gancho (Kg):
                       </label>
                       <input
                         type="number"
                         value={despostePesoEntrada}
                         onChange={(e) => setDespostePesoEntrada(Number(e.target.value) || 0)}
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-base font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-amber-400"
                         style={monoFont}
                       />
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                         Costo Total Compra (₲):
                       </label>
                       <input
                         type="text"
                         value={desposteCostoTotal}
                         onChange={(e) => setDesposteCostoTotal(Number(e.target.value.replace(/\D/g, "")) || 0)}
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-base font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-amber-400"
                         style={monoFont}
                       />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-center">
+                  <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-white/[0.03] border border-white/5 text-center">
                     <div>
-                      <div className="text-[9px] uppercase font-bold text-slate-400">Costo / Kg Gancho</div>
-                      <div className="font-black text-sm text-slate-900 dark:text-white" style={monoFont}>
+                      <div className="text-[9px] uppercase font-bold text-slate-500">Costo / Kg Gancho</div>
+                      <div className="font-black text-sm text-slate-200" style={monoFont}>
                         {formatPYG(desposteCalculo.costoKgGancho)}
                       </div>
                     </div>
                     <div>
-                      <div className="text-[9px] uppercase font-bold text-slate-400">Valorizado Venta</div>
-                      <div className="font-black text-sm text-emerald-600 dark:text-emerald-400" style={monoFont}>
+                      <div className="text-[9px] uppercase font-bold text-slate-500">Valorizado Venta</div>
+                      <div className="font-black text-sm text-emerald-400" style={monoFont}>
                         {formatPYG(desposteCalculo.valorizadoTotal)}
                       </div>
                     </div>
                     <div>
-                      <div className="text-[9px] uppercase font-bold text-slate-400">Margen Bruto</div>
-                      <div className="font-black text-sm text-amber-600 dark:text-amber-400" style={monoFont}>
+                      <div className="text-[9px] uppercase font-bold text-slate-500">Margen Bruto</div>
+                      <div className="font-black text-sm text-amber-400" style={monoFont}>
                         {desposteCalculo.margenPct.toFixed(1)}%
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Elaboración de Embutidos (Chorizos) */}
-                <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
-                  <h2 className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
+                {/* Elaboración de Embutidos */}
+                <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                  <h2 className="font-black text-sm text-white" style={displayFont}>
                     Elaboración de Embutidos & Chacinados
                   </h2>
                   <form onSubmit={handleConfirmProduccionCarne} className="space-y-3">
                     <div>
-                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                         Receta a Elaborar:
                       </label>
                       <select
                         value={carneReceta}
                         onChange={(e) => setCarneReceta(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
                       >
                         <option value="Chorizo Parrillero Casero Extra">Chorizo Parrillero Casero Extra (BOM: Trimmings + Tocino)</option>
                         <option value="Chorizo Toscano con Hierbas">Chorizo Toscano con Hierbas</option>
@@ -1061,26 +1547,26 @@ export default function SalonOperacionesPwaPage() {
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                           Kg Recortes / Trimmings:
                         </label>
                         <input
                           type="number"
                           value={carneKgTrimmings}
                           onChange={(e) => setCarneKgTrimmings(e.target.value)}
-                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-sm font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-black text-white outline-none focus:border-amber-400"
                           style={monoFont}
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                           Kg Tocino / Grasa:
                         </label>
                         <input
                           type="number"
                           value={carneKgTocino}
                           onChange={(e) => setCarneKgTocino(e.target.value)}
-                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-sm font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-black text-white outline-none focus:border-amber-400"
                           style={monoFont}
                         />
                       </div>
@@ -1088,7 +1574,7 @@ export default function SalonOperacionesPwaPage() {
 
                     <button
                       type="submit"
-                      className="w-full py-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-red-600/20 cursor-pointer"
+                      className="w-full py-3.5 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-red-600/25 cursor-pointer active:scale-95 transition-all"
                     >
                       <Beef className="w-4 h-4" />
                       Registrar Lote de Elaborados en Carnicería
@@ -1098,15 +1584,15 @@ export default function SalonOperacionesPwaPage() {
               </div>
             )}
 
-            {/* ── SUB-SECTOR 2: PANADERÍA (AMASADO & RESIDUO CERO) ── */}
+            {/* ── SUB-SECTOR 2: PANADERÍA ── */}
             {produccionSector === "panaderia" && (
               <div className="space-y-4 animate-fade-in">
-                <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
-                  <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+                <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                  <div className="flex items-center gap-2 border-b border-white/10 pb-3">
                     <button
                       onClick={() => setPanModo("sobrante")}
                       className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer ${
-                        panModo === "sobrante" ? "bg-amber-500 text-slate-950 shadow-xs" : "bg-slate-100 dark:bg-slate-800 text-slate-500"
+                        panModo === "sobrante" ? "bg-amber-500 text-slate-950 shadow-sm" : "bg-white/[0.05] text-slate-400"
                       }`}
                     >
                       ♻️ Residuo Cero (Pan Rallado)
@@ -1114,7 +1600,7 @@ export default function SalonOperacionesPwaPage() {
                     <button
                       onClick={() => setPanModo("amasado")}
                       className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer ${
-                        panModo === "amasado" ? "bg-amber-500 text-slate-950 shadow-xs" : "bg-slate-100 dark:bg-slate-800 text-slate-500"
+                        panModo === "amasado" ? "bg-amber-500 text-slate-950 shadow-sm" : "bg-white/[0.05] text-slate-400"
                       }`}
                     >
                       🥖 Horneada Diaria (Amasado)
@@ -1124,32 +1610,32 @@ export default function SalonOperacionesPwaPage() {
                   <form onSubmit={handleConfirmProduccionPan} className="space-y-3">
                     {panModo === "sobrante" ? (
                       <>
-                        <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-700 dark:text-emerald-300">
-                          <strong>Upcycling / Residuo Cero:</strong> Convierte el pan no vendido de ayer en Pan Rallado embolsado o tostadas para eliminar la merma y generar margen.
+                        <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-300">
+                          <strong>Upcycling / Residuo Cero:</strong> Convierte el pan no vendido en Pan Rallado embolsado para evitar merma y ganar margen.
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                               Kg Pan Francés Seco:
                             </label>
                             <input
                               type="number"
                               value={panKgSobrante}
                               onChange={(e) => setPanKgSobrante(e.target.value)}
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-sm font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                              className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-black text-white outline-none focus:border-amber-400"
                               style={monoFont}
                             />
                           </div>
 
                           <div>
-                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                               Destino de Transformación:
                             </label>
                             <select
                               value={panDestinoSobrante}
                               onChange={(e) => setPanDestinoSobrante(e.target.value)}
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                              className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-3 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
                             >
                               <option value="Pan Rallado Artesanal Extra">Pan Rallado Artesanal Extra (Bolsas 1Kg)</option>
                               <option value="Tostadas Saborizadas con Orégano">Tostadas Saborizadas con Orégano</option>
@@ -1160,7 +1646,7 @@ export default function SalonOperacionesPwaPage() {
 
                         <button
                           type="submit"
-                          className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-amber-500/20 cursor-pointer"
+                          className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95 transition-all"
                         >
                           <ChefHat className="w-4 h-4" />
                           Transformar en Pan Rallado (Residuo Cero)
@@ -1170,25 +1656,25 @@ export default function SalonOperacionesPwaPage() {
                       <>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                               Kg Harina Amasada:
                             </label>
                             <input
                               type="number"
                               value={panKgHarina}
                               onChange={(e) => setPanKgHarina(e.target.value)}
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-sm font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                              className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-black text-white outline-none focus:border-amber-400"
                               style={monoFont}
                             />
                           </div>
                           <div>
-                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                               Variedad Horneada:
                             </label>
                             <select
                               value={panTipoAmasado}
                               onChange={(e) => setPanTipoAmasado(e.target.value)}
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                              className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-3 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
                             >
                               <option value="Pan Francés Tradicional">Pan Francés Tradicional</option>
                               <option value="Pan Felipe">Pan Felipe</option>
@@ -1201,7 +1687,7 @@ export default function SalonOperacionesPwaPage() {
 
                         <button
                           type="submit"
-                          className="w-full py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-amber-500/20 cursor-pointer"
+                          className="w-full py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95 transition-all"
                         >
                           <ChefHat className="w-4 h-4" />
                           Registrar Horneada y Descontar Harina
@@ -1213,15 +1699,15 @@ export default function SalonOperacionesPwaPage() {
               </div>
             )}
 
-            {/* ── SUB-SECTOR 3: VERDULERÍA (FRESH CUT & FRACCIONAMIENTO) ── */}
+            {/* ── SUB-SECTOR 3: VERDULERÍA ── */}
             {produccionSector === "verduleria" && (
               <div className="space-y-4 animate-fade-in">
-                <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
-                  <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
-                    <h2 className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
+                <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                  <div className="border-b border-white/10 pb-3">
+                    <h2 className="font-black text-sm text-white" style={displayFont}>
                       Fraccionamiento Fresh Cut (Valor Agregado)
                     </h2>
-                    <div className="text-[11px] text-slate-500">
+                    <div className="text-[11px] text-slate-400">
                       Convierte verduras a granel en bandejas peladas de conveniencia (margen 50%+).
                     </div>
                   </div>
@@ -1229,13 +1715,13 @@ export default function SalonOperacionesPwaPage() {
                   <form onSubmit={handleConfirmProduccionVerdura} className="space-y-3">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                           Verdura Insumo (Granel):
                         </label>
                         <select
                           value={verduraInsumo}
                           onChange={(e) => setVerduraInsumo(e.target.value)}
-                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-3 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
                         >
                           <option value="Zapallo Kabutiá">Zapallo Kabutiá</option>
                           <option value="Mandioca Seleccionada">Mandioca Seleccionada</option>
@@ -1245,27 +1731,27 @@ export default function SalonOperacionesPwaPage() {
                       </div>
 
                       <div>
-                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                           Kg Brutos Insumidos:
                         </label>
                         <input
                           type="number"
                           value={verduraKgBrutos}
                           onChange={(e) => setVerduraKgBrutos(e.target.value)}
-                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-sm font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-black text-white outline-none focus:border-amber-400"
                           style={monoFont}
                         />
                       </div>
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                         Producto Final Empacado:
                       </label>
                       <select
                         value={verduraBandejasDestino}
                         onChange={(e) => setVerduraBandejasDestino(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-3 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
                       >
                         <option value="Bandejas Zapallo en Cubos 500g">Bandejas Zapallo en Cubos 500g</option>
                         <option value="Bolsas Mandioca Pelada Envasada 1Kg">Bolsas Mandioca Pelada Envasada 1Kg</option>
@@ -1276,7 +1762,7 @@ export default function SalonOperacionesPwaPage() {
 
                     <button
                       type="submit"
-                      className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 cursor-pointer"
+                      className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 cursor-pointer active:scale-95 transition-all"
                     >
                       <Carrot className="w-4 h-4" />
                       Registrar Bandejeado en Batea Refrigerada
@@ -1286,42 +1772,48 @@ export default function SalonOperacionesPwaPage() {
               </div>
             )}
 
-            {/* Historial de Lotes Producidos Hoy */}
-            <div className="space-y-2">
-              <h3 className="font-black text-xs uppercase tracking-wider text-slate-500" style={displayFont}>
-                Lotes Producidos Hoy en Salón ({lotesProduccion.length})
+            {/* Historial de Lotes Producidos */}
+            <div className="space-y-3">
+              <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
+                Lotes Producidos Hoy ({lotesProduccion.length})
               </h3>
-              <div className="space-y-2">
-                {lotesProduccion.map((lp) => (
-                  <div key={lp.id} className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
-                          lp.sector === "Carnicería" ? "bg-red-500/20 text-red-600 dark:text-red-400" :
-                          lp.sector === "Panadería" ? "bg-amber-500/20 text-amber-600 dark:text-amber-400" :
-                          "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                        }`}>
-                          {lp.sector}
-                        </span>
-                        <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
-                          {lp.producto_obtenido}
+              {lotesProduccion.length === 0 ? (
+                <div className="p-6 rounded-3xl bg-white/[0.03] border border-white/5 text-center text-xs text-slate-500">
+                  Aún no se registraron lotes de producción en el turno.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {lotesProduccion.map((lp) => (
+                    <div key={lp.id} className="p-3.5 rounded-2xl backdrop-blur-md bg-slate-900/60 border border-white/10 flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                            lp.sector === "Carnicería" ? "bg-red-500/20 text-red-400 border border-red-500/30" :
+                            lp.sector === "Panadería" ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" :
+                            "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                          }`}>
+                            {lp.sector}
+                          </span>
+                          <div className="font-bold text-xs text-white truncate">
+                            {lp.producto_obtenido}
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-1">
+                          Insumo: {lp.insumo_origen} • Lote: <strong className="text-slate-200 font-mono">{lp.lote_codigo}</strong> • {lp.hora}
                         </div>
                       </div>
-                      <div className="text-[10px] text-slate-500 mt-1">
-                        Insumo: {lp.insumo_origen} · Lote: <strong className="text-slate-700 dark:text-slate-300 font-mono">{lp.lote_codigo}</strong> · {lp.hora}
+                      <div className="text-right shrink-0">
+                        <div className="font-black text-sm text-white" style={monoFont}>
+                          {lp.cantidad_obtenida} {lp.unidad}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          {formatPYG(lp.costo_unitario)}/{lp.unidad === "Bandejas" ? "un" : "kg"}
+                        </div>
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="font-black text-sm text-slate-900 dark:text-white" style={monoFont}>
-                        {lp.cantidad_obtenida} {lp.unidad}
-                      </div>
-                      <div className="text-[10px] text-slate-400 font-mono">
-                        Costo: {formatPYG(lp.costo_unitario)}/{lp.unidad === "Bandejas" ? "un" : "kg"}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
 
           </div>
@@ -1329,25 +1821,25 @@ export default function SalonOperacionesPwaPage() {
 
         {/* ══════════════════════ TAB 3: MERMAS OFICIALES EN SALÓN ══════════════════════ */}
         {tab === "mermas" && (
-          <div className="space-y-4 animate-fade-in">
-            <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
-              <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-                <div className="w-8 h-8 rounded-xl bg-rose-500 text-white flex items-center justify-center font-black">
+          <div className="space-y-5 animate-fade-in">
+            <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+              <div className="flex items-center gap-2.5 border-b border-white/10 pb-3">
+                <div className="w-9 h-9 rounded-2xl bg-rose-600/30 border border-rose-500/40 text-rose-400 flex items-center justify-center font-black shadow-lg shadow-rose-600/20">
                   <Trash2 className="w-4 h-4" />
                 </div>
                 <div>
-                  <h2 className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
+                  <h2 className="font-black text-sm text-white" style={displayFont}>
                     Registrar Merma Oficial de Salón
                   </h2>
-                  <div className="text-[11px] text-slate-500">
-                    Descuenta automáticamente las existencias del inventario real.
+                  <div className="text-[11px] text-slate-400">
+                    Descuenta automáticamente las existencias del inventario real en Extra.
                   </div>
                 </div>
               </div>
 
               <form onSubmit={handleConfirmMerma} className="space-y-3">
                 <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                     Producto a Mermar:
                   </label>
                   <select
@@ -1356,7 +1848,7 @@ export default function SalonOperacionesPwaPage() {
                       const found = products.find(p => p.id === e.target.value)
                       setMermaProd(found || null)
                     }}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-3 text-sm font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-bold text-white outline-none focus:border-amber-400"
                   >
                     <option value="">-- Seleccionar producto del salón --</option>
                     {products.slice(0, 100).map((p) => (
@@ -1369,7 +1861,7 @@ export default function SalonOperacionesPwaPage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                       Cantidad Mermada (Un. o Kg):
                     </label>
                     <input
@@ -1377,19 +1869,19 @@ export default function SalonOperacionesPwaPage() {
                       value={mermaQty}
                       onChange={(e) => setMermaQty(e.target.value.replace(/[^0-9.,]/g, ""))}
                       placeholder="0"
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-base font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                      className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-amber-400"
                       style={monoFont}
                     />
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                       Sector del Salón:
                     </label>
                     <select
                       value={mermaArea}
                       onChange={(e) => setMermaArea(e.target.value)}
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                      className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-3 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
                     >
                       {SECTORES_SALON.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
@@ -1397,35 +1889,35 @@ export default function SalonOperacionesPwaPage() {
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                     Motivo de la Merma:
                   </label>
                   <select
                     value={mermaTipo}
                     onChange={(e) => setMermaTipo(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-3 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
                   >
                     {MOTIVOS_MERMA.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                   </select>
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                     Observación Adicional (Opcional):
                   </label>
                   <input
                     type="text"
                     value={mermaObs}
                     onChange={(e) => setMermaObs(e.target.value)}
-                    placeholder="Ej: Golpeado durante reposición en pasillo 3..."
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                    placeholder="Ej: Averiado por caída durante reposición..."
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-2.5 text-xs text-white outline-none focus:border-amber-400"
                   />
                 </div>
 
                 <button
                   type="submit"
                   disabled={submittingMerma}
-                  className="w-full py-3.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-600/25 cursor-pointer disabled:opacity-50 transition active:scale-[0.98]"
+                  className="w-full py-3.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-600/25 cursor-pointer disabled:opacity-50 active:scale-95 transition-all"
                 >
                   {submittingMerma ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                   Confirmar y Descontar Stock Oficial
@@ -1434,39 +1926,39 @@ export default function SalonOperacionesPwaPage() {
             </div>
 
             {/* Historial de Mermas de Hoy */}
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="font-black text-xs uppercase tracking-wider text-slate-500" style={displayFont}>
+                <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
                   Mermas Registradas Hoy ({mermasList.length})
                 </h3>
-                <div className="text-xs font-black text-rose-600 dark:text-rose-400" style={monoFont}>
+                <div className="text-xs font-black text-rose-400" style={monoFont}>
                   Total: {formatPYG(totalMermasHoy)}
                 </div>
               </div>
 
               {mermasList.length === 0 ? (
-                <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400">
+                <div className="p-6 rounded-3xl bg-white/[0.03] border border-white/5 text-center text-xs text-slate-500">
                   No hay mermas registradas en el turno de hoy.
                 </div>
               ) : (
                 <div className="space-y-2">
                   {mermasList.map((m) => (
-                    <div key={m.id} className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+                    <div key={m.id} className="p-3.5 rounded-2xl backdrop-blur-md bg-slate-900/60 border border-white/10 flex items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                        <div className="font-bold text-xs text-white truncate">
                           {m.producto_nombre}
                         </div>
-                        <div className="text-[10px] text-slate-500 flex items-center gap-2 mt-0.5">
+                        <div className="text-[10px] text-slate-400 flex items-center gap-2 mt-0.5">
                           <span>{m.area}</span>
-                          <span>· {m.tipo_merma.replace("_", " ")}</span>
-                          <span>· {m.fecha}</span>
+                          <span>• {m.tipo_merma.replace("_", " ")}</span>
+                          <span>• {m.fecha}</span>
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <div className="font-black text-sm text-rose-600 dark:text-rose-400" style={monoFont}>
+                        <div className="font-black text-sm text-rose-400" style={monoFont}>
                           {m.cantidad} un.
                         </div>
-                        <div className="text-[10px] text-slate-400 font-mono">
+                        <div className="text-[10px] text-slate-500 font-mono">
                           {formatPYG(m.costo_total || m.cantidad * 8500)}
                         </div>
                       </div>
@@ -1480,25 +1972,25 @@ export default function SalonOperacionesPwaPage() {
 
         {/* ══════════════════════ TAB 4: REPOSICIÓN & QUIEBRES ══════════════════════ */}
         {tab === "reposicion" && (
-          <div className="space-y-4 animate-fade-in">
-            <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
-              <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-                <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-black">
+          <div className="space-y-5 animate-fade-in">
+            <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+              <div className="flex items-center gap-2.5 border-b border-white/10 pb-3">
+                <div className="w-9 h-9 rounded-2xl bg-indigo-600/30 border border-indigo-500/40 text-indigo-400 flex items-center justify-center font-black shadow-lg shadow-indigo-600/20">
                   <Boxes className="w-4 h-4" />
                 </div>
                 <div>
-                  <h2 className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
-                    Solicitud de Reposición a Depósito
+                  <h2 className="font-black text-sm text-white" style={displayFont}>
+                    Solicitud de Reposición a Trastienda
                   </h2>
-                  <div className="text-[11px] text-slate-500">
-                    Avisa al personal de trastienda para bajar mercadería al salón.
+                  <div className="text-[11px] text-slate-400">
+                    Avisa al personal de depósito para bajar mercadería urgente a góndola.
                   </div>
                 </div>
               </div>
 
               <form onSubmit={handleConfirmReposicion} className="space-y-3">
                 <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                     Producto con Quiebre o Faltante en Góndola:
                   </label>
                   <select
@@ -1507,7 +1999,7 @@ export default function SalonOperacionesPwaPage() {
                       const found = products.find(p => p.id === e.target.value)
                       setRepoProd(found || null)
                     }}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-3 text-sm font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-bold text-white outline-none focus:border-amber-400"
                   >
                     <option value="">-- Seleccionar producto --</option>
                     {products.slice(0, 100).map((p) => (
@@ -1520,7 +2012,7 @@ export default function SalonOperacionesPwaPage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                       Cantidad a Bajar:
                     </label>
                     <input
@@ -1528,19 +2020,19 @@ export default function SalonOperacionesPwaPage() {
                       value={repoQty}
                       onChange={(e) => setRepoQty(e.target.value)}
                       placeholder="12"
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-base font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                      className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-amber-400"
                       style={monoFont}
                     />
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                       Nivel de Urgencia:
                     </label>
                     <select
                       value={repoUrgencia}
                       onChange={(e) => setRepoUrgencia(e.target.value as any)}
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                      className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-3 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
                     >
                       <option value="alta">⚡ Urgente (Góndola Vacía)</option>
                       <option value="normal">Normal (Baja Rotación)</option>
@@ -1550,7 +2042,7 @@ export default function SalonOperacionesPwaPage() {
 
                 <button
                   type="submit"
-                  className="w-full py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 cursor-pointer transition active:scale-[0.98]"
+                  className="w-full py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 cursor-pointer active:scale-95 transition-all"
                 >
                   <Boxes className="w-4 h-4" />
                   Enviar Pedido al Depósito
@@ -1559,56 +2051,62 @@ export default function SalonOperacionesPwaPage() {
             </div>
 
             {/* Lista de Quiebres en Proceso */}
-            <div className="space-y-2">
-              <h3 className="font-black text-xs uppercase tracking-wider text-slate-500" style={displayFont}>
+            <div className="space-y-3">
+              <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
                 Pedidos en Camino desde Depósito ({reposiciones.length})
               </h3>
-              <div className="space-y-2">
-                {reposiciones.map((r) => (
-                  <div key={r.id} className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
-                          r.urgencia === "alta" ? "bg-rose-500/20 text-rose-600 dark:text-rose-400" : "bg-slate-200 dark:bg-slate-800 text-slate-500"
-                        }`}>
-                          {r.urgencia}
-                        </span>
-                        <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
-                          {r.producto_nombre}
+              {reposiciones.length === 0 ? (
+                <div className="p-6 rounded-3xl bg-white/[0.03] border border-white/5 text-center text-xs text-slate-500">
+                  No hay pedidos de reposición pendientes.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {reposiciones.map((r) => (
+                    <div key={r.id} className="p-3.5 rounded-2xl backdrop-blur-md bg-slate-900/60 border border-white/10 flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                            r.urgencia === "alta" ? "bg-rose-500/20 text-rose-400 border border-rose-500/30" : "bg-white/[0.05] text-slate-400"
+                          }`}>
+                            {r.urgencia}
+                          </span>
+                          <div className="font-bold text-xs text-white truncate">
+                            {r.producto_nombre}
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-1">
+                          {r.sector} • Solicitado {r.hora}
                         </div>
                       </div>
-                      <div className="text-[10px] text-slate-500 mt-1">
-                        {r.sector} · Solicitado {r.hora}
+                      <div className="text-right shrink-0">
+                        <div className="font-black text-sm text-indigo-400" style={monoFont}>
+                          {r.cantidad} un.
+                        </div>
+                        <span className={`text-[9px] font-bold uppercase ${r.estado === "en_camino" ? "text-amber-400" : "text-slate-500"}`}>
+                          {r.estado.replace("_", " ")}
+                        </span>
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="font-black text-sm text-indigo-600 dark:text-indigo-400" style={monoFont}>
-                        {r.cantidad} un.
-                      </div>
-                      <span className={`text-[9px] font-bold uppercase ${r.estado === "en_camino" ? "text-amber-500" : "text-slate-400"}`}>
-                        {r.estado.replace("_", " ")}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {/* ══════════════════════ TAB 5: TEMPERATURAS & INOCUIDAD HACCP ══════════════════════ */}
         {tab === "haccp" && (
-          <div className="space-y-4 animate-fade-in">
-            <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
-              <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-                <div className="w-8 h-8 rounded-xl bg-teal-600 text-white flex items-center justify-center font-black">
+          <div className="space-y-5 animate-fade-in">
+            <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+              <div className="flex items-center gap-2.5 border-b border-white/10 pb-3">
+                <div className="w-9 h-9 rounded-2xl bg-teal-600/30 border border-teal-500/40 text-teal-400 flex items-center justify-center font-black shadow-lg shadow-teal-600/20">
                   <Thermometer className="w-4 h-4" />
                 </div>
                 <div>
-                  <h2 className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
+                  <h2 className="font-black text-sm text-white" style={displayFont}>
                     Control de Temperaturas & Cadena de Frío
                   </h2>
-                  <div className="text-[11px] text-slate-500">
+                  <div className="text-[11px] text-slate-400">
                     Registro de puntos críticos bromatológicos del salón y cámaras.
                   </div>
                 </div>
@@ -1616,13 +2114,13 @@ export default function SalonOperacionesPwaPage() {
 
               <form onSubmit={handleConfirmTemperatura} className="space-y-3">
                 <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                     Cámara o Equipo a Medir:
                   </label>
                   <select
                     value={tempEquipo}
                     onChange={(e) => setTempEquipo(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-3 text-sm font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-bold text-white outline-none focus:border-amber-400"
                   >
                     <option value="Cámara de Reses (Carnicería)">Cámara de Reses (Carnicería) [0°C a 4°C]</option>
                     <option value="Batea Exhibidora de Cortes">Batea Exhibidora de Cortes [0°C a 4°C]</option>
@@ -1633,7 +2131,7 @@ export default function SalonOperacionesPwaPage() {
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                     Temperatura Leída (°C):
                   </label>
                   <input
@@ -1641,135 +2139,152 @@ export default function SalonOperacionesPwaPage() {
                     value={tempValor}
                     onChange={(e) => setTempValor(e.target.value.replace(/[^0-9.,-]/g, ""))}
                     placeholder="Ej: 2.5"
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-base font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-amber-400"
                     style={monoFont}
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-teal-600/25 cursor-pointer transition active:scale-[0.98]"
+                  className="w-full py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-teal-600/25 cursor-pointer active:scale-95 transition-all"
                 >
-                  <Check className="w-4 h-4" />
-                  Guardar Medición en Libro Oficial
+                  <Thermometer className="w-4 h-4" />
+                  Guardar Medición HACCP Oficial
                 </button>
               </form>
             </div>
 
-            {/* Historial de Mediciones */}
-            <div className="space-y-2">
-              <h3 className="font-black text-xs uppercase tracking-wider text-slate-500" style={displayFont}>
+            {/* Historial de Temperaturas */}
+            <div className="space-y-3">
+              <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
                 Mediciones Registradas Hoy ({temperaturas.length})
               </h3>
-              <div className="space-y-2">
-                {temperaturas.map((t) => (
-                  <div key={t.id} className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
-                        {t.equipo}
+              {temperaturas.length === 0 ? (
+                <div className="p-6 rounded-3xl bg-white/[0.03] border border-white/5 text-center text-xs text-slate-500">
+                  No hay mediciones registradas en el turno de hoy.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {temperaturas.map((t) => (
+                    <div key={t.id} className="p-3.5 rounded-2xl backdrop-blur-md bg-slate-900/60 border border-white/10 flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                            t.estado === "optimo" ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-rose-500/20 text-rose-400 border border-rose-500/30 animate-pulse"
+                          }`}>
+                            {t.estado === "optimo" ? "Óptimo" : "Crítico"}
+                          </span>
+                          <div className="font-bold text-xs text-white truncate">
+                            {t.equipo}
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-1">
+                          Rango seguro: {t.rango_min}°C a {t.rango_max}°C • {t.hora}
+                        </div>
                       </div>
-                      <div className="text-[10px] text-slate-500 mt-0.5">
-                        Rango seguro: {t.rango_min}°C a {t.rango_max}°C · Medido {t.hora}
+                      <div className="text-right shrink-0">
+                        <div className={`font-black text-lg ${t.estado === "optimo" ? "text-emerald-400" : "text-rose-400"}`} style={monoFont}>
+                          {t.temperatura > 0 ? `+${t.temperatura}` : t.temperatura}°C
+                        </div>
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className={`font-black text-base ${t.estado === "optimo" ? "text-teal-600 dark:text-teal-400" : "text-rose-600 dark:text-rose-400 animate-pulse"}`} style={monoFont}>
-                        {t.temperatura}°C
-                      </div>
-                      <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${t.estado === "optimo" ? "bg-teal-500/20 text-teal-600 dark:text-teal-400" : "bg-rose-500/20 text-rose-600 dark:text-rose-400"}`}>
-                        {t.estado}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
 
-      </div>
+      </main>
 
-      {/* ── BARRA INFERIOR DE NAVEGACIÓN TÁCTIL (5 PESTAÑAS EXACTAS) ── */}
-      <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800/80 pb-[env(safe-area-inset-bottom)] shadow-lg">
-        <div className="grid grid-cols-5 w-full max-w-lg mx-auto px-1 py-1">
-          {[
-            { id: "gondola", label: "Góndola", icon: Tag, badge: labelQueue.length },
-            { id: "produccion", label: "Producción", icon: ChefHat, badge: lotesProduccion.length },
-            { id: "mermas", label: "Mermas", icon: Trash2, badge: mermasList.length },
-            { id: "reposicion", label: "Quiebres", icon: Boxes, badge: reposiciones.filter(r => r.estado === "pendiente").length },
-            { id: "haccp", label: "HACCP Frío", icon: Thermometer },
-          ].map((sec) => {
-            const Icon = sec.icon
-            const active = tab === sec.id
-            return (
-              <button
-                key={sec.id}
-                onClick={() => setTab(sec.id as SalonTab)}
-                className={`flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-xl transition-all cursor-pointer relative ${
-                  active ? "text-amber-500 font-bold bg-amber-500/10" : "text-slate-400 dark:text-slate-500 hover:text-slate-600"
-                }`}
-              >
-                <div className="relative">
-                  <Icon className="w-5 h-5" strokeWidth={active ? 2.5 : 2} />
-                  {!!sec.badge && sec.badge > 0 && (
-                    <span className="absolute -top-1 -right-2 text-[8.5px] font-black bg-rose-500 text-white min-w-3.5 h-3.5 px-0.5 rounded-full flex items-center justify-center animate-pulse">
-                      {sec.badge > 99 ? "99+" : sec.badge}
-                    </span>
-                  )}
-                </div>
-                <span className="text-[9.5px] tracking-tight truncate w-full text-center">{sec.label}</span>
-                {active && <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-amber-500" />}
-              </button>
-            )
-          })}
+      {/* ── BARRA INFERIOR DE NAVEGACIÓN TÁCTIL (GLASS FLOATING DOCK) ── */}
+      <nav className="fixed bottom-3 left-3 right-3 z-40 max-w-lg mx-auto">
+        <div className="backdrop-blur-2xl bg-slate-950/80 border border-white/15 rounded-3xl p-1.5 shadow-[0_20px_50px_rgba(0,0,0,0.7)]">
+          <div className="grid grid-cols-5 gap-1">
+            {[
+              { id: "gondola", label: "Góndola", icon: Tag, badge: labelQueue.length },
+              { id: "produccion", label: "Producción", icon: ChefHat, badge: lotesProduccion.length },
+              { id: "mermas", label: "Mermas", icon: Trash2, badge: mermasList.length },
+              { id: "reposicion", label: "Quiebres", icon: Boxes, badge: reposiciones.filter(r => r.estado === "pendiente").length },
+              { id: "haccp", label: "HACCP", icon: Thermometer },
+            ].map((sec) => {
+              const Icon = sec.icon
+              const active = tab === sec.id
+              return (
+                <button
+                  key={sec.id}
+                  onClick={() => setTab(sec.id as SalonTab)}
+                  className={`flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-2xl transition-all cursor-pointer relative ${
+                    active
+                      ? "text-slate-950 bg-amber-400 font-black shadow-lg shadow-amber-400/30 scale-105"
+                      : "text-slate-400 hover:text-white hover:bg-white/[0.04]"
+                  }`}
+                >
+                  <div className="relative">
+                    <Icon className="w-5 h-5" strokeWidth={active ? 2.5 : 2} />
+                    {!!sec.badge && sec.badge > 0 && (
+                      <span className={`absolute -top-1.5 -right-2 text-[8px] font-black min-w-4 h-4 px-1 rounded-full flex items-center justify-center ${
+                        active ? "bg-slate-950 text-amber-400" : "bg-rose-500 text-white animate-pulse"
+                      }`}>
+                        {sec.badge > 99 ? "99+" : sec.badge}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[9.5px] tracking-tight truncate w-full text-center">
+                    {sec.label}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
         </div>
-      </div>
+      </nav>
 
-      {/* ── MODAL: COLA DE IMPRESIÓN DE ETIQUETAS ── */}
+      {/* ── MODAL: COLA DE IMPRESIÓN DE ETIQUETAS FLEJE ── */}
       {showQueueModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full sm:max-w-lg bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] max-h-[88vh] overflow-y-auto animate-fade-in space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full sm:max-w-lg bg-slate-900 border-t sm:border border-white/15 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+24px)] max-h-[88vh] overflow-y-auto animate-fade-in space-y-4 shadow-2xl">
             
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black">
                   <Printer className="w-4 h-4" />
                 </div>
                 <div>
-                  <h2 className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
-                    Cola de Impresión de Etiquetas ({labelQueue.length})
+                  <h2 className="font-black text-sm text-white" style={displayFont}>
+                    Cola de Impresión de Flejes ({labelQueue.length})
                   </h2>
-                  <div className="text-[11px] text-slate-500">
-                    Acumuladas durante el recorrido de salón para imprimir en lote.
+                  <div className="text-[11px] text-slate-400">
+                    Acumuladas para enviar en lote a la impresora Zebra/TSC.
                   </div>
                 </div>
               </div>
-              <button onClick={() => setShowQueueModal(false)} className="text-slate-400 p-1 cursor-pointer">
+              <button onClick={() => setShowQueueModal(false)} className="text-slate-400 hover:text-white p-1 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {labelQueue.length === 0 ? (
-              <div className="p-8 text-center text-xs text-slate-400">
-                La cola de impresión está vacía. Escanée productos en góndola para agregar flejes.
+              <div className="p-8 text-center text-xs text-slate-500">
+                La cola de impresión está vacía. Escanée productos en góndola para acumular flejes.
               </div>
             ) : (
               <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                 {labelQueue.map((item, idx) => (
-                  <div key={item.id} className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+                  <div key={item.id} className="p-3 rounded-2xl bg-slate-950/80 border border-white/10 flex items-center justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                      <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                      <div className="font-bold text-xs text-white truncate">
                         {item.nombre}
                       </div>
-                      <div className="text-[10px] text-slate-500 flex items-center gap-2 mt-0.5">
-                        <span>{formatPYG(item.precio_venta)}</span>
-                        {item.descuento_pct && <span className="text-amber-600 font-bold">(-{item.descuento_pct}%)</span>}
-                        <span>· {item.motivo.replace("_", " ")}</span>
+                      <div className="text-[10px] text-slate-400 flex items-center gap-2 mt-0.5">
+                        <span className="text-amber-400 font-mono font-bold">{formatPYG(item.precio_venta)}</span>
+                        {item.descuento_pct && <span className="text-rose-400 font-bold">(-{item.descuento_pct}%)</span>}
+                        <span>• {item.motivo.replace("_", " ")}</span>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="font-black text-sm text-slate-900 dark:text-white" style={monoFont}>
+                      <span className="font-black text-sm text-white" style={monoFont}>
                         {item.cantidad}x
                       </span>
                       <button
@@ -1777,9 +2292,9 @@ export default function SalonOperacionesPwaPage() {
                           const updated = labelQueue.filter((_, i) => i !== idx)
                           saveLabelQueue(updated)
                         }}
-                        className="p-1 rounded-lg text-slate-400 hover:text-rose-500 cursor-pointer"
+                        className="p-1 rounded-lg text-slate-400 hover:text-rose-400 cursor-pointer"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
@@ -1788,19 +2303,19 @@ export default function SalonOperacionesPwaPage() {
             )}
 
             {labelQueue.length > 0 && (
-              <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex gap-2 pt-2 border-t border-white/10">
                 <button
                   onClick={() => saveLabelQueue([])}
-                  className="px-4 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 font-bold text-xs cursor-pointer hover:bg-rose-50"
+                  className="px-4 py-3 rounded-2xl bg-white/[0.05] hover:bg-rose-500/20 text-rose-400 font-bold text-xs cursor-pointer transition"
                 >
                   Vaciar Cola
                 </button>
                 <button
-                  onClick={handlePrintAllQueue}
+                  onClick={() => window.print()}
                   className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 cursor-pointer"
                 >
                   <Printer className="w-4 h-4" />
-                  Imprimir Todo el Lote ({labelQueue.reduce((acc, i) => acc + i.cantidad, 0)} Etiquetas)
+                  Imprimir Todo el Lote ({labelQueue.reduce((acc, i) => acc + i.cantidad, 0)} Flejes)
                 </button>
               </div>
             )}
@@ -1808,32 +2323,32 @@ export default function SalonOperacionesPwaPage() {
         </div>
       )}
 
-      {/* ── MODAL: INICIO DE SESIÓN RÁPIDO DE SALÓN ── */}
+      {/* ── MODAL: ACCESO RÁPIDO OPERADOR DE SALÓN ── */}
       {showLoginModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 animate-fade-in space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-500 to-emerald-500 flex items-center justify-center text-slate-950 font-black">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-slate-900 border border-white/15 rounded-3xl p-6 animate-fade-in space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-amber-500 to-emerald-400 flex items-center justify-center text-slate-950 font-black">
                   <LogIn className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
+                  <h3 className="font-black text-sm text-white" style={displayFont}>
                     Acceso Operador de Salón
                   </h3>
-                  <div className="text-[10px] text-slate-500">
+                  <div className="text-[10px] text-slate-400">
                     Extra Supermercado
                   </div>
                 </div>
               </div>
-              <button onClick={() => setShowLoginModal(false)} className="text-slate-400 p-1 cursor-pointer">
+              <button onClick={() => setShowLoginModal(false)} className="text-slate-400 hover:text-white p-1 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleQuickLogin} className="space-y-3">
               <div>
-                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                   Usuario o Correo:
                 </label>
                 <input
@@ -1841,13 +2356,13 @@ export default function SalonOperacionesPwaPage() {
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
                   placeholder="ej: operador o admin@extra.com.py"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                  className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white outline-none focus:border-amber-400"
                   autoFocus
                 />
               </div>
 
               <div>
-                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                   Contraseña:
                 </label>
                 <input
@@ -1855,17 +2370,17 @@ export default function SalonOperacionesPwaPage() {
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                  className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white outline-none focus:border-amber-400"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={loggingIn}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 cursor-pointer disabled:opacity-50"
+                className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 cursor-pointer disabled:opacity-50"
               >
                 {loggingIn ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserCheck className="w-4 h-4" />}
-                Ingresar y Sincronizar Catálogo
+                Ingresar al Salón
               </button>
             </form>
           </div>
