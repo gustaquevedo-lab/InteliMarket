@@ -5,18 +5,20 @@ import {
   AlertTriangle, ThumbsUp, ThumbsDown, Layers, PiggyBank, UserCircle2, Landmark,
   Paperclip, ClipboardCheck, Scale, Filter, Eye, RefreshCw, ShieldAlert, ArrowRight,
   SlidersHorizontal, Check, AlertCircle, FileText, Download, Calendar, Tag,
-  FileSpreadsheet, Printer, PieChart, BookOpen, FileCheck
+  FileSpreadsheet, Printer, PieChart, BookOpen, FileCheck, ScrollText, CheckCheck
 } from "lucide-react"
 import {
   api, API_ORIGIN, type Expense, type ExpenseCategory, type CostCenter,
   type ExpenseDashboard, type FinanceRecommendation, type PettyCashFund,
-  type BankAccount, type PettyCashFundCount
+  type BankAccount, type PettyCashFundCount, type PettyCashRendicion
 } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, getTodayAsuncion } from "../../utils/format"
 import { useAuth } from "../../context/AuthContext"
+import { RendicionCreateModal } from "./RendicionCreateModal"
+import { RendicionAuditModal } from "./RendicionAuditModal"
 
-type Tab = "dashboard" | "fondos" | "list" | "arqueos" | "sectores" | "categories" | "reportes"
+type Tab = "dashboard" | "fondos" | "rendiciones" | "list" | "arqueos" | "sectores" | "categories" | "reportes"
 type ReportSubTab = "sector" | "fondos" | "fiscal" | "rendicion"
 
 export default function ExpensesPage() {
@@ -54,15 +56,41 @@ export default function ExpensesPage() {
     ruc: "",
     timbrado: "",
     numero_factura: "",
+    tipo_comprobante: "factura_contado",
     iva_10: "",
     iva_5: "",
     exentas: "",
     tipo_pago: "efectivo",
-    fecha_gasto: getTodayAsuncion()
+    fecha_gasto: getTodayAsuncion(),
+    es_inversion: false,
+    asset_nombre: "",
+    asset_codigo_interno: "",
+    asset_categoria: "muebles_equipos",
+    asset_vida_util_meses: 60,
   })
   const [catForm, setCatForm] = useState({ nombre: "", descripcion: "", presupuesto_mensual: "" })
   const [sectorForm, setSectorForm] = useState({ nombre: "", tipo: "sector", peso_prorateo: "1" })
-  const [fundForm, setFundForm] = useState({ nombre: "", monto_autorizado: "", custodio_id: "" })
+  const [fundForm, setFundForm] = useState({
+    nombre: "",
+    monto_autorizado: "",
+    custodio_id: "",
+    cost_center_id: "",
+    monto_maximo_por_gasto: "",
+    dotacion_inicial: false,
+    medio_dotacion: "EFECTIVO_BOVEDA",
+    caja_boveda_id: "",
+    bank_account_id: "",
+  })
+
+  // Rendiciones de Cuentas & Reposición
+  const [rendiciones, setRendiciones] = useState<PettyCashRendicion[]>([])
+  const [loadingRendiciones, setLoadingRendiciones] = useState(false)
+  const [showCreateRendicionModal, setShowCreateRendicionModal] = useState(false)
+  const [rendicionCreateInitialFundId, setRendicionCreateInitialFundId] = useState("")
+  const [selectedRendicionForAuditId, setSelectedRendicionForAuditId] = useState<string | null>(null)
+  const [filterRendicionFund, setFilterRendicionFund] = useState("")
+  const [filterRendicionEstado, setFilterRendicionEstado] = useState("")
+  const [cashRegisters, setCashRegisters] = useState<any[]>([])
 
   // Umbral de aprobación
   const [showThresholdForm, setShowThresholdForm] = useState(false)
@@ -117,20 +145,41 @@ export default function ExpensesPage() {
   const sectorName = (id?: string) => costCenters.find(c => c.id === id)?.nombre || "Sin sector"
   const fundName = (id?: string) => funds.find(f => f.id === id)?.nombre || "General"
 
+  const fetchRendiciones = async () => {
+    setLoadingRendiciones(true)
+    try {
+      const data = await api.expenses.rendiciones.list({
+        fund_id: filterRendicionFund || undefined,
+        estado: filterRendicionEstado || undefined,
+      })
+      setRendiciones(data)
+    } catch (err: any) {
+      toast.error("Error al cargar rendiciones", err.message)
+    } finally {
+      setLoadingRendiciones(false)
+    }
+  }
+
   const fetchAll = async () => {
     setLoading(true)
     try {
-      const [c, cc, f, ac, pc] = await Promise.all([
+      const [c, cc, f, ac, pc, bAccs, cRegs, rends] = await Promise.all([
         api.expenses.categories.list().catch(() => []),
         api.expenses.costCenters.list().catch(() => []),
         api.expenses.funds.list().catch(() => []),
         api.expenses.approvalConfig.get().catch(() => null),
-        api.expenses.funds.counts.pendingAll().catch(() => [])
+        api.expenses.funds.counts.pendingAll().catch(() => []),
+        api.financial.banks.list().catch(() => []),
+        api.caja.registers.list().catch(() => []),
+        api.expenses.rendiciones.list().catch(() => [])
       ])
       setCategories(c)
       setCostCenters(cc)
       setFunds(f)
       setPendingCounts(pc)
+      setBankAccounts(bAccs.filter((b: any) => b.activo))
+      setCashRegisters(cRegs)
+      setRendiciones(rends)
       if (ac) {
         setApprovalThreshold(ac.umbral_aprobacion)
         setApprovalThresholdForm(String(ac.umbral_aprobacion))
@@ -153,6 +202,14 @@ export default function ExpensesPage() {
         }).catch(() => [])
         setExpenses(e)
       }
+
+      if (tab === "rendiciones") {
+        const r = await api.expenses.rendiciones.list({
+          fund_id: filterRendicionFund || undefined,
+          estado: filterRendicionEstado || undefined,
+        }).catch(() => [])
+        setRendiciones(r)
+      }
     } catch (e: any) {
       toast.error("Error al cargar datos de gastos", e.message)
     } finally {
@@ -162,7 +219,7 @@ export default function ExpensesPage() {
 
   useEffect(() => {
     fetchAll()
-  }, [tab, filterEstado, filterCategory])
+  }, [tab, filterEstado, filterCategory, filterRendicionFund, filterRendicionEstado])
 
   const fetchReportData = async () => {
     setLoadingReport(true)
@@ -283,6 +340,14 @@ export default function ExpensesPage() {
         category_id: form.category_id || undefined,
         cost_center_id: form.cost_center_id || undefined,
         monto: Number(form.monto),
+        iva_10: form.iva_10 ? Number(form.iva_10) : undefined,
+        iva_5: form.iva_5 ? Number(form.iva_5) : undefined,
+        exentas: form.exentas ? Number(form.exentas) : undefined,
+        es_inversion: form.es_inversion || false,
+        asset_nombre: form.es_inversion ? form.asset_nombre : undefined,
+        asset_codigo_interno: form.es_inversion ? form.asset_codigo_interno : undefined,
+        asset_categoria: form.es_inversion ? form.asset_categoria : undefined,
+        asset_vida_util_meses: form.es_inversion && form.asset_vida_util_meses ? Number(form.asset_vida_util_meses) : undefined,
         comprobante_url
       })
 
@@ -298,8 +363,17 @@ export default function ExpensesPage() {
         ruc: "",
         timbrado: "",
         numero_factura: "",
+        tipo_comprobante: "factura_contado",
+        iva_10: "",
+        iva_5: "",
+        exentas: "",
         tipo_pago: "efectivo",
-        fecha_gasto: getTodayAsuncion()
+        fecha_gasto: getTodayAsuncion(),
+        es_inversion: false,
+        asset_nombre: "",
+        asset_codigo_interno: "",
+        asset_categoria: "muebles_equipos",
+        asset_vida_util_meses: 60,
       })
       setComprobanteFile(null)
       fetchAll()
@@ -319,10 +393,26 @@ export default function ExpensesPage() {
         nombre: fundForm.nombre,
         monto_autorizado: Number(fundForm.monto_autorizado),
         custodio_id: fundForm.custodio_id || undefined,
+        cost_center_id: fundForm.cost_center_id || undefined,
+        monto_maximo_por_gasto: fundForm.monto_maximo_por_gasto ? Number(fundForm.monto_maximo_por_gasto) : undefined,
+        dotacion_inicial: fundForm.dotacion_inicial,
+        medio_dotacion: fundForm.dotacion_inicial ? fundForm.medio_dotacion : undefined,
+        caja_boveda_id: fundForm.dotacion_inicial && fundForm.medio_dotacion === "EFECTIVO_BOVEDA" ? fundForm.caja_boveda_id : undefined,
+        bank_account_id: fundForm.dotacion_inicial && fundForm.medio_dotacion === "DEBITO_BANCARIO" ? fundForm.bank_account_id : undefined,
       })
-      toast.success("Fondo Fijo Creado", "Ya podés registrar gastos y arqueos contra esta caja.")
+      toast.success("Fondo Fijo Creado", "Ya podés registrar gastos y rendiciones contra este fondo.")
       setShowFundForm(false)
-      setFundForm({ nombre: "", monto_autorizado: "", custodio_id: "" })
+      setFundForm({
+        nombre: "",
+        monto_autorizado: "",
+        custodio_id: "",
+        cost_center_id: "",
+        monto_maximo_por_gasto: "",
+        dotacion_inicial: false,
+        medio_dotacion: "EFECTIVO_BOVEDA",
+        caja_boveda_id: "",
+        bank_account_id: "",
+      })
       fetchAll()
     } catch (e: any) {
       toast.error("Error al crear fondo", e.message)
@@ -685,6 +775,7 @@ export default function ExpensesPage() {
         {[
           { k: "dashboard" as Tab, l: "Torre de Control", i: BarChart3 },
           { k: "fondos" as Tab, l: "Fondos Fijos (Caja Chica)", i: PiggyBank, count: funds.length },
+          { k: "rendiciones" as Tab, l: "Rendiciones & Reposición", i: FileCheck, count: rendiciones.filter(r => r.estado === "presentada").length },
           { k: "list" as Tab, l: "Comprobantes de Gasto", i: ReceiptIcon, count: expenses.length },
           { k: "arqueos" as Tab, l: "Auditoría de Arqueos", i: Scale, count: pendingCounts.length },
           { k: "sectores" as Tab, l: "Centros de Costo", i: Layers, count: costCenters.length },
@@ -945,7 +1036,17 @@ export default function ExpensesPage() {
                 </div>
                 <button
                   onClick={() => {
-                    setFundForm({ nombre: "", monto_autorizado: "", custodio_id: user?.id || "" })
+                    setFundForm({
+                      nombre: "",
+                      monto_autorizado: "",
+                      custodio_id: user?.id || "",
+                      cost_center_id: "",
+                      monto_maximo_por_gasto: "",
+                      dotacion_inicial: false,
+                      medio_dotacion: "EFECTIVO_BOVEDA",
+                      caja_boveda_id: "",
+                      bank_account_id: "",
+                    })
                     setShowFundForm(true)
                   }}
                   className="btn-primary text-xs flex items-center gap-2 shrink-0"
@@ -985,6 +1086,20 @@ export default function ExpensesPage() {
                           )}
                         </div>
 
+                        {/* Etiquetas de Sector y Límite */}
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {f.cost_center_nombre && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                              <Layers className="w-3 h-3" /> {f.cost_center_nombre}
+                            </span>
+                          )}
+                          {f.monto_maximo_por_gasto && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
+                              Máx/gasto: {formatPYG(f.monto_maximo_por_gasto)}
+                            </span>
+                          )}
+                        </div>
+
                         {/* Saldos */}
                         <div className="mt-4 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800 space-y-2">
                           <div className="flex justify-between items-baseline">
@@ -1012,11 +1127,21 @@ export default function ExpensesPage() {
                       </div>
 
                       {/* Botones de Acción */}
-                      <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700/60 grid grid-cols-3 gap-2">
+                      <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700/60 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                        <button
+                          onClick={() => {
+                            setRendicionCreateInitialFundId(f.id)
+                            setShowCreateRendicionModal(true)
+                          }}
+                          className="btn-primary py-1.5 px-2 text-xs flex items-center justify-center gap-1 col-span-2 sm:col-span-1"
+                          title="Rendir comprobantes y solicitar reposición"
+                        >
+                          <FileCheck className="w-3.5 h-3.5" /> Rendir
+                        </button>
                         <button
                           onClick={() => handleOpenReplenish(f)}
-                          className="btn-primary py-1.5 px-2 text-xs flex items-center justify-center gap-1"
-                          title="Reponer fondos desde banco"
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 flex items-center justify-center gap-1 transition-colors"
+                          title="Reponer fondos desde banco o tesorería"
                         >
                           <Landmark className="w-3.5 h-3.5" /> Reponer
                         </button>
@@ -1046,6 +1171,211 @@ export default function ExpensesPage() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* TAB 3: RENDICIONES DE CUENTAS & REPOSICIÓN */}
+          {tab === "rendiciones" && (
+            <div className="space-y-6">
+              {/* Encabezado y Acción */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-800/80 p-5 rounded-2xl border border-slate-200 dark:border-slate-700/60 shadow-sm">
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <FileCheck className="w-5 h-5 text-indigo-600" />
+                    Rendiciones de Cuentas & Reposición de Fondos Fijos
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Proceso formal: El custodio agrupa comprobantes y declara efectivo remanente. Tesorería audita ítem por ítem con validación antifraude y repone desde Bóveda o Banco.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setRendicionCreateInitialFundId(funds[0]?.id || "")
+                      setShowCreateRendicionModal(true)
+                    }}
+                    className="btn-primary text-xs flex items-center gap-2 shrink-0 px-4 py-2.5 shadow-sm"
+                  >
+                    <Plus className="w-4 h-4" /> Nueva Rendición
+                  </button>
+                </div>
+              </div>
+
+              {/* Filtros de Rendiciones */}
+              <div className="card p-4 bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/60 shadow-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Filtrar por Fondo Fijo</label>
+                    <select
+                      className="input-field w-full text-xs"
+                      value={filterRendicionFund}
+                      onChange={e => setFilterRendicionFund(e.target.value)}
+                    >
+                      <option value="">Todos los Fondos Fijos ({funds.length})</option>
+                      {funds.map(f => (
+                        <option key={f.id} value={f.id}>{f.nombre}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Estado de Auditoría</label>
+                    <select
+                      className="input-field w-full text-xs"
+                      value={filterRendicionEstado}
+                      onChange={e => setFilterRendicionEstado(e.target.value)}
+                    >
+                      <option value="">Todos los Estados</option>
+                      <option value="presentada">⏳ Presentadas (Pendientes de Auditoría)</option>
+                      <option value="en_auditoria">🔍 En Auditoría</option>
+                      <option value="aprobada">✓ Aprobadas (Listas p/ Reponer)</option>
+                      <option value="repuesta">💎 Repuestas / Cerradas</option>
+                      <option value="rechazada">✕ Rechazadas</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-end">
+                    <button
+                      onClick={fetchRendiciones}
+                      disabled={loadingRendiciones}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 flex items-center justify-center gap-1.5 transition-colors w-full h-[38px]"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loadingRendiciones ? "animate-spin" : ""}`} />
+                      Actualizar Listado
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabla de Rendiciones */}
+              {loadingRendiciones ? (
+                <div className="flex justify-center py-16">
+                  <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+                </div>
+              ) : rendiciones.length === 0 ? (
+                <div className="card p-12 text-center text-gray-400 bg-white dark:bg-slate-800/80">
+                  <FileCheck className="w-12 h-12 mx-auto mb-3 opacity-40 text-indigo-500" />
+                  <p className="font-bold text-sm text-gray-700 dark:text-gray-200">No hay rendiciones de cuentas registradas</p>
+                  <p className="text-xs mt-1 text-gray-500">
+                    Los encargados de fondos fijos pueden generar una rendición agrupando los comprobantes cargados en el sistema.
+                  </p>
+                </div>
+              ) : (
+                <div className="card overflow-hidden bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/60 shadow-sm">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-900/60 text-slate-500 border-b border-slate-200 dark:border-slate-700/60 uppercase tracking-wider text-[10px] font-bold">
+                        <tr>
+                          <th className="py-3 px-4">N° Expediente</th>
+                          <th className="py-3 px-4">Fondo / Custodio</th>
+                          <th className="py-3 px-4">Fecha Presentación</th>
+                          <th className="py-3 px-4 text-center">Comprobantes</th>
+                          <th className="py-3 px-4 text-right">Monto Rendido</th>
+                          <th className="py-3 px-4 text-right">Arqueo Remanente</th>
+                          <th className="py-3 px-4 text-center">Estado</th>
+                          <th className="py-3 px-4 text-right">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                        {rendiciones.map(r => {
+                          const f = funds.find(x => x.id === r.fund_id)
+                          const dif = r.diferencia_arqueo || 0
+                          return (
+                            <tr key={r.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded">
+                                    {r.numero_rendicion}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="font-bold text-gray-900 dark:text-white">{r.fund_nombre || f?.nombre || "Fondo Fijo"}</div>
+                                <div className="text-[11px] text-gray-400 flex items-center gap-1">
+                                  <UserCircle2 className="w-3 h-3" />
+                                  {r.presentado_por_nombre || f?.custodio_nombre || "Custodio"}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 font-mono text-gray-600 dark:text-gray-300">
+                                {r.created_at ? new Date(r.created_at).toLocaleDateString("es-PY") : "—"}
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                                  {r.cantidad_comprobantes ?? r.total_comprobantes_presentados ?? 0} comp.
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono font-bold text-gray-900 dark:text-white">
+                                {formatPYG(r.total_presentado ?? r.total_comprobantes_presentados ?? 0)}
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <div className="font-mono font-semibold text-slate-700 dark:text-slate-300">
+                                  {formatPYG(r.efectivo_remanente_contado)}
+                                </div>
+                                <div className="text-[10px] mt-0.5">
+                                  {dif === 0 ? (
+                                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">Cuadrado (0 Gs)</span>
+                                  ) : dif < 0 ? (
+                                    <span className="text-red-500 font-bold">Faltante {formatPYG(dif)}</span>
+                                  ) : (
+                                    <span className="text-amber-500 font-bold">Sobrante +{formatPYG(dif)}</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                {r.estado === "presentada" && (
+                                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800 inline-flex items-center gap-1">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                                    Pendiente Auditoría
+                                  </span>
+                                )}
+                                {(r.estado === "en_auditoria" || r.estado === "en_revision") && (
+                                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                    En Auditoría
+                                  </span>
+                                )}
+                                {r.estado === "aprobada" && (
+                                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                    Aprobada p/ Reponer
+                                  </span>
+                                )}
+                                {(r.estado === "repuesta" || r.estado === "pagada") && (
+                                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 inline-flex items-center gap-1">
+                                    <Check className="w-3 h-3" /> Repuesta / Cerrada
+                                  </span>
+                                )}
+                                {r.estado === "rechazada" && (
+                                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                                    Rechazada
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    onClick={() => setSelectedRendicionForAuditId(r.id)}
+                                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1 transition-colors shadow-sm"
+                                    title="Auditar ítem por ítem o reponer fondos"
+                                  >
+                                    <FileCheck className="w-3.5 h-3.5" />
+                                    {r.estado === "repuesta" || r.estado === "pagada" ? "Ver Expediente" : "Auditar"}
+                                  </button>
+                                  <button
+                                    onClick={() => api.expenses.rendiciones.downloadPdf(r.id, r.numero_rendicion)}
+                                    className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                                    title="Descargar Acta Oficial en PDF con firmas institucionales"
+                                  >
+                                    <Download className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -2038,10 +2368,10 @@ export default function ExpensesPage() {
       {/* MODAL: REGISTRAR GASTO */}
       {showForm && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-5 animate-in fade-in zoom-in-95 my-8">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-5 animate-in fade-in zoom-in-95 my-8">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <ReceiptIcon className="w-5 h-5 text-indigo-600" /> Registrar Comprobante de Gasto
+                <ReceiptIcon className="w-5 h-5 text-indigo-600" /> Registrar Comprobante de Gasto / Inversión
               </h3>
               <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-gray-600">
                 <XCircle className="w-5 h-5" />
@@ -2055,9 +2385,16 @@ export default function ExpensesPage() {
                   <select
                     className="input-field w-full text-xs"
                     value={form.fund_id}
-                    onChange={e => setForm({ ...form, fund_id: e.target.value })}
+                    onChange={e => {
+                      const selFund = funds.find(f => f.id === e.target.value)
+                      setForm({
+                        ...form,
+                        fund_id: e.target.value,
+                        cost_center_id: selFund?.cost_center_id || form.cost_center_id
+                      })
+                    }}
                   >
-                    <option value="">Sin Fondo Fijo (Gasto General)</option>
+                    <option value="">Sin Fondo Fijo (Gasto Directo General)</option>
                     {funds.map(f => (
                       <option key={f.id} value={f.id}>
                         {f.nombre} (Disp: {formatPYG(f.saldo_actual)})
@@ -2067,7 +2404,7 @@ export default function ExpensesPage() {
                 </div>
 
                 <div>
-                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Monto Total (PYG) *</label>
+                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Monto Total a Pagar (PYG) *</label>
                   <input
                     type="number"
                     step="any"
@@ -2075,7 +2412,10 @@ export default function ExpensesPage() {
                     placeholder="ej: 150000"
                     className="input-field w-full text-xs font-mono font-bold"
                     value={form.monto}
-                    onChange={e => setForm({ ...form, monto: e.target.value })}
+                    onChange={e => {
+                      const val = e.target.value
+                      setForm({ ...form, monto: val })
+                    }}
                   />
                 </div>
               </div>
@@ -2094,7 +2434,7 @@ export default function ExpensesPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Categoría</label>
+                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Categoría de Gasto</label>
                   <select
                     className="input-field w-full text-xs"
                     value={form.category_id}
@@ -2108,7 +2448,7 @@ export default function ExpensesPage() {
                 </div>
 
                 <div>
-                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Centro de Costo / Sector</label>
+                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Centro de Costo / Sector Imputado</label>
                   <select
                     className="input-field w-full text-xs"
                     value={form.cost_center_id}
@@ -2122,27 +2462,237 @@ export default function ExpensesPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Proveedor / Beneficiario</label>
+              {/* DATOS FISCALES DEL COMPROBANTE */}
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 dark:text-slate-200 text-xs flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-indigo-600" />
+                    Datos Fiscales del Comprobante (SET / DNIT)
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const m = Number(form.monto) || 0
+                        setForm({ ...form, iva_10: m > 0 ? String(Math.round(m / 11)) : "", iva_5: "", exentas: "" })
+                      }}
+                      className="px-2 py-0.5 rounded bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-[10px] font-bold"
+                    >
+                      Calcular IVA 10%
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const m = Number(form.monto) || 0
+                        setForm({ ...form, iva_5: m > 0 ? String(Math.round(m / 21)) : "", iva_10: "", exentas: "" })
+                      }}
+                      className="px-2 py-0.5 rounded bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-[10px] font-bold"
+                    >
+                      Calcular IVA 5%
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const m = Number(form.monto) || 0
+                        setForm({ ...form, exentas: m > 0 ? String(m) : "", iva_10: "", iva_5: "" })
+                      }}
+                      className="px-2 py-0.5 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-bold"
+                    >
+                      Exenta
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">Tipo de Comprobante</label>
+                    <select
+                      className="input-field w-full text-xs"
+                      value={form.tipo_comprobante}
+                      onChange={e => setForm({ ...form, tipo_comprobante: e.target.value })}
+                    >
+                      <option value="factura_contado">Factura Contado</option>
+                      <option value="factura_credito">Factura Crédito</option>
+                      <option value="autofactura">Autofactura</option>
+                      <option value="boleta_resguardo">Boleta de Resguardo</option>
+                      <option value="recibo_dinero">Recibo de Dinero</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">RUC Proveedor (con DV)</label>
+                    <input
+                      type="text"
+                      placeholder="ej: 80012345-6"
+                      className="input-field w-full text-xs font-mono"
+                      value={form.ruc}
+                      onChange={e => setForm({ ...form, ruc: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">Proveedor / Beneficiario</label>
+                    <input
+                      type="text"
+                      placeholder="ej: Plásticos del Este S.A."
+                      className="input-field w-full text-xs"
+                      value={form.proveedor}
+                      onChange={e => setForm({ ...form, proveedor: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">Timbrado Fiscal</label>
+                    <input
+                      type="text"
+                      maxLength={8}
+                      placeholder="ej: 12345678"
+                      className="input-field w-full text-xs font-mono"
+                      value={form.timbrado}
+                      onChange={e => setForm({ ...form, timbrado: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">N° Factura / Comprobante</label>
+                    <input
+                      type="text"
+                      placeholder="ej: 001-001-0012345"
+                      className="input-field w-full text-xs font-mono"
+                      value={form.numero_factura}
+                      onChange={e => setForm({ ...form, numero_factura: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">Fecha Emisión</label>
+                    <input
+                      type="date"
+                      className="input-field w-full text-xs font-mono"
+                      value={form.fecha_gasto}
+                      onChange={e => setForm({ ...form, fecha_gasto: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">IVA 10% (PYG)</label>
+                    <input
+                      type="number"
+                      placeholder="ej: 13636"
+                      className="input-field w-full text-xs font-mono text-emerald-600 font-bold"
+                      value={form.iva_10}
+                      onChange={e => setForm({ ...form, iva_10: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">IVA 5% (PYG)</label>
+                    <input
+                      type="number"
+                      placeholder="ej: 0"
+                      className="input-field w-full text-xs font-mono text-teal-600 font-bold"
+                      value={form.iva_5}
+                      onChange={e => setForm({ ...form, iva_5: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">Exentas (PYG)</label>
+                    <input
+                      type="number"
+                      placeholder="ej: 0"
+                      className="input-field w-full text-xs font-mono"
+                      value={form.exentas}
+                      onChange={e => setForm({ ...form, exentas: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* CLASIFICACIÓN CONTABLE: GASTO VS INVERSIÓN (ACTIVO FIJO) */}
+              <div className="p-3.5 rounded-xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                    <div>
+                      <span className="font-bold text-purple-900 dark:text-purple-300 text-xs block">
+                        Clasificación Contable: ¿Es Inversión / Activo Fijo?
+                      </span>
+                      <span className="text-[10px] text-purple-700 dark:text-purple-400">
+                        Marcar si se adquiere un bien de uso que se amortizará en varios meses (ej: maquinarias, computadoras, estanterías).
+                      </span>
+                    </div>
+                  </div>
                   <input
-                    type="text"
-                    placeholder="ej: Plásticos del Este S.A."
-                    className="input-field w-full text-xs"
-                    value={form.proveedor}
-                    onChange={e => setForm({ ...form, proveedor: e.target.value })}
+                    type="checkbox"
+                    id="es_inversion_chk"
+                    className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
+                    checked={form.es_inversion}
+                    onChange={e => setForm({ ...form, es_inversion: e.target.checked })}
                   />
                 </div>
 
-                <div>
-                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Fecha del Comprobante</label>
-                  <input
-                    type="date"
-                    className="input-field w-full text-xs font-mono"
-                    value={form.fecha_gasto}
-                    onChange={e => setForm({ ...form, fecha_gasto: e.target.value })}
-                  />
-                </div>
+                {form.es_inversion && (
+                  <div className="space-y-2.5 pt-2 border-t border-purple-200/60 dark:border-purple-800/60 animate-in fade-in">
+                    <p className="text-[10px] text-purple-800 dark:text-purple-300 bg-purple-100/60 dark:bg-purple-900/40 p-2 rounded-lg font-medium">
+                      ✓ Al aprobarse y reponerse esta rendición, el sistema dará de alta automáticamente este ítem en el módulo contable de <strong>Activos Fijos (Cta 1.2.01 Bienes de Uso)</strong> para su amortización acumulada.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-[11px] font-bold text-purple-900 dark:text-purple-300 block mb-1">Nombre del Activo Fijo *</label>
+                        <input
+                          type="text"
+                          required={form.es_inversion}
+                          placeholder="ej: Cortadora de Fiambre Marani 300mm"
+                          className="input-field w-full text-xs"
+                          value={form.asset_nombre}
+                          onChange={e => setForm({ ...form, asset_nombre: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-purple-900 dark:text-purple-300 block mb-1">Código Interno / Placa (Opcional)</label>
+                        <input
+                          type="text"
+                          placeholder="ej: AF-PAN-004"
+                          className="input-field w-full text-xs font-mono"
+                          value={form.asset_codigo_interno}
+                          onChange={e => setForm({ ...form, asset_codigo_interno: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-[11px] font-bold text-purple-900 dark:text-purple-300 block mb-1">Categoría del Bien</label>
+                        <select
+                          className="input-field w-full text-xs"
+                          value={form.asset_categoria}
+                          onChange={e => {
+                            const cat = e.target.value
+                            let vida = 60
+                            if (cat === "maquinarias_equipos" || cat === "muebles_equipos" || cat === "instalaciones") vida = 120
+                            if (cat === "equipos_informatica") vida = 48
+                            if (cat === "vehiculos") vida = 60
+                            setForm({ ...form, asset_categoria: cat, asset_vida_util_meses: vida })
+                          }}
+                        >
+                          <option value="maquinarias_equipos">Maquinarias y Equipos (10 años / 120m)</option>
+                          <option value="muebles_equipos">Muebles y Útiles (10 años / 120m)</option>
+                          <option value="equipos_informatica">Equipos de Informática (4 años / 48m)</option>
+                          <option value="vehiculos">Vehículos y Rodados (5 años / 60m)</option>
+                          <option value="instalaciones">Instalaciones y Mejoras (10 años / 120m)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-purple-900 dark:text-purple-300 block mb-1">Vida Útil Estimada (Meses)</label>
+                        <input
+                          type="number"
+                          placeholder="ej: 60"
+                          className="input-field w-full text-xs font-mono font-bold"
+                          value={form.asset_vida_util_meses}
+                          onChange={e => setForm({ ...form, asset_vida_util_meses: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Adjuntar Comprobante Físico */}
@@ -2183,11 +2733,11 @@ export default function ExpensesPage() {
 
       {/* MODAL: NUEVO FONDO FIJO */}
       {showFundForm && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-4 my-8">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
               <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <PiggyBank className="w-5 h-5 text-indigo-600" /> Crear Caja Chica / Fondo Fijo
+                <PiggyBank className="w-5 h-5 text-indigo-600" /> Crear Fondo Fijo / Caja Chica Descentralizada
               </h3>
               <button onClick={() => setShowFundForm(false)} className="text-gray-400 hover:text-gray-600">
                 <XCircle className="w-5 h-5" />
@@ -2196,7 +2746,7 @@ export default function ExpensesPage() {
 
             <form onSubmit={handleCreateFund} className="space-y-4 text-xs">
               <div>
-                <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Nombre de la Caja *</label>
+                <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Nombre de la Caja / Fondo *</label>
                 <input
                   type="text"
                   required
@@ -2207,16 +2757,127 @@ export default function ExpensesPage() {
                 />
               </div>
 
-              <div>
-                <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Monto Autorizado (PYG) *</label>
-                <input
-                  type="number"
-                  required
-                  placeholder="ej: 1000000"
-                  className="input-field w-full text-xs font-mono font-bold"
-                  value={fundForm.monto_autorizado}
-                  onChange={e => setFundForm({ ...fundForm, monto_autorizado: e.target.value })}
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Monto Autorizado (PYG) *</label>
+                  <input
+                    type="number"
+                    required
+                    placeholder="ej: 1000000"
+                    className="input-field w-full text-xs font-mono font-bold"
+                    value={fundForm.monto_autorizado}
+                    onChange={e => setFundForm({ ...fundForm, monto_autorizado: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Límite Máximo por Gasto (PYG)</label>
+                  <input
+                    type="number"
+                    placeholder="ej: 200000"
+                    className="input-field w-full text-xs font-mono"
+                    value={fundForm.monto_maximo_por_gasto}
+                    onChange={e => setFundForm({ ...fundForm, monto_maximo_por_gasto: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Centro de Costo / Sector Asignado</label>
+                  <select
+                    className="input-field w-full text-xs"
+                    value={fundForm.cost_center_id}
+                    onChange={e => setFundForm({ ...fundForm, cost_center_id: e.target.value })}
+                  >
+                    <option value="">Sin sector específico (Global)</option>
+                    {costCenters.map(cc => (
+                      <option key={cc.id} value={cc.id}>{cc.nombre}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Custodio Responsable (Encargado)</label>
+                  <input
+                    type="text"
+                    placeholder={user?.nombre || "Encargado de sector"}
+                    className="input-field w-full text-xs"
+                    value={fundForm.custodio_id}
+                    onChange={e => setFundForm({ ...fundForm, custodio_id: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              {/* OPCIÓN: DOTACIÓN INICIAL DESDE TESORERÍA */}
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-slate-800 dark:text-slate-200 text-xs block">
+                      Dotación Inicial de Efectivo
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      Desembolsar de inmediato el efectivo a la apertura desde Bóveda Central o Banco.
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    id="dotacion_chk"
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    checked={fundForm.dotacion_inicial}
+                    onChange={e => setFundForm({ ...fundForm, dotacion_inicial: e.target.checked })}
+                  />
+                </div>
+
+                {fundForm.dotacion_inicial && (
+                  <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-700 animate-in fade-in">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">Medio de Desembolso</label>
+                      <select
+                        className="input-field w-full text-xs font-semibold"
+                        value={fundForm.medio_dotacion}
+                        onChange={e => setFundForm({ ...fundForm, medio_dotacion: e.target.value })}
+                      >
+                        <option value="EFECTIVO_BOVEDA">Efectivo Físico desde Bóveda Central (Gaveta)</option>
+                        <option value="DEBITO_BANCARIO">Transferencia / Débito Bancario</option>
+                      </select>
+                    </div>
+
+                    {fundForm.medio_dotacion === "EFECTIVO_BOVEDA" ? (
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">Caja Bóveda de Origen</label>
+                        <select
+                          className="input-field w-full text-xs"
+                          value={fundForm.caja_boveda_id}
+                          onChange={e => setFundForm({ ...fundForm, caja_boveda_id: e.target.value })}
+                        >
+                          <option value="">Bóveda Central por defecto</option>
+                          {cashRegisters.map(cr => (
+                            <option key={cr.id} value={cr.id}>
+                              {cr.nombre || `Caja ${cr.numero_caja}`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">Cuenta Bancaria de Origen</label>
+                        <select
+                          className="input-field w-full text-xs"
+                          value={fundForm.bank_account_id}
+                          onChange={e => setFundForm({ ...fundForm, bank_account_id: e.target.value })}
+                        >
+                          <option value="">Seleccionar cuenta bancaria...</option>
+                          {bankAccounts.map(b => (
+                            <option key={b.id} value={b.id}>
+                              {b.banco || "Banco"} — {b.numero_cuenta} ({formatPYG(b.saldo_actual || 0)})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
@@ -2228,7 +2889,7 @@ export default function ExpensesPage() {
                   Cancelar
                 </button>
                 <button type="submit" className="btn-primary text-xs px-4 py-2">
-                  Crear Fondo
+                  Crear Fondo Fijo
                 </button>
               </div>
             </form>
@@ -2654,6 +3315,33 @@ export default function ExpensesPage() {
           </div>
         </div>
       )}
+
+      {/* MODAL: PRESENTACIÓN DE RENDICIÓN DE CUENTAS (CUSTODIO) */}
+      <RendicionCreateModal
+        isOpen={showCreateRendicionModal}
+        onClose={() => setShowCreateRendicionModal(false)}
+        onSuccess={() => {
+          setShowCreateRendicionModal(false)
+          fetchRendiciones()
+          fetchAll()
+        }}
+        funds={funds}
+        initialFundId={rendicionCreateInitialFundId}
+      />
+
+      {/* MODAL: AUDITORÍA ITEM POR ITEM Y REPOSICIÓN (TESORERÍA) */}
+      <RendicionAuditModal
+        rendicionId={selectedRendicionForAuditId}
+        isOpen={!!selectedRendicionForAuditId}
+        onClose={() => setSelectedRendicionForAuditId(null)}
+        onSuccess={() => {
+          setSelectedRendicionForAuditId(null)
+          fetchRendiciones()
+          fetchAll()
+        }}
+        bankAccounts={bankAccounts}
+        cashRegisters={cashRegisters}
+      />
     </div>
   )
 }

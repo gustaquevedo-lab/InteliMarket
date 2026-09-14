@@ -16,6 +16,8 @@ from api.src.petty_cash.schemas import (
     ExpenseApprovalConfig, ExpenseRejectBody, FundReplenishRequest,
     ExpenseVoidBody, ComprobanteUploadResponse,
     FundCountCreate, FundCountConfirm, PettyCashFundCountResponse,
+    PettyCashRendicionCreate, PettyCashRendicionAuditRequest, PettyCashRendicionReplenishRequest,
+    PettyCashRendicionResponse, PettyCashRendicionDetailResponse,
 )
 
 async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
@@ -113,6 +115,91 @@ async def export_fund_rendicion_pdf_endpoint(
     pdf_bytes = pdf_reports.generate_rendicion_fondo_fijo_pdf(company, data["fund"], data["expenses"], generated_by)
     nombre_limpio = data["fund"]["nombre"].replace(" ", "_").lower()
     return _pdf_response(pdf_bytes, f"acta_rendicion_{nombre_limpio}_{date.today()}.pdf")
+
+
+# ── Rendición de Cuentas y Solicitud de Reposición Formal ──
+
+@funds_router.post("/rendiciones", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def create_rendicion_endpoint(
+    data: PettyCashRendicionCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        return await service.create_rendicion(db, user["company_id"], data, user.get("id"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@funds_router.get("/rendiciones", response_model=list[dict])
+async def list_rendiciones_endpoint(
+    fund_id: Optional[str] = Query(None),
+    estado: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_rendiciones(db, user["company_id"], fund_id=fund_id, estado=estado)
+
+
+@funds_router.get("/rendiciones/{rendicion_id}", response_model=dict)
+async def get_rendicion_detail_endpoint(
+    rendicion_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        return await service.get_rendicion_detail(db, user["company_id"], rendicion_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@funds_router.post("/rendiciones/{rendicion_id}/audit", response_model=dict)
+async def audit_rendicion_endpoint(
+    rendicion_id: str,
+    data: PettyCashRendicionAuditRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        return await service.audit_rendicion(db, user["company_id"], rendicion_id, data, user.get("id"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@funds_router.post("/rendiciones/{rendicion_id}/replenish", response_model=dict)
+async def replenish_rendicion_endpoint(
+    rendicion_id: str,
+    data: PettyCashRendicionReplenishRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        return await service.replenish_rendicion(db, user["company_id"], rendicion_id, data, user.get("id"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@funds_router.get("/rendiciones/{rendicion_id}/export.pdf")
+async def export_rendicion_pdf_endpoint(
+    rendicion_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        data = await service.get_rendicion_pdf_data(db, user["company_id"], rendicion_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    company = await _get_company_info(db, user["company_id"])
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_rendicion_fondo_fijo_pdf(
+        company,
+        data["fund"],
+        data["expenses"],
+        generated_by=generated_by,
+    )
+    nro = data["rendicion"]["numero_rendicion"]
+    return _pdf_response(pdf_bytes, f"expediente_{nro}.pdf")
 
 
 @funds_router.patch("/{fund_id}", response_model=PettyCashFundResponse)
@@ -247,16 +334,24 @@ async def create_cost_center(
 @router.get("", response_model=list[ExpenseResponse])
 async def list_expenses(
     branch_id: Optional[str] = Query(None),
+    fund_id: Optional[str] = Query(None),
+    rendicion_id: Optional[str] = Query(None),
+    sin_rendicion: Optional[bool] = Query(None),
     category_id: Optional[str] = Query(None),
     estado: Optional[str] = Query(None),
     desde: Optional[date] = Query(None),
     hasta: Optional[date] = Query(None),
-    limit: int = Query(50, le=200),
+    limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.list_expenses(db, user["company_id"], branch_id, category_id, estado, desde, hasta, limit, offset)
+    return await service.list_expenses(
+        db, user["company_id"], branch_id=branch_id, fund_id=fund_id,
+        rendicion_id=rendicion_id, sin_rendicion=sin_rendicion,
+        category_id=category_id, estado=estado, desde=desde, hasta=hasta,
+        limit=limit, offset=offset
+    )
 
 
 @router.get("/summary", response_model=ExpenseSummary)

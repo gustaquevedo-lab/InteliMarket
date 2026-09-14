@@ -1026,8 +1026,106 @@ export interface CreditAuthorization { id: string; company_id: string; customer_
 export interface DistribuidoraDashboard { total_clientes: number; clientes_con_credito: number; clientes_bloqueados: number; ventas_mes: number; margen_promedio: number; facturas_vencidas: number; monto_vencido: number; contenedores_en_transito: number; contenedores_en_aduanas: number; productos_bajo_stock: number; visitas_hoy: number; visitas_completadas_hoy: number }
 export interface ExpenseCategory { id: string; nombre: string; descripcion?: string; presupuesto_mensual?: number; activo?: boolean; created_at?: string }
 export interface CostCenter { id: string; nombre: string; tipo: "sector" | "global"; peso_prorateo: number; activo?: boolean; created_at?: string }
-export interface Expense { id: string; company_id?: string; branch_id?: string; fund_id?: string; category_id?: string; cost_center_id?: string; monto: number; descripcion: string; proveedor?: string; comprobante_url?: string; tipo_pago?: string; fecha_gasto?: string; registrado_por?: string; aprobado_por?: string; aprobado_at?: string; rechazado_por?: string; rechazado_at?: string; rechazado_motivo?: string; anulado?: boolean; anulado_por?: string; anulado_at?: string; anulado_motivo?: string; estado?: string; notas?: string; created_at?: string }
-export interface PettyCashFund { id: string; company_id: string; branch_id?: string | null; branch_nombre?: string | null; nombre: string; custodio_id?: string | null; custodio_nombre?: string | null; monto_autorizado: number; saldo_actual: number; activo: boolean; created_at?: string }
+export interface Expense {
+  id: string;
+  company_id?: string;
+  branch_id?: string;
+  fund_id?: string;
+  rendicion_id?: string | null;
+  category_id?: string;
+  cost_center_id?: string;
+  cost_center_nombre?: string;
+  monto: number;
+  descripcion: string;
+  proveedor?: string;
+  comprobante_url?: string;
+  tipo_pago?: string;
+  fecha_gasto?: string;
+  ruc?: string;
+  timbrado?: string;
+  numero_factura?: string;
+  tipo_comprobante?: string;
+  gravado_10?: number;
+  gravado_5?: number;
+  exentas?: number;
+  iva_10?: number;
+  iva_5?: number;
+  es_inversion?: boolean;
+  fixed_asset_id?: string | null;
+  vida_util_meses?: number;
+  categoria_activo?: string;
+  auditoria_estado?: string;
+  auditoria_motivo?: string;
+  registrado_por?: string;
+  aprobado_por?: string;
+  aprobado_at?: string;
+  rechazado_por?: string;
+  rechazado_at?: string;
+  rechazado_motivo?: string;
+  anulado?: boolean;
+  anulado_por?: string;
+  anulado_at?: string;
+  anulado_motivo?: string;
+  estado?: string;
+  notas?: string;
+  created_at?: string;
+}
+export interface PettyCashFund {
+  id: string;
+  company_id: string;
+  branch_id?: string | null;
+  branch_nombre?: string | null;
+  nombre: string;
+  custodio_id?: string | null;
+  custodio_nombre?: string | null;
+  cost_center_id?: string | null;
+  cost_center_nombre?: string | null;
+  monto_autorizado: number;
+  saldo_actual: number;
+  monto_maximo_por_gasto?: number;
+  activo: boolean;
+  created_at?: string;
+}
+export interface PettyCashRendicion {
+  id: string;
+  company_id: string;
+  fund_id: string;
+  fund_nombre?: string;
+  numero_rendicion: string;
+  custodio_id: string;
+  custodio_nombre?: string;
+  presentado_por_nombre?: string;
+  auditado_por_id?: string | null;
+  auditado_por_nombre?: string | null;
+  estado: "borrador" | "presentada" | "en_auditoria" | "en_revision" | "aprobada" | "repuesta" | "pagada" | "rechazada";
+  monto_fondo_autorizado: number;
+  efectivo_remanente_contado: number;
+  total_comprobantes_presentados: number;
+  total_comprobantes_aprobados: number;
+  total_comprobantes_rechazados: number;
+  total_presentado?: number;
+  cantidad_comprobantes?: number;
+  diferencia_arqueo: number;
+  total_gravado_10: number;
+  total_gravado_5: number;
+  total_exentas: number;
+  total_iva_10: number;
+  total_iva_5: number;
+  total_inversion_activos: number;
+  total_gasto_operativo: number;
+  monto_repuesto: number;
+  medio_reposicion?: string | null;
+  caja_boveda_id?: string | null;
+  bank_account_id?: string | null;
+  comprobante_pago_ref?: string | null;
+  asiento_contable_id?: string | null;
+  fecha_presentacion?: string | null;
+  fecha_aprobacion?: string | null;
+  fecha_pago?: string | null;
+  observaciones_custodio?: string | null;
+  observaciones_tesoreria?: string | null;
+  created_at?: string;
+}
 export interface PettyCashFundMovement { id: string; fund_id: string; tipo: string; monto: number; saldo_anterior: number; saldo_nuevo: number; referencia_type?: string | null; referencia_id?: string | null; observaciones?: string | null; created_at?: string }
 export interface PettyCashFundCount { id: string; fund_id: string; contado_por: string; contado_por_nombre?: string | null; saldo_esperado: number; monto_contado: number; diferencia: number; requiere_revision: boolean; estado: string; confirmado_por?: string | null; confirmado_por_nombre?: string | null; fecha_confirmacion?: string | null; ajusto_saldo: boolean; observaciones?: string | null; created_at?: string }
 export interface ExpenseSummary { total_dia: number; total_semana: number; total_mes: number; por_categoria: any[]; por_sucursal: any[]; pendientes_aprobacion: number }
@@ -2655,7 +2753,15 @@ export const api = {
       list: () => client.get<CostCenter[]>("/v1/expenses/cost-centers"),
       create: (data: any) => client.post<CostCenter>("/v1/expenses/cost-centers", data),
     },
-    list: (params?: { branch_id?: string; category_id?: string; estado?: string; desde?: string; hasta?: string; limit?: number; offset?: number }) => client.get<Expense[]>("/v1/expenses", params as any),
+    list: (params?: { branch_id?: string; fund_id?: string; rendicion_id?: string; sin_rendicion?: boolean; category_id?: string; estado?: string; desde?: string; hasta?: string; limit?: number; offset?: number }) => client.get<Expense[]>("/v1/expenses", params as any),
+    rendiciones: {
+      list: (params?: { fund_id?: string; estado?: string }) => client.get<PettyCashRendicion[]>("/v1/petty-cash-funds/rendiciones", params as any),
+      get: (id: string) => client.get<{ rendicion: PettyCashRendicion; expenses: Expense[]; fund: PettyCashFund }>(`/v1/petty-cash-funds/rendiciones/${id}`),
+      create: (data: { fund_id: string; expense_ids: string[]; efectivo_remanente_contado: number; observaciones?: string }) => client.post<{ success: boolean; rendicion_id: string; numero_rendicion: string; total_presentado: number; diferencia_arqueo: number }>("/v1/petty-cash-funds/rendiciones", data),
+      audit: (id: string, data: { items: { expense_id: string; estado: string; motivo?: string }[]; observaciones?: string }) => client.post<{ success: boolean; rendicion_id: string; total_aprobado: number; total_rechazado: number; estado: string }>(`/v1/petty-cash-funds/rendiciones/${id}/audit`, data),
+      replenish: (id: string, data: { medio_reposicion: string; caja_boveda_id?: string; bank_account_id?: string; comprobante_pago_ref?: string; observaciones?: string }) => client.post<{ success: boolean; rendicion_id: string; monto_repuesto: number; medio_reposicion: string; estado: string }>(`/v1/petty-cash-funds/rendiciones/${id}/replenish`, data),
+      downloadPdf: (id: string, nro?: string) => downloadAuthenticated(`/v1/petty-cash-funds/rendiciones/${id}/export.pdf`, {}, `expediente_${nro || id.slice(0, 8)}.pdf`),
+    },
     get: (id: string) => client.get<Expense>(`/v1/expenses/${id}`),
     create: (data: any) => client.post<Expense>("/v1/expenses", data),
     update: (id: string, data: any) => client.put<Expense>(`/v1/expenses/${id}`, data),
@@ -2676,7 +2782,7 @@ export const api = {
     },
     funds: {
       list: (params?: { activo?: boolean }) => client.get<PettyCashFund[]>("/v1/petty-cash-funds", params as any),
-      create: (data: { branch_id?: string; nombre: string; custodio_id?: string; monto_autorizado: number }) => client.post<PettyCashFund>("/v1/petty-cash-funds", data),
+      create: (data: { branch_id?: string; nombre: string; custodio_id?: string; monto_autorizado: number; cost_center_id?: string; monto_maximo_por_gasto?: number; dotacion_inicial?: boolean; medio_dotacion?: string; caja_boveda_id?: string; bank_account_id?: string }) => client.post<PettyCashFund>("/v1/petty-cash-funds", data),
       update: (id: string, data: { nombre?: string; custodio_id?: string; activo?: boolean }) => client.patch<PettyCashFund>(`/v1/petty-cash-funds/${id}`, data),
       movements: (id: string, limit?: number) => client.get<PettyCashFundMovement[]>(`/v1/petty-cash-funds/${id}/movements`, limit ? { limit } : undefined),
       replenish: (id: string, data: { monto: number; bank_account_id?: string; referencia?: string; observaciones?: string }) => client.post<PettyCashFund>(`/v1/petty-cash-funds/${id}/replenish`, data),

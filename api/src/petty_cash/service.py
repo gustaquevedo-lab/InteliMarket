@@ -1,5 +1,6 @@
 from decimal import Decimal
 from datetime import date, datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 import json
 import uuid
@@ -7,17 +8,23 @@ import uuid
 from sqlalchemy import select, text, func as sa_func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.src.petty_cash.models import Expense, ExpenseCategory, CostCenter, PettyCashFund, PettyCashFundMovement, PettyCashFundCount
+from api.src.petty_cash.models import (
+    Expense, ExpenseCategory, CostCenter, PettyCashFund, PettyCashFundMovement,
+    PettyCashFundCount, PettyCashRendicion,
+)
 from api.src.petty_cash.schemas import (
     ExpenseCreate, ExpenseUpdate, ExpenseSummary, CostCenterCreate, PettyCashFundCreate, PettyCashFundUpdate,
     ExpenseApprovalConfig, FundCountCreate, FundCountConfirm,
+    PettyCashRendicionCreate, PettyCashRendicionAuditRequest, PettyCashRendicionReplenishRequest,
 )
+
+TZ_ASUNCION = ZoneInfo("America/Asuncion")
 
 
 async def _get_user_nombre(db: AsyncSession, user_id: str | None) -> str | None:
     if not user_id:
         return None
-    result = await db.execute(text("SELECT nombre FROM users WHERE id = :uid"), {"uid": user_id})
+    result = await db.execute(text("SELECT nombre FROM users WHERE id = :uid"), {"uid": str(user_id)})
     row = result.fetchone()
     return row.nombre if row else None
 
@@ -43,39 +50,42 @@ def save_comprobante(content: bytes, filename: str) -> str:
         raise ValueError("El archivo está vacío")
 
     _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    unique_name = f"{uuid.uuid4()}{ext}"
-    (_UPLOAD_DIR / unique_name).write_bytes(content)
-    return f"/uploads/comprobantes/{unique_name}"
+    unique_name = f"{uuid.uuid4().hex[:12]}_{Path(filename).name}"
+    dest = _UPLOAD_DIR / unique_name
+    dest.write_bytes(content)
+    return f"/static/uploads/comprobantes/{unique_name}"
 
 
-# ── Configuracion de aprobacion (Fase 2) ────────────────────────────────────
-# Umbral por empresa: gastos por debajo se auto-aprueban (no tiene sentido
-# hacer perder tiempo a un Supervisor por una compra de Gs 5.000), por
-# encima quedan pendientes hasta que alguien con rol Supervisor o Gerente
-# los revise de verdad -- a diferencia de antes, donde el boton "Aprobar" no
-# tenia ningun control de rol detras.
+# ── Umbral de aprobacion (Fase 2) ───────────────────────────────────────────
+# Por debajo se auto-aprueba, por encima requiere aprobacion de rol autorizado.
+# Se guarda como JSON en settings_company bajo la key 'petty_cash_approval'.
 
-_APPROVAL_CONFIG_KEY = "gastos_aprobacion"
-_APPROVAL_CONFIG_DEFAULT = {"umbral_aprobacion": 200000, "tolerancia_arqueo": 2000}
+_CONFIG_KEY = "petty_cash_approval"
 
 
 async def get_approval_config(db: AsyncSession, company_id: str) -> ExpenseApprovalConfig:
-    result = await db.execute(text("SELECT config FROM companies WHERE id = :cid"), {"cid": company_id})
+    result = await db.execute(
+        text("SELECT value FROM settings_company WHERE company_id = :cid AND key = :k"),
+        {"cid": company_id, "k": _CONFIG_KEY},
+    )
     row = result.fetchone()
-    config = (row.config or {}) if row else {}
-    stored = config.get(_APPROVAL_CONFIG_KEY, {}) if isinstance(config, dict) else {}
-    merged = {**_APPROVAL_CONFIG_DEFAULT, **stored}
-    return ExpenseApprovalConfig(**merged)
+    if row and row.value:
+        try:
+            return ExpenseApprovalConfig(**json.loads(row.value))
+        except Exception:
+            pass
+    return ExpenseApprovalConfig()
 
 
 async def update_approval_config(db: AsyncSession, company_id: str, data: ExpenseApprovalConfig) -> ExpenseApprovalConfig:
-    result = await db.execute(text("SELECT config FROM companies WHERE id = :cid"), {"cid": company_id})
-    row = result.fetchone()
-    config = dict(row.config or {}) if row and row.config else {}
-    config[_APPROVAL_CONFIG_KEY] = {"umbral_aprobacion": float(data.umbral_aprobacion), "tolerancia_arqueo": float(data.tolerancia_arqueo)}
+    val = json.dumps(data.model_dump(mode="json"))
     await db.execute(
-        text("UPDATE companies SET config = :config WHERE id = :cid"),
-        {"config": json.dumps(config), "cid": company_id},
+        text("""
+            INSERT INTO settings_company (id, company_id, key, value, created_at, updated_at)
+            VALUES (gen_random_uuid(), :cid, :k, :v, now(), now())
+            ON CONFLICT (company_id, key) DO UPDATE SET value = :v, updated_at = now()
+        """),
+        {"cid": company_id, "k": _CONFIG_KEY, "v": val},
     )
     await db.commit()
     return data
@@ -83,26 +93,80 @@ async def update_approval_config(db: AsyncSession, company_id: str, data: Expens
 
 # ── Fondo fijo (Fase 1) ─────────────────────────────────────────────────────
 # El concepto central que faltaba: un monto autorizado por sucursal con un
-# custodio responsable y un saldo real que baja con cada gasto. Antes de esto
-# "caja chica" era solo un log de gastos sin ningun concepto de caja.
+# custodio responsable y un saldo real que baja con cada gasto.
 
 async def create_fund(db: AsyncSession, company_id: str, data: PettyCashFundCreate, user_id: str | None) -> PettyCashFund:
+    cid = uuid.UUID(company_id)
     monto = Decimal(str(data.monto_autorizado))
+    monto_max = Decimal(str(data.monto_maximo_por_gasto or 500000))
+    cc_id = uuid.UUID(data.cost_center_id) if data.cost_center_id else None
+
+    caja_mov_id = None
+    bank_tx_id = None
+    saldo_inicial = monto
+
+    if data.dotacion_inicial:
+        user_nombre = await _get_user_nombre(db, user_id) or "Tesorería"
+        if data.medio_dotacion == "EFECTIVO_BOVEDA" and data.caja_boveda_id:
+            from api.src.caja.models import CashRegisterMovement
+            crm = CashRegisterMovement(
+                company_id=cid,
+                register_id=uuid.UUID(data.caja_boveda_id),
+                tipo="retiro",
+                monto=monto,
+                moneda="PYG",
+                fecha=datetime.now(TZ_ASUNCION),
+                usuario=user_nombre,
+                observaciones=f"Dotación Inicial Fondo Fijo: {data.nombre}",
+            )
+            db.add(crm)
+            await db.flush()
+            caja_mov_id = crm.id
+        elif data.medio_dotacion == "BANCO_TRANSFERENCIA" and data.bank_account_id:
+            from api.src.financial.models import BankAccount, BankTransaction
+            acc_res = await db.execute(select(BankAccount).where(BankAccount.id == uuid.UUID(data.bank_account_id)))
+            acc = acc_res.scalar_one_or_none()
+            if acc:
+                bt = BankTransaction(
+                    company_id=cid,
+                    bank_account_id=acc.id,
+                    fecha=date.today(),
+                    tipo="debito",
+                    monto=monto,
+                    moneda=acc.moneda,
+                    descripcion=f"Dotación Inicial Fondo Fijo: {data.nombre}",
+                    categoria="caja_chica",
+                )
+                db.add(bt)
+                acc.saldo_actual = Decimal(str(acc.saldo_actual)) - monto
+                await db.flush()
+                bank_tx_id = bt.id
+
     fund = PettyCashFund(
-        company_id=uuid.UUID(company_id),
+        company_id=cid,
         branch_id=uuid.UUID(data.branch_id) if data.branch_id else None,
         nombre=data.nombre,
         custodio_id=uuid.UUID(data.custodio_id) if data.custodio_id else None,
+        cost_center_id=cc_id,
         monto_autorizado=monto,
-        saldo_actual=monto,
+        saldo_actual=saldo_inicial,
+        monto_maximo_por_gasto=monto_max,
     )
     db.add(fund)
     await db.flush()
+
     db.add(PettyCashFundMovement(
-        fund_id=fund.id, tipo="apertura", monto=monto, saldo_anterior=Decimal("0"), saldo_nuevo=monto,
-        referencia_type="apertura_fondo", observaciones=f"Apertura del fondo '{data.nombre}'",
+        fund_id=fund.id,
+        tipo="apertura",
+        monto=monto,
+        saldo_anterior=Decimal("0"),
+        saldo_nuevo=fund.saldo_actual,
+        referencia_type="cash_movement" if caja_mov_id else ("bank_transaction" if bank_tx_id else "apertura_fondo"),
+        referencia_id=caja_mov_id or bank_tx_id,
+        observaciones=f"Apertura del fondo '{data.nombre}' (Dotación: {data.medio_dotacion if data.dotacion_inicial else 'Directa'})",
         created_by=uuid.UUID(user_id) if user_id else None,
     ))
+
     await db.commit()
     await db.refresh(fund)
     return fund
@@ -110,10 +174,11 @@ async def create_fund(db: AsyncSession, company_id: str, data: PettyCashFundCrea
 
 async def list_funds(db: AsyncSession, company_id: str, activo: bool | None = None) -> list[dict]:
     query = text("""
-        SELECT f.*, b.nombre AS branch_nombre, u.nombre AS custodio_nombre
+        SELECT f.*, b.nombre AS branch_nombre, u.nombre AS custodio_nombre, cc.nombre AS cost_center_nombre
         FROM petty_cash_funds f
         LEFT JOIN branches b ON b.id = f.branch_id
         LEFT JOIN users u ON u.id = f.custodio_id
+        LEFT JOIN cost_centers cc ON cc.id = f.cost_center_id
         WHERE f.company_id = :cid
     """ + (" AND f.activo = :activo" if activo is not None else "") + " ORDER BY f.created_at DESC")
     params = {"cid": company_id}
@@ -360,6 +425,7 @@ async def _resolve_fund_for_branch(db: AsyncSession, company_id: str, branch_id:
 
 
 async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate, user_id: str) -> Expense:
+    cid = uuid.UUID(company_id)
     fund = None
     if data.fund_id:
         fund = await get_fund(db, data.fund_id)
@@ -376,40 +442,90 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
                 f"(disponible: {fund.saldo_actual:,.0f}, gasto: {monto:,.0f})"
             )
 
-    # Umbral de aprobacion (Fase 2): por debajo se auto-aprueba (no tiene
-    # sentido hacer perder tiempo a un Supervisor por una compra chica), por
-    # encima queda pendiente hasta revision real por rol.
-    approval_config = await get_approval_config(db, company_id)
-    auto_aprobado = monto <= Decimal(str(approval_config.umbral_aprobacion))
+    # 1. Control Antifraude de Duplicados (RUC + Timbrado + Factura)
+    if data.ruc and data.timbrado and data.numero_factura:
+        clean_ruc = data.ruc.strip()
+        clean_timb = data.timbrado.strip()
+        clean_num = data.numero_factura.strip()
+        dup_stmt = select(Expense.id, Expense.descripcion, Expense.fecha_gasto).where(
+            Expense.company_id == cid,
+            Expense.ruc == clean_ruc,
+            Expense.timbrado == clean_timb,
+            Expense.numero_factura == clean_num,
+            Expense.anulado == False,
+        )
+        dup = (await db.execute(dup_stmt)).first()
+        if dup:
+            raise ValueError(
+                f"Factura ya registrada: El comprobante Nro {clean_num} (Timbrado {clean_timb}, RUC {clean_ruc}) "
+                f"ya fue cargado previamente el {dup.fecha_gasto} ('{dup.descripcion}')."
+            )
 
-    notas_val = data.notas
-    if getattr(data, "ruc", None) or getattr(data, "timbrado", None) or getattr(data, "numero_factura", None) or getattr(data, "iva_10", None) or getattr(data, "iva_5", None) or getattr(data, "exentas", None):
-        fiscal_dict = {
-            "ruc": data.ruc,
-            "timbrado": data.timbrado,
-            "numero_factura": data.numero_factura,
-            "iva_10": float(data.iva_10) if data.iva_10 is not None else None,
-            "iva_5": float(data.iva_5) if data.iva_5 is not None else None,
-            "exentas": float(data.exentas) if data.exentas is not None else None,
-            "custom_note": data.notas or "",
-        }
-        notas_val = json.dumps(fiscal_dict)
+    # 2. Desglose Impositivo DNIT / SET (Paraguay)
+    grav_10 = Decimal(str(data.gravado_10 or 0))
+    grav_5 = Decimal(str(data.gravado_5 or 0))
+    exen = Decimal(str(data.exentas or 0))
+    iva_10 = Decimal(str(data.iva_10 or 0))
+    iva_5 = Decimal(str(data.iva_5 or 0))
+
+    if grav_10 == 0 and grav_5 == 0 and exen == 0:
+        tipo_c = (data.tipo_comprobante or "").upper()
+        if tipo_c in ("RECIBO", "BOLETA"):
+            exen = monto
+        else:
+            grav_10 = monto
+            iva_10 = round(grav_10 / Decimal("11"))
+    else:
+        if grav_10 > 0 and iva_10 == 0:
+            iva_10 = round(grav_10 / Decimal("11"))
+        if grav_5 > 0 and iva_5 == 0:
+            iva_5 = round(grav_5 / Decimal("21"))
+
+    # 3. Control de Límite Máximo por Comprobante
+    auditoria_estado = "pendiente"
+    auditoria_motivo = None
+    if fund and fund.monto_maximo_por_gasto and monto > Decimal(str(fund.monto_maximo_por_gasto)):
+        auditoria_estado = "observado"
+        auditoria_motivo = f"Supera el límite autorizado de Gs. {fund.monto_maximo_por_gasto:,.0f} por comprobante de caja chica."
+
+    approval_config = await get_approval_config(db, company_id)
+    auto_aprobado = monto <= Decimal(str(approval_config.umbral_aprobacion)) and auditoria_estado != "observado"
+
+    cost_center_id = None
+    if data.cost_center_id:
+        cost_center_id = uuid.UUID(data.cost_center_id)
+    elif fund and fund.cost_center_id:
+        cost_center_id = fund.cost_center_id
 
     exp = Expense(
-        company_id=uuid.UUID(company_id),
+        company_id=cid,
         branch_id=uuid.UUID(data.branch_id) if data.branch_id else (fund.branch_id if fund else None),
         fund_id=fund.id if fund else None,
         category_id=uuid.UUID(data.category_id) if data.category_id else None,
-        cost_center_id=uuid.UUID(data.cost_center_id) if data.cost_center_id else None,
+        cost_center_id=cost_center_id,
         monto=monto,
         descripcion=data.descripcion,
         proveedor=data.proveedor,
         comprobante_url=data.comprobante_url,
-        tipo_pago=data.tipo_pago,
+        tipo_pago=data.tipo_pago or "efectivo",
         fecha_gasto=data.fecha_gasto or date.today(),
+        ruc=data.ruc.strip() if data.ruc else None,
+        timbrado=data.timbrado.strip() if data.timbrado else None,
+        numero_factura=data.numero_factura.strip() if data.numero_factura else None,
+        tipo_comprobante=data.tipo_comprobante or "FACTURA_CONTADO",
+        gravado_10=grav_10,
+        gravado_5=grav_5,
+        exentas=exen,
+        iva_10=iva_10,
+        iva_5=iva_5,
+        es_inversion=bool(data.es_inversion),
+        vida_util_meses=data.vida_util_meses if data.es_inversion else None,
+        categoria_activo=data.categoria_activo if data.es_inversion else None,
+        auditoria_estado=auditoria_estado,
+        auditoria_motivo=auditoria_motivo,
         registrado_por=uuid.UUID(user_id),
         estado="aprobado" if auto_aprobado else "pendiente",
-        notas=notas_val,
+        notas=data.notas,
     )
     db.add(exp)
     await db.flush()
@@ -435,13 +551,21 @@ async def get_expense(db: AsyncSession, expense_id: str) -> Expense | None:
 
 async def list_expenses(
     db: AsyncSession, company_id: str, branch_id: str | None = None,
+    fund_id: str | None = None, rendicion_id: str | None = None,
+    sin_rendicion: bool | None = None,
     category_id: str | None = None, estado: str | None = None,
     desde: date | None = None, hasta: date | None = None,
-    limit: int = 50, offset: int = 0, incluir_anulados: bool = False,
+    limit: int = 100, offset: int = 0, incluir_anulados: bool = False,
 ) -> list[Expense]:
     query = select(Expense).where(Expense.company_id == uuid.UUID(company_id))
     if not incluir_anulados:
         query = query.where(Expense.anulado == False)
+    if fund_id:
+        query = query.where(Expense.fund_id == uuid.UUID(fund_id))
+    if rendicion_id:
+        query = query.where(Expense.rendicion_id == uuid.UUID(rendicion_id))
+    if sin_rendicion is True:
+        query = query.where(Expense.rendicion_id.is_(None))
     if branch_id:
         query = query.where(Expense.branch_id == uuid.UUID(branch_id))
     if category_id:
@@ -452,7 +576,7 @@ async def list_expenses(
         query = query.where(Expense.fecha_gasto >= desde)
     if hasta:
         query = query.where(Expense.fecha_gasto <= hasta)
-    query = query.order_by(Expense.created_at.desc()).limit(limit).offset(offset)
+    query = query.order_by(Expense.fecha_gasto.desc(), Expense.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     return list(result.scalars().all())
 
@@ -461,6 +585,9 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
     exp = await get_expense(db, expense_id)
     if not exp:
         return None
+
+    if exp.rendicion_id is not None:
+        raise ValueError("Operación denegada: Este comprobante ya está incluido en un expediente de rendición de cuentas.")
 
     update_data = data.model_dump(exclude_unset=True)
     nuevo_monto = update_data.get("monto")
@@ -492,13 +619,9 @@ async def delete_expense(db: AsyncSession, expense_id: str) -> bool:
     if not exp:
         return False
 
-    # Si el gasto habia descontado un fondo, hay que devolver el saldo -- si
-    # no, borrar el gasto deja el fondo con menos plata de la que realmente
-    # tiene disponible. Pero si ya estaba rechazado o anulado, ese reverso ya
-    # paso en reject_expense/void_expense -- reversarlo de nuevo aca
-    # duplicaria el saldo (bug real encontrado y corregido en verificacion
-    # de Fase 4: borrar un gasto ya anulado sumaba el monto dos veces).
-    # (Fase 4 reemplaza este delete fisico por anulacion como via principal.)
+    if exp.rendicion_id is not None:
+        raise ValueError("Operación denegada: Este comprobante ya está incluido en un expediente de rendición de cuentas.")
+
     if exp.fund_id and exp.estado != "rechazado" and not exp.anulado:
         fund = await get_fund(db, str(exp.fund_id))
         if fund:
@@ -586,6 +709,8 @@ async def void_expense(db: AsyncSession, expense_id: str, user_id: str, tenant_i
     exp = await get_expense(db, expense_id)
     if not exp:
         return {"error": "Gasto no encontrado"}
+    if exp.rendicion_id is not None:
+        return {"error": "Operación denegada: Este comprobante ya está incluido en un expediente de rendición de cuentas."}
     if exp.anulado:
         return {"error": "El gasto ya está anulado"}
 
@@ -1142,3 +1267,452 @@ async def get_fund_rendicion_data(db: AsyncSession, company_id: str, fund_id: st
         "fund": fund_dict,
         "expenses": expenses,
     }
+
+
+# ── Rendición de Cuentas y Solicitud de Reposición Formal ───────────────────
+
+async def create_rendicion(db: AsyncSession, company_id: str, data: PettyCashRendicionCreate, user_id: str) -> dict:
+    cid = uuid.UUID(company_id)
+    fid = uuid.UUID(data.fund_id)
+    fund = await get_fund(db, data.fund_id)
+    if not fund or str(fund.company_id) != company_id:
+        raise ValueError("Fondo fijo no encontrado")
+
+    if not data.expense_ids:
+        raise ValueError("Debe incluir al menos un comprobante en la rendición de cuentas")
+
+    expense_uuids = [uuid.UUID(eid) for eid in data.expense_ids]
+    q_exp = select(Expense).where(
+        Expense.id.in_(expense_uuids),
+        Expense.fund_id == fid,
+        Expense.company_id == cid,
+        Expense.anulado == False,
+    )
+    expenses = list((await db.execute(q_exp)).scalars().all())
+    if not expenses:
+        raise ValueError("Ninguno de los comprobantes seleccionados es válido para este fondo")
+
+    for e in expenses:
+        if e.rendicion_id is not None:
+            raise ValueError(f"El comprobante '{e.descripcion}' ya forma parte de otra rendición.")
+
+    now = datetime.now(TZ_ASUNCION)
+    periodo_prefix = f"REND-{now.strftime('%Y%m')}-"
+    cnt_res = await db.execute(
+        select(sa_func.count(PettyCashRendicion.id)).where(
+            PettyCashRendicion.company_id == cid,
+            PettyCashRendicion.numero_rendicion.like(f"{periodo_prefix}%"),
+        )
+    )
+    seq = (cnt_res.scalar_one() or 0) + 1
+    numero_rendicion = f"{periodo_prefix}{seq:04d}"
+
+    tot_presentado = sum(Decimal(str(e.monto)) for e in expenses)
+    tot_g10 = sum(Decimal(str(e.gravado_10 or 0)) for e in expenses)
+    tot_g5 = sum(Decimal(str(e.gravado_5 or 0)) for e in expenses)
+    tot_ex = sum(Decimal(str(e.exentas or 0)) for e in expenses)
+    tot_iva10 = sum(Decimal(str(e.iva_10 or 0)) for e in expenses)
+    tot_iva5 = sum(Decimal(str(e.iva_5 or 0)) for e in expenses)
+    tot_inv = sum(Decimal(str(e.monto)) for e in expenses if e.es_inversion)
+    tot_gas = sum(Decimal(str(e.monto)) for e in expenses if not e.es_inversion)
+
+    efectivo_rem = Decimal(str(data.efectivo_remanente_contado or 0))
+    diferencia = (efectivo_rem + tot_presentado) - Decimal(str(fund.monto_autorizado))
+
+    custodio_nombre = await _get_user_nombre(db, str(fund.custodio_id or user_id)) or "Custodio"
+
+    rendicion = PettyCashRendicion(
+        company_id=cid,
+        fund_id=fid,
+        numero_rendicion=numero_rendicion,
+        custodio_id=fund.custodio_id or uuid.UUID(user_id),
+        custodio_nombre=custodio_nombre,
+        estado="presentada",
+        monto_fondo_autorizado=fund.monto_autorizado,
+        efectivo_remanente_contado=efectivo_rem,
+        total_comprobantes_presentados=tot_presentado,
+        total_comprobantes_aprobados=tot_presentado,
+        total_comprobantes_rechazados=Decimal("0"),
+        diferencia_arqueo=diferencia,
+        total_gravado_10=tot_g10,
+        total_gravado_5=tot_g5,
+        total_exentas=tot_ex,
+        total_iva_10=tot_iva10,
+        total_iva_5=tot_iva5,
+        total_inversion_activos=tot_inv,
+        total_gasto_operativo=tot_gas,
+        fecha_presentacion=now,
+        observaciones_custodio=data.observaciones,
+    )
+    db.add(rendicion)
+    await db.flush()
+
+    for e in expenses:
+        e.rendicion_id = rendicion.id
+        if e.auditoria_estado == "pendiente":
+            e.auditoria_estado = "presentado"
+
+    await db.commit()
+    await db.refresh(rendicion)
+
+    return {
+        "success": True,
+        "rendicion_id": str(rendicion.id),
+        "numero_rendicion": rendicion.numero_rendicion,
+        "total_presentado": float(tot_presentado),
+        "diferencia_arqueo": float(diferencia),
+    }
+
+
+async def list_rendiciones(
+    db: AsyncSession, company_id: str, fund_id: str | None = None, estado: str | None = None
+) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    q = (
+        select(PettyCashRendicion, PettyCashFund.nombre.label("fund_nombre"))
+        .join(PettyCashFund, PettyCashFund.id == PettyCashRendicion.fund_id)
+        .where(PettyCashRendicion.company_id == cid)
+    )
+    if fund_id:
+        q = q.where(PettyCashRendicion.fund_id == uuid.UUID(fund_id))
+    if estado:
+        q = q.where(PettyCashRendicion.estado == estado)
+    q = q.order_by(PettyCashRendicion.created_at.desc())
+
+    rows = (await db.execute(q)).all()
+    out = []
+    for r, f_nom in rows:
+        d = {c.name: getattr(r, c.name) for c in r.__table__.columns}
+        d["fund_nombre"] = f_nom
+        out.append(d)
+    return out
+
+
+async def get_rendicion_detail(db: AsyncSession, company_id: str, rendicion_id: str) -> dict:
+    cid = uuid.UUID(company_id)
+    rid = uuid.UUID(rendicion_id)
+    r_res = await db.execute(
+        select(PettyCashRendicion, PettyCashFund.nombre.label("fund_nombre"))
+        .join(PettyCashFund, PettyCashFund.id == PettyCashRendicion.fund_id)
+        .where(PettyCashRendicion.id == rid, PettyCashRendicion.company_id == cid)
+    )
+    row = r_res.first()
+    if not row:
+        raise ValueError("Expediente de rendición no encontrado")
+    rendicion_obj, fund_nombre = row
+
+    fund_obj = await get_fund(db, str(rendicion_obj.fund_id))
+
+    # Comprobantes asociados
+    q_exp = (
+        select(Expense, CostCenter.nombre.label("cost_center_nombre"))
+        .outerjoin(CostCenter, CostCenter.id == Expense.cost_center_id)
+        .where(Expense.rendicion_id == rid, Expense.company_id == cid)
+        .order_by(Expense.fecha_gasto.asc(), Expense.created_at.asc())
+    )
+    exp_rows = (await db.execute(q_exp)).all()
+
+    expenses = []
+    for e, cc_nom in exp_rows:
+        ed = {c.name: getattr(e, c.name) for c in e.__table__.columns}
+        ed["cost_center_nombre"] = cc_nom
+        expenses.append(ed)
+
+    rend_dict = {c.name: getattr(rendicion_obj, c.name) for c in rendicion_obj.__table__.columns}
+    rend_dict["fund_nombre"] = fund_nombre
+
+    fund_dict = {c.name: getattr(fund_obj, c.name) for c in fund_obj.__table__.columns} if fund_obj else {}
+
+    return {
+        "rendicion": rend_dict,
+        "expenses": expenses,
+        "fund": fund_dict,
+    }
+
+
+async def audit_rendicion(
+    db: AsyncSession, company_id: str, rendicion_id: str, data: PettyCashRendicionAuditRequest, user_id: str
+) -> dict:
+    cid = uuid.UUID(company_id)
+    rid = uuid.UUID(rendicion_id)
+
+    r_res = await db.execute(
+        select(PettyCashRendicion).where(PettyCashRendicion.id == rid, PettyCashRendicion.company_id == cid)
+    )
+    rendicion = r_res.scalar_one_or_none()
+    if not rendicion:
+        raise ValueError("Rendición no encontrada")
+    if rendicion.estado in ("pagada", "anulada"):
+        raise ValueError(f"No se puede auditar una rendición en estado '{rendicion.estado}'")
+
+    auditor_nombre = await _get_user_nombre(db, user_id) or "Auditor Tesorería"
+
+    # Actualizar estado comprobante por comprobante
+    for it in data.items:
+        eid = uuid.UUID(it.expense_id)
+        e_res = await db.execute(
+            select(Expense).where(Expense.id == eid, Expense.rendicion_id == rid, Expense.company_id == cid)
+        )
+        exp = e_res.scalar_one_or_none()
+        if exp:
+            exp.auditoria_estado = it.estado
+            exp.auditoria_motivo = it.motivo
+            if it.estado == "aprobado":
+                exp.estado = "aprobado"
+                exp.aprobado_por = uuid.UUID(user_id)
+                exp.aprobado_at = datetime.now(timezone.utc)
+            elif it.estado == "rechazado":
+                exp.estado = "rechazado"
+                exp.rechazado_por = uuid.UUID(user_id)
+                exp.rechazado_at = datetime.now(timezone.utc)
+                exp.rechazado_motivo = it.motivo
+
+    # Recalcular totales aprobados vs rechazados
+    q_all = select(Expense).where(Expense.rendicion_id == rid, Expense.company_id == cid)
+    all_exp = list((await db.execute(q_all)).scalars().all())
+
+    aprobados = [e for e in all_exp if e.auditoria_estado == "aprobado"]
+    rechazados = [e for e in all_exp if e.auditoria_estado == "rechazado"]
+
+    rendicion.total_comprobantes_aprobados = sum(Decimal(str(e.monto)) for e in aprobados)
+    rendicion.total_comprobantes_rechazados = sum(Decimal(str(e.monto)) for e in rechazados)
+    rendicion.total_gravado_10 = sum(Decimal(str(e.gravado_10 or 0)) for e in aprobados)
+    rendicion.total_gravado_5 = sum(Decimal(str(e.gravado_5 or 0)) for e in aprobados)
+    rendicion.total_exentas = sum(Decimal(str(e.exentas or 0)) for e in aprobados)
+    rendicion.total_iva_10 = sum(Decimal(str(e.iva_10 or 0)) for e in aprobados)
+    rendicion.total_iva_5 = sum(Decimal(str(e.iva_5 or 0)) for e in aprobados)
+    rendicion.total_inversion_activos = sum(Decimal(str(e.monto)) for e in aprobados if e.es_inversion)
+    rendicion.total_gasto_operativo = sum(Decimal(str(e.monto)) for e in aprobados if not e.es_inversion)
+
+    rendicion.auditado_por_id = uuid.UUID(user_id)
+    rendicion.auditado_por_nombre = auditor_nombre
+    rendicion.fecha_aprobacion = datetime.now(TZ_ASUNCION)
+    rendicion.estado = "aprobada"
+    if data.observaciones:
+        rendicion.observaciones_tesoreria = data.observaciones
+
+    await db.commit()
+    await db.refresh(rendicion)
+
+    return {
+        "success": True,
+        "rendicion_id": str(rendicion.id),
+        "total_aprobado": float(rendicion.total_comprobantes_aprobados),
+        "total_rechazado": float(rendicion.total_comprobantes_rechazados),
+        "estado": rendicion.estado,
+    }
+
+
+async def replenish_rendicion(
+    db: AsyncSession, company_id: str, rendicion_id: str, data: PettyCashRendicionReplenishRequest, user_id: str
+) -> dict:
+    cid = uuid.UUID(company_id)
+    rid = uuid.UUID(rendicion_id)
+
+    r_res = await db.execute(
+        select(PettyCashRendicion).where(PettyCashRendicion.id == rid, PettyCashRendicion.company_id == cid)
+    )
+    rendicion = r_res.scalar_one_or_none()
+    if not rendicion:
+        raise ValueError("Rendición no encontrada")
+    if rendicion.estado == "pagada":
+        raise ValueError("Esta rendición ya ha sido repuesta y pagada previamente")
+
+    fund = await get_fund(db, str(rendicion.fund_id))
+    if not fund:
+        raise ValueError("Fondo fijo asociado no encontrado")
+
+    monto_repuesto = Decimal(str(rendicion.total_comprobantes_aprobados))
+    if monto_repuesto <= 0:
+        raise ValueError("No existen comprobantes aprobados para reponer fondos")
+
+    tesorero_nombre = await _get_user_nombre(db, user_id) or "Tesorería"
+    caja_mov_id = None
+    bank_tx_id = None
+
+    # 1. Desembolso desde origen de fondos seleccionado
+    if data.medio_reposicion == "EFECTIVO_BOVEDA":
+        if not data.caja_boveda_id:
+            raise ValueError("Debe seleccionar la Caja Central / Bóveda para el desembolso en efectivo")
+        from api.src.caja.models import CashRegisterMovement
+        crm = CashRegisterMovement(
+            company_id=cid,
+            register_id=uuid.UUID(data.caja_boveda_id),
+            tipo="retiro",
+            monto=monto_repuesto,
+            moneda="PYG",
+            fecha=datetime.now(TZ_ASUNCION),
+            usuario=tesorero_nombre,
+            observaciones=f"Reposición Fondo Fijo '{fund.nombre}' — Rendición {rendicion.numero_rendicion}",
+        )
+        db.add(crm)
+        await db.flush()
+        caja_mov_id = crm.id
+    elif data.medio_reposicion in ("BANCO_TRANSFERENCIA", "CHEQUE"):
+        if not data.bank_account_id:
+            raise ValueError("Debe seleccionar la cuenta bancaria para la reposición")
+        from api.src.financial.models import BankAccount, BankTransaction
+        acc_res = await db.execute(select(BankAccount).where(BankAccount.id == uuid.UUID(data.bank_account_id)))
+        acc = acc_res.scalar_one_or_none()
+        if not acc:
+            raise ValueError("Cuenta bancaria no encontrada")
+        if Decimal(str(acc.saldo_actual)) < monto_repuesto:
+            raise ValueError(f"Saldo bancario insuficiente: disponible Gs. {acc.saldo_actual:,.0f}, requerido Gs. {monto_repuesto:,.0f}")
+
+        bt = BankTransaction(
+            company_id=cid,
+            bank_account_id=acc.id,
+            fecha=date.today(),
+            tipo="debito",
+            monto=monto_repuesto,
+            moneda=acc.moneda,
+            descripcion=f"Reposición Fondo Fijo '{fund.nombre}' — Rendición {rendicion.numero_rendicion}",
+            referencia=data.comprobante_pago_ref,
+            categoria="caja_chica",
+        )
+        db.add(bt)
+        acc.saldo_actual = Decimal(str(acc.saldo_actual)) - monto_repuesto
+        await db.flush()
+        bank_tx_id = bt.id
+
+    # 2. Reconstitución del saldo en el fondo fijo
+    saldo_ant = Decimal(str(fund.saldo_actual))
+    fund.saldo_actual = min(Decimal(str(fund.monto_autorizado)), saldo_ant + monto_repuesto)
+    db.add(PettyCashFundMovement(
+        fund_id=fund.id,
+        tipo="reposicion",
+        monto=monto_repuesto,
+        saldo_anterior=saldo_ant,
+        saldo_nuevo=fund.saldo_actual,
+        referencia_type="rendicion",
+        referencia_id=rendicion.id,
+        observaciones=f"Reposición {data.medio_reposicion} por Rendición {rendicion.numero_rendicion}",
+        created_by=uuid.UUID(user_id),
+    ))
+
+    # 3. Alta Automática en Activos Fijos para Comprobantes Marcados como Inversión
+    q_inv = select(Expense).where(
+        Expense.rendicion_id == rid,
+        Expense.es_inversion == True,
+        Expense.auditoria_estado == "aprobado",
+        Expense.fixed_asset_id.is_(None),
+    )
+    inv_expenses = list((await db.execute(q_inv)).scalars().all())
+    if inv_expenses:
+        from api.src.fixed_assets.models import FixedAsset
+        for ie in inv_expenses:
+            neto_activo = Decimal(str(ie.monto)) - Decimal(str(ie.iva_10 or 0)) - Decimal(str(ie.iva_5 or 0))
+            if neto_activo <= 0:
+                neto_activo = Decimal(str(ie.monto))
+            fa = FixedAsset(
+                company_id=cid,
+                nombre=f"{ie.descripcion} ({ie.proveedor or 'S/P'})",
+                categoria=ie.categoria_activo or "Maquinarias y Equipos",
+                fecha_adquisicion=ie.fecha_gasto or date.today(),
+                valor_adquisicion=neto_activo,
+                valor_residual=Decimal("0"),
+                vida_util_meses=ie.vida_util_meses or 60,
+                estado="activo",
+            )
+            db.add(fa)
+            await db.flush()
+            ie.fixed_asset_id = fa.id
+
+    # 4. Asiento Contable Automático en Contabilidad Integrada
+    asiento_id = None
+    try:
+        from api.src.integrated_finance.service import create_manual_entry
+        from api.src.integrated_finance.schemas import ManualEntryCreate, ManualEntryLine
+        from api.src.integrated_finance.models import AccountPlan
+
+        # Cuentas requeridas en account_plans
+        acc_caja = await db.execute(select(AccountPlan).where(AccountPlan.company_id == cid, AccountPlan.codigo == "1.1.01"))
+        caja_plan = acc_caja.scalar_one_or_none()
+
+        acc_gasto = await db.execute(select(AccountPlan).where(AccountPlan.company_id == cid, AccountPlan.codigo == "6.1.07"))
+        gasto_plan = acc_gasto.scalar_one_or_none()
+
+        acc_iva = await db.execute(select(AccountPlan).where(AccountPlan.company_id == cid, AccountPlan.codigo == "1.1.05"))
+        iva_plan = acc_iva.scalar_one_or_none()
+
+        acc_af = await db.execute(select(AccountPlan).where(AccountPlan.company_id == cid, AccountPlan.codigo.in_(["1.2.01", "1.1.06"])))
+        af_plan = acc_af.scalars().first()
+
+        if caja_plan and gasto_plan and iva_plan:
+            lines = []
+            tot_iva = rendicion.total_iva_10 + rendicion.total_iva_5
+            tot_inv_net = rendicion.total_inversion_activos
+            tot_gas_net = rendicion.total_gasto_operativo
+
+            if tot_gas_net > 0:
+                lines.append(ManualEntryLine(
+                    account_id=str(gasto_plan.id),
+                    tipo="debe",
+                    monto=float(tot_gas_net),
+                    concepto=f"Gastos Operativos Fondo Fijo {fund.nombre}",
+                ))
+
+            if tot_inv_net > 0 and af_plan:
+                lines.append(ManualEntryLine(
+                    account_id=str(af_plan.id),
+                    tipo="debe",
+                    monto=float(tot_inv_net),
+                    concepto=f"Inversión Activo Fijo Fondo Fijo {fund.nombre}",
+                ))
+
+            if tot_iva > 0:
+                lines.append(ManualEntryLine(
+                    account_id=str(iva_plan.id),
+                    tipo="debe",
+                    monto=float(tot_iva),
+                    concepto=f"IVA Crédito Fiscal Rendición {rendicion.numero_rendicion}",
+                ))
+
+            lines.append(ManualEntryLine(
+                account_id=str(caja_plan.id),
+                tipo="haber",
+                monto=float(monto_repuesto),
+                concepto=f"Salida Reposición {rendicion.numero_rendicion}",
+            ))
+
+            entry_payload = ManualEntryCreate(
+                fecha=date.today(),
+                concepto=f"Reposición Fondo Fijo {fund.nombre} — {rendicion.numero_rendicion}",
+                lines=lines,
+            )
+            res_entry = await create_manual_entry(db, company_id, entry_payload, user_id)
+            if "id" in res_entry:
+                asiento_id = uuid.UUID(res_entry["id"])
+    except Exception:
+        pass  # Si la contabilidad no está inicializada para este tenant, continúa sin bloquear
+
+    # 5. Actualizar estado de la Rendición a Pagada
+    rendicion.monto_repuesto = monto_repuesto
+    rendicion.medio_reposicion = data.medio_reposicion
+    rendicion.caja_boveda_id = uuid.UUID(data.caja_boveda_id) if data.caja_boveda_id else None
+    rendicion.cash_movement_id = caja_mov_id
+    rendicion.bank_account_id = uuid.UUID(data.bank_account_id) if data.bank_account_id else None
+    rendicion.bank_transaction_id = bank_tx_id
+    rendicion.comprobante_pago_ref = data.comprobante_pago_ref
+    rendicion.asiento_contable_id = asiento_id
+    rendicion.fecha_pago = datetime.now(TZ_ASUNCION)
+    rendicion.estado = "pagada"
+    if data.observaciones:
+        rendicion.observaciones_tesoreria = (rendicion.observaciones_tesoreria or "") + "\n" + data.observaciones
+
+    await db.commit()
+    await db.refresh(rendicion)
+
+    return {
+        "success": True,
+        "rendicion_id": str(rendicion.id),
+        "monto_repuesto": float(monto_repuesto),
+        "medio_reposicion": rendicion.medio_reposicion,
+        "estado": rendicion.estado,
+    }
+
+
+async def get_rendicion_pdf_data(db: AsyncSession, company_id: str, rendicion_id: str) -> dict:
+    detail = await get_rendicion_detail(db, company_id, rendicion_id)
+    return detail
+
