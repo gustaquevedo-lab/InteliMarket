@@ -1227,7 +1227,7 @@ export default function POSPage() {
       toast.warning("CPF inválido", "El CPF brasileño debe tener exactamente 11 números.")
       return
     }
-    const montoPyg = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const montoPyg = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     if (montoPyg <= 0) {
       toast.warning("Monto inválido", "Ingrese un monto mayor a 0.")
       return
@@ -1324,7 +1324,7 @@ export default function POSPage() {
       toast.warning("Teléfono inválido", "Ingrese un número de teléfono válido para el cliente.")
       return
     }
-    const montoPyg = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const montoPyg = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay_credito")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     if (montoPyg <= 0) {
       toast.warning("Monto inválido", "Ingrese un monto mayor a 0.")
       return
@@ -1560,7 +1560,7 @@ export default function POSPage() {
   }
 
   const handleGenerateBancardCloudQr = async () => {
-    const monto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const monto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     if (monto <= 0) {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
       return
@@ -1706,7 +1706,7 @@ export default function POSPage() {
       toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
       return
     }
-    const montoBancard = isMultiPayment ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const montoBancard = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "bancard")) ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     if (montoBancard <= 0) {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por Bancard antes de continuar.")
       return
@@ -1892,7 +1892,7 @@ export default function POSPage() {
       toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Dinelco para esta caja en \"Configurar Terminales POS\".")
       return
     }
-    const montoDinelco = isMultiPayment ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const montoDinelco = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     if (montoDinelco <= 0) {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por Dinelco antes de continuar.")
       return
@@ -1978,7 +1978,7 @@ export default function POSPage() {
       toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Dinelco para esta caja en \"Configurar Terminales POS\".")
       return
     }
-    const montoQrDinelco = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const montoQrDinelco = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     if (montoQrDinelco <= 0) {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
       return
@@ -2142,7 +2142,7 @@ export default function POSPage() {
       toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
       return
     }
-    const montoQr = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const montoQr = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     if (montoQr <= 0) {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
       return
@@ -6195,19 +6195,19 @@ export default function POSPage() {
       recibido += pyg + brl + usd
     }
     if (activeMethods.has("bancard")) {
-      recibido += isMultiPayment ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "bancard")) ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
       recibido += extraLegsMontoTotal("bancard")
     }
     if (activeMethods.has("dinelco")) {
-      recibido += isMultiPayment ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
       recibido += extraLegsMontoTotal("dinelco")
     }
     if (activeMethods.has("qr")) {
-      recibido += isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
       recibido += extraLegsMontoTotal("qr")
     }
     if (activeMethods.has("plugpay") || activeMethods.has("plugpay_credito")) {
-      recibido += isMultiPayment ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay" || l.method === "plugpay_credito")) ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
       recibido += extraLegsMontoTotal("plugpay") + extraLegsMontoTotal("plugpay_credito")
     }
     if (activeMethods.has("extra_club")) {
@@ -6472,7 +6472,7 @@ export default function POSPage() {
   const handleVerifyPosTerminal = async (metodo: "bancard" | "dinelco") => {
     const procesador = metodo === "bancard" ? "BANCARD" : "DINELCO"
     const montoStr = metodo === "bancard" ? mixedCardPyg : mixedDinelcoPyg
-    const monto = isMultiPayment ? parseInt(montoStr.replace(/\D/g, "") || String(totalPyg), 10) : totalPyg
+    const monto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === metodo)) ? parseInt(montoStr.replace(/\D/g, "") || String(totalPyg), 10) : totalPyg
     setPosVerifyStatus("searching")
     setPosVerifyCandidates([])
     setPosVerifiedTxn(null)
@@ -6691,7 +6691,7 @@ export default function POSPage() {
         let otrosMonto = 0
 
         if (activeMethods.has("bancard")) {
-          cardMonto = isMultiPayment ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          cardMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "bancard")) ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (cardMonto > 0) {
             let fp = "TARJETA_BANCARD"
             if (bancardSubMethod === "debito") fp = "TARJETA DEBITO"
@@ -6707,7 +6707,7 @@ export default function POSPage() {
           }
         }
         if (activeMethods.has("dinelco")) {
-          dinelcoMonto = isMultiPayment ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          dinelcoMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (dinelcoMonto > 0) {
             let fp = "TARJETA_DINELCO"
             if (dinelcoSubMethod === "debito") fp = "TARJETA DEBITO"
@@ -6727,7 +6727,7 @@ export default function POSPage() {
           }
         }
         if (activeMethods.has("plugpay")) {
-          plugpayMonto = isMultiPayment ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
+          plugpayMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay")) ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
           if (plugpayMonto > 0) {
             let fp = plugpaySubMethod === "pix" ? "PIX" : "TARJETA CREDITO"
             out.push({ forma_pago: fp, monto: plugpayMonto, moneda: "PYG" })
@@ -6740,7 +6740,7 @@ export default function POSPage() {
           }
         }
         if (activeMethods.has("qr")) {
-          qrMonto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          qrMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (qrMonto > 0) out.push({ forma_pago: "QR", monto: qrMonto, moneda: "PYG" })
           for (const leg of extraPaymentLegs.filter((l) => l.method === "qr")) {
             const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
@@ -6750,7 +6750,7 @@ export default function POSPage() {
           }
         }
         if (activeMethods.has("plugpay_credito")) {
-          parceladoMonto = isMultiPayment ? parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          parceladoMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay_credito")) ? parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (parceladoMonto > 0) out.push({ forma_pago: "TARJETA CREDITO", monto: parceladoMonto, moneda: "PYG" })
           for (const leg of extraPaymentLegs.filter((l) => l.method === "plugpay_credito")) {
             const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
@@ -10174,8 +10174,8 @@ export default function POSPage() {
                           </div>
                         )}
 
-                        {/* Monto de línea si es pago mixto */}
-                        {isMultiPayment && (
+                        {/* Monto de línea si es pago mixto, o si ya se esta dividiendo entre varias tarjetas del mismo Bancard */}
+                        {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "bancard")) && (
                           <div>
                             <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto Bancard en esta línea (₲):</label>
                             <div className="flex gap-1">
@@ -10319,8 +10319,11 @@ export default function POSPage() {
                           </>
                         )}
 
-                        {/* COBROS ADICIONALES CON TARJETA (2da, 3ra... -- otras cuentas/tarjetas en la misma venta) */}
-                        {isMultiPayment && (bancardSubMethod === "debito" || bancardSubMethod === "credito") && (
+                        {/* COBROS ADICIONALES CON TARJETA (2da, 3ra... -- otras cuentas/tarjetas en la misma venta).
+                            No depende de "Pago mixto": dividir entre 2+ tarjetas del mismo Bancard es un caso
+                            valido incluso con un solo metodo activo -- antes quedaba escondido detras de activar
+                            un segundo metodo distinto (ej. Efectivo) solo para desbloquear este boton. */}
+                        {(bancardSubMethod === "debito" || bancardSubMethod === "credito") && (
                           <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
                             {extraPaymentLegs.filter((l) => l.method === "bancard").map((leg, idx) => (
                               <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
@@ -10414,13 +10417,37 @@ export default function POSPage() {
                               <QrCode className="w-7 h-7 text-purple-600" />
                               <div className="text-left">
                                 <div className="font-bold text-xs text-slate-900 dark:text-white">QR Dinámico Bancard Zimple</div>
-                                {!isMultiPayment && (
+                                {!(isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) && (
                                   <div className="text-xs font-posMono tabular-nums font-black text-purple-600 dark:text-purple-400">
                                     {formatPYG(totalPyg)} (R$ {totalBrl})
                                   </div>
                                 )}
                               </div>
                             </div>
+
+                            {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) && (
+                              <div className="w-full max-w-sm text-left">
+                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto QR en esta línea (₲):</label>
+                                <div className="flex gap-1">
+                                  <input
+                                    type="text"
+                                    value={mixedQrPyg}
+                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                    onFocus={(e) => e.target.select()}
+                                    placeholder="0"
+                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                                  />
+                                  <button
+                                    type="button"
+                                    title="Completar con el resto"
+                                    onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                    className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                                  >
+                                    Resto
+                                  </button>
+                                </div>
+                              </div>
+                            )}
 
                             {bancardQrState !== "aprobada" && (
                               <button
@@ -10519,8 +10546,9 @@ export default function POSPage() {
                               </div>
                             )}
 
-                            {/* COBROS ADICIONALES CON QR ZIMPLE (2do, 3er QR -- otras cuentas/clientes en la misma venta) */}
-                            {isMultiPayment && (
+                            {/* COBROS ADICIONALES CON QR ZIMPLE (2do, 3er QR -- otras cuentas/clientes en la misma venta).
+                                Ya no depende de "Pago mixto": se puede dividir entre 2+ QR del mismo Bancard con un solo metodo activo. */}
+                            {(
                               <div className="w-full max-w-sm pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5 text-left">
                                 {extraPaymentLegs.filter((l) => l.method === "qr").map((leg, idx) => (
                                   <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
@@ -10603,13 +10631,37 @@ export default function POSPage() {
                               <QrCode className="w-7 h-7 text-blue-600" />
                               <div className="text-left">
                                 <div className="font-bold text-xs text-slate-900 dark:text-white">QR Bancard (Pantalla API)</div>
-                                {!isMultiPayment && (
+                                {!(isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) && (
                                   <div className="text-xs font-posMono tabular-nums font-black text-blue-600 dark:text-blue-400">
                                     {formatPYG(totalPyg)}
                                   </div>
                                 )}
                               </div>
                             </div>
+
+                            {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) && (
+                              <div className="w-full max-w-sm text-left">
+                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto QR en esta línea (₲):</label>
+                                <div className="flex gap-1">
+                                  <input
+                                    type="text"
+                                    value={mixedQrPyg}
+                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                    onFocus={(e) => e.target.select()}
+                                    placeholder="0"
+                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
+                                  />
+                                  <button
+                                    type="button"
+                                    title="Completar con el resto"
+                                    onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                    className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                                  >
+                                    Resto
+                                  </button>
+                                </div>
+                              </div>
+                            )}
 
                             {bancardCloudQrState === "idle" && (
                               <button
@@ -10659,8 +10711,9 @@ export default function POSPage() {
                               </div>
                             )}
 
-                            {/* COBROS ADICIONALES CON QR PANTALLA (2do, 3er QR -- otras cuentas/clientes en la misma venta) */}
-                            {isMultiPayment && (
+                            {/* COBROS ADICIONALES CON QR PANTALLA (2do, 3er QR -- otras cuentas/clientes en la misma venta).
+                                Ya no depende de "Pago mixto". */}
+                            {(
                               <div className="w-full max-w-sm pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5 text-left">
                                 {extraPaymentLegs.filter((l) => l.method === "qr").map((leg, idx) => (
                                   <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
@@ -10803,7 +10856,7 @@ export default function POSPage() {
                         )}
 
                         {/* Monto de línea si es pago mixto */}
-                        {isMultiPayment && (
+                        {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) && (
                           <div>
                             <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto Dinelco en esta línea (₲):</label>
                             <div className="flex gap-1">
@@ -10935,8 +10988,9 @@ export default function POSPage() {
                               </div>
                             )}
 
-                            {/* COBROS ADICIONALES CON TARJETA DINELCO (2da, 3ra... -- otras cuentas/tarjetas en la misma venta) */}
-                            {isMultiPayment && (
+                            {/* COBROS ADICIONALES CON TARJETA DINELCO (2da, 3ra... -- otras cuentas/tarjetas en la misma venta).
+                                Ya no depende de "Pago mixto". */}
+                            {(
                               <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
                                 {extraPaymentLegs.filter((l) => l.method === "dinelco" && l.dinelcoOpType !== "qr").map((leg, idx) => (
                                   <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
@@ -11031,13 +11085,37 @@ export default function POSPage() {
                               <QrCode className="w-7 h-7 text-purple-600" />
                               <div className="text-left">
                                 <div className="font-bold text-xs text-slate-900 dark:text-white">Dinelco (Ingenico AXIUM) - {dinelcoSubMethod === "pix" ? "PIX Brasil" : "QR Guaraníes"}</div>
-                                {!isMultiPayment && (
+                                {!(isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) && (
                                   <div className="text-xs font-posMono tabular-nums font-black text-purple-600 dark:text-purple-400">
                                     {formatPYG(totalPyg)}
                                   </div>
                                 )}
                               </div>
                             </div>
+
+                            {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) && (
+                              <div className="w-full max-w-md text-left">
+                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto Dinelco QR/PIX en esta línea (₲):</label>
+                                <div className="flex gap-1">
+                                  <input
+                                    type="text"
+                                    value={mixedQrPyg}
+                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                    onFocus={(e) => e.target.select()}
+                                    placeholder="0"
+                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                                  />
+                                  <button
+                                    type="button"
+                                    title="Completar con el resto"
+                                    onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                    className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                                  >
+                                    Resto
+                                  </button>
+                                </div>
+                              </div>
+                            )}
 
                             {!activePosConfig.dinelcoIp && (
                               <div className="w-full max-w-sm p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
@@ -11095,8 +11173,9 @@ export default function POSPage() {
                               </div>
                             )}
 
-                            {/* COBROS ADICIONALES CON QR/PIX DINELCO (2do, 3er QR -- otras cuentas/clientes en la misma venta) */}
-                            {isMultiPayment && (
+                            {/* COBROS ADICIONALES CON QR/PIX DINELCO (2do, 3er QR -- otras cuentas/clientes en la misma venta).
+                                Ya no depende de "Pago mixto". */}
+                            {(
                               <div className="w-full max-w-md pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5 text-left">
                                 {extraPaymentLegs.filter((l) => l.method === "dinelco" && l.dinelcoOpType === "qr").map((leg, idx) => (
                                   <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
@@ -11217,8 +11296,8 @@ export default function POSPage() {
                           </div>
                         </div>
 
-                        {/* Monto de línea si es pago mixto */}
-                        {isMultiPayment && (
+                        {/* Monto de línea si es pago mixto, o si ya se esta dividiendo entre varios cobros de Plug Pay */}
+                        {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay" || l.method === "plugpay_credito")) && (
                           <div>
                             <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto Plug Pay en esta línea (₲):</label>
                             <div className="flex gap-1">
@@ -11357,8 +11436,9 @@ export default function POSPage() {
                               </div>
                             )}
 
-                            {/* COBROS ADICIONALES CON PIX (2do, 3er PIX -- otras cuentas/clientes en la misma venta) */}
-                            {isMultiPayment && (
+                            {/* COBROS ADICIONALES CON PIX (2do, 3er PIX -- otras cuentas/clientes en la misma venta).
+                                Ya no depende de "Pago mixto". */}
+                            {(
                               <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
                                 {extraPaymentLegs.filter((l) => l.method === "plugpay").map((leg, idx) => (
                                   <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
@@ -11558,8 +11638,9 @@ export default function POSPage() {
                               </div>
                             )}
 
-                            {/* COBROS ADICIONALES CON CRÉDITO PARCELADO (2do, 3er crédito -- otras cuentas/clientes en la misma venta) */}
-                            {isMultiPayment && (
+                            {/* COBROS ADICIONALES CON CRÉDITO PARCELADO (2do, 3er crédito -- otras cuentas/clientes en la misma venta).
+                                Ya no depende de "Pago mixto". */}
+                            {(
                               <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
                                 {extraPaymentLegs.filter((l) => l.method === "plugpay_credito").map((leg, idx) => (
                                   <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
