@@ -8,7 +8,7 @@ import {
   LogOut, Menu, X, Moon, Sun, Monitor, Search, Store, ChevronDown, Building, Scan, QrCode, BookOpen, PiggyBank,
   PieChart, DollarSign, TrendingUp, Bot, Clock, Award, Globe, Repeat, Wrench,
   Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid, Carrot, ChefHat, Radio, Plus, Sparkles, Tag,
-  Ticket
+  Ticket, ArrowLeftRight, ClipboardCheck
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
@@ -78,6 +78,8 @@ const navGroups: NavGroup[] = [
       { icon: Copy, label: "Variantes & Empaques", path: "/variants" },
       { icon: Package, label: "Kits & Combos", path: "/kits" },
       { icon: Warehouse, label: "Depósitos & Stock", path: "/inventory", permission: "inventory:adjust" },
+      { icon: ArrowLeftRight, label: "Transferencias entre Depósitos", path: "/transferencias", permission: "inventory:transfer" },
+      { icon: ClipboardCheck, label: "Conteo Cíclico", path: "/advanced-inventory", permission: "inventory:cycle_count" },
       { icon: AlertTriangle, label: "Mermas (Shrinkage)", path: "/shrinkage" },
     ]
   },
@@ -103,6 +105,7 @@ const navGroups: NavGroup[] = [
     title: "Abastecimiento",
     items: [
       { icon: ShoppingBag, label: "Gestión de Compras", path: "/purchases" },
+      { icon: Truck, label: "Recepción de Mercadería (Muelle)", path: "/deposito", permission: "purchases:receive" },
       { icon: Tags, label: "Etiquetas", path: "/etiquetas" },
       { icon: TrendingUp, label: "Forecast & Reposición", path: "/demand-forecast" },
       { icon: Truck, label: "Recepción Directa DSD", path: "/dsd" },

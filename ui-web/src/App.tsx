@@ -274,7 +274,6 @@ function AppRoutes() {
         {[
           ["dashboard", <DashboardRouter />],
           ["self-checkout", <SelfCheckoutPage />],
-          ["transferencias", <TransferenciasPage />],
           ["boveda", <BovedaPage />],
           ["edge-agent", <EdgeAgentPage />],
           ["sales", <SalesPage />],
@@ -328,6 +327,7 @@ function AppRoutes() {
           <Route key={path as string} path={path as string} element={<Suspense fallback={<PageLoader />}>{el as React.ReactNode}</Suspense>} />
         ))}
         <Route path="inventory" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="inventory:adjust"><InventoryPage /></PermissionRoute></Suspense>} />
+        <Route path="transferencias" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="inventory:transfer"><TransferenciasPage /></PermissionRoute></Suspense>} />
         <Route path="crm" element={<Suspense fallback={<PageLoader />}><PermissionRoute anyPermission={["crm:update", "crm:campaigns"]}><CrmPage /></PermissionRoute></Suspense>} />
         {/* <Route path="pagopar" .../> DESACTIVADO: sin credenciales reales, un typo en enabled_features podia exponer un checkout que parece real y no lo es. Ver auditoria 2026-09-02 */}
         {/* <Route path="kuapay" .../> DESACTIVADO: sin credenciales reales. Ver auditoria 2026-09-02 */}
@@ -344,7 +344,7 @@ function AppRoutes() {
         <Route path="servicios" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="servicios"><ServiciosPage /></FeatureRoute></Suspense>} />
         <Route path="supermer" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><SupermerPage /></FeatureRoute></Suspense>} />
         <Route path="operaciones-salon" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><SalonOperacionesPwaPage /></PermissionRoute></Suspense>} />
-        <Route path="deposito" element={<Suspense fallback={<PageLoader />}><DepositoRecepcionPage /></Suspense>} />
+        <Route path="deposito" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="purchases:receive"><DepositoRecepcionPage /></PermissionRoute></Suspense>} />
         <Route path="desposte" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><CarniceriaDespostePage /></PermissionRoute></Suspense>} />
         <Route path="frescos" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><VerduleriaFrescosPage /></PermissionRoute></Suspense>} />
         <Route path="panaderia-rotiseria" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><PanaderiaRotiseriaPage /></PermissionRoute></Suspense>} />
@@ -354,7 +354,7 @@ function AppRoutes() {
         <Route path="esl" element={<Suspense fallback={<PageLoader />}><EslPage /></Suspense>} />
         <Route path="escalas" element={<Suspense fallback={<PageLoader />}><ScalesPage /></Suspense>} />
         <Route path="distribuidora" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="distribuidora"><DistribuidoraPage /></FeatureRoute></Suspense>} />
-        <Route path="advanced-inventory" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><InventoryAdvancedPage /></FeatureRoute></Suspense>} />
+        <Route path="advanced-inventory" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><PermissionRoute permission="inventory:cycle_count"><InventoryAdvancedPage /></PermissionRoute></FeatureRoute></Suspense>} />
         <Route path="integrated-finance" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="integrated_finance"><IntegratedFinancePage /></FeatureRoute></Suspense>} />
         <Route path="smart-pricing" element={<Navigate to="/price-lists" replace />} />
         <Route path="demand-forecast" element={<Suspense fallback={<PageLoader />}><DemandForecastPage /></Suspense>} />
