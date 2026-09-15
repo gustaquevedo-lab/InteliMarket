@@ -200,7 +200,11 @@ async def save_bot_flow(
 
     t_cfg = dict(tenant.config or {})
     bot_cfg = dict(t_cfg.get("chatbot", {}))
-    bot_cfg["flow"] = body.get("flow") or body
+    flow_data = body.get("flow") or body
+    if isinstance(flow_data, dict):
+        flow_data["active"] = True
+    bot_cfg["flow"] = flow_data
+    bot_cfg["auto_reply"] = True
     t_cfg["chatbot"] = bot_cfg
     tenant.config = t_cfg
     flag_modified(tenant, "config")
@@ -800,17 +804,31 @@ async def evolution_webhook(
 
         # Si el chatbot o respuesta automática está configurada
         try:
-            cfg = await whatsapp_service.get_config(db, tenant.id)
-            if cfg and cfg.auto_reply:
+            t_cfg = (tenant.config or {}) if tenant else {}
+            bot_cfg = t_cfg.get("chatbot", {})
+            flow_cfg = bot_cfg.get("flow") or {}
+
+            # El bot responde si el flujo está activo o auto_reply es True
+            flow_active = flow_cfg.get("active", True)
+            auto_reply_active = bot_cfg.get("auto_reply", True)
+            should_reply = flow_active or auto_reply_active
+
+            if should_reply:
                 from api.src.companies.models import Company
-                from api.src.whatsapp.chatbot import ChatbotEngine, update_conversation_state
+                from api.src.whatsapp.chatbot import ChatbotEngine
                 comp_res = await db.execute(select(Company).where(Company.tenant_id == tenant.id).limit(1))
                 company = comp_res.scalar_one_or_none()
+                if not company:
+                    comp_res = await db.execute(select(Company).limit(1))
+                    company = comp_res.scalar_one_or_none()
+
                 if company:
                     chatbot = ChatbotEngine(db, company.id)
+                    logger.info(f"[Evolution Webhook] Disparando motor de bot para '{clean_phone}' mensaje: '{content}'")
                     resp_data = await chatbot.process_message(conv, content)
                     if resp_data and resp_data.get("text"):
                         resp_type = resp_data.get("type", "message")
+                        logger.info(f"[Evolution Webhook] Despachando respuesta tipo '{resp_type}' a '{clean_phone}'")
                         # Despachar usando botones nativos interactivos, lista desplegable o texto
                         if resp_type == "buttons" and resp_data.get("buttons"):
                             await evolution_client.send_buttons_message(
