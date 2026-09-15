@@ -753,7 +753,14 @@ async def evolution_webhook(
         if not remote_jid or remote_jid.endswith("@g.us") or remote_jid == "status@broadcast":
             return {"status": "ignored", "detail": "Group or broadcast"}
 
-        raw_phone = remote_jid.split("@")[0].split(":")[0]
+        # Soporte para WhatsApp iOS / Moderno que usa identificadores LID (@lid)
+        sender_jid = remote_jid
+        if remote_jid.endswith("@lid"):
+            alt_jid = key.get("remoteJidAlt") or msg_data.get("remoteJidAlt") or key.get("participant")
+            if alt_jid and "@s.whatsapp.net" in str(alt_jid):
+                sender_jid = alt_jid
+
+        raw_phone = sender_jid.split("@")[0].split(":")[0]
         clean_phone = re.sub(r"[^\d+]", "", raw_phone)
         push_name = msg_data.get("pushName") or clean_phone
 
@@ -827,28 +834,8 @@ async def evolution_webhook(
                     logger.info(f"[Evolution Webhook] Disparando motor de bot para '{clean_phone}' mensaje: '{content}'")
                     resp_data = await chatbot.process_message(conv, content)
                     if resp_data and resp_data.get("text"):
-                        resp_type = resp_data.get("type", "message")
-                        logger.info(f"[Evolution Webhook] Despachando respuesta tipo '{resp_type}' a '{clean_phone}'")
-                        # Despachar usando botones nativos interactivos, lista desplegable o texto
-                        if resp_type == "buttons" and resp_data.get("buttons"):
-                            await evolution_client.send_buttons_message(
-                                phone=clean_phone,
-                                text=resp_data["text"],
-                                buttons=resp_data["buttons"],
-                                title=resp_data.get("title", "Extra Supermercado"),
-                                footer=resp_data.get("footer", "Extra Supermercado Mayorista"),
-                            )
-                        elif resp_type == "list" and resp_data.get("sections"):
-                            await evolution_client.send_list_message(
-                                phone=clean_phone,
-                                text=resp_data["text"],
-                                sections=resp_data["sections"],
-                                button_text=resp_data.get("button_text", "Ver Opciones 📋"),
-                                title=resp_data.get("title", "Extra Supermercado"),
-                                footer=resp_data.get("footer", "Extra Supermercado Mayorista"),
-                            )
-                        else:
-                            await evolution_client.send_text_message(clean_phone, resp_data["text"])
+                        logger.info(f"[Evolution Webhook] Despachando mensaje de flujo a '{clean_phone}'")
+                        await evolution_client.send_text_message(clean_phone, resp_data["text"])
 
                         # Registrar mensaje saliente en la conversación del sistema
                         outbound_msg = WhatsAppMessage(

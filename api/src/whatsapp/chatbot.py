@@ -415,8 +415,42 @@ class ChatbotEngine:
         formatted_text = formatted_text.replace("{campana_sorteo}", campana_sorteo)
         formatted_text = formatted_text.replace("{promociones_texto}", promociones_texto)
 
+        # Incorporar opciones de botones y links directamente en el texto
+        lines = [formatted_text]
+        if node.get("buttons"):
+            lines.append("")
+            number_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
+            for idx, b in enumerate(node["buttons"]):
+                em = number_emojis[idx] if idx < len(number_emojis) else f"{idx+1}."
+                b_text = b.get("text") or b.get("displayText") or f"Opción {idx+1}"
+                if b.get("type") == "url" and b.get("url"):
+                    lines.append(f"{em} {b_text} 👉 {b['url']}")
+                else:
+                    lines.append(f"{em} *{b_text}*")
+            lines.append("")
+            lines.append("_Escribí el número o la opción para continuar._")
+
+        elif node.get("sections"):
+            lines.append("")
+            row_num = 1
+            for sec in node["sections"]:
+                if sec.get("title"):
+                    lines.append(f"📌 *{sec['title']}*")
+                for r in sec.get("rows", []):
+                    r_title = r.get("title", f"Opción {row_num}")
+                    r_desc = r.get("description", "")
+                    if r_desc:
+                        lines.append(f"{row_num}️⃣ *{r_title}* — {r_desc}")
+                    else:
+                        lines.append(f"{row_num}️⃣ *{r_title}*")
+                    row_num += 1
+                lines.append("")
+            lines.append("_Escribí el número o la palabra de tu consulta._")
+
+        full_text = "\n".join(lines)
+
         return {
-            "text": formatted_text,
+            "text": full_text,
             "type": node.get("type", "buttons" if node.get("buttons") else "message"),
             "buttons": node.get("buttons", []),
             "sections": node.get("sections", []),
