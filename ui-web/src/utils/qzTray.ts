@@ -164,12 +164,34 @@ export interface QzImagenOptions {
 export async function printImageViaQz({ printerName, imagenBase64, widthMm, heightMm }: QzImagenOptions): Promise<void> {
   const qz = await ensureQzConnected()
   await verificarImpresora(printerName)
-  const config = qz.configs.create(printerName, {
-    size: { width: widthMm, height: heightMm },
-    units: "mm",
-    margins: 0,
-    scaleContent: true,
-    colorType: "color",
-  })
-  await qz.print(config, [{ type: "pixel", format: "image", flavor: "base64", data: imagenBase64 }])
+  const datos = [{ type: "pixel", format: "image", flavor: "base64", data: imagenBase64 }]
+  const horizontal = widthMm > heightMm
+  // Los drivers de tarjetas (ZC300) no aceptan un papel inventado: si se le
+  // pasa 85,6 x 53,98 mm Java lo valida contra el driver, el area imprimible
+  // queda en cero y QZ tira "Paper's imageable width is too small". Se prueba
+  // primero con la tarjeta que ya define el driver, solo girada; si el driver
+  // no trae tamaño propio, con el tamaño en vertical (como lo describe el
+  // driver) y orientacion horizontal.
+  const intentos = [
+    { orientation: horizontal ? "landscape" : "portrait", margins: 0, scaleContent: true, colorType: "color" },
+    {
+      size: { width: Math.min(widthMm, heightMm), height: Math.max(widthMm, heightMm) },
+      units: "mm",
+      orientation: horizontal ? "landscape" : "portrait",
+      margins: 0,
+      scaleContent: true,
+      colorType: "color",
+    },
+  ]
+  let ultimoError: any = null
+  for (const opciones of intentos) {
+    try {
+      await qz.print(qz.configs.create(printerName, opciones), datos)
+      return
+    } catch (e: any) {
+      ultimoError = e
+      if (!/imageable|paper/i.test(String(e?.message || e))) throw e
+    }
+  }
+  throw ultimoError
 }
