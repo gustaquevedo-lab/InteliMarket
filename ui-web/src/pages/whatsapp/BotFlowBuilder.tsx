@@ -4,7 +4,7 @@ import {
   Bot, Plus, Edit, Trash2, Check, ExternalLink, RefreshCw,
   Smartphone, Sparkles, ChevronRight, CheckCircle2, RotateCcw,
   ArrowRight, Search, Zap, Layers, GitBranch, MessageSquare,
-  Globe, PhoneCall, ListFilter, CornerDownRight, X, Play, Send, ShieldCheck
+  Globe, PhoneCall, ListFilter, CornerDownRight, X, Play, Send, ShieldCheck, Power
 } from "lucide-react"
 
 export interface BotButton {
@@ -690,13 +690,35 @@ export default function BotFlowBuilder({ flow, onSave, onSaveFlow, onReset, onRe
             <Plus className="w-3.5 h-3.5" /> Nuevo Bloque
           </button>
 
+          {/* Toggle Activo / Pausado del Flujo */}
+          <button
+            type="button"
+            onClick={() => {
+              if (!localFlow) return
+              const nextActive = !localFlow.active
+              const updated = { ...localFlow, active: nextActive }
+              setLocalFlow(updated)
+              handleSaveTrigger(updated)
+            }}
+            disabled={saving || !localFlow}
+            className={`text-xs px-3.5 py-2 flex items-center gap-1.5 rounded-xl font-black transition-all shadow-sm cursor-pointer ${
+              localFlow?.active
+                ? "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700"
+                : "bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-700 animate-pulse"
+            }`}
+            title="Alternar estado activo/pausado del flujo"
+          >
+            <Power className="w-3.5 h-3.5" />
+            <span>{localFlow?.active ? "Flujo: ACTIVO" : "Flujo: PAUSADO"}</span>
+          </button>
+
           <button
             onClick={() => localFlow && handleSaveTrigger(localFlow)}
             disabled={saving || !localFlow}
             className="btn-primary text-xs px-4 py-2 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold shadow-sm hover:from-emerald-700 hover:to-teal-700"
           >
             {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-            Guardar y Activar Flujo
+            Guardar Cambios
           </button>
         </div>
       </div>

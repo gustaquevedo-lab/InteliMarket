@@ -16,7 +16,7 @@ import {
   Search, Server, User, Clock, ArrowRight, MessageSquare, Terminal,
   Bot, Play, Sparkles, Filter, Radio, ChevronRight, CheckCircle,
   Building, HelpCircle, RotateCcw, Megaphone, BellRing, Users,
-  CheckCheck, AlertTriangle, GitFork, Sliders
+  CheckCheck, AlertTriangle, GitFork, Sliders, Power
 } from "lucide-react"
 import BotFlowBuilder, { type BotFlow } from "./BotFlowBuilder"
 
@@ -91,6 +91,7 @@ export default function WhatsAppPage() {
   const [botFlow, setBotFlow] = useState<BotFlow | null>(null)
   const [loadingFlow, setLoadingFlow] = useState<boolean>(false)
   const [savingFlow, setSavingFlow] = useState<boolean>(false)
+  const [togglingAutoReply, setTogglingAutoReply] = useState<boolean>(false)
 
   // Modales de Reglas de Palabras Clave y Menú Personalizado
   const [showKeywordModal, setShowKeywordModal] = useState<boolean>(false)
@@ -427,6 +428,26 @@ export default function WhatsAppPage() {
   }
 
   // ── Flujo Visual del Chatbot (Evolution Interactive) ──
+  const handleToggleAutoReply = async (newActive: boolean) => {
+    setTogglingAutoReply(true)
+    try {
+      await api.whatsapp.toggleAutoReply(newActive)
+      setChatbotConfig((prev: any) => ({ ...prev, auto_reply: newActive }))
+      if (botFlow) {
+        setBotFlow({ ...botFlow, active: newActive })
+      }
+      if (newActive) {
+        toast.success("Auto-Responder Encendido", "El bot responderá a los mensajes entrantes según el flujo.")
+      } else {
+        toast.info("Auto-Responder Apagado", "El bot está completamente apagado. No enviará respuestas automáticas.")
+      }
+    } catch (e: any) {
+      toast.error("Error", e?.response?.data?.detail || e?.message || "No se pudo cambiar el estado del autorespondedor")
+    } finally {
+      setTogglingAutoReply(false)
+    }
+  }
+
   const fetchBotFlow = async () => {
     setLoadingFlow(true)
     try {
@@ -1611,9 +1632,24 @@ export default function WhatsAppPage() {
               <span className="text-xs text-slate-500 dark:text-slate-400">
                 Instancia: <code className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">extra_supermercado</code>
               </span>
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${chatbotConfig.auto_reply ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" : "bg-amber-100 text-amber-700"}`}>
-                {chatbotConfig.auto_reply ? "● Motor Activo" : "○ En Pausa"}
-              </span>
+              <button
+                type="button"
+                onClick={() => handleToggleAutoReply(!chatbotConfig.auto_reply)}
+                disabled={togglingAutoReply}
+                className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-black transition-all shadow-sm cursor-pointer ${
+                  chatbotConfig.auto_reply
+                    ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/25 ring-2 ring-emerald-400/40"
+                    : "bg-rose-600 hover:bg-rose-700 text-white shadow-rose-500/25 ring-2 ring-rose-400/40 animate-pulse"
+                }`}
+                title={chatbotConfig.auto_reply ? "Hacé clic para apagar el autorespondedor" : "Hacé clic para encender el autorespondedor"}
+              >
+                {togglingAutoReply ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Power className="w-3.5 h-3.5" />
+                )}
+                <span>{chatbotConfig.auto_reply ? "Auto-Responder: ENCENDIDO" : "Auto-Responder: APAGADO"}</span>
+              </button>
             </div>
           </div>
 
@@ -1644,19 +1680,25 @@ export default function WhatsAppPage() {
                   </div>
                 </div>
 
-                {/* Toggle Auto-responder */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Auto-Responder:</span>
-                  <input
-                    type="checkbox"
-                    checked={chatbotConfig.auto_reply}
-                    onChange={(e) => setChatbotConfig({ ...chatbotConfig, auto_reply: e.target.checked })}
-                    className="w-4 h-4 accent-emerald-600 rounded"
-                  />
-                  <span className={`text-xs font-bold ${chatbotConfig.auto_reply ? "text-emerald-600" : "text-slate-400"}`}>
-                    {chatbotConfig.auto_reply ? "Activo" : "Pausado"}
-                  </span>
-                </label>
+                {/* Toggle Auto-responder Inmediato */}
+                <button
+                  type="button"
+                  onClick={() => handleToggleAutoReply(!chatbotConfig.auto_reply)}
+                  disabled={togglingAutoReply}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-black transition cursor-pointer ${
+                    chatbotConfig.auto_reply
+                      ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300"
+                      : "bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-700 text-rose-700 dark:text-rose-300"
+                  }`}
+                  title="Cambiar estado inmediato del autorespondedor"
+                >
+                  {togglingAutoReply ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Power className="w-4 h-4" />
+                  )}
+                  <span>{chatbotConfig.auto_reply ? "Auto-Responder: ACTIVO" : "Auto-Responder: APAGADO"}</span>
+                </button>
               </div>
 
               <div className="space-y-4">

@@ -144,6 +144,36 @@ async def get_chatbot_config(
     return merged
 
 
+@router.post("/toggle-auto-reply")
+async def toggle_auto_reply(
+    body: dict,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Activa o desactiva de inmediato el auto-responder de WhatsApp."""
+    from api.src.tenants.models import Tenant
+    from sqlalchemy.orm.attributes import flag_modified
+    tenant_id = UUID(user["tenant_id"])
+    tenant = await db.get(Tenant, tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+
+    active = bool(body.get("active", False))
+    await whatsapp_service.save_config(db, tenant_id, {"auto_reply": active})
+
+    t_cfg = dict(tenant.config or {})
+    bot_cfg = dict(t_cfg.get("chatbot", {}))
+    bot_cfg["auto_reply"] = active
+    if "flow" in bot_cfg and isinstance(bot_cfg["flow"], dict):
+        bot_cfg["flow"]["active"] = active
+    t_cfg["chatbot"] = bot_cfg
+    tenant.config = t_cfg
+    flag_modified(tenant, "config")
+    await db.commit()
+    logger.info(f"[Chatbot] Auto-responder cambiado a: {active} para tenant {tenant_id}")
+    return {"status": "ok", "auto_reply": active}
+
+
 @router.put("/chatbot-config")
 async def save_chatbot_config(
     body: dict,
@@ -157,10 +187,16 @@ async def save_chatbot_config(
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
 
-    auto_reply = body.get("auto_reply", True)
+    auto_reply = bool(body.get("auto_reply", False))
     await whatsapp_service.save_config(db, tenant_id, {"auto_reply": auto_reply})
 
     t_cfg = dict(tenant.config or {})
+    existing_bot_cfg = dict(t_cfg.get("chatbot", {}))
+    if "flow" in existing_bot_cfg and "flow" not in body:
+        body["flow"] = existing_bot_cfg["flow"]
+    if isinstance(body.get("flow"), dict):
+        body["flow"]["active"] = auto_reply
+
     t_cfg["chatbot"] = body
     tenant.config = t_cfg
     flag_modified(tenant, "config")
@@ -201,10 +237,11 @@ async def save_bot_flow(
     t_cfg = dict(tenant.config or {})
     bot_cfg = dict(t_cfg.get("chatbot", {}))
     flow_data = body.get("flow") or body
-    if isinstance(flow_data, dict):
-        flow_data["active"] = True
+    flow_active = bool(flow_data.get("active", True)) if isinstance(flow_data, dict) else True
     bot_cfg["flow"] = flow_data
-    bot_cfg["auto_reply"] = True
+    bot_cfg["auto_reply"] = flow_active
+    await whatsapp_service.save_config(db, tenant_id, {"auto_reply": flow_active})
+
     t_cfg["chatbot"] = bot_cfg
     tenant.config = t_cfg
     flag_modified(tenant, "config")
@@ -815,12 +852,14 @@ async def evolution_webhook(
             bot_cfg = t_cfg.get("chatbot", {})
             flow_cfg = bot_cfg.get("flow") or {}
 
-            # El bot responde si el flujo está activo o auto_reply es True
+            # El bot responde si auto_reply está activo Y el flujo no está en pausa
             flow_active = flow_cfg.get("active", True)
-            auto_reply_active = bot_cfg.get("auto_reply", True)
-            should_reply = flow_active or auto_reply_active
+            auto_reply_active = bot_cfg.get("auto_reply", False)
+            should_reply = bool(auto_reply_active and flow_active)
 
-            if should_reply:
+            if not should_reply:
+                logger.info(f"[Evolution Webhook] Chatbot en PAUSA para '{clean_phone}'. No se genera respuesta (auto_reply={auto_reply_active}, flow_active={flow_active})")
+            else:
                 from api.src.companies.models import Company
                 from api.src.whatsapp.chatbot import ChatbotEngine
                 comp_res = await db.execute(select(Company).where(Company.tenant_id == tenant.id).limit(1))
