@@ -60,9 +60,14 @@ NO_PELEAR_SEG = 15 * 60
 HORA_RESUMEN = (7, 30)
 
 # (unidad, nivel si está caída, nombre para humanos)
+# "intelimarket-ui" NO va acá: es la unidad vieja del servidor de desarrollo
+# de Vite, deshabilitada a propósito porque nginx sirve la version compilada
+# directo desde /var/www/intelimarket-ui/current. Chequearla por ActiveState
+# generaba una falsa alarma de "Interfaz web detenida" con el sitio
+# funcionando -- el chequeo real y correcto ya existe en chequear_interfaz()
+# (HTTP contra :5173, valida hasta que el bundle sea el publicado).
 SERVICIOS = [
     ("intelimarket-api", "critico", "API (cajas y sistema)"),
-    ("intelimarket-ui", "critico", "Interfaz web"),
     ("nginx", "critico", "Acceso web (nginx)"),
     ("postgresql@18-main", "critico", "Base de datos"),
     ("cron", "critico", "Tareas programadas (respaldos, sincronización)"),
