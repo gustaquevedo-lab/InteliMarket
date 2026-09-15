@@ -272,15 +272,27 @@ async def get_open_session(db: AsyncSession, register_id: str) -> CashSession | 
     sess = result.scalar_one_or_none()
     if not sess:
         return None
-    # Blindaje contra turnos huérfanos de jornadas anteriores (>16h)
+    # Blindaje contra turnos huérfanos de jornadas anteriores:
+    # Si la sesión pertenece a un día calendario anterior en America/Asuncion, o lleva >16h abierta:
     ahora_utc = datetime.now(timezone.utc)
     apertura_utc = sess.fecha_apertura
     if apertura_utc.tzinfo is None:
         apertura_utc = apertura_utc.replace(tzinfo=timezone.utc)
-    if (ahora_utc - apertura_utc) > timedelta(hours=16):
-        sess.estado = "cerrada"
-        sess.fecha_cierre = ahora_utc
-        sess.observaciones = (sess.observaciones or "") + " [Cierre automático por vencimiento (>16h)]"
+    apertura_asuncion = apertura_utc.astimezone(TZ_ASUNCION)
+    hoy_asuncion = datetime.now(TZ_ASUNCION).date()
+
+    if apertura_asuncion.date() < hoy_asuncion or (ahora_utc - apertura_utc) > timedelta(hours=16):
+        sales_cnt = (
+            await db.execute(select(func.count(Sale.id)).where(Sale.session_id == sess.id))
+        ).scalar() or 0
+        if sales_cnt == 0:
+            sess.estado = "sin_movimiento"
+            sess.fecha_cierre = sess.fecha_apertura
+            sess.observaciones = (sess.observaciones or "") + " [Cierre automático: turno anterior sin ventas]"
+        else:
+            sess.estado = "cerrada"
+            sess.fecha_cierre = ahora_utc
+            sess.observaciones = (sess.observaciones or "") + " [Cierre automático por cambio de jornada]"
         await db.commit()
         return None
     return sess
@@ -296,6 +308,7 @@ async def list_sessions(
     fecha_hasta: datetime | None = None,
     limit: int = 50,
     offset: int = 0,
+    incluir_sin_movimiento: bool = False,
 ) -> list[CashSession]:
     # Sin este join+filtro, cualquier usuario autenticado de CUALQUIER
     # empresa podia listar las sesiones de caja de todas las demas (nombre
@@ -311,6 +324,8 @@ async def list_sessions(
         query = query.where(CashSession.user_id == uuid.UUID(user_id))
     if estado:
         query = query.where(CashSession.estado == estado)
+    elif not incluir_sin_movimiento:
+        query = query.where(CashSession.estado != "sin_movimiento")
     if fecha_desde:
         query = query.where(CashSession.fecha_apertura >= fecha_desde)
     if fecha_hasta:
@@ -367,15 +382,26 @@ async def get_active_user_session(db: AsyncSession, user_id: str) -> dict | None
     session_obj = row[0]
 
     # Blindaje contra turnos huérfanos o de jornadas anteriores:
-    # Si la sesión fue abierta hace más de 16 horas, se considera expirada de la jornada anterior.
+    # Si la sesión pertenece a un día calendario anterior en America/Asuncion, o lleva >16h abierta:
     ahora_utc = datetime.now(timezone.utc)
     apertura_utc = session_obj.fecha_apertura
     if apertura_utc.tzinfo is None:
         apertura_utc = apertura_utc.replace(tzinfo=timezone.utc)
-    if (ahora_utc - apertura_utc) > timedelta(hours=16):
-        session_obj.estado = "cerrada"
-        session_obj.fecha_cierre = ahora_utc
-        session_obj.observaciones = (session_obj.observaciones or "") + " [Cierre automático por vencimiento de jornada anterior (>16h)]"
+    apertura_asuncion = apertura_utc.astimezone(TZ_ASUNCION)
+    hoy_asuncion = datetime.now(TZ_ASUNCION).date()
+
+    if apertura_asuncion.date() < hoy_asuncion or (ahora_utc - apertura_utc) > timedelta(hours=16):
+        sales_cnt = (
+            await db.execute(select(func.count(Sale.id)).where(Sale.session_id == session_obj.id))
+        ).scalar() or 0
+        if sales_cnt == 0:
+            session_obj.estado = "sin_movimiento"
+            session_obj.fecha_cierre = session_obj.fecha_apertura
+            session_obj.observaciones = (session_obj.observaciones or "") + " [Cierre automático: turno anterior sin ventas]"
+        else:
+            session_obj.estado = "cerrada"
+            session_obj.fecha_cierre = ahora_utc
+            session_obj.observaciones = (session_obj.observaciones or "") + " [Cierre automático por cambio de jornada]"
         await db.commit()
         return None
 
@@ -1251,11 +1277,31 @@ async def close_session(
     if not session_obj or session_obj.estado not in ("abierta", "pausada"):
         return None
 
+    # Verificar si fue una sesión sin ventas ni movimientos
+    sales_cnt = (
+        await db.execute(select(func.count(Sale.id)).where(Sale.session_id == session_obj.id))
+    ).scalar() or 0
+    drops_cnt = (
+        await db.execute(select(func.count(CashDropRequest.id)).where(CashDropRequest.session_id == session_obj.id))
+    ).scalar() or 0
+
+    is_sin_movimiento = (
+        sales_cnt == 0
+        and drops_cnt == 0
+        and (monto_cierre_real == Decimal("0") or monto_cierre_real is None)
+        and (monto_cierre_usd == Decimal("0") or monto_cierre_usd is None)
+        and (monto_cierre_brl == Decimal("0") or monto_cierre_brl is None)
+    )
+
     # Registrar el cierre
     session_obj.fecha_cierre = datetime.now(timezone.utc)
     session_obj.monto_cierre = monto_cierre_real
     session_obj.observaciones = observaciones
-    session_obj.estado = "cerrada"
+    if is_sin_movimiento:
+        session_obj.estado = "sin_movimiento"
+        session_obj.observaciones = (observaciones or "") + " [Cierre descartado: sin ventas ni movimientos]"
+    else:
+        session_obj.estado = "cerrada"
     await db.flush()
 
     # Conciliación consolidada unificada en Guaraníes
@@ -1302,20 +1348,21 @@ async def close_session(
     await db.flush()
     await db.refresh(count)
 
-    handoff = CashHandoff(
-        company_id=register.company_id if register else None,
-        session_id=session_obj.id,
-        cash_count_id=count.id,
-        entregado_por=session_obj.user_id,
-        entregado_por_nombre=session_obj.cajero_nombre,
-        monto_pyg=monto_cierre_real,
-        monto_usd=monto_cierre_usd,
-        monto_brl=monto_cierre_brl,
-        requiere_revision=requiere_revision,
-        estado="pendiente",
-    )
-    db.add(handoff)
-    await db.flush()
+    if not is_sin_movimiento:
+        handoff = CashHandoff(
+            company_id=register.company_id if register else None,
+            session_id=session_obj.id,
+            cash_count_id=count.id,
+            entregado_por=session_obj.user_id,
+            entregado_por_nombre=session_obj.cajero_nombre,
+            monto_pyg=monto_cierre_real,
+            monto_usd=monto_cierre_usd,
+            monto_brl=monto_cierre_brl,
+            requiere_revision=requiere_revision,
+            estado="pendiente",
+        )
+        db.add(handoff)
+        await db.flush()
     await db.refresh(session_obj)
 
     if requiere_revision and tenant_id:
@@ -1388,6 +1435,7 @@ async def list_sessions_with_totals(
     cajero_nombre: str | None = None,
     user_id: str | None = None,
     search: str | None = None,
+    incluir_sin_movimiento: bool = False,
 ) -> list[dict]:
     """Sesiones con el monto realmente cobrado (ventas confirmadas vinculadas
     a la sesion real) y conciliación consistente."""
@@ -1404,6 +1452,8 @@ async def list_sessions_with_totals(
             query = query.where(CashSession.estado.in_([e.strip() for e in estado.split(",") if e.strip()]))
         else:
             query = query.where(CashSession.estado == estado)
+    elif not incluir_sin_movimiento:
+        query = query.where(CashSession.estado != "sin_movimiento")
     if user_id:
         query = query.where(CashSession.user_id == uuid.UUID(user_id))
     if cajero_nombre:

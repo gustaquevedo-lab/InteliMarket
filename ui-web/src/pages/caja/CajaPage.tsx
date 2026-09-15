@@ -752,15 +752,16 @@ export default function CajaPage() {
 
   const pendingHandoffs = handoffs.filter(h => h.estado === "pendiente")
 
-  const fetchHistorial = async (lim?: number, overrideFilters?: { fecha_desde?: string; fecha_hasta?: string; cajero?: string }) => {
+  const fetchHistorial = async (lim?: number, overrideFilters?: { fecha_desde?: string; fecha_hasta?: string; cajero?: string; estado?: string }) => {
     setHistorialLoading(true)
     const effectiveLimit = lim ?? historialLimit
     const fDesde = overrideFilters && "fecha_desde" in overrideFilters ? overrideFilters.fecha_desde : historialFechaDesde
     const fHasta = overrideFilters && "fecha_hasta" in overrideFilters ? overrideFilters.fecha_hasta : historialFechaHasta
     const cNom = overrideFilters && "cajero" in overrideFilters ? overrideFilters.cajero : historialCajeroFilter
+    const est = overrideFilters && "estado" in overrideFilters ? overrideFilters.estado : historialEstadoFilter
     try {
       const data = await api.caja.sessionsSummary({
-        estado: "cerrada",
+        estado: est === "sin_movimiento" ? "sin_movimiento" : (est === "verificada" ? "verificada" : "cerrada"),
         limit: effectiveLimit,
         fecha_desde: fDesde || undefined,
         fecha_hasta: fHasta || undefined,
@@ -1085,7 +1086,9 @@ export default function CajaPage() {
       matchesFechaHasta = sessionDate ? sessionDate <= historialFechaHasta : true
     }
 
-    const matchesEstado = !historialEstadoFilter || (s.estado || "").toLowerCase() === historialEstadoFilter.toLowerCase()
+    const matchesEstado = !historialEstadoFilter
+      ? s.estado !== "sin_movimiento"
+      : (s.estado || "").toLowerCase() === historialEstadoFilter.toLowerCase()
 
     return matchesSearch && matchesCajero && matchesFechaDesde && matchesFechaHasta && matchesEstado
   })
@@ -1842,12 +1845,17 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
                 <select
                   value={historialEstadoFilter}
-                  onChange={(e) => setHistorialEstadoFilter(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    setHistorialEstadoFilter(val)
+                    fetchHistorial(undefined, { estado: val })
+                  }}
                   className="text-xs font-semibold bg-transparent text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
                 >
                   <option value="" className="dark:bg-slate-800">Todos los estados</option>
                   <option value="verificada" className="dark:bg-slate-800">✓ Verificadas en Bóveda</option>
                   <option value="cerrada" className="dark:bg-slate-800">⏳ Cerradas (Pend. Verif.)</option>
+                  <option value="sin_movimiento" className="dark:bg-slate-800">⚪ Sin Movimiento (Descartadas)</option>
                 </select>
               </div>
 
@@ -1974,6 +1982,10 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             {s.estado === "verificada" ? (
                               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
                                 ✓ Verificada
+                              </span>
+                            ) : s.estado === "sin_movimiento" ? (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-300 dark:border-slate-600" title="Caja descartada sin ventas ni movimientos">
+                                ⚪ Sin Movimiento
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">

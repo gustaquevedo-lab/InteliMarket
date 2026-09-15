@@ -8,8 +8,11 @@ import unicodedata
 from sqlalchemy import select, update, func, cast, Integer, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 import uuid
+
+TZ_ASUNCION = ZoneInfo("America/Asuncion")
 
 from api.src.sales.models import Sale, SaleItem, SalePayment
 from api.src.auth.models import User
@@ -239,13 +242,35 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         active_user_sess = u_sess_res.scalar_one_or_none()
 
     if active_user_sess:
-        effective_session_id = active_user_sess.id
-        # Si estaba pausada, se reactiva automáticamente al registrar venta
-        if active_user_sess.estado == "pausada":
-            active_user_sess.estado = "abierta"
-        # Si la cajera rotó a otra terminal física, sincronizar register_id
-        if reg_id and active_user_sess.register_id != reg_id:
-            active_user_sess.register_id = reg_id
+        # Validar si la sesión activa pertenece a una jornada anterior (America/Asuncion)
+        ap_dt = active_user_sess.fecha_apertura
+        if ap_dt.tzinfo is None:
+            ap_dt = ap_dt.replace(tzinfo=timezone.utc)
+        ap_local = ap_dt.astimezone(TZ_ASUNCION)
+        hoy_local = datetime.now(TZ_ASUNCION).date()
+
+        if ap_local.date() < hoy_local:
+            # La sesión pertenece a un día calendario anterior -> cerrarla y forzar nueva para hoy
+            s_cnt = (await db.execute(select(func.count(Sale.id)).where(Sale.session_id == active_user_sess.id))).scalar() or 0
+            if s_cnt == 0:
+                active_user_sess.estado = "sin_movimiento"
+                active_user_sess.fecha_cierre = active_user_sess.fecha_apertura
+                active_user_sess.observaciones = (active_user_sess.observaciones or "") + " [Cierre automático: jornada anterior sin ventas]"
+            else:
+                active_user_sess.estado = "cerrada"
+                active_user_sess.fecha_cierre = datetime.now(timezone.utc)
+                active_user_sess.observaciones = (active_user_sess.observaciones or "") + " [Cierre automático por cambio de jornada]"
+            await db.flush()
+            active_user_sess = None
+            effective_session_id = None
+        else:
+            effective_session_id = active_user_sess.id
+            # Si estaba pausada, se reactiva automáticamente al registrar venta
+            if active_user_sess.estado == "pausada":
+                active_user_sess.estado = "abierta"
+            # Si la cajera rotó a otra terminal física, sincronizar register_id
+            if reg_id and active_user_sess.register_id != reg_id:
+                active_user_sess.register_id = reg_id
     elif data.session_id:
         # Si no se encontró por user_id, verificar si la sesión enviada existe y está activa
         sess_check = await db.execute(
@@ -258,11 +283,30 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             if data.user_id and sess_row.user_id != data.user_id:
                 effective_session_id = None
             else:
-                effective_session_id = sess_row.id
-                if sess_row.estado == "pausada":
-                    sess_row.estado = "abierta"
-                if reg_id and sess_row.register_id != reg_id:
-                    sess_row.register_id = reg_id
+                ap_dt = sess_row.fecha_apertura
+                if ap_dt.tzinfo is None:
+                    ap_dt = ap_dt.replace(tzinfo=timezone.utc)
+                ap_local = ap_dt.astimezone(TZ_ASUNCION)
+                hoy_local = datetime.now(TZ_ASUNCION).date()
+
+                if ap_local.date() < hoy_local:
+                    s_cnt = (await db.execute(select(func.count(Sale.id)).where(Sale.session_id == sess_row.id))).scalar() or 0
+                    if s_cnt == 0:
+                        sess_row.estado = "sin_movimiento"
+                        sess_row.fecha_cierre = sess_row.fecha_apertura
+                        sess_row.observaciones = (sess_row.observaciones or "") + " [Cierre automático: jornada anterior sin ventas]"
+                    else:
+                        sess_row.estado = "cerrada"
+                        sess_row.fecha_cierre = datetime.now(timezone.utc)
+                        sess_row.observaciones = (sess_row.observaciones or "") + " [Cierre automático por cambio de jornada]"
+                    await db.flush()
+                    effective_session_id = None
+                else:
+                    effective_session_id = sess_row.id
+                    if sess_row.estado == "pausada":
+                        sess_row.estado = "abierta"
+                    if reg_id and sess_row.register_id != reg_id:
+                        sess_row.register_id = reg_id
 
     # Si aún no tiene sesión y tenemos user_id, auto-abrir la sesión de jornada para el cajero
     if not effective_session_id and data.user_id:

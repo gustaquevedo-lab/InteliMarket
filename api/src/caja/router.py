@@ -248,6 +248,7 @@ async def list_sessions_summary(
     user_id: str | None = Query(None),
     cajero_nombre: str | None = Query(None),
     search: str | None = Query(None),
+    incluir_sin_movimiento: bool = Query(False),
     limit: int = Query(50, le=5000),
     offset: int = Query(0, ge=0),
     fecha_desde: str | None = Query(None),
@@ -288,6 +289,7 @@ async def list_sessions_summary(
         cajero_nombre=cajero_nombre,
         user_id=user_id,
         search=search,
+        incluir_sin_movimiento=incluir_sin_movimiento,
     )
 
 
