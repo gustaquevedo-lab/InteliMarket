@@ -81,6 +81,7 @@ export default function CustomersPage() {
     tipo: "cliente",
     condicion_iva: "contribuyente",
     es_agente_retencion: false,
+    regimen_retencion: "general",
     porcentaje_retencion_iva: 30,
     es_convenio: false,
     empresa_vinculada_nombre: "",
@@ -213,6 +214,7 @@ export default function CustomersPage() {
       tipo: "cliente",
       condicion_iva: "contribuyente",
       es_agente_retencion: false,
+      regimen_retencion: "general",
       porcentaje_retencion_iva: 30,
       es_convenio: false,
       empresa_vinculada_nombre: "",
@@ -256,6 +258,7 @@ export default function CustomersPage() {
       tipo: c.tipo || (tieneConvenio ? "funcionario" : "cliente"),
       condicion_iva: c.condicion_iva || "contribuyente",
       es_agente_retencion: Boolean(c.es_agente_retencion),
+      regimen_retencion: c.regimen_retencion || "general",
       porcentaje_retencion_iva: c.porcentaje_retencion_iva != null ? Number(c.porcentaje_retencion_iva) : 30,
       es_convenio: tieneConvenio,
       empresa_vinculada_nombre: empNombre,
@@ -401,6 +404,7 @@ export default function CustomersPage() {
         tipo: form.es_convenio && form.tipo === "cliente" ? "funcionario" : form.tipo,
         condicion_iva: form.condicion_iva,
         es_agente_retencion: Boolean(form.es_agente_retencion),
+        regimen_retencion: form.es_agente_retencion ? (form.regimen_retencion || "general") : "general",
         porcentaje_retencion_iva: Number(form.porcentaje_retencion_iva) || 30.00,
         empresa_vinculada_nombre: form.es_convenio ? form.empresa_vinculada_nombre.trim() : null,
         empresa_vinculada_ruc: form.es_convenio ? (form.empresa_vinculada_ruc.trim() || null) : null,
@@ -722,13 +726,28 @@ export default function CustomersPage() {
                       </div>
                     </td>
                     <td className="p-4">
-                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
-                        (c.tipo_persona || "").toLowerCase() === "fisica"
-                          ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20"
-                          : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20"
-                      }`}>
-                        {c.tipo || c.tipo_persona || "juridica"}
-                      </span>
+                      <div className="space-y-1">
+                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                          (c.tipo_persona || "").toLowerCase() === "fisica"
+                            ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20"
+                            : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20"
+                        }`}>
+                          {c.tipo || c.tipo_persona || "juridica"}
+                        </span>
+                        {c.es_agente_retencion && (
+                          <div>
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase ${
+                              c.regimen_retencion === "agro_exportador"
+                                ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30"
+                                : c.regimen_retencion === "agro_granos"
+                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
+                                : "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30"
+                            }`} title={`Agente Retentor DNIT (${c.porcentaje_retencion_iva || 30}% IVA)`}>
+                              {c.regimen_retencion === "agro_exportador" ? "🌾 Agro 70%" : c.regimen_retencion === "agro_granos" ? "🌱 Agro 10%" : `🏢 Ret. ${c.porcentaje_retencion_iva || 30}%`}
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="p-4 text-slate-500 text-[11px]">
                       <div className="space-y-0.5">
@@ -1044,27 +1063,41 @@ export default function CustomersPage() {
                   </div>
                 </div>
 
-                {/* 🌟 CARD TOGGLE AGENTE DE RETENCIÓN DNIT / SET */}
+                {/* 🌟 CARD TOGGLE AGENTE DE RETENCIÓN DNIT / SET (Incluye Sector Agropecuario Art. 37 Dto 3107/19) */}
                 <div className={`p-4 rounded-2xl border transition-all ${
                   form.es_agente_retencion
-                    ? "bg-gradient-to-br from-indigo-500/15 via-indigo-500/5 to-slate-900/30 border-indigo-500/40 shadow-lg shadow-indigo-500/5"
+                    ? form.regimen_retencion === "agro_exportador"
+                      ? "bg-gradient-to-br from-amber-500/15 via-amber-500/5 to-slate-900/30 border-amber-500/40 shadow-lg shadow-amber-500/5"
+                      : "bg-gradient-to-br from-indigo-500/15 via-indigo-500/5 to-slate-900/30 border-indigo-500/40 shadow-lg shadow-indigo-500/5"
                     : "bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800"
                 }`}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold transition-all ${
                         form.es_agente_retencion
-                          ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                          ? form.regimen_retencion === "agro_exportador"
+                            ? "bg-amber-600 text-white shadow-md shadow-amber-600/30"
+                            : "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
                           : "bg-slate-200 dark:bg-slate-800 text-slate-400"
                       }`}>
-                        <Building2 className="w-5 h-5" />
+                        {form.regimen_retencion === "agro_exportador" || form.regimen_retencion === "agro_granos" ? (
+                          <span className="text-base">🌾</span>
+                        ) : (
+                          <Building2 className="w-5 h-5" />
+                        )}
                       </div>
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <h4 className="font-black text-slate-900 dark:text-white text-sm">¿Cliente es Agente de Retención DNIT?</h4>
                           {form.es_agente_retencion ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-500 text-white">
-                              Agente Retentor Activo
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                              form.regimen_retencion === "agro_exportador"
+                                ? "bg-amber-500 text-slate-950 font-black"
+                                : form.regimen_retencion === "agro_granos"
+                                ? "bg-emerald-500 text-white"
+                                : "bg-indigo-500 text-white"
+                            }`}>
+                              {form.regimen_retencion === "agro_exportador" ? "🌾 Sector Agroexportador (70% IVA)" : form.regimen_retencion === "agro_granos" ? "🌱 Agro Granos (10% IVA)" : "🏢 Agente Retentor Activo"}
                             </span>
                           ) : (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold text-slate-400 bg-slate-200 dark:bg-slate-800">
@@ -1074,7 +1107,7 @@ export default function CustomersPage() {
                         </div>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
                           {form.es_agente_retencion
-                            ? "Cliente designado por DNIT para emitir Retenciones de IVA (Tesakã) en cobros que superen 10 jornales mínimos"
+                            ? "Cliente facultado u obligado a emitir Retenciones de IVA (Tesakã) en cobros que superen 10 jornales mínimos"
                             : "Cliente normal. Cancela facturas en su totalidad sin retención impositiva"}
                         </p>
                       </div>
@@ -1093,27 +1126,96 @@ export default function CustomersPage() {
                   </div>
 
                   {form.es_agente_retencion && (
-                    <div className="mt-3 pt-3 border-t border-indigo-500/20 grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                    <div className="mt-3.5 pt-3.5 border-t border-indigo-500/20 space-y-3">
+                      {/* Selector de Régimen Fiscal / Sector */}
                       <div>
-                        <label className="block font-black uppercase text-[10px] text-indigo-500 dark:text-indigo-400 mb-1">
-                          Porcentaje Retención IVA (%)
+                        <label className="block font-black uppercase text-[10px] text-indigo-600 dark:text-indigo-400 mb-1.5">
+                          Régimen Impositivo del Agente Retentor (DNIT / Paraguay)
                         </label>
-                        <div className="relative">
-                          <input
-                            type="number"
-                            min="1"
-                            max="100"
-                            step="1"
-                            value={form.porcentaje_retencion_iva}
-                            onChange={e => setForm(f => ({ ...f, porcentaje_retencion_iva: Number(e.target.value) || 30 }))}
-                            className="w-full bg-white dark:bg-slate-950 border border-indigo-300 dark:border-indigo-800 rounded-xl px-3.5 py-2 text-xs font-black text-slate-900 dark:text-white"
-                          />
-                          <span className="absolute right-3 top-2 text-xs font-bold text-slate-400">%</span>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setForm(f => ({ ...f, regimen_retencion: "general", porcentaje_retencion_iva: 30 }))}
+                            className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between ${
+                              form.regimen_retencion === "general"
+                                ? "bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/20"
+                                : "bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-indigo-400"
+                            }`}
+                          >
+                            <div className="font-extrabold text-xs flex items-center gap-1.5">
+                              <span>🏢 Régimen General</span>
+                            </div>
+                            <div className={`text-[10px] mt-1 ${form.regimen_retencion === "general" ? "text-indigo-100" : "text-slate-400"}`}>
+                              30% del IVA en compras de bienes y servicios (Art. 44 Dto. 3107/19)
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setForm(f => ({ ...f, regimen_retencion: "agro_exportador", porcentaje_retencion_iva: 70 }))}
+                            className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between ${
+                              form.regimen_retencion === "agro_exportador"
+                                ? "bg-amber-500 text-slate-950 border-amber-500 shadow-md shadow-amber-500/20 font-black"
+                                : "bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-amber-400"
+                            }`}
+                          >
+                            <div className="font-extrabold text-xs flex items-center gap-1.5">
+                              <span>🌾 Sector Agro / Agroexportador</span>
+                            </div>
+                            <div className={`text-[10px] mt-1 ${form.regimen_retencion === "agro_exportador" ? "text-amber-950 font-medium" : "text-slate-400"}`}>
+                              70% del IVA en compras de bienes gravados al 10% (Art. 37 Dto. 3107/19)
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setForm(f => ({ ...f, regimen_retencion: "agro_granos", porcentaje_retencion_iva: 10 }))}
+                            className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between ${
+                              form.regimen_retencion === "agro_granos"
+                                ? "bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-600/20"
+                                : "bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-emerald-400"
+                            }`}
+                          >
+                            <div className="font-extrabold text-xs flex items-center gap-1.5">
+                              <span>🌱 Acopio Granos Estado Natural</span>
+                            </div>
+                            <div className={`text-[10px] mt-1 ${form.regimen_retencion === "agro_granos" ? "text-emerald-100" : "text-slate-400"}`}>
+                              10% del IVA (Soja, maíz, trigo - Art. 90 inc. d Ley 6380)
+                            </div>
+                          </button>
                         </div>
                       </div>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-                        Paraguay SET / DNIT (Ley 6380/19): Estándar <b>30% del IVA</b> (o 100% para exportadores/organismos). En Cuentas por Cobrar se pre-calculará automáticamente al cobrar.
-                      </p>
+
+                      {/* Porcentaje y Nota Explicativa */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center pt-1">
+                        <div>
+                          <label className="block font-black uppercase text-[10px] text-indigo-500 dark:text-indigo-400 mb-1">
+                            Porcentaje Retención IVA (%)
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              min="1"
+                              max="100"
+                              step="1"
+                              value={form.porcentaje_retencion_iva}
+                              onChange={e => setForm(f => ({ ...f, porcentaje_retencion_iva: Number(e.target.value) || 30 }))}
+                              className="w-full bg-white dark:bg-slate-950 border border-indigo-300 dark:border-indigo-800 rounded-xl px-3.5 py-2 text-xs font-black text-slate-900 dark:text-white"
+                            />
+                            <span className="absolute right-3 top-2 text-xs font-bold text-slate-400">%</span>
+                          </div>
+                        </div>
+
+                        <div className="sm:col-span-2 text-[11px] leading-relaxed p-2.5 rounded-xl bg-slate-100 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300">
+                          {form.regimen_retencion === "agro_exportador" ? (
+                            <span>🌾 <b>Regla Agro / Exportadores (Decreto 3107/19 Art. 37 num. 1):</b> Al comprar mercaderías e insumos gravados al 10%, retienen el <b>70% del IVA</b> (siempre que supere 10 jornales = ₲ 1.076.270).</span>
+                          ) : form.regimen_retencion === "agro_granos" ? (
+                            <span>🌱 <b>Regla Productos Agrícolas en Estado Natural (Art. 37 num. 3):</b> Retienen el <b>10% del IVA</b> en compras de granos y oleaginosas sin procesar.</span>
+                          ) : (
+                            <span>🏢 <b>Régimen General DNIT (Art. 44 Dto. 3107/19):</b> Retienen el <b>30% del IVA</b> en compras generales de supermercado que superen 10 jornales mínimos.</span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1747,8 +1849,18 @@ export default function CustomersPage() {
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400">Agente Retención DNIT:</span>
                   {viewingCustomer.es_agente_retencion ? (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
-                      SÍ ({viewingCustomer.porcentaje_retencion_iva || 30}% IVA)
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase border ${
+                      viewingCustomer.regimen_retencion === "agro_exportador"
+                        ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                        : viewingCustomer.regimen_retencion === "agro_granos"
+                        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                        : "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30"
+                    }`}>
+                      {viewingCustomer.regimen_retencion === "agro_exportador"
+                        ? "🌾 AGROEXPORTADOR (70% IVA)"
+                        : viewingCustomer.regimen_retencion === "agro_granos"
+                        ? "🌱 AGRO GRANOS (10% IVA)"
+                        : `SÍ (${viewingCustomer.porcentaje_retencion_iva || 30}% IVA)`}
                     </span>
                   ) : (
                     <span className="text-slate-500 text-xs">No</span>

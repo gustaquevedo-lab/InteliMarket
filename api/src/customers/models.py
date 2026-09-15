@@ -34,6 +34,7 @@ class Customer(Base):
     credito_usado = Column(Numeric(15, 0), default=0, server_default=text("0"))
     pago_default = Column(String(20))
     es_agente_retencion = Column(Boolean, default=False, server_default=text("false"))
+    regimen_retencion = Column(String(30), default="general", server_default=text("'general'"))
     porcentaje_retencion_iva = Column(Numeric(5, 2), default=30.00, server_default=text("30.00"))
     activo = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
