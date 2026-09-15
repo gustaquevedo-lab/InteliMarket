@@ -83,8 +83,21 @@ export async function printHtmlViaQz({ printerName, htmlContent, widthMm, height
 }
 
 export function isQzAvailableError(e: any): boolean {
+  // Solo cuando de verdad no hay con quien hablar. Antes bastaba con que el
+  // texto dijera "qz" o "connect", y un certificado rechazado o un error del
+  // driver se mostraba como "QZ Tray no esta abierto", escondiendo la causa.
   const msg = String(e?.message || e || "")
-  return msg.includes("WebSocket") || msg.includes("qz") || msg.includes("connect")
+  return /Unable to establish connection|websocket.*(closed|not active)|connection (refused|closed)/i.test(msg)
+}
+
+/** Explicacion para el usuario de un error de QZ Tray, sin esconder el mensaje real. */
+export function qzErrorLegible(e: any): string {
+  const msg = String(e?.message || e || "error desconocido")
+  if (isQzAvailableError(e)) return "QZ Tray no está abierto en esta PC (o no responde). Abrilo e intentá de nuevo."
+  if (/blocked|sign|certificate|untrusted|anonymous/i.test(msg)) {
+    return `QZ Tray rechazó el pedido: falta el certificado de InteliMarket en esta PC. (${msg})`
+  }
+  return msg
 }
 
 /**

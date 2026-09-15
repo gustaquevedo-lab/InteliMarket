@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { CreditCard, Search, Printer, Loader2, CheckCircle2, AlertCircle, AlertTriangle, RefreshCw, Hash, Settings } from "lucide-react"
 import { api } from "../../api"
 import { renderTarjeta, renderAnverso, girar180, canvasABase64, OPCIONES_DEFAULT, TARJETA_MM, type OpcionesTarjeta } from "../../utils/cardCanvas"
-import { printImageViaQz, listarImpresoras, isQzAvailableError } from "../../utils/qzTray"
+import { printImageViaQz, listarImpresoras, qzErrorLegible } from "../../utils/qzTray"
 
 /**
  * Emision de tarjetas de socio Extra Club en la Zebra ZC300.
@@ -179,9 +179,7 @@ export default function TarjetasSocioPage() {
       const zc = lista.find((n) => /zc3|zebra.*card|card.*zebra/i.test(n))
       if (zc && !impresoraQz) guardarImpresora(zc)
     } catch (e: any) {
-      mostrar("error", isQzAvailableError(e)
-        ? "QZ Tray no está abierto en esta PC. Abrilo e intentá de nuevo."
-        : `No se pudieron listar las impresoras: ${e?.message || ""}`)
+      mostrar("error", `No se pudieron listar las impresoras. ${qzErrorLegible(e)}`)
     }
   }
 
@@ -238,7 +236,7 @@ export default function TarjetasSocioPage() {
       mostrar("ok", `${hechas} tarjeta${hechas === 1 ? "" : "s"} enviada${hechas === 1 ? "" : "s"} a la impresora.`)
       setSeleccion(new Set())
     } catch (e: any) {
-      const detalle = isQzAvailableError(e) ? "QZ Tray no está abierto en esta PC." : e?.message || "error desconocido"
+      const detalle = qzErrorLegible(e)
       mostrar("error", `Se detuvo después de ${hechas} de ${lista.length}. ${detalle}`)
     } finally {
       setImprimiendo(null)
@@ -273,7 +271,7 @@ export default function TarjetasSocioPage() {
       }
       mostrar("ok", `${hechas} frente${hechas === 1 ? "" : "s"} enviado${hechas === 1 ? "" : "s"}. Cuando salgan, dalas vuelta, cargalas en la bandeja e imprimí los dorsos.`)
     } catch (e: any) {
-      const detalle = isQzAvailableError(e) ? "QZ Tray no está abierto en esta PC." : e?.message || "error desconocido"
+      const detalle = qzErrorLegible(e)
       mostrar("error", `Se detuvo después de ${hechas} de ${n} frentes. ${detalle}`)
     } finally {
       setImprimiendo(null)
