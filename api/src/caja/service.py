@@ -145,6 +145,16 @@ def classify_payment_channel(
             return PAYMENT_CHANNEL_MAP["EFECTIVO_USD"]
         return PAYMENT_CHANNEL_MAP["EFECTIVO_PYG"]
 
+    # 0b. Formas institucionales y no-bancarias directas (no deben ser pisadas por POS en pagos mixtos)
+    if "EXTRA_CLUB" in fp or "CLUB" in fp or "CREDITO_CLIENTE" in fp:
+        return PAYMENT_CHANNEL_MAP["EXTRA_CLUB"]
+
+    if "CHEQUE" in fp or "VALE" in fp:
+        return PAYMENT_CHANNEL_MAP["CHEQUES"]
+
+    if "TRANSFERENCIA" in fp or "TRANSF" in fp or "SIPAP" in fp:
+        return PAYMENT_CHANNEL_MAP["TRANSFERENCIA"]
+
     # 1. Transacciones PlugPay directas
     if plug == "credito_parcelado" or "PLUGPAY_CREDITO" in fp or "PARCELADO" in fp:
         return PAYMENT_CHANNEL_MAP["PLUGPAY_CREDITO"]
@@ -169,10 +179,6 @@ def classify_payment_channel(
             return PAYMENT_CHANNEL_MAP["BANCARD_DEBITO"]
         elif pos in ("venta_credito", "venta_credito_3cuotas", "venta_credito_12cuotas"):
             return PAYMENT_CHANNEL_MAP["BANCARD_CREDITO"]
-
-    # 3. Clasificación por forma de pago declarada en venta
-    if "EXTRA_CLUB" in fp or "CLUB" in fp:
-        return PAYMENT_CHANNEL_MAP["EXTRA_CLUB"]
 
     if "DINELCO" in fp:
         if "PIX" in fp:
@@ -3421,6 +3427,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     session_obj = res_sess.scalar_one_or_none()
 
     # 2. Obtener todas las transacciones de pago vinculadas con ventas de la sesión
+    from api.src.customers.models import Customer
     vouchers_res = await db.execute(
         select(
             SalePayment.id,
@@ -3434,6 +3441,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             Sale.total.label("sale_total"),
             Sale.tipo_comprobante,
             Sale.observaciones.label("sale_obs"),
+            Customer.razon_social.label("cliente_nombre"),
             PosTerminalTransaction.id.label("pos_txn_id"),
             PosTerminalTransaction.tipo_operacion.label("pos_tipo_operacion"),
             PosTerminalTransaction.codigo_autorizacion,
@@ -3446,6 +3454,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         )
         .select_from(SalePayment)
         .join(Sale, Sale.id == SalePayment.sale_id)
+        .outerjoin(Customer, Customer.id == Sale.customer_id)
         .outerjoin(PosTerminalTransaction, and_(PosTerminalTransaction.sale_id == Sale.id, PosTerminalTransaction.exitosa == True))
         .outerjoin(PlugpayTransaction, and_(PlugpayTransaction.sale_id == Sale.id, PlugpayTransaction.exitosa == True))
         .where(
@@ -3561,26 +3570,34 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
                 m_gs = m_dec * tasa_brl if mon == "BRL" else (m_dec * tasa_usd if mon == "USD" else m_dec)
         m_gs_float = float(m_gs)
 
-        nro_boleta = None
-        codigo_autorizacion = row.codigo_autorizacion
-        nsu = row.nsu
-        tarjeta_marca = row.nombre_tarjeta
-        tarjeta_pan = row.pan
-        titular = row.nombre_cliente
+        if canal_key == "EXTRA_CLUB":
+            nro_boleta = row.numero_interno or row.numero_venta
+            codigo_autorizacion = "CREDITO"
+            nsu = None
+            tarjeta_marca = "Crédito Extra Club"
+            tarjeta_pan = None
+            titular = row.cliente_nombre or row.nombre_cliente or "Socio Extra Club"
+        else:
+            nro_boleta = None
+            codigo_autorizacion = row.codigo_autorizacion
+            nsu = row.nsu
+            tarjeta_marca = row.nombre_tarjeta
+            tarjeta_pan = row.pan
+            titular = row.nombre_cliente
 
-        # A. Si vino un PosTerminalTransaction directamente enlazado por sale_id:
-        if row.raw_response and isinstance(row.raw_response, dict):
-            raw = row.raw_response
-            nro_boleta = raw.get("nroBoleta") or raw.get("nro_boleta") or raw.get("boleta") or raw.get("ticket_numero")
-            if not tarjeta_pan:
-                tarjeta_pan = raw.get("ultimos4") or raw.get("pan")
-            if not codigo_autorizacion:
-                codigo_autorizacion = raw.get("codigoAutorizacion") or raw.get("cod_autorizacion")
-            if not nsu:
-                nsu = raw.get("nsu") or raw.get("nro_secuencia")
+            # A. Si vino un PosTerminalTransaction directamente enlazado por sale_id:
+            if row.raw_response and isinstance(row.raw_response, dict):
+                raw = row.raw_response
+                nro_boleta = raw.get("nroBoleta") or raw.get("nro_boleta") or raw.get("boleta") or raw.get("ticket_numero")
+                if not tarjeta_pan:
+                    tarjeta_pan = raw.get("ultimos4") or raw.get("pan")
+                if not codigo_autorizacion:
+                    codigo_autorizacion = raw.get("codigoAutorizacion") or raw.get("cod_autorizacion")
+                if not nsu:
+                    nsu = raw.get("nsu") or raw.get("nro_secuencia")
 
         # B. Si no hay autorización y es tarjeta (Bancard o Dinelco), buscar en unlinked_pos_txns:
-        if (not codigo_autorizacion or codigo_autorizacion == "—") and ("TARJETA" in canal_key or "DINELCO" in canal_key or "BANCARD" in canal_key):
+        if canal_key != "EXTRA_CLUB" and (not codigo_autorizacion or codigo_autorizacion == "—") and ("TARJETA" in canal_key or "DINELCO" in canal_key or "BANCARD" in canal_key):
             best_match = None
             best_diff = None
             row_fecha = row.fecha
