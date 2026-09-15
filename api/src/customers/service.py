@@ -159,6 +159,9 @@ async def delete_customer(db: AsyncSession, customer_id: str) -> bool:
     customer = await get_customer(db, customer_id)
     if not customer:
         return False
+    from api.src.credit_accounts.models import CreditAccount
+    from sqlalchemy import delete
+    await db.execute(delete(CreditAccount).where(CreditAccount.customer_id == customer.id))
     await db.delete(customer)
     await db.flush()
     return True
