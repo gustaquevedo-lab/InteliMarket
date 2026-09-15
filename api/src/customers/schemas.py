@@ -11,7 +11,7 @@ class CustomerCreate(BaseModel):
     company_id: UUID
     tipo_persona: str = "juridica"
     tipo: Optional[str] = "cliente"
-    ruc: Optional[str] = Field(default=None, max_length=15)
+    ruc: Optional[str] = Field(default=None, max_length=20)
     extra_club_numero: Optional[str] = Field(default=None, max_length=40)
     empresa_vinculada_nombre: Optional[str] = Field(default=None, max_length=255)
     empresa_vinculada_ruc: Optional[str] = Field(default=None, max_length=20)
@@ -24,10 +24,12 @@ class CustomerCreate(BaseModel):
     departamento: Optional[str] = None
     telefono: Optional[str] = None
     email: Optional[str] = None
+    contacto: Optional[str] = None
     price_list_id: Optional[UUID] = None
     credito_limite: Decimal = Decimal("0")
     limite_credito: Optional[Decimal] = Decimal("0")
     pago_default: str = "contado"
+    activo: bool = True
 
 
 class CustomerUpdate(BaseModel):
@@ -43,6 +45,7 @@ class CustomerUpdate(BaseModel):
     departamento: Optional[str] = None
     telefono: Optional[str] = None
     email: Optional[str] = None
+    contacto: Optional[str] = None
     price_list_id: Optional[UUID] = None
     credito_limite: Optional[Decimal] = None
     limite_credito: Optional[Decimal] = None
@@ -71,6 +74,7 @@ class CustomerResponse(BaseModel):
     departamento: Optional[str] = None
     telefono: Optional[str] = None
     email: Optional[str] = None
+    contacto: Optional[str] = None
     credito_limite: float
     limite_credito: Optional[float] = 0.0
     credito_usado: float
