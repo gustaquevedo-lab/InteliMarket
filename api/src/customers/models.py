@@ -21,7 +21,7 @@ class Customer(Base):
     ci = Column(String(20))
     razon_social = Column(String(255), nullable=False)
     nombre_fantasia = Column(String(255))
-    condicion_iva = Column(String(20))
+    condicion_iva = Column(String(50))
     direccion = Column(Text)
     ciudad = Column(String(100))
     departamento = Column(String(100))
