@@ -641,12 +641,39 @@ def generate_recibo_a6_pdf(
 
     # 4. TOTAL COBRADO Y MONTO EN LETRAS
     monto_letras = _numero_a_letras(int(monto_total))
+    aplica_ret = bool(receipt_data.get("aplica_retencion"))
+    monto_ret = Decimal(str(receipt_data.get("monto_retencion") or 0))
+    monto_neto = Decimal(str(receipt_data.get("monto_efectivo_recibido") or (monto_total - monto_ret)))
+    ret_comp = receipt_data.get("retencion_numero_comprobante") or "—"
+    ret_fec = receipt_data.get("retencion_fecha")
+    ret_fec_str = ret_fec.strftime("%d/%m/%Y") if hasattr(ret_fec, "strftime") else str(ret_fec or "")
+
+    if aplica_ret and monto_ret > 0:
+        tot_col1 = (
+            f"<font size=5.5 color='#64748B'><b>SON GUARANÍES (TOTAL DEUDA CANCELADA):</b></font><br/>"
+            f"<font size=6.2 color='#0F172A'><b>{monto_letras} GUARANÍES</b></font><br/>"
+            f"<font size=5.5 color='#B45309'><b>RETENCIÓN IVA (Agente Retentor):</b> {_fmt_gs(monto_ret)} (Tesakã: {ret_comp} {ret_fec_str})</font>"
+        )
+        tot_col2 = (
+            f"<font size=5.5 color='#64748B'>Total Deuda: <b>{_fmt_gs(monto_total)}</b></font> &nbsp; "
+            f"<font size=5.5 color='#DC2626'>Retención: <b>-{_fmt_gs(monto_ret)}</b></font><br/>"
+            f"<font size=5.5 color='#64748B'><b>NETO RECIBIDO:</b></font> "
+            f"<font size=9.5 color='#059669'><b>{_fmt_gs(monto_neto)}</b></font>"
+        )
+    else:
+        tot_col1 = (
+            f"<font size=5.5 color='#64748B'><b>SON GUARANÍES:</b></font><br/>"
+            f"<font size=6.5 color='#0F172A'><b>{monto_letras} GUARANÍES</b></font>"
+        )
+        tot_col2 = (
+            f"<font size=6 color='#64748B'><b>TOTAL COBRADO:</b></font><br/>"
+            f"<font size=10 color='#059669'><b>{_fmt_gs(monto_total)}</b></font>"
+        )
+
     tot_data = [
         [
-            Paragraph(f"<font size=5.5 color='#64748B'><b>SON GUARANÍES:</b></font><br/>"
-                      f"<font size=6.5 color='#0F172A'><b>{monto_letras} GUARANÍES</b></font>", styles["Normal"]),
-            Paragraph(f"<font size=6 color='#64748B'><b>TOTAL COBRADO:</b></font><br/>"
-                      f"<font size=10 color='#059669'><b>{_fmt_gs(monto_total)}</b></font>", ParagraphStyle("TotCob", parent=styles["Normal"], alignment=TA_RIGHT)),
+            Paragraph(tot_col1, styles["Normal"]),
+            Paragraph(tot_col2, ParagraphStyle("TotCob", parent=styles["Normal"], alignment=TA_RIGHT)),
         ]
     ]
     t_total = Table(tot_data, colWidths=[92 * mm, 46 * mm])

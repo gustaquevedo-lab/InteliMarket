@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import {
   Search, ReceiptText, Clock, AlertTriangle, DollarSign, FileText, Loader2,
   Calendar, Eye, X, Package, Wallet, Sparkles, PhoneCall, CreditCard, Plus,
@@ -149,12 +149,25 @@ export default function AccountsReceivablePage() {
   const [payChequeFechaEmision, setPayChequeFechaEmision] = useState(() => getTodayAsuncion())
   const [payChequeFechaCobro, setPayChequeFechaCobro] = useState(() => getTodayAsuncion())
 
+  // ⚖️ Retenciones DNIT / SET (Ley 6380/19)
+  const [aplicaRetencion, setAplicaRetencion] = useState(false)
+  const [montoRetencionManual, setMontoRetencionManual] = useState<string>("")
+  const [retencionNumeroComprobante, setRetencionNumeroComprobante] = useState("")
+  const [retencionFecha, setRetencionFecha] = useState(() => getTodayAsuncion())
+  const [retencionPorcentaje, setRetencionPorcentaje] = useState(30)
+  const [paymentCustomerInfo, setPaymentCustomerInfo] = useState<{
+    razon_social: string
+    ruc?: string
+    empresa_vinculada?: string
+    es_agente_retencion?: boolean
+    porcentaje_retencion_iva?: number
+  } | null>(null)
+
   // ⚡ Modal de Inicio Rápido de Cobro (Cabecera)
   const [showQuickCobroModal, setShowQuickCobroModal] = useState(false)
   const [quickCustomerSearch, setQuickCustomerSearch] = useState("")
   const [quickCustomerResults, setQuickCustomerResults] = useState<any[]>([])
   const [quickCustomerLoading, setQuickCustomerLoading] = useState(false)
-  const [paymentCustomerInfo, setPaymentCustomerInfo] = useState<{ razon_social: string; ruc?: string; empresa_vinculada?: string } | null>(null)
 
   // 🏢 Convenios Corporativos y Nóminas (Empresas Vinculadas)
   const [agreements, setAgreements] = useState<any[]>([])
@@ -475,12 +488,21 @@ export default function AccountsReceivablePage() {
 
   const openPaymentModal = async (
     customerId: string,
-    custInfo?: { razon_social: string; ruc?: string; empresa_vinculada?: string },
+    custInfo?: { razon_social: string; ruc?: string; empresa_vinculada?: string; es_agente_retencion?: boolean; porcentaje_retencion_iva?: number },
     targetDoc?: { id: string; saldo_pendiente: number }
   ) => {
     setShowPaymentModal(customerId)
+    setAplicaRetencion(false)
+    setMontoRetencionManual("")
+    setRetencionNumeroComprobante("")
+    setRetencionFecha(getTodayAsuncion())
+    setRetencionPorcentaje(30)
+
     if (custInfo) {
       setPaymentCustomerInfo(custInfo)
+      if (custInfo.porcentaje_retencion_iva) {
+        setRetencionPorcentaje(Number(custInfo.porcentaje_retencion_iva))
+      }
     } else {
       // Intentar obtener datos del cliente si no vinieron
       const foundDoc = docs.find(d => (d.customer_id === customerId || (d as any).customer?.id === customerId))
@@ -489,11 +511,30 @@ export default function AccountsReceivablePage() {
           razon_social: foundDoc.customer_name || (foundDoc as any).customer?.razon_social || "Cliente",
           ruc: foundDoc.customer_ruc || (foundDoc as any).customer?.ruc,
           empresa_vinculada: (foundDoc as any).customer?.empresa_vinculada_nombre,
+          es_agente_retencion: (foundDoc as any).customer?.es_agente_retencion,
+          porcentaje_retencion_iva: (foundDoc as any).customer?.porcentaje_retencion_iva,
         })
       } else {
         setPaymentCustomerInfo(null)
       }
     }
+
+    // Consultar datos completos del cliente para verificar si es Agente de Retención DNIT
+    api.customers.get(customerId).then(fullCust => {
+      if (fullCust) {
+        const esAgente = Boolean(fullCust.es_agente_retencion)
+        const pctRet = fullCust.porcentaje_retencion_iva != null ? Number(fullCust.porcentaje_retencion_iva) : 30
+        setPaymentCustomerInfo({
+          razon_social: fullCust.razon_social || fullCust.nombre || "Cliente",
+          ruc: fullCust.ruc,
+          empresa_vinculada: fullCust.empresa_vinculada_nombre || undefined,
+          es_agente_retencion: esAgente,
+          porcentaje_retencion_iva: pctRet,
+        })
+        if (pctRet) setRetencionPorcentaje(pctRet)
+      }
+    }).catch(() => {})
+
     if (targetDoc) {
       setAllocations({ [targetDoc.id]: String(targetDoc.saldo_pendiente) })
       setPayMontoGlobal(String(targetDoc.saldo_pendiente))
@@ -535,6 +576,38 @@ export default function AccountsReceivablePage() {
 
   const montoTotalPago = Object.values(allocations).reduce((sum, v) => sum + (parseFloat(v) || 0), 0)
 
+  // ⚖️ Reglas de Retención DNIT / SET (Ley 6380/19 - Dto 3107/19):
+  // Umbral: 10 jornales mínimos diarios vigentes en Paraguay (aprox. Gs. 1.076.270)
+  const UMBRAL_RETENCION_GS = 1076270
+  const isAgenteRetentor = Boolean(paymentCustomerInfo?.es_agente_retencion)
+  const superaUmbralRetencion = montoTotalPago >= UMBRAL_RETENCION_GS
+
+  // Si no se editó manualmente, calcular porcentaje del IVA (IVA 10% = Total / 11; Retención = IVA * pct / 100)
+  const montoRetencionSugerido = useMemo(() => {
+    if (!aplicaRetencion || montoTotalPago <= 0) return 0
+    const pct = retencionPorcentaje || 30
+    const iva10Aprox = Math.round(montoTotalPago / 11)
+    return Math.round(iva10Aprox * (pct / 100))
+  }, [aplicaRetencion, montoTotalPago, retencionPorcentaje])
+
+  const montoRetencionFinal = useMemo(() => {
+    if (!aplicaRetencion) return 0
+    if (montoRetencionManual !== "") {
+      const parsed = parseFloat(montoRetencionManual)
+      return isNaN(parsed) ? 0 : parsed
+    }
+    return montoRetencionSugerido
+  }, [aplicaRetencion, montoRetencionManual, montoRetencionSugerido])
+
+  const montoEfectivoRecibido = Math.max(0, montoTotalPago - montoRetencionFinal)
+
+  // Asumir automáticamente retención si el cliente es Agente Retentor y supera el umbral legal
+  useEffect(() => {
+    if (showPaymentModal && isAgenteRetentor && superaUmbralRetencion) {
+      setAplicaRetencion(true)
+    }
+  }, [showPaymentModal, isAgenteRetentor, superaUmbralRetencion])
+
   const handleDistribuirFifo = (montoInput?: number) => {
     const total = montoInput !== undefined ? montoInput : parseFloat(payMontoGlobal) || 0
     if (total <= 0) {
@@ -562,9 +635,8 @@ export default function AccountsReceivablePage() {
   const handleToggleDocBatch = (id: string) => {
     const nextState = { ...selectedBatchDocs, [id]: !selectedBatchDocs[id] }
     setSelectedBatchDocs(nextState)
-    const total = parseFloat(payMontoGlobal) || 0
-    if (total > 0) {
-      let restante = total
+    if (payMontoGlobal && parseFloat(payMontoGlobal) > 0) {
+      let restante = parseFloat(payMontoGlobal)
       const nuevas: Record<string, string> = {}
       const docsFiltrados = pendingDocs.filter(d => nextState[d.id] !== false)
       for (const d of docsFiltrados) {
@@ -581,8 +653,15 @@ export default function AccountsReceivablePage() {
 
   const handleSubmitPayment = async () => {
     if (!showPaymentModal) return
+    if (montoTotalPago <= 0) {
+      toast.warning("Monto no asignado", "Ingresá un monto a cobrar en la cascada FIFO o asigná saldo a las facturas.")
+      return
+    }
     const allocs = Object.entries(allocations).filter(([, v]) => parseFloat(v) > 0).map(([id, v]) => ({ accounts_receivable_id: id, monto: parseFloat(v) }))
-    if (allocs.length === 0) { toast.warning("Monto no asignado", "Asigná o distribuí un monto a al menos una factura"); return }
+    if (allocs.length === 0) {
+      toast.warning("Monto no asignado", "Asigná o distribuí un monto a al menos una factura")
+      return
+    }
     setSubmittingPayment(true)
     try {
       const selectedDocIds = Object.keys(allocations).filter(id => (parseFloat(allocations[id]) || 0) > 0)
@@ -602,9 +681,19 @@ export default function AccountsReceivablePage() {
         cheque_ruc: payFormaPago === "cheque" ? (payChequeRuc || undefined) : undefined,
         cheque_fecha_emision: payFormaPago === "cheque" ? payChequeFechaEmision : undefined,
         cheque_fecha_cobro: payFormaPago === "cheque" ? payChequeFechaCobro : undefined,
+        aplica_retencion: aplicaRetencion,
+        monto_retencion: aplicaRetencion ? montoRetencionFinal : 0,
+        retencion_numero_comprobante: (aplicaRetencion && retencionNumeroComprobante.trim()) ? retencionNumeroComprobante.trim() : undefined,
+        retencion_fecha: aplicaRetencion ? retencionFecha : undefined,
+        retencion_porcentaje: aplicaRetencion ? retencionPorcentaje : undefined,
+        monto_efectivo_recibido: aplicaRetencion ? montoEfectivoRecibido : montoTotalPago,
       })
 
-      toast.success("Pago registrado con éxito", `${formatPYG(montoTotalPago)} imputado en cascada FIFO`)
+      const msgExito = aplicaRetencion && montoRetencionFinal > 0
+        ? `Cobro de ${formatPYG(montoTotalPago)} registrado con éxito (Retención Tesakã: ${formatPYG(montoRetencionFinal)} · Neto percibido: ${formatPYG(montoEfectivoRecibido)})`
+        : `${formatPYG(montoTotalPago)} imputado en cascada FIFO`
+
+      toast.success("Pago registrado con éxito", msgExito)
       setShowPaymentModal(null)
       fetchData()
       if (expandedCustomer) openCustomer(expandedCustomer)
@@ -2157,24 +2246,41 @@ export default function AccountsReceivablePage() {
 
       {/* MODAL: Registrar Cobro Multi-Factura con Cascada FIFO e Imputación a Tesorería */}
       {showPaymentModal && (
-        <div className="modal-overlay" onClick={() => setShowPaymentModal(null)}>
-          <div className="modal-content max-w-3xl" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b flex items-start justify-between">
-              <div>
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                  <Wallet className="w-5 h-5 text-emerald-500" />
-                  Registrar Cobro de Cliente · Imputación por Lote / FIFO
+        <div className="modal-overlay z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/75 backdrop-blur-sm" onClick={() => setShowPaymentModal(null)}>
+          <div className="modal-content max-w-3xl w-full flex flex-col max-h-[92vh] overflow-hidden shadow-2xl rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+            <div className="shrink-0 p-4 sm:p-5 border-b border-gray-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-white dark:bg-slate-900 z-10">
+              <div className="min-w-0">
+                <h3 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2 truncate">
+                  <Wallet className="w-5 h-5 text-emerald-500 shrink-0" />
+                  <span>Registrar Cobro de Cliente</span>
+                  {isAgenteRetentor && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 shrink-0">
+                      Agente Retentor DNIT
+                    </span>
+                  )}
                 </h3>
-                <p className="text-xs text-gray-500 mt-1">
-                  Amortización en cascada a facturas más antiguas, asignación bimonetaria e ingreso real a Tesorería (Bóveda / Bancos / Cheques).
+                <p className="text-xs text-gray-500 truncate">
+                  Amortización en cascada a facturas más antiguas e ingreso real a Tesorería.
                 </p>
               </div>
-              <button onClick={() => setShowPaymentModal(null)} className="p-1 text-gray-400 hover:text-gray-600 rounded">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleSubmitPayment}
+                  disabled={submittingPayment}
+                  className="hidden sm:flex px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-600/20 items-center gap-1.5 transition active:scale-95 cursor-pointer disabled:opacity-50"
+                  title="Confirmar y registrar cobro"
+                >
+                  {submittingPayment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>Cobrar {formatPYG(aplicaRetencion ? montoEfectivoRecibido : montoTotalPago)}</span>
+                </button>
+                <button onClick={() => setShowPaymentModal(null)} className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg transition">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
-            <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+            <div className="p-4 sm:p-6 space-y-4 flex-1 overflow-y-auto min-h-0">
               {/* Tarjeta de Información del Cliente */}
               {paymentCustomerInfo && (
                 <div className="p-3.5 rounded-xl bg-slate-900 text-white border border-slate-800 flex items-center justify-between">
@@ -2194,6 +2300,135 @@ export default function AccountsReceivablePage() {
                       <span className="text-xs font-semibold text-white">{paymentCustomerInfo.empresa_vinculada}</span>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* ⚖️ PANEL DE RETENCIÓN DE IVA DNIT / SET (Ley 6380/19 - Dto 3107/19) */}
+              {(isAgenteRetentor || aplicaRetencion) && (
+                <div className={`p-4 rounded-2xl border transition-all ${
+                  aplicaRetencion
+                    ? "bg-gradient-to-br from-indigo-50/90 via-indigo-50/40 to-slate-50 dark:from-indigo-950/40 dark:via-slate-900 dark:to-slate-900 border-indigo-300 dark:border-indigo-800 shadow-md shadow-indigo-500/5"
+                    : "bg-slate-50/80 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700"
+                }`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition ${
+                        aplicaRetencion ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30" : "bg-slate-200 dark:bg-slate-700 text-slate-400"
+                      }`}>
+                        <Building2 className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                            Retención de IVA por Agente Retentor DNIT
+                          </h4>
+                          {superaUmbralRetencion ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500 text-white">
+                              Supera 10 jornales (₲ 1.076.270)
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 dark:bg-slate-700 text-slate-500">
+                              Bajo el umbral legal
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          {superaUmbralRetencion
+                            ? "El total a cobrar supera 10 jornales mínimos. Por legislación paraguaya, el cliente debe retener el 30% del IVA (o el porcentaje que corresponda) y emitir Comprobante Virtual Tesakã."
+                            : "La deuda actual no alcanza los 10 jornales mínimos (₲ 1.076.270), pero podés aplicar la retención si el cliente emitió el comprobante."}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Toggle Switch */}
+                    <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 mt-0.5">
+                      <input
+                        type="checkbox"
+                        checked={aplicaRetencion}
+                        onChange={e => setAplicaRetencion(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-indigo-600"></div>
+                    </label>
+                  </div>
+
+                  {aplicaRetencion && (
+                    <div className="mt-3.5 pt-3.5 border-t border-indigo-200 dark:border-indigo-900/60 space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="label-field text-[11px] font-bold text-indigo-950 dark:text-indigo-200">
+                            N° Comprobante Virtual (Tesakã)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ej: 001-001-0001234"
+                            className="input-field text-xs font-mono font-bold"
+                            value={retencionNumeroComprobante}
+                            onChange={e => setRetencionNumeroComprobante(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="label-field text-[11px] font-bold text-indigo-950 dark:text-indigo-200">
+                            Fecha del Comprobante Retención
+                          </label>
+                          <input
+                            type="date"
+                            className="input-field text-xs"
+                            value={retencionFecha}
+                            onChange={e => setRetencionFecha(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <label className="label-field text-[11px] font-bold text-indigo-950 dark:text-indigo-200">
+                              Monto Retención IVA (₲)
+                            </label>
+                            {montoRetencionManual !== "" && (
+                              <button
+                                type="button"
+                                onClick={() => setMontoRetencionManual("")}
+                                className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
+                              >
+                                Recalcular ({retencionPorcentaje}%)
+                              </button>
+                            )}
+                          </div>
+                          <input
+                            type="number"
+                            placeholder={String(montoRetencionSugerido)}
+                            className="input-field text-xs font-mono font-bold text-right text-indigo-600 dark:text-indigo-400"
+                            value={montoRetencionManual !== "" ? montoRetencionManual : (montoRetencionSugerido > 0 ? String(montoRetencionSugerido) : "")}
+                            onChange={e => setMontoRetencionManual(e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Desglose Bimonetario / Contable */}
+                      <div className="p-3 rounded-xl bg-indigo-100/60 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-900 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                        <div className="text-[11px] text-indigo-900 dark:text-indigo-200">
+                          <span>Total Deuda Facturas: <b>{formatPYG(montoTotalPago)}</b></span>
+                          <span className="mx-2 text-indigo-400">·</span>
+                          <span>Retención IVA ({retencionPorcentaje}%): <b className="text-amber-700 dark:text-amber-400">-{formatPYG(montoRetencionFinal)}</b></span>
+                        </div>
+                        <div className="text-xs font-extrabold text-emerald-700 dark:text-emerald-400 font-mono">
+                          Neto a Cobrar en Dinero: {formatPYG(montoEfectivoRecibido)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!isAgenteRetentor && !aplicaRetencion && (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setAplicaRetencion(true)}
+                    className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-semibold"
+                  >
+                    <Building2 className="w-3.5 h-3.5" />
+                    <span>+ Aplicar Retención de IVA (Comprobante Tesakã)</span>
+                  </button>
                 </div>
               )}
 
@@ -2515,26 +2750,77 @@ export default function AccountsReceivablePage() {
                 </div>
               )}
 
-              <div className="p-4 rounded-xl bg-slate-900 text-white flex items-center justify-between shadow-sm">
+              {/* Resumen Total y Desglose Final */}
+              <div className="p-4 rounded-xl bg-slate-900 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md border border-slate-800">
                 <div>
-                  <span className="text-xs font-bold text-slate-300 block">Total Cobro Imputado</span>
+                  <span className="text-xs font-bold text-slate-300 block">Total Deuda Cancelada</span>
                   <span className="text-[11px] text-slate-400">
                     {Object.values(allocations).filter(v => (parseFloat(v) || 0) > 0).length} factura(s) amortizada(s)
                   </span>
                 </div>
-                <span className="text-xl font-extrabold text-emerald-400 font-mono">{formatPYG(montoTotalPago)}</span>
+                <div className="text-right">
+                  <span className="text-xl sm:text-2xl font-black text-white font-mono block">
+                    {formatPYG(montoTotalPago)}
+                  </span>
+                  {aplicaRetencion && montoRetencionFinal > 0 && (
+                    <span className="text-xs font-bold text-emerald-400 font-mono block">
+                      Neto a percibir: {formatPYG(montoEfectivoRecibido)} (-{formatPYG(montoRetencionFinal)} Ret. IVA)
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
-            <div className="p-6 border-t flex justify-end gap-3">
-              <button onClick={() => setShowPaymentModal(null)} className="btn-ghost text-xs">Cancelar</button>
-              <button
-                onClick={handleSubmitPayment}
-                disabled={submittingPayment || montoTotalPago <= 0}
-                className="btn-primary bg-emerald-600 hover:bg-emerald-500 text-white text-xs disabled:opacity-50 flex items-center gap-2"
-              >
-                {submittingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirmar e Imputar Cobro"}
-              </button>
+            {/* FOOTER FIJO / STICKY CON BOTÓN PROMINENTE DE COBRO */}
+            <div className="shrink-0 p-4 sm:p-5 border-t border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-950 z-20 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-xs text-gray-500 dark:text-slate-400 text-center sm:text-left">
+                {montoTotalPago > 0 ? (
+                  <span>
+                    Cobro listo: <b className="text-gray-900 dark:text-white font-mono">{formatPYG(montoTotalPago)}</b>
+                    {aplicaRetencion && montoRetencionFinal > 0 && (
+                      <span> · Percibido en {payFormaPago}: <b className="text-emerald-600 dark:text-emerald-400 font-mono">{formatPYG(montoEfectivoRecibido)}</b></span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-amber-600 dark:text-amber-400 font-medium">
+                    ⚠️ Ingresá un monto en la cascada FIFO o asigná valores a las facturas
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowPaymentModal(null)}
+                  className="px-4 py-3 rounded-xl border border-gray-300 dark:border-slate-700 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSubmitPayment}
+                  disabled={submittingPayment}
+                  className={`w-full sm:w-auto px-7 py-3.5 rounded-xl text-sm font-black text-white shadow-xl flex items-center justify-center gap-2.5 active:scale-95 transition cursor-pointer ${
+                    montoTotalPago > 0
+                      ? "bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-600/30"
+                      : "bg-slate-500 hover:bg-slate-600 shadow-slate-900/20"
+                  }`}
+                >
+                  {submittingPayment ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span>Procesando Cobro...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-5 h-5" />
+                      <span>
+                        💰 REGISTRAR COBRO ({formatPYG(aplicaRetencion ? montoEfectivoRecibido : montoTotalPago)})
+                      </span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

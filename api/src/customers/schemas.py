@@ -29,6 +29,8 @@ class CustomerCreate(BaseModel):
     credito_limite: Decimal = Decimal("0")
     limite_credito: Optional[Decimal] = Decimal("0")
     pago_default: str = "contado"
+    es_agente_retencion: bool = False
+    porcentaje_retencion_iva: Optional[Decimal] = Decimal("30.00")
     activo: bool = True
 
 
@@ -50,6 +52,8 @@ class CustomerUpdate(BaseModel):
     credito_limite: Optional[Decimal] = None
     limite_credito: Optional[Decimal] = None
     pago_default: Optional[str] = None
+    es_agente_retencion: Optional[bool] = None
+    porcentaje_retencion_iva: Optional[Decimal] = None
     activo: Optional[bool] = None
     extra_club_numero: Optional[str] = None
     empresa_vinculada_nombre: Optional[str] = None
@@ -79,6 +83,8 @@ class CustomerResponse(BaseModel):
     limite_credito: Optional[float] = 0.0
     credito_usado: float
     pago_default: Optional[str] = None
+    es_agente_retencion: Optional[bool] = False
+    porcentaje_retencion_iva: Optional[float] = 30.0
     activo: bool
     created_at: datetime
     updated_at: datetime

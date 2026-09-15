@@ -94,6 +94,13 @@ class ReceivablePayment(Base):
     vault_entry_id = Column(UUID(as_uuid=True))
     destino_fondos = Column(String(30))  # boveda | caja | banco
     numero_recibo = Column(String(50), index=True)
+    # Retenciones tributarias realizadas por el cliente (Agente de Retención DNIT / Tesakã)
+    aplica_retencion = Column(Boolean, default=False)
+    monto_retencion = Column(Numeric(15, 0), default=0)
+    retencion_numero_comprobante = Column(String(50))
+    retencion_fecha = Column(Date)
+    retencion_porcentaje = Column(Numeric(5, 2), default=30.00)
+    monto_efectivo_recibido = Column(Numeric(15, 0), default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (

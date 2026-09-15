@@ -80,6 +80,8 @@ export default function CustomersPage() {
     tipo_persona: "juridica",
     tipo: "cliente",
     condicion_iva: "contribuyente",
+    es_agente_retencion: false,
+    porcentaje_retencion_iva: 30,
     es_convenio: false,
     empresa_vinculada_nombre: "",
     empresa_vinculada_ruc: "",
@@ -210,6 +212,8 @@ export default function CustomersPage() {
       tipo_persona: "juridica",
       tipo: "cliente",
       condicion_iva: "contribuyente",
+      es_agente_retencion: false,
+      porcentaje_retencion_iva: 30,
       es_convenio: false,
       empresa_vinculada_nombre: "",
       empresa_vinculada_ruc: "",
@@ -251,6 +255,8 @@ export default function CustomersPage() {
       tipo_persona: c.tipo_persona || "juridica",
       tipo: c.tipo || (tieneConvenio ? "funcionario" : "cliente"),
       condicion_iva: c.condicion_iva || "contribuyente",
+      es_agente_retencion: Boolean(c.es_agente_retencion),
+      porcentaje_retencion_iva: c.porcentaje_retencion_iva != null ? Number(c.porcentaje_retencion_iva) : 30,
       es_convenio: tieneConvenio,
       empresa_vinculada_nombre: empNombre,
       empresa_vinculada_ruc: c.empresa_vinculada_ruc || (matched ? matched.empresa_ruc : ""),
@@ -394,6 +400,8 @@ export default function CustomersPage() {
         tipo_persona: form.tipo_persona,
         tipo: form.es_convenio && form.tipo === "cliente" ? "funcionario" : form.tipo,
         condicion_iva: form.condicion_iva,
+        es_agente_retencion: Boolean(form.es_agente_retencion),
+        porcentaje_retencion_iva: Number(form.porcentaje_retencion_iva) || 30.00,
         empresa_vinculada_nombre: form.es_convenio ? form.empresa_vinculada_nombre.trim() : null,
         empresa_vinculada_ruc: form.es_convenio ? (form.empresa_vinculada_ruc.trim() || null) : null,
         extra_club_numero: finalExtraClubNumero,
@@ -1036,6 +1044,80 @@ export default function CustomersPage() {
                   </div>
                 </div>
 
+                {/* 🌟 CARD TOGGLE AGENTE DE RETENCIÓN DNIT / SET */}
+                <div className={`p-4 rounded-2xl border transition-all ${
+                  form.es_agente_retencion
+                    ? "bg-gradient-to-br from-indigo-500/15 via-indigo-500/5 to-slate-900/30 border-indigo-500/40 shadow-lg shadow-indigo-500/5"
+                    : "bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800"
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold transition-all ${
+                        form.es_agente_retencion
+                          ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                          : "bg-slate-200 dark:bg-slate-800 text-slate-400"
+                      }`}>
+                        <Building2 className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-black text-slate-900 dark:text-white text-sm">¿Cliente es Agente de Retención DNIT?</h4>
+                          {form.es_agente_retencion ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-500 text-white">
+                              Agente Retentor Activo
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold text-slate-400 bg-slate-200 dark:bg-slate-800">
+                              No Retiene
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {form.es_agente_retencion
+                            ? "Cliente designado por DNIT para emitir Retenciones de IVA (Tesakã) en cobros que superen 10 jornales mínimos"
+                            : "Cliente normal. Cancela facturas en su totalidad sin retención impositiva"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Toggle Switch */}
+                    <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={form.es_agente_retencion}
+                        onChange={e => setForm(f => ({ ...f, es_agente_retencion: e.target.checked }))}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-indigo-600"></div>
+                    </label>
+                  </div>
+
+                  {form.es_agente_retencion && (
+                    <div className="mt-3 pt-3 border-t border-indigo-500/20 grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                      <div>
+                        <label className="block font-black uppercase text-[10px] text-indigo-500 dark:text-indigo-400 mb-1">
+                          Porcentaje Retención IVA (%)
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            min="1"
+                            max="100"
+                            step="1"
+                            value={form.porcentaje_retencion_iva}
+                            onChange={e => setForm(f => ({ ...f, porcentaje_retencion_iva: Number(e.target.value) || 30 }))}
+                            className="w-full bg-white dark:bg-slate-950 border border-indigo-300 dark:border-indigo-800 rounded-xl px-3.5 py-2 text-xs font-black text-slate-900 dark:text-white"
+                          />
+                          <span className="absolute right-3 top-2 text-xs font-bold text-slate-400">%</span>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                        Paraguay SET / DNIT (Ley 6380/19): Estándar <b>30% del IVA</b> (o 100% para exportadores/organismos). En Cuentas por Cobrar se pre-calculará automáticamente al cobrar.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
                 {/* 🌟 CARD PRINCIPAL TOGGLE EXTRA CLUB */}
                 <div className={`p-4 rounded-2xl border transition-all ${
                   form.es_extra_club
@@ -1661,6 +1743,16 @@ export default function CustomersPage() {
                 <div className="flex justify-between">
                   <span className="text-slate-400">Condición Fiscal:</span>
                   <span className="font-bold text-slate-700 dark:text-slate-300 uppercase text-[10px]">{viewingCustomer.condicion_iva || "Contribuyente General"}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Agente Retención DNIT:</span>
+                  {viewingCustomer.es_agente_retencion ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
+                      SÍ ({viewingCustomer.porcentaje_retencion_iva || 30}% IVA)
+                    </span>
+                  ) : (
+                    <span className="text-slate-500 text-xs">No</span>
+                  )}
                 </div>
               </div>
             </div>

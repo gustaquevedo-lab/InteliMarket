@@ -1,10 +1,15 @@
 from __future__ import annotations
+import logging
 from decimal import Decimal
 from datetime import datetime, timezone, date, timedelta
 import uuid
 
 from sqlalchemy import select, text, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from api.src.integrated_finance.auto_posting import PostingEngine, ACC_CAJA, ACC_CXC, ACC_IVA_CREDITO
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -328,6 +333,48 @@ async def list_customer_pending_documents(db: AsyncSession, company_id: str, cus
     return [dict(row._mapping) for row in result.fetchall()]
 
 
+async def _post_ar_payment_accounting(
+    db: AsyncSession,
+    company_id: str,
+    payment_id: uuid.UUID,
+    fecha: date,
+    numero_recibo: str,
+    customer_name: str,
+    monto_total: Decimal,
+    aplica_retencion: bool,
+    monto_retencion: Decimal,
+    retencion_numero_comprobante: str | None,
+) -> None:
+    """Genera el asiento contable de partida doble para el cobro de CxC:
+    - DEBE: Caja y Bancos (1.1.01) por el dinero neto recibido (monto_total - retención)
+    - DEBE: IVA Crédito Fiscal (1.1.05) por la retención soportada (comprobante Tesakã)
+    - HABER: Cuentas por Cobrar Clientes (1.1.02) por el total cancelado de la deuda.
+    Garantiza balance exacto y registro auditable."""
+    try:
+        engine = PostingEngine(db, company_id)
+        await engine.ensure_accounts()
+
+        monto_tot_q = Decimal(str(monto_total)).quantize(Decimal("1"))
+        monto_ret_q = Decimal(str(monto_retencion)).quantize(Decimal("1")) if aplica_retencion else Decimal("0")
+        monto_neto_q = max(Decimal("0"), monto_tot_q - monto_ret_q)
+
+        lines: list[tuple[str, str, Decimal]] = []
+        if monto_neto_q > 0:
+            lines.append((ACC_CAJA, "debe", monto_neto_q))
+        if monto_ret_q > 0:
+            lines.append((ACC_IVA_CREDITO, "debe", monto_ret_q))
+        if monto_tot_q > 0:
+            lines.append((ACC_CXC, "haber", monto_tot_q))
+
+        concepto = f"Cobro Recibo #{numero_recibo} - {customer_name}"
+        if aplica_retencion and retencion_numero_comprobante:
+            concepto += f" (Ret. IVA Tesakã #{retencion_numero_comprobante})"
+
+        await engine.post(fecha, concepto, "receivable_payment", payment_id, lines)
+    except Exception as e:
+        logger.warning("No se pudo postear asiento contable para cobro AR %s: %s", payment_id, e)
+
+
 async def _record_treasury_ingress(
     db: AsyncSession,
     company_id: str,
@@ -516,11 +563,20 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
     daily_seq = (seq_res.scalar() or 0) + 1
     numero_recibo = f"REC-{p_date_str}-{daily_seq:04d}"
 
+    aplica_retencion = bool(getattr(data, "aplica_retencion", False))
+    monto_retencion = Decimal(str(getattr(data, "monto_retencion", 0) or 0)) if aplica_retencion else Decimal("0")
+    retencion_numero_comprobante = getattr(data, "retencion_numero_comprobante", None) if aplica_retencion else None
+    retencion_fecha = getattr(data, "retencion_fecha", None) if aplica_retencion else None
+    retencion_porcentaje = Decimal(str(getattr(data, "retencion_porcentaje", 30.00) or 30.00)) if aplica_retencion else Decimal("30.00")
+    monto_efectivo_recibido = max(Decimal("0"), Decimal(str(data.monto_total)) - monto_retencion)
+
     await db.execute(
         text("""
             INSERT INTO receivable_payments
-                (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por, numero_recibo)
-            VALUES (:id, :company_id, :customer_id, :monto_total, :moneda, :forma_pago, :referencia, :fecha, :observaciones, :registrado_por, :numero_recibo)
+                (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por, numero_recibo,
+                 aplica_retencion, monto_retencion, retencion_numero_comprobante, retencion_fecha, retencion_porcentaje, monto_efectivo_recibido)
+            VALUES (:id, :company_id, :customer_id, :monto_total, :moneda, :forma_pago, :referencia, :fecha, :observaciones, :registrado_por, :numero_recibo,
+                 :aplica_retencion, :monto_retencion, :retencion_numero_comprobante, :retencion_fecha, :retencion_porcentaje, :monto_efectivo_recibido)
         """),
         {
             "id": payment_id, "company_id": company_id, "customer_id": str(data.customer_id),
@@ -528,6 +584,12 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
             "referencia": data.referencia, "fecha": p_date,
             "observaciones": data.observaciones, "registrado_por": registrado_por,
             "numero_recibo": numero_recibo,
+            "aplica_retencion": aplica_retencion,
+            "monto_retencion": float(monto_retencion),
+            "retencion_numero_comprobante": retencion_numero_comprobante,
+            "retencion_fecha": retencion_fecha,
+            "retencion_porcentaje": float(retencion_porcentaje),
+            "monto_efectivo_recibido": float(monto_efectivo_recibido),
         },
     )
 
@@ -580,10 +642,23 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
         customer_id=str(data.customer_id),
         customer_name=customer_name,
         customer_ruc=customer_ruc,
-        monto=Decimal(str(data.monto_total)),
+        monto=monto_efectivo_recibido,
         data=data,
         registrado_por=registrado_por,
         numero_recibo=numero_recibo,
+    )
+
+    await _post_ar_payment_accounting(
+        db=db,
+        company_id=company_id,
+        payment_id=payment_id,
+        fecha=p_date,
+        numero_recibo=numero_recibo,
+        customer_name=customer_name,
+        monto_total=Decimal(str(data.monto_total)),
+        aplica_retencion=aplica_retencion,
+        monto_retencion=monto_retencion,
+        retencion_numero_comprobante=retencion_numero_comprobante,
     )
 
     await db.flush()
@@ -592,6 +667,10 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
         "payment_id": str(payment_id),
         "numero_recibo": numero_recibo,
         "monto_total": float(data.monto_total),
+        "aplica_retencion": aplica_retencion,
+        "monto_retencion": float(monto_retencion),
+        "monto_efectivo_recibido": float(monto_efectivo_recibido),
+        "retencion_numero_comprobante": retencion_numero_comprobante,
         "allocations": aplicados,
         "treasury": treasury_res,
     }
@@ -818,11 +897,20 @@ async def apply_global_payment(
     daily_seq = (seq_res.scalar() or 0) + 1
     numero_recibo = f"REC-{p_date_str}-{daily_seq:04d}"
 
+    aplica_retencion = bool(getattr(data, "aplica_retencion", False))
+    monto_retencion = Decimal(str(getattr(data, "monto_retencion", 0) or 0)) if aplica_retencion else Decimal("0")
+    retencion_numero_comprobante = getattr(data, "retencion_numero_comprobante", None) if aplica_retencion else None
+    retencion_fecha = getattr(data, "retencion_fecha", None) if aplica_retencion else None
+    retencion_porcentaje = Decimal(str(getattr(data, "retencion_porcentaje", 30.00) or 30.00)) if aplica_retencion else Decimal("30.00")
+    monto_efectivo_recibido = max(Decimal("0"), monto_pago - monto_retencion)
+
     await db.execute(
         text("""
             INSERT INTO receivable_payments
-                (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por, numero_recibo)
-            VALUES (:id, :company_id, :customer_id, :monto_total, :moneda, :forma_pago, :referencia, :fecha, :observaciones, :registrado_por, :numero_recibo)
+                (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por, numero_recibo,
+                 aplica_retencion, monto_retencion, retencion_numero_comprobante, retencion_fecha, retencion_porcentaje, monto_efectivo_recibido)
+            VALUES (:id, :company_id, :customer_id, :monto_total, :moneda, :forma_pago, :referencia, :fecha, :observaciones, :registrado_por, :numero_recibo,
+                 :aplica_retencion, :monto_retencion, :retencion_numero_comprobante, :retencion_fecha, :retencion_porcentaje, :monto_efectivo_recibido)
         """),
         {
             "id": payment_id,
@@ -836,6 +924,12 @@ async def apply_global_payment(
             "observaciones": data.observaciones,
             "registrado_por": registrado_por,
             "numero_recibo": numero_recibo,
+            "aplica_retencion": aplica_retencion,
+            "monto_retencion": float(monto_retencion),
+            "retencion_numero_comprobante": retencion_numero_comprobante,
+            "retencion_fecha": retencion_fecha,
+            "retencion_porcentaje": float(retencion_porcentaje),
+            "monto_efectivo_recibido": float(monto_efectivo_recibido),
         },
     )
 
@@ -919,10 +1013,23 @@ async def apply_global_payment(
         customer_id=str(data.customer_id),
         customer_name=customer_name,
         customer_ruc=customer_ruc,
-        monto=monto_pago,
+        monto=monto_efectivo_recibido,
         data=data,
         registrado_por=registrado_por,
         numero_recibo=numero_recibo,
+    )
+
+    await _post_ar_payment_accounting(
+        db=db,
+        company_id=company_id,
+        payment_id=payment_id,
+        fecha=fecha_pago,
+        numero_recibo=numero_recibo,
+        customer_name=customer_name,
+        monto_total=Decimal(str(monto_pago)),
+        aplica_retencion=aplica_retencion,
+        monto_retencion=monto_retencion,
+        retencion_numero_comprobante=retencion_numero_comprobante,
     )
 
     await db.flush()
@@ -931,6 +1038,10 @@ async def apply_global_payment(
         "id": str(payment_id),
         "numero_recibo": numero_recibo,
         "monto_total": float(monto_pago),
+        "aplica_retencion": aplica_retencion,
+        "monto_retencion": float(monto_retencion),
+        "monto_efectivo_recibido": float(monto_efectivo_recibido),
+        "retencion_numero_comprobante": retencion_numero_comprobante,
         "documentos_afectados": len(aplicados),
         "allocations": aplicados,
         "treasury": treasury_res,
@@ -1072,6 +1183,8 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
             rp.id, rp.company_id, rp.customer_id, rp.monto_total, rp.moneda,
             rp.forma_pago, rp.referencia, rp.fecha, rp.observaciones, rp.created_at,
             rp.numero_recibo,
+            rp.aplica_retencion, rp.monto_retencion, rp.retencion_numero_comprobante,
+            rp.retencion_fecha, rp.retencion_porcentaje, rp.monto_efectivo_recibido,
             c.razon_social as customer_name, c.nombre_fantasia, c.ruc as customer_ruc,
             c.telefono as customer_telefono, c.empresa_vinculada_nombre,
             comp.razon_social as comp_razon_social, comp.ruc as comp_ruc,

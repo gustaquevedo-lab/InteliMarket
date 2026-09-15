@@ -74,6 +74,12 @@ class ReceivablePaymentCreate(BaseModel):
     cheque_ruc: Optional[str] = None
     cheque_fecha_emision: Optional[date] = None
     cheque_fecha_cobro: Optional[date] = None
+    aplica_retencion: Optional[bool] = False
+    monto_retencion: Optional[Decimal] = Decimal("0")
+    retencion_numero_comprobante: Optional[str] = None
+    retencion_fecha: Optional[date] = None
+    retencion_porcentaje: Optional[Decimal] = Decimal("30.00")
+    monto_efectivo_recibido: Optional[Decimal] = None
     allocations: list[ReceivableAllocationInput] = Field(min_length=1)
 
 
@@ -94,6 +100,12 @@ class ReceivableGlobalPaymentCreate(BaseModel):
     cheque_ruc: Optional[str] = None
     cheque_fecha_emision: Optional[date] = None
     cheque_fecha_cobro: Optional[date] = None
+    aplica_retencion: Optional[bool] = False
+    monto_retencion: Optional[Decimal] = Decimal("0")
+    retencion_numero_comprobante: Optional[str] = None
+    retencion_fecha: Optional[date] = None
+    retencion_porcentaje: Optional[Decimal] = Decimal("30.00")
+    monto_efectivo_recibido: Optional[Decimal] = None
     # Si viene None o vacío, se aplica en cascada FIFO a todas las facturas pendientes
     # Si viene con IDs, se aplica en cascada FIFO sólo a las facturas seleccionadas
     accounts_receivable_ids: Optional[list[UUID]] = None
@@ -130,6 +142,13 @@ class ReceivablePaymentResponse(BaseModel):
     observaciones: Optional[str] = None
     registrado_por: Optional[UUID] = None
     created_at: datetime
+    numero_recibo: Optional[str] = None
+    aplica_retencion: Optional[bool] = False
+    monto_retencion: Optional[Decimal] = Decimal("0")
+    retencion_numero_comprobante: Optional[str] = None
+    retencion_fecha: Optional[date] = None
+    retencion_porcentaje: Optional[Decimal] = Decimal("30.00")
+    monto_efectivo_recibido: Optional[Decimal] = None
     allocations: list[dict] = []
 
     class Config:
