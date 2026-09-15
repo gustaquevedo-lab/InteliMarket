@@ -543,7 +543,32 @@ async def send_message_to_phone(
         if not to_phone or not message:
             return False
         res = await evolution_client.send_text_message(to_phone, message, delay_ms=1000)
-        return bool(res.get("success", False))
+        success = bool(res.get("success", False))
+        if success and company_id:
+            try:
+                from uuid import UUID
+                c_uuid = company_id if isinstance(company_id, UUID) else UUID(str(company_id))
+                conv = await get_or_create_conversation(db, c_uuid, to_phone, name=to_phone)
+                msg_id = (
+                    res.get("data", {}).get("key", {}).get("id")
+                    or res.get("message_id")
+                    or f"auto-{datetime.now(timezone.utc).timestamp()}"
+                )
+                outbound_msg = WhatsAppMessage(
+                    tenant_id=c_uuid,
+                    conversation_id=conv.id,
+                    direction=MessageDirection.outbound,
+                    content=message,
+                    message_id=msg_id,
+                    status=MessageStatus.sent,
+                )
+                db.add(outbound_msg)
+                conv.last_message_at = datetime.now(timezone.utc)
+                await db.commit()
+            except Exception as reg_err:
+                import logging
+                logging.getLogger("whatsapp.service").warning(f"No se pudo registrar mensaje saliente en BD: {reg_err}")
+        return success
     except Exception as e:
         import logging
         logging.getLogger("whatsapp.service").error(f"Error in send_message_to_phone: {e}")
@@ -641,11 +666,41 @@ DEFAULT_WA_TEMPLATES: dict[str, str] = {
 }
 
 
-def format_wa_template(template: str, **kwargs: str) -> str:
-    """Replace {VAR} placeholders in a template with provided values."""
+def format_wa_template(template: str, **kwargs: object) -> str:
+    """Replace {VAR} or {{VAR}} placeholders in a template with provided values.
+
+    Supports:
+    - Case-insensitive matching: {TICKET}, {ticket}, {Ticket}
+    - Double curly braces: {{ticket}}, {{monto}}
+    - Whitespace inside braces: { ticket }
+    - Automatic synonyms: ticket <-> numero, monto <-> total, puntos <-> puntos_ganados, etc.
+    """
+    if not template:
+        return ""
     result = template
-    for key, value in kwargs.items():
-        result = result.replace(f"{{{key}}}", value)
+    expanded: dict[str, str] = {}
+    for k, v in kwargs.items():
+        val_str = str(v) if v is not None else ""
+        expanded[k] = val_str
+        kl = k.lower()
+        if kl in ("ticket", "numero"):
+            expanded["ticket"] = val_str
+            expanded["numero"] = val_str
+        elif kl in ("monto", "total"):
+            expanded["monto"] = val_str
+            expanded["total"] = val_str
+        elif kl in ("puntos", "puntos_ganados"):
+            expanded["puntos"] = val_str
+            expanded["puntos_ganados"] = val_str
+        elif kl in ("cliente", "nombre"):
+            expanded["cliente"] = val_str
+            expanded["nombre"] = val_str
+        elif kl in ("doc", "documento", "ruc", "ci"):
+            expanded["documento"] = val_str
+
+    for key, value in expanded.items():
+        pattern = re.compile(r"\{{1,2}\s*" + re.escape(key) + r"\s*\}{1,2}", re.IGNORECASE)
+        result = pattern.sub(str(value), result)
     return result
 
 

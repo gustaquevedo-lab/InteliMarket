@@ -31,20 +31,109 @@ async def _get_customer_email_phone(db: AsyncSession, customer_id: str) -> tuple
 async def _send_sale_wa(db: AsyncSession, sale, customer_phone: str | None, tipo: str = "venta.creada", extra: dict | None = None):
     if not customer_phone or not sale.company_id:
         return
-    # sale.company_id ya viene como UUID real (asyncpg lo devuelve tipado,
-    # no como string) -- volver a envolverlo en UUID(...) rompia con
-    # "'asyncpg.pgproto.pgproto.UUID' object has no attribute 'replace'".
-    # Esto tiraba abajo TODA la transaccion de cancel_sale (venta.cancelada
-    # es el unico tipo que pasa por aca con un customer_phone real
-    # habitualmente), asi que cancelar una venta con un cliente con
-    # telefono cargado nunca revertia nada -- ni el stock, ni el credito,
-    # ni la cuenta por cobrar -- pese a que la API respondia como si hubiera
-    # fallado limpio.
     template = await get_wa_template(db, sale.company_id, tipo)
     if not template:
         return
-    total_str = f"{float(sale.total):,.0f}" if sale.total else "0"
-    kwargs = {"NUMERO": sale.numero or "", "TOTAL": total_str, **(extra or {})}
+
+    from sqlalchemy import select, func, or_
+    import pytz
+    from datetime import datetime, timezone
+
+    # 1. Ticket / Número
+    nro_str = sale.numero or ""
+
+    # 2. Total / Monto (formato guaraníes con separador de miles '.')
+    total_val = float(sale.total) if sale.total else 0.0
+    total_str = f"{int(round(total_val)):,}".replace(",", ".")
+
+    # 3. Datos del cliente
+    cliente_nombre = "Cliente"
+    documento = ""
+    socio_nro = ""
+    if sale.customer_id:
+        try:
+            from api.src.customers.models import Customer
+            c_res = await db.execute(select(Customer).where(Customer.id == sale.customer_id))
+            cust = c_res.scalar_one_or_none()
+            if cust:
+                cliente_nombre = (cust.razon_social or cust.nombre or "Cliente").strip()
+                documento = (cust.ruc or cust.ci or "").strip()
+                socio_nro = str(getattr(cust, "socio_numero", "") or getattr(cust, "codigo", "") or "").strip()
+        except Exception:
+            pass
+
+    # 4. Puntos fidelidad ExtraClub ganados
+    puntos_val = getattr(sale, "puntos_ganados", None)
+    if puntos_val is None and sale.customer_id:
+        try:
+            from api.src.loyalty.models import LoyaltyPoints
+            res_pts = await db.execute(
+                select(func.coalesce(func.sum(LoyaltyPoints.puntos), 0)).where(
+                    LoyaltyPoints.referencia_tipo == "sale",
+                    LoyaltyPoints.referencia_id == str(sale.id),
+                    LoyaltyPoints.tipo == "ganado"
+                )
+            )
+            puntos_val = res_pts.scalar() or 0
+        except Exception:
+            puntos_val = 0
+    puntos_int = int(puntos_val or 0)
+    puntos_str = f"{puntos_int:,}".replace(",", ".")
+    valor_monetario_str = f"{puntos_int * 100:,}".replace(",", ".")
+
+    # 5. Cupones de Sorteo generados
+    cupones_gen = 0
+    cupones_tot = 0
+    campana_sorteo = "Gran Sorteo Extra Supermercado"
+    try:
+        from api.src.cupones.models import CuponTicket
+        ct_res = await db.execute(
+            select(CuponTicket).where(
+                or_(
+                    CuponTicket.sale_id == sale.id,
+                    CuponTicket.nro_ticket == sale.numero
+                )
+            )
+        )
+        ct = ct_res.scalars().first()
+        if ct:
+            cupones_gen = ct.cantidad
+            campana_sorteo = ct.campana_nombre or campana_sorteo
+            tot_res = await db.execute(
+                select(func.coalesce(func.sum(CuponTicket.cantidad), 0)).where(
+                    CuponTicket.cliente_id == ct.cliente_id
+                )
+            )
+            cupones_tot = tot_res.scalar() or cupones_gen
+    except Exception:
+        pass
+
+    # 6. Fecha local Paraguay (America/Asuncion)
+    py_tz = pytz.timezone("America/Asuncion")
+    sale_date = getattr(sale, "created_at", None) or datetime.now(timezone.utc)
+    if sale_date.tzinfo is None:
+        sale_date = pytz.utc.localize(sale_date).astimezone(py_tz)
+    else:
+        sale_date = sale_date.astimezone(py_tz)
+    fecha_str = sale_date.strftime("%d/%m/%Y %H:%M")
+
+    kwargs = {
+        "ticket": nro_str,
+        "numero": nro_str,
+        "monto": total_str,
+        "total": total_str,
+        "puntos": puntos_str,
+        "cliente": cliente_nombre,
+        "nombre": cliente_nombre,
+        "documento": documento,
+        "socio_numero": socio_nro,
+        "valor_monetario": valor_monetario_str,
+        "fecha": fecha_str,
+        "cupones_generados": str(cupones_gen),
+        "cupones_totales": str(cupones_tot),
+        "campana_sorteo": campana_sorteo,
+        **(extra or {}),
+    }
     message = format_wa_template(template, **kwargs)
     await send_message_to_phone(db, sale.company_id, customer_phone, message)
 
