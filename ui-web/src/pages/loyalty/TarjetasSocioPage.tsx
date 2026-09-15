@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { CreditCard, Search, Printer, Loader2, CheckCircle2, AlertCircle, AlertTriangle, RefreshCw, Hash, Settings } from "lucide-react"
 import { api } from "../../api"
-import { renderTarjeta, renderAnverso, girar180, canvasABase64, OPCIONES_DEFAULT, TARJETA_MM, type OpcionesTarjeta } from "../../utils/cardCanvas"
+import { renderTarjeta, renderAnverso, girar180, imprimirConNavegador, canvasABase64, OPCIONES_DEFAULT, TARJETA_MM, type OpcionesTarjeta } from "../../utils/cardCanvas"
 import { printImageViaQz, listarImpresoras, qzErrorLegible } from "../../utils/qzTray"
 
 /**
@@ -75,6 +75,11 @@ export default function TarjetasSocioPage() {
   // imprimen en pasadas separadas, dando vuelta las tarjetas entre una y otra.
   const [cara, setCara] = useState<"frente" | "dorso">("dorso")
   const [copiasFrente, setCopiasFrente] = useState(1)
+  // "windows": dialogo de impresion de Chrome (funciona con el driver de la
+  // ZC300). "qz": silencioso por QZ Tray, que con este driver no imprime.
+  const [via, setVia] = useState<"windows" | "qz">(() => {
+    try { return localStorage.getItem("tarjetas_via") === "qz" ? "qz" : "windows" } catch { return "windows" }
+  })
   const [girarDorso, setGirarDorso] = useState(() => {
     try { return localStorage.getItem("tarjetas_girar_dorso") === "1" } catch { return false }
   })
@@ -185,7 +190,7 @@ export default function TarjetasSocioPage() {
 
   const imprimir = async (lista: Socio[]) => {
     if (!lista.length) return
-    if (!impresoraQz) {
+    if (via === "qz" && !impresoraQz) {
       setMostrarConfig(true)
       mostrar("error", "Falta elegir la impresora de tarjetas (Configuración).")
       return
@@ -215,6 +220,7 @@ export default function TarjetasSocioPage() {
 
     const off = document.createElement("canvas")
     let hechas = 0
+    const imagenesWin: string[] = []
     try {
       for (const s of lista) {
         setImprimiendo(s.nombre)
@@ -230,10 +236,21 @@ export default function TarjetasSocioPage() {
           { nombre: s.nombre, numero: numero!, documento: s.documento, empresa: s.empresa_vinculada, ciudad: s.ciudad, limite: s.limite_credito },
           opciones,
         )
-        await printImageViaQz({ printerName: impresoraQz, imagenBase64: canvasABase64(girarDorso ? girar180(off) : off), widthMm: TARJETA_MM.ancho, heightMm: TARJETA_MM.alto })
+        const final = girarDorso ? girar180(off) : off
+        if (via === "qz") {
+          await printImageViaQz({ printerName: impresoraQz, imagenBase64: canvasABase64(final), widthMm: TARJETA_MM.ancho, heightMm: TARJETA_MM.alto })
+        } else {
+          imagenesWin.push(final.toDataURL("image/png"))
+        }
         hechas++
       }
-      mostrar("ok", `${hechas} tarjeta${hechas === 1 ? "" : "s"} enviada${hechas === 1 ? "" : "s"} a la impresora.`)
+      if (via === "windows") {
+        setImprimiendo("abriendo el diálogo de impresión")
+        await imprimirConNavegador(imagenesWin)
+        mostrar("ok", `Se envió el dorso de ${hechas} tarjeta${hechas === 1 ? "" : "s"} al diálogo de impresión.`)
+      } else {
+        mostrar("ok", `${hechas} tarjeta${hechas === 1 ? "" : "s"} enviada${hechas === 1 ? "" : "s"} a la impresora.`)
+      }
       setSeleccion(new Set())
     } catch (e: any) {
       const detalle = qzErrorLegible(e)
@@ -247,7 +264,7 @@ export default function TarjetasSocioPage() {
   // Frentes: la misma imagen para todos, sin datos del socio. No asigna numeros.
   const imprimirFrentes = async () => {
     const n = Math.max(1, Math.min(100, Math.floor(copiasFrente) || 1))
-    if (!impresoraQz) {
+    if (via === "qz" && !impresoraQz) {
       setMostrarConfig(true)
       mostrar("error", "Falta elegir la impresora de tarjetas (Configuración).")
       return
@@ -259,6 +276,19 @@ export default function TarjetasSocioPage() {
     const off = document.createElement("canvas")
     if (!(await renderAnverso(off))) {
       mostrar("error", "No se pudo cargar el diseño del frente. Recargá la página e intentá de nuevo.")
+      return
+    }
+    if (via === "windows") {
+      try {
+        setImprimiendo("abriendo el diálogo de impresión")
+        await imprimirConNavegador(Array(n).fill(off.toDataURL("image/png")))
+        mostrar("ok", `Se enviaron ${n} frente${n === 1 ? "" : "s"} al diálogo de impresión. Cuando salgan, dalas vuelta, cargalas en la bandeja e imprimí los dorsos.`)
+      } catch (e: any) {
+        mostrar("error", `No se pudo abrir la impresión: ${e?.message || e}`)
+      } finally {
+        setImprimiendo(null)
+        cargarEstado()
+      }
       return
     }
     const imagen = canvasABase64(off)
@@ -335,7 +365,23 @@ export default function TarjetasSocioPage() {
 
       {mostrarConfig && (
         <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col gap-3">
-          <div className="text-sm font-bold text-slate-800 dark:text-slate-100">Impresora de tarjetas en esta PC</div>
+          <div className="flex flex-col gap-1.5">
+            <div className="text-sm font-bold text-slate-800 dark:text-slate-100">Cómo imprimir</div>
+            <select value={via}
+              onChange={(e) => {
+                const v = e.target.value === "qz" ? "qz" : "windows"
+                setVia(v)
+                try { localStorage.setItem("tarjetas_via", v) } catch {}
+              }}
+              className="min-w-[260px] self-start px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs outline-none cursor-pointer">
+              <option value="windows">Diálogo de impresión de Windows (recomendado para la ZC300)</option>
+              <option value="qz">QZ Tray, sin diálogo</option>
+            </select>
+            <p className="text-xs text-slate-500">
+              El driver de la ZC300 le informa a QZ Tray un papel de tamaño cero, así que por QZ no imprime. Con el diálogo de Windows elegís la ZC300 la primera vez y Chrome la recuerda.
+            </p>
+          </div>
+          <div className="text-sm font-bold text-slate-800 dark:text-slate-100">Impresora de tarjetas en esta PC (solo para QZ Tray)</div>
           <p className="text-xs text-slate-500">
             La impresión va por QZ Tray al driver de la ZC300, así que se hace desde la PC donde está instalado ese driver.
           </p>

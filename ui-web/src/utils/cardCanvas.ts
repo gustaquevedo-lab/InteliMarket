@@ -259,6 +259,47 @@ export function girar180(src: HTMLCanvasElement): HTMLCanvasElement {
   return out
 }
 
+/**
+ * Imprime tarjetas con el dialogo de impresion del navegador, una por pagina,
+ * todas en un solo trabajo.
+ *
+ * Existe porque el driver de la ZC300 le informa a Java (QZ Tray) un papel de
+ * tamaño cero: QZ falla con "0 or negative value argument" o "Paper's
+ * imageable width is too small" en cualquier combinacion. Chrome imprime por
+ * el camino normal de Windows, que el driver si entiende.
+ */
+export function imprimirConNavegador(imagenesDataUrl: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const iframe = document.createElement("iframe")
+    Object.assign(iframe.style, { position: "fixed", right: "0", bottom: "0", width: "0", height: "0", border: "0" })
+    document.body.appendChild(iframe)
+    const doc = iframe.contentDocument
+    const win = iframe.contentWindow
+    if (!doc || !win) { iframe.remove(); reject(new Error("El navegador no permitió preparar la impresión")); return }
+    const { ancho, alto } = TARJETA_MM
+    doc.open()
+    doc.write(
+      `<!doctype html><html><head><title>Tarjetas Extra Club</title><style>` +
+      `@page{size:${ancho}mm ${alto}mm;margin:0}` +
+      `html,body{margin:0;padding:0;background:#fff}` +
+      `img{display:block;width:${ancho}mm;height:${alto}mm;break-after:page;page-break-after:always}` +
+      `img:last-child{break-after:auto;page-break-after:auto}` +
+      `</style></head><body>` +
+      imagenesDataUrl.map((src) => `<img src="${src}">`).join("") +
+      `</body></html>`,
+    )
+    doc.close()
+    const imgs = Array.from(doc.images)
+    Promise.all(imgs.map((i) => (i.complete ? Promise.resolve() : new Promise((r) => { i.onload = r; i.onerror = r }))))
+      .then(() => {
+        win.focus()
+        win.print() // en Chrome bloquea hasta que se cierra el dialogo
+        setTimeout(() => { iframe.remove(); resolve() }, 500)
+      })
+      .catch((e) => { iframe.remove(); reject(e) })
+  })
+}
+
 /** PNG en base64 sin el prefijo data:, que es lo que pide QZ Tray. */
 export function canvasABase64(canvas: HTMLCanvasElement): string {
   return canvas.toDataURL("image/png").replace(/^data:image\/png;base64,/, "")

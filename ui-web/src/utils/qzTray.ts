@@ -208,5 +208,29 @@ export async function printImageViaQz({ printerName, imagenBase64, widthMm, heig
       fallas.push(`${nombre}: ${msg}`)
     }
   }
+  reportarDiagnostico(qz, printerName, fallas)
   throw new Error(`La impresora rechazó todas las configuraciones. ${fallas.join(" | ")}`)
+}
+
+/**
+ * Deja el detalle de la falla en el log del servidor web, para diagnosticar sin
+ * que nadie tenga que copiar ni fotografiar errores. Va como consulta a una
+ * ruta que no existe: nginx la anota igual. Solo mensajes tecnicos de QZ y del
+ * driver, ningun dato de clientes.
+ */
+async function reportarDiagnostico(qz: any, printerName: string, fallas: string[]): Promise<void> {
+  let detalles: any = null
+  try {
+    const todos = await qz.printers.details()
+    detalles = (Array.isArray(todos) ? todos : [todos]).find((p: any) => p?.name?.toLowerCase() === printerName.toLowerCase()) || null
+  } catch (e: any) {
+    detalles = { error: String(e?.message || e) }
+  }
+  let version: any = null
+  try { version = await qz.api.getVersion() } catch {}
+  // Tope corto: codificado en la URL crece ~3 veces y nginx corta pedidos de mas de 8 KB.
+  const info = JSON.stringify({ printerName, version, fallas, detalles }).slice(0, 2400)
+  try {
+    fetch(`/__diag/qz?d=${encodeURIComponent(info)}`, { cache: "no-store" }).catch(() => {})
+  } catch {}
 }
