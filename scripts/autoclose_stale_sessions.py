@@ -48,9 +48,9 @@ async def run():
                 fecha_cierre = timezone('utc', (cs.fecha_apertura AT TIME ZONE 'America/Asuncion')::date + time '23:59:59'),
                 observaciones = COALESCE(cs.observaciones, '') || ' [Cierre nocturno automático por cambio de jornada]'
             WHERE cs.estado IN ('abierta', 'pausada')
-              AND (cs.fecha_apertura AT TIME ZONE 'America/Asuncion')::date < :hoy
+              AND (cs.fecha_apertura AT TIME ZONE 'America/Asuncion')::date < (now() AT TIME ZONE 'America/Asuncion')::date
             RETURNING cs.id, cs.cajero_nombre, cs.fecha_apertura;
-        """), {"hoy": hoy_str})
+        """))
         closed_sales = res_sales.fetchall()
         for r in closed_sales:
             logger.info("Sesión con ventas de jornada anterior cerrada automáticamente: %s (Cajero: %s, Apertura: %s)", r[0], r[1], r[2])
