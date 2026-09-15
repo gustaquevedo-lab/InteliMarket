@@ -1,14 +1,27 @@
 import { useState, useEffect, useMemo } from "react"
+import { useNavigate } from "react-router-dom"
 import {
   Search, Plus, Users, Edit, Loader2, Upload, Download, X,
   Building2, UserCheck, CreditCard, ChevronLeft, ChevronRight,
   Phone, Mail, MapPin, RefreshCw, Eye, Trash2, CheckCircle2, ShieldCheck,
-  Award, Sparkles, Filter, Briefcase, FileText, Check, AlertCircle, Hash
+  Award, Sparkles, Filter, Briefcase, FileText, Check, AlertCircle, Hash,
+  Printer, Copy
 } from "lucide-react"
 import { api, type Customer } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG, formatDate } from "../../utils/format"
+
+const generateUUIDv4 = (): string => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID().toLowerCase()
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === "x" ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
 
 const getCreditoLimite = (c: Customer | null | undefined): number => {
   if (!c) return 0
@@ -33,6 +46,7 @@ const CONVENIOS_PREDEFINIDOS = [
 ]
 
 export default function CustomersPage() {
+  const navigate = useNavigate()
   const toast = useToast()
   const confirm = useConfirm()
 
@@ -40,7 +54,7 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [search, setSearch] = useState("")
-  const [tab, setTab] = useState<"todos" | "convenios" | "fisica" | "juridica" | "con_credito" | "inactivos">("todos")
+  const [tab, setTab] = useState<"todos" | "socios_extra_club" | "convenios" | "fisica" | "juridica" | "con_credito" | "inactivos">("todos")
 
   // Convenios Corporativos cargados del backend
   const [corporateAgreements, setCorporateAgreements] = useState<Array<{ empresa_nombre: string; empresa_ruc: string }>>([])
@@ -69,6 +83,7 @@ export default function CustomersPage() {
     es_convenio: false,
     empresa_vinculada_nombre: "",
     empresa_vinculada_ruc: "",
+    es_extra_club: false,
     extra_club_numero: "",
     credito_limite: 0,
     pago_default: "contado",
@@ -162,7 +177,8 @@ export default function CustomersPage() {
         (c.extra_club_numero || "").toLowerCase().includes(s)
 
       let matchTab = true
-      if (tab === "convenios") matchTab = Boolean(c.empresa_vinculada_nombre && c.empresa_vinculada_nombre.trim().length > 0)
+      if (tab === "socios_extra_club") matchTab = Boolean(c.extra_club_numero && c.extra_club_numero.trim().length > 0)
+      else if (tab === "convenios") matchTab = Boolean(c.empresa_vinculada_nombre && c.empresa_vinculada_nombre.trim().length > 0)
       else if (tab === "fisica") matchTab = (c.tipo_persona || "").toLowerCase() === "fisica"
       else if (tab === "juridica") matchTab = (c.tipo_persona || "juridica").toLowerCase() === "juridica"
       else if (tab === "con_credito") matchTab = getCreditoLimite(c) > 0
@@ -197,6 +213,7 @@ export default function CustomersPage() {
       es_convenio: false,
       empresa_vinculada_nombre: "",
       empresa_vinculada_ruc: "",
+      es_extra_club: false,
       extra_club_numero: "",
       credito_limite: 0,
       pago_default: "contado",
@@ -215,6 +232,7 @@ export default function CustomersPage() {
     setEditingCustomer(c)
     setModalTab("fiscal")
     const tieneConvenio = Boolean(c.empresa_vinculada_nombre && c.empresa_vinculada_nombre.trim().length > 0)
+    const tieneExtraClub = Boolean(c.extra_club_numero && c.extra_club_numero.trim().length > 0)
     const empNombre = c.empresa_vinculada_nombre || ""
 
     // Detectar si está en la lista de convenios conocidos
@@ -236,9 +254,10 @@ export default function CustomersPage() {
       es_convenio: tieneConvenio,
       empresa_vinculada_nombre: empNombre,
       empresa_vinculada_ruc: c.empresa_vinculada_ruc || (matched ? matched.empresa_ruc : ""),
+      es_extra_club: tieneExtraClub,
       extra_club_numero: c.extra_club_numero || "",
       credito_limite: getCreditoLimite(c),
-      pago_default: c.pago_default || "contado",
+      pago_default: c.pago_default || (tieneExtraClub ? "extra_club" : "contado"),
       activo: c.activo !== false,
       telefono: c.telefono || "",
       email: c.email || "",
@@ -282,12 +301,35 @@ export default function CustomersPage() {
     }
   }
 
-  // Generación rápida de número socio ExtraClub
-  const handleGenerateExtraClub = () => {
-    const rand = Math.floor(100000 + Math.random() * 900000)
-    const code = `EC-${rand}`
-    setForm(prev => ({ ...prev, extra_club_numero: code }))
-    toast.info("Código ExtraClub", `Asignado código provisional: ${code}`)
+  // Control de activación de Socio Extra Club con generación automática de UUID v4
+  const handleToggleExtraClub = (enabled: boolean) => {
+    if (enabled) {
+      const existingIsUUID = form.extra_club_numero && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(form.extra_club_numero.trim())
+      const uuid = existingIsUUID ? form.extra_club_numero.trim().toLowerCase() : generateUUIDv4()
+      setForm(prev => ({
+        ...prev,
+        es_extra_club: true,
+        extra_club_numero: uuid,
+        credito_limite: prev.credito_limite > 0 ? prev.credito_limite : 500000,
+        pago_default: prev.pago_default === "contado" ? "extra_club" : prev.pago_default,
+      }))
+      toast.info("Socio Extra Club", "Se generó el UUID de socio y se habilitó la línea de crédito.")
+    } else {
+      setForm(prev => ({
+        ...prev,
+        es_extra_club: false,
+        extra_club_numero: "",
+        credito_limite: 0,
+        pago_default: "contado",
+      }))
+    }
+  }
+
+  // Regeneración explícita de UUID de socio Extra Club
+  const handleRegenerateUUID = () => {
+    const newUuid = generateUUIDv4()
+    setForm(prev => ({ ...prev, extra_club_numero: newUuid, es_extra_club: true }))
+    toast.success("Nuevo UUID Generado", newUuid)
   }
 
   // Cambio de selector de convenio
@@ -317,7 +359,7 @@ export default function CustomersPage() {
     }
   }
 
-  const handleSave = async () => {
+  const handleSave = async (andPrintCard: boolean = false) => {
     if (!form.razon_social.trim()) {
       toast.error("Error", "La razón social o nombre completo es obligatorio")
       setModalTab("fiscal")
@@ -328,6 +370,17 @@ export default function CustomersPage() {
       toast.error("Convenio Requerido", "Debe especificar el nombre de la empresa vinculada")
       setModalTab("convenio")
       return
+    }
+
+    // Si está marcado como Extra Club pero el UUID está vacío o no es válido, generar UUID v4 estándar
+    let finalExtraClubNumero = form.extra_club_numero ? form.extra_club_numero.trim().toLowerCase() : null
+    if (form.es_extra_club) {
+      if (!finalExtraClubNumero || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(finalExtraClubNumero)) {
+        finalExtraClubNumero = generateUUIDv4()
+        setForm(prev => ({ ...prev, extra_club_numero: finalExtraClubNumero! }))
+      }
+    } else {
+      finalExtraClubNumero = null
     }
 
     setSaving(true)
@@ -343,7 +396,7 @@ export default function CustomersPage() {
         condicion_iva: form.condicion_iva,
         empresa_vinculada_nombre: form.es_convenio ? form.empresa_vinculada_nombre.trim() : null,
         empresa_vinculada_ruc: form.es_convenio ? (form.empresa_vinculada_ruc.trim() || null) : null,
-        extra_club_numero: form.extra_club_numero.trim() || null,
+        extra_club_numero: finalExtraClubNumero,
         credito_limite: limiteNum,
         limite_credito: limiteNum,
         pago_default: form.pago_default,
@@ -356,15 +409,22 @@ export default function CustomersPage() {
         departamento: form.departamento.trim() || "Amambay",
       }
 
+      let targetQuery = finalExtraClubNumero || payload.ci || payload.ruc || ""
+
       if (editingCustomer) {
         await api.customers.update(editingCustomer.id, payload)
         toast.success("Ficha Actualizada", `Se guardaron los cambios de ${form.razon_social}`)
       } else {
-        await api.customers.create(payload)
+        const created = await api.customers.create(payload)
         toast.success("Cliente Creado", `Se registró con éxito a ${form.razon_social}`)
+        if (created?.extra_club_numero) targetQuery = created.extra_club_numero
       }
       setShowForm(false)
       fetchData()
+
+      if (andPrintCard && targetQuery) {
+        navigate(`/loyalty/tarjetas?q=${encodeURIComponent(targetQuery)}`)
+      }
     } catch (err: any) {
       toast.error("Error al guardar", err?.message || err?.detail || "Ocurrió un error inesperado al conectar con el servidor")
     } finally {
@@ -526,6 +586,7 @@ export default function CustomersPage() {
       <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
           { id: "todos", label: "Todos los Clientes", count: kpis.total },
+          { id: "socios_extra_club", label: "⭐ Socios ExtraClub", count: kpis.sociosExtraClub },
           { id: "convenios", label: "🏢 Convenios Corporativos", count: kpis.conConvenio },
           { id: "fisica", label: "Personas Físicas (C.I.)", count: kpis.personasFisicas },
           { id: "juridica", label: "Empresas & RUC", count: kpis.personasJuridicas },
@@ -640,9 +701,11 @@ export default function CustomersPage() {
                           </span>
                         ) : null}
                         {c.extra_club_numero ? (
-                          <div className="flex items-center gap-1 text-[10px] font-mono text-amber-600 dark:text-amber-400">
-                            <Award className="w-3 h-3 text-amber-500" />
-                            <span>{c.extra_club_numero}</span>
+                          <div className="flex items-center gap-1 text-[10px] font-mono text-amber-600 dark:text-amber-400" title={`Socio ExtraClub: ${c.extra_club_numero}`}>
+                            <Award className="w-3 h-3 text-amber-500 flex-shrink-0" />
+                            <span className="truncate max-w-[130px] font-bold">
+                              {c.extra_club_numero.length > 18 ? `${c.extra_club_numero.slice(0, 8)}…` : c.extra_club_numero}
+                            </span>
                           </div>
                         ) : null}
                         {!c.empresa_vinculada_nombre && !c.extra_club_numero && (
@@ -686,6 +749,15 @@ export default function CustomersPage() {
                     </td>
                     <td className="p-4 text-center">
                       <div className="flex items-center justify-center gap-1.5">
+                        {c.extra_club_numero && (
+                          <button
+                            onClick={() => navigate(`/loyalty/tarjetas?q=${encodeURIComponent(c.extra_club_numero || c.ci || c.ruc || "")}`)}
+                            className="p-2 text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-xl transition"
+                            title="Imprimir Tarjeta Socio en Zebra ZC300"
+                          >
+                            <Printer className="w-4 h-4" />
+                          </button>
+                        )}
                         <button
                           onClick={() => setViewingCustomer(c)}
                           className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-xl transition"
@@ -949,7 +1021,7 @@ export default function CustomersPage() {
                     />
                   </div>
 
-                  <div>
+                    <div>
                     <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Condición Fiscal Tributaria (IVA)</label>
                     <select
                       value={form.condicion_iva}
@@ -962,6 +1034,148 @@ export default function CustomersPage() {
                       <option value="no_contribuyente">No Contribuyente / Consumidor Final</option>
                     </select>
                   </div>
+                </div>
+
+                {/* 🌟 CARD PRINCIPAL TOGGLE EXTRA CLUB */}
+                <div className={`p-4 rounded-2xl border transition-all ${
+                  form.es_extra_club
+                    ? "bg-gradient-to-br from-amber-500/15 via-amber-500/5 to-slate-900/30 border-amber-500/40 shadow-lg shadow-amber-500/5"
+                    : "bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800"
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold transition-all ${
+                        form.es_extra_club
+                          ? "bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30"
+                          : "bg-slate-200 dark:bg-slate-800 text-slate-400"
+                      }`}>
+                        <Award className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-black text-slate-900 dark:text-white text-sm">¿Es Socio Extra Club?</h4>
+                          {form.es_extra_club ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500 text-slate-950">
+                              Membresía Activa
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold text-slate-400 bg-slate-200 dark:bg-slate-800">
+                              Cliente Común
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {form.es_extra_club
+                            ? "Socio con carnet/UUID asignado, acumulación de beneficios y compras a crédito"
+                            : "Cliente estándar sin tarjeta ni línea de crédito (solo compras al contado)"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Toggle Switch */}
+                    <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={form.es_extra_club}
+                        onChange={e => handleToggleExtraClub(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                    </label>
+                  </div>
+
+                  {/* DETALLES EXPANDIBLES SI ES SOCIO EXTRA CLUB */}
+                  {form.es_extra_club && (
+                    <div className="mt-4 pt-3.5 border-t border-amber-500/20 space-y-3 animate-fade-in-up">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="sm:col-span-2">
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block font-black uppercase text-[10px] text-amber-700 dark:text-amber-300 tracking-wider">
+                              UUID de Socio Extra Club (Escáner POS & Zebra ZC300)
+                            </label>
+                            <span className="text-[10px] font-bold text-slate-400 font-mono">Formato v4 oficial</span>
+                          </div>
+                          <input
+                            type="text"
+                            value={form.extra_club_numero}
+                            onChange={e => setForm(f => ({ ...f, extra_club_numero: e.target.value.toLowerCase().trim() }))}
+                            placeholder="xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
+                            className="w-full bg-white dark:bg-slate-950 border border-amber-500/30 rounded-2xl px-3.5 py-2.5 text-xs font-mono font-bold text-amber-600 dark:text-amber-400 tracking-wide outline-none focus:border-amber-500"
+                          />
+                        </div>
+
+                        <div className="flex items-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={handleRegenerateUUID}
+                            className="flex-1 py-2.5 px-3 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-800 dark:text-amber-200 font-bold rounded-2xl text-xs flex items-center justify-center gap-1.5 transition"
+                            title="Generar nuevo UUID v4 aleatorio"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>Regenerar</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (form.extra_club_numero) {
+                                navigator.clipboard.writeText(form.extra_club_numero)
+                                toast.success("Copiado", "UUID copiado al portapapeles")
+                              }
+                            }}
+                            className="py-2.5 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-2xl text-xs flex items-center gap-1 transition"
+                            title="Copiar UUID"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copiar</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* LÍNEA DE CRÉDITO DEL SOCIO */}
+                      <div className="p-3 bg-white/70 dark:bg-slate-950/60 rounded-xl border border-amber-500/20 space-y-2">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                          <label className="block font-black uppercase text-[10px] text-emerald-600 dark:text-emerald-400">
+                            Línea de Crédito Autorizada para el Socio (₲)
+                          </label>
+                          <span className="text-[10px] text-slate-500">Cupo disponible en gaveta/caja para compras a plazo</span>
+                        </div>
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-2.5 font-bold font-mono text-emerald-600 dark:text-emerald-400 text-sm">₲</span>
+                          <input
+                            type="number"
+                            value={form.credito_limite}
+                            onChange={e => setForm(f => ({ ...f, credito_limite: Number(e.target.value) || 0 }))}
+                            placeholder="0"
+                            className="w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl pl-8 pr-4 py-2 text-sm font-mono font-black text-emerald-600 dark:text-emerald-400"
+                          />
+                        </div>
+                        {/* Atajos de asignación rápida de cupo */}
+                        <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                          <span className="text-[10px] font-bold text-slate-400">Atajos de cupo:</span>
+                          {[
+                            { label: "₲ 500.000", val: 500000 },
+                            { label: "₲ 1.000.000", val: 1000000 },
+                            { label: "₲ 1.500.000", val: 1500000 },
+                            { label: "₲ 2.000.000", val: 2000000 },
+                            { label: "₲ 5.000.000", val: 5000000 },
+                          ].map(p => (
+                            <button
+                              key={p.val}
+                              type="button"
+                              onClick={() => setForm(f => ({ ...f, credito_limite: p.val }))}
+                              className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold transition ${
+                                form.credito_limite === p.val
+                                  ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                                  : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-emerald-500"
+                              }`}
+                            >
+                              {p.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1055,41 +1269,74 @@ export default function CustomersPage() {
                 </div>
 
                 {/* Panel Destacado de Extra Club */}
-                <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-slate-900/10 border border-amber-500/20 space-y-3">
+                <div className={`p-4 rounded-2xl border transition-all ${
+                  form.es_extra_club
+                    ? "bg-gradient-to-br from-amber-500/15 via-amber-500/5 to-slate-900/10 border-amber-500/30"
+                    : "bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800"
+                }`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold">
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold transition-all ${
+                        form.es_extra_club ? "bg-amber-500 text-slate-950" : "bg-slate-200 dark:bg-slate-800 text-slate-400"
+                      }`}>
                         <Award className="w-4 h-4" />
                       </div>
                       <div>
-                        <h4 className="font-extrabold text-slate-900 dark:text-white text-xs">Fidelización Extra Club</h4>
-                        <p className="text-[11px] text-slate-500">Asignación de tarjeta o código de socio para beneficios y crédito POS</p>
+                        <h4 className="font-extrabold text-slate-900 dark:text-white text-xs">Membresía Socio Extra Club</h4>
+                        <p className="text-[11px] text-slate-500">
+                          {form.es_extra_club ? "Socio activo con UUID y crédito habilitado" : "Desactivado (cliente común sin tarjeta)"}
+                        </p>
                       </div>
                     </div>
+                    <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={form.es_extra_club}
+                        onChange={e => handleToggleExtraClub(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+                    </label>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="sm:col-span-2">
-                      <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Nº Socio / Código Tarjeta Extra Club</label>
-                      <input
-                        type="text"
-                        value={form.extra_club_numero}
-                        onChange={e => setForm(f => ({ ...f, extra_club_numero: e.target.value }))}
-                        placeholder="Ej: EC-784001 o Código de Barras de Tarjeta"
-                        className="w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-mono font-bold text-amber-600 dark:text-amber-400"
-                      />
+                  {form.es_extra_club && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-amber-500/20 mt-2">
+                      <div className="sm:col-span-2">
+                        <label className="block font-black uppercase text-[10px] text-amber-700 dark:text-amber-300 mb-1">UUID de Socio (Oficial v4)</label>
+                        <input
+                          type="text"
+                          value={form.extra_club_numero}
+                          onChange={e => setForm(f => ({ ...f, extra_club_numero: e.target.value.toLowerCase().trim() }))}
+                          placeholder="xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
+                          className="w-full bg-white dark:bg-slate-950 border border-amber-500/30 rounded-2xl px-3.5 py-2.5 text-xs font-mono font-bold text-amber-600 dark:text-amber-400"
+                        />
+                      </div>
+                      <div className="flex items-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={handleRegenerateUUID}
+                          className="flex-1 py-2.5 px-3 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-700 dark:text-amber-300 font-bold rounded-2xl text-xs flex items-center justify-center gap-1.5 transition"
+                          title="Regenerar UUID"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>Regenerar</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (form.extra_club_numero) {
+                              navigator.clipboard.writeText(form.extra_club_numero)
+                              toast.success("Copiado", "UUID copiado")
+                            }
+                          }}
+                          className="py-2.5 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-2xl text-xs transition"
+                          title="Copiar UUID"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-end">
-                      <button
-                        type="button"
-                        onClick={handleGenerateExtraClub}
-                        className="w-full py-2.5 px-3 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-700 dark:text-amber-300 font-bold rounded-2xl text-xs flex items-center justify-center gap-1.5 transition"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>Generar Código</span>
-                      </button>
-                    </div>
-                  </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1277,9 +1524,21 @@ export default function CustomersPage() {
                 >
                   Cancelar
                 </button>
+                {form.es_extra_club && (
+                  <button
+                    type="button"
+                    onClick={() => handleSave(true)}
+                    disabled={saving}
+                    className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-amber-500/25 transition"
+                    title="Guardar y abrir el panel de emisión de tarjetas en Zebra ZC300"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Guardar y Emitir Tarjeta</span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={handleSave}
+                  onClick={() => handleSave(false)}
                   disabled={saving}
                   className="px-6 py-2.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-extrabold text-xs flex items-center gap-2 shadow-lg shadow-indigo-500/25 transition"
                 >
@@ -1406,7 +1665,22 @@ export default function CustomersPage() {
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end gap-2">
+            <div className="pt-2 flex flex-wrap justify-end gap-2">
+              {viewingCustomer.extra_club_numero && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const q = viewingCustomer.extra_club_numero || viewingCustomer.ci || viewingCustomer.ruc || ""
+                    setViewingCustomer(null)
+                    navigate(`/loyalty/tarjetas?q=${encodeURIComponent(q)}`)
+                  }}
+                  className="px-4 py-2 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs transition flex items-center gap-1.5 shadow-md shadow-amber-500/20"
+                  title="Abrir panel de impresión Zebra ZC300"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Imprimir Tarjeta Zebra</span>
+                </button>
+              )}
               <button
                 onClick={() => {
                   const target = viewingCustomer
@@ -1420,7 +1694,7 @@ export default function CustomersPage() {
               </button>
               <button
                 onClick={() => setViewingCustomer(null)}
-                className="px-5 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs"
+                className="px-5 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
                 Cerrar
               </button>
