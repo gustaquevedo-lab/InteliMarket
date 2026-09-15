@@ -103,7 +103,10 @@ export default function ReturnsPage() {
   const [returnItems, setReturnItems] = useState<ReturnItemType[]>([])
   const [showCreate, setShowCreate] = useState(false)
   const [selectedSaleId, setSelectedSaleId] = useState("")
+  const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
   const [saleSearch, setSaleSearch] = useState("")
+  const [modalSales, setModalSales] = useState<Sale[]>([])
+  const [searchingSales, setSearchingSales] = useState(false)
   const [saleItems, setSaleItems] = useState<any[]>([])
   const [selectedItems, setSelectedItems] = useState<Record<string, { cantidad: number; condicion: string; motivo_detalle: string }>>({})
   const [motivo, setMotivo] = useState("")
@@ -203,6 +206,42 @@ export default function ReturnsPage() {
     fetchSupplierCreditNotes()
     fetchSupplierReturns()
   }, [filterStatus])
+
+  // Búsqueda en servidor de comprobantes para el modal de devolución (cualquier fecha)
+  useEffect(() => {
+    if (!showCreate) {
+      setModalSales([])
+      setSearchingSales(false)
+      return
+    }
+
+    const term = saleSearch.trim()
+    if (!term) {
+      setModalSales(sales.slice(0, 10))
+      setSearchingSales(false)
+      return
+    }
+
+    setSearchingSales(true)
+    const timeout = setTimeout(async () => {
+      try {
+        const results = await api.sales.list({
+          search: term,
+          all_dates: true,
+          estado: "confirmado",
+          limit: 20,
+        })
+        setModalSales(results || [])
+      } catch (err) {
+        console.error("Error buscando ventas para devolución:", err)
+        setModalSales([])
+      } finally {
+        setSearchingSales(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timeout)
+  }, [saleSearch, showCreate, sales])
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -330,7 +369,7 @@ export default function ReturnsPage() {
     }
     setCreating(true)
     try {
-      const sale = sales.find(s => s.id === selectedSaleId)
+      const sale = selectedSale || sales.find(s => s.id === selectedSaleId)
       await api.returns.create({
         sale_id: selectedSaleId,
         customer_id: sale?.customer_id || undefined,
@@ -351,7 +390,9 @@ export default function ReturnsPage() {
 
   const resetCreateForm = () => {
     setSelectedSaleId("")
+    setSelectedSale(null)
     setSaleSearch("")
+    setModalSales([])
     setSaleItems([])
     setSelectedItems({})
     setMotivo("")
@@ -409,13 +450,6 @@ export default function ReturnsPage() {
 
   const motivoLabel = (m: string) => MOTIVOS_LABELS[m] || m.replace(/_/g, " ")
   const condicionLabel = (c: string) => CONDICION_LABELS[c] || c.replace(/_/g, " ")
-
-  const filteredSalesForModal = sales.filter(s =>
-    !saleSearch ||
-    (s.numero || "").toLowerCase().includes(saleSearch.toLowerCase()) ||
-    ((s.customer?.razon_social || (s as any).customer_name || "")).toLowerCase().includes(saleSearch.toLowerCase()) ||
-    ((s.customer?.ruc || (s as any).customer_ruc || "")).includes(saleSearch)
-  ).slice(0, 6)
 
   return (
     <div className="space-y-6 animate-fade-in-up pb-16">
@@ -984,14 +1018,14 @@ export default function ReturnsPage() {
                   <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
                     <div>
                       <span className="font-bold text-slate-900 dark:text-white">
-                        Venta #{sales.find(s => s.id === selectedSaleId)?.numero || selectedSaleId.slice(0, 8)}
+                        Venta #{selectedSale?.numero || sales.find(s => s.id === selectedSaleId)?.numero || selectedSaleId.slice(0, 8)}
                       </span>
                       <p className="text-[11px] text-slate-400 font-mono">
-                        Cliente: {sales.find(s => s.id === selectedSaleId)?.customer?.razon_social || (sales.find(s => s.id === selectedSaleId) as any)?.customer_name || "Consumidor Final"} · Total: {formatPYG(Number(sales.find(s => s.id === selectedSaleId)?.total || 0))}
+                        Cliente: {selectedSale?.customer?.razon_social || (selectedSale as any)?.customer_name || sales.find(s => s.id === selectedSaleId)?.customer?.razon_social || (sales.find(s => s.id === selectedSaleId) as any)?.customer_name || "Consumidor Final"} · Total: {formatPYG(Number(selectedSale?.total || sales.find(s => s.id === selectedSaleId)?.total || 0))}
                       </p>
                     </div>
                     <button
-                      onClick={() => { setSelectedSaleId(""); setSaleItems([]); setSelectedItems({}) }}
+                      onClick={() => { setSelectedSaleId(""); setSelectedSale(null); setSaleItems([]); setSelectedItems({}) }}
                       className="text-rose-500 hover:text-rose-700 font-bold"
                     >
                       <X className="w-4 h-4" />
@@ -1004,27 +1038,53 @@ export default function ReturnsPage() {
                       value={saleSearch}
                       onChange={e => setSaleSearch(e.target.value)}
                       placeholder="Buscar por Nº comprobante, RUC o cliente..."
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-9 pr-4 py-2.5 text-xs text-slate-900 dark:text-white"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-9 pr-9 py-2.5 text-xs text-slate-900 dark:text-white"
                     />
+                    {searchingSales && (
+                      <Loader2 className="w-4 h-4 absolute right-3 top-3 text-rose-500 animate-spin" />
+                    )}
                     {saleSearch && (
-                      <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-20 max-h-44 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
-                        {filteredSalesForModal.map(s => (
-                          <button
-                            key={s.id}
-                            onClick={() => {
-                              setSelectedSaleId(s.id)
-                              setSaleSearch("")
-                              handleLoadSaleItems(s.id)
-                            }}
-                            className="w-full p-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-between"
-                          >
-                            <div>
-                              <p className="font-bold text-xs">Venta #{s.numero || s.id.slice(0, 8)}</p>
-                              <p className="text-[10px] text-slate-400 font-mono">{s.customer?.razon_social || (s as any).customer_name || "Consumidor"} · RUC {s.customer?.ruc || (s as any).customer_ruc || "—"}</p>
-                            </div>
-                            <span className="font-mono font-bold text-emerald-600 text-xs">{formatPYG(Number(s.total || 0))}</span>
-                          </button>
-                        ))}
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-20 max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                        {searchingSales ? (
+                          <div className="p-4 text-center text-slate-400 flex items-center justify-center gap-2">
+                            <Loader2 className="w-4 h-4 animate-spin text-rose-500" />
+                            <span>Buscando en base de datos...</span>
+                          </div>
+                        ) : modalSales.length > 0 ? (
+                          modalSales.map(s => (
+                            <button
+                              key={s.id}
+                              onClick={() => {
+                                setSelectedSale(s)
+                                setSelectedSaleId(s.id)
+                                setSaleSearch("")
+                                setModalSales([])
+                                setSales(prev => prev.some(x => x.id === s.id) ? prev : [s, ...prev])
+                                handleLoadSaleItems(s.id)
+                              }}
+                              className="w-full p-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-between transition-colors"
+                            >
+                              <div>
+                                <p className="font-bold text-xs text-slate-900 dark:text-white">
+                                  Venta #{s.numero || s.id.slice(0, 8)}
+                                  {s.fecha && (
+                                    <span className="ml-2 font-mono font-normal text-[10px] text-slate-400">
+                                      {formatDate(s.fecha)}
+                                    </span>
+                                  )}
+                                </p>
+                                <p className="text-[10px] text-slate-400 font-mono">
+                                  {s.customer?.razon_social || (s as any).customer_name || "Consumidor Final"} · RUC {s.customer?.ruc || (s as any).customer_ruc || "—"}
+                                </p>
+                              </div>
+                              <span className="font-mono font-bold text-emerald-600 text-xs">{formatPYG(Number(s.total || 0))}</span>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="p-4 text-center text-slate-400 text-xs">
+                            No se encontraron ventas confirmadas con "{saleSearch}"
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
