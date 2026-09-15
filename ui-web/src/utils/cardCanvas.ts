@@ -204,6 +204,61 @@ export async function renderTarjeta(canvas: HTMLCanvasElement, d: DatosTarjeta, 
   }
 }
 
+let anversoPromesa: Promise<HTMLImageElement | null> | null = null
+function cargarAnverso(): Promise<HTMLImageElement | null> {
+  if (!anversoPromesa) {
+    anversoPromesa = new Promise((resolve) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.onerror = () => { anversoPromesa = null; resolve(null) }
+      img.src = "/tarjeta_anverso.jpg"
+    })
+  }
+  return anversoPromesa
+}
+
+/**
+ * Frente de la tarjeta: el diseño fijo de Extra Club, el mismo del generador
+ * que se usaba con el legacy (intelicard). Es igual para todos los socios.
+ *
+ * La ZC300 es de una sola cara: se imprimen los frentes, se dan vuelta las
+ * tarjetas, se vuelven a cargar y se imprime el dorso con los datos y el QR.
+ *
+ * Devuelve false si no se pudo cargar la imagen: en ese caso NO se imprime.
+ */
+export async function renderAnverso(canvas: HTMLCanvasElement): Promise<boolean> {
+  const W = TARJETA_PX.ancho
+  const H = TARJETA_PX.alto
+  canvas.width = W
+  canvas.height = H
+  const ctx = canvas.getContext("2d")!
+  ctx.fillStyle = "#0E1B57" // azul del diseño: tapa cualquier borde que no cubra la imagen
+  ctx.fillRect(0, 0, W, H)
+  const img = await cargarAnverso()
+  if (!img) return false
+  // Cubrir la tarjeta entera sin deformar: la imagen es apenas mas alta que
+  // CR80, se recortan ~2 px arriba y abajo.
+  const s = Math.max(W / img.width, H / img.height)
+  const w = img.width * s
+  const h = img.height * s
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = "high"
+  ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h)
+  return true
+}
+
+/** Copia girada 180°. Al dar vuelta la tarjeta a mano el dorso puede salir cabeza abajo. */
+export function girar180(src: HTMLCanvasElement): HTMLCanvasElement {
+  const out = document.createElement("canvas")
+  out.width = src.width
+  out.height = src.height
+  const ctx = out.getContext("2d")!
+  ctx.translate(out.width, out.height)
+  ctx.rotate(Math.PI)
+  ctx.drawImage(src, 0, 0)
+  return out
+}
+
 /** PNG en base64 sin el prefijo data:, que es lo que pide QZ Tray. */
 export function canvasABase64(canvas: HTMLCanvasElement): string {
   return canvas.toDataURL("image/png").replace(/^data:image\/png;base64,/, "")

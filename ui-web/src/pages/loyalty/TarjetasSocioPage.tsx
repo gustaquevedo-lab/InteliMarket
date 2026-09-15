@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { CreditCard, Search, Printer, Loader2, CheckCircle2, AlertCircle, AlertTriangle, RefreshCw, Hash, Settings } from "lucide-react"
 import { api } from "../../api"
-import { renderTarjeta, canvasABase64, OPCIONES_DEFAULT, TARJETA_MM, type OpcionesTarjeta } from "../../utils/cardCanvas"
+import { renderTarjeta, renderAnverso, girar180, canvasABase64, OPCIONES_DEFAULT, TARJETA_MM, type OpcionesTarjeta } from "../../utils/cardCanvas"
 import { printImageViaQz, listarImpresoras, isQzAvailableError } from "../../utils/qzTray"
 
 /**
@@ -70,6 +70,14 @@ export default function TarjetasSocioPage() {
   const [imprimiendo, setImprimiendo] = useState<string | null>(null)
   const [aviso, setAviso] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const frenteRef = useRef<HTMLCanvasElement>(null)
+  // La ZC300 es de una cara: frente (diseño fijo) y dorso (datos + QR) se
+  // imprimen en pasadas separadas, dando vuelta las tarjetas entre una y otra.
+  const [cara, setCara] = useState<"frente" | "dorso">("dorso")
+  const [copiasFrente, setCopiasFrente] = useState(1)
+  const [girarDorso, setGirarDorso] = useState(() => {
+    try { return localStorage.getItem("tarjetas_girar_dorso") === "1" } catch { return false }
+  })
 
   const mostrar = (tipo: "ok" | "error", texto: string) => {
     setAviso({ tipo, texto })
@@ -132,7 +140,11 @@ export default function TarjetasSocioPage() {
       },
       opciones,
     )
-  }, [activo, opciones])
+  }, [activo, opciones, cara])
+
+  useEffect(() => {
+    if (cara === "frente" && frenteRef.current) renderAnverso(frenteRef.current)
+  }, [cara])
 
   const alternar = (id: string) =>
     setSeleccion((prev) => {
@@ -220,7 +232,7 @@ export default function TarjetasSocioPage() {
           { nombre: s.nombre, numero: numero!, documento: s.documento, empresa: s.empresa_vinculada, ciudad: s.ciudad, limite: s.limite_credito },
           opciones,
         )
-        await printImageViaQz({ printerName: impresoraQz, imagenBase64: canvasABase64(off), widthMm: TARJETA_MM.ancho, heightMm: TARJETA_MM.alto })
+        await printImageViaQz({ printerName: impresoraQz, imagenBase64: canvasABase64(girarDorso ? girar180(off) : off), widthMm: TARJETA_MM.ancho, heightMm: TARJETA_MM.alto })
         hechas++
       }
       mostrar("ok", `${hechas} tarjeta${hechas === 1 ? "" : "s"} enviada${hechas === 1 ? "" : "s"} a la impresora.`)
@@ -228,6 +240,41 @@ export default function TarjetasSocioPage() {
     } catch (e: any) {
       const detalle = isQzAvailableError(e) ? "QZ Tray no está abierto en esta PC." : e?.message || "error desconocido"
       mostrar("error", `Se detuvo después de ${hechas} de ${lista.length}. ${detalle}`)
+    } finally {
+      setImprimiendo(null)
+      cargarEstado()
+    }
+  }
+
+  // Frentes: la misma imagen para todos, sin datos del socio. No asigna numeros.
+  const imprimirFrentes = async () => {
+    const n = Math.max(1, Math.min(100, Math.floor(copiasFrente) || 1))
+    if (!impresoraQz) {
+      setMostrarConfig(true)
+      mostrar("error", "Falta elegir la impresora de tarjetas (Configuración).")
+      return
+    }
+    if (estado?.sin_tarjetas) {
+      mostrar("error", "La impresora no tiene tarjetas cargadas. Cargá la bandeja y volvé a intentar.")
+      return
+    }
+    const off = document.createElement("canvas")
+    if (!(await renderAnverso(off))) {
+      mostrar("error", "No se pudo cargar el diseño del frente. Recargá la página e intentá de nuevo.")
+      return
+    }
+    const imagen = canvasABase64(off)
+    let hechas = 0
+    try {
+      for (let i = 0; i < n; i++) {
+        setImprimiendo(`frente ${i + 1} de ${n}`)
+        await printImageViaQz({ printerName: impresoraQz, imagenBase64: imagen, widthMm: TARJETA_MM.ancho, heightMm: TARJETA_MM.alto })
+        hechas++
+      }
+      mostrar("ok", `${hechas} frente${hechas === 1 ? "" : "s"} enviado${hechas === 1 ? "" : "s"}. Cuando salgan, dalas vuelta, cargalas en la bandeja e imprimí los dorsos.`)
+    } catch (e: any) {
+      const detalle = isQzAvailableError(e) ? "QZ Tray no está abierto en esta PC." : e?.message || "error desconocido"
+      mostrar("error", `Se detuvo después de ${hechas} de ${n} frentes. ${detalle}`)
     } finally {
       setImprimiendo(null)
       cargarEstado()
@@ -283,7 +330,7 @@ export default function TarjetasSocioPage() {
         </button>
         {estado?.alcanzable && estado.doble_faz === false && (
           <p className="w-full text-xs text-slate-500">
-            Esta ZC300 es de <b>una sola cara</b>: todo el contenido va en el frente.
+            Esta ZC300 es de <b>una sola cara</b>: primero imprimí los frentes, después dá vuelta las tarjetas, cargalas otra vez en la bandeja e imprimí los dorsos.
           </p>
         )}
       </div>
@@ -364,14 +411,26 @@ export default function TarjetasSocioPage() {
           <button onClick={() => imprimir(seleccionados)} disabled={!seleccionados.length || !!imprimiendo}
             className="w-full py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-30 text-slate-950 font-black flex items-center justify-center gap-2 cursor-pointer">
             {imprimiendo ? <Loader2 className="w-5 h-5 animate-spin" /> : <Printer className="w-5 h-5" />}
-            {imprimiendo ? `Imprimiendo ${imprimiendo}…` : `Imprimir ${seleccionados.length || ""} seleccionada${seleccionados.length === 1 ? "" : "s"}`}
+            {imprimiendo ? `Imprimiendo ${imprimiendo}…` : `Imprimir dorso de ${seleccionados.length || ""} seleccionada${seleccionados.length === 1 ? "" : "s"}`}
           </button>
         </div>
 
         {/* Vista previa */}
         <div className="flex flex-col gap-3 min-w-0">
+          <div className="flex gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 self-start">
+            {([["frente", "Frente"], ["dorso", "Dorso (datos y QR)"]] as const).map(([c, label]) => (
+              <button key={c}
+                onClick={() => { setCara(c); if (c === "frente" && seleccionados.length) setCopiasFrente(seleccionados.length) }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${cara === c ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+
           <div className="p-4 rounded-2xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-            {activo ? (
+            {cara === "frente" ? (
+              <canvas ref={frenteRef} className="w-full h-auto rounded-[14px] shadow-lg bg-[#0E1B57]" style={{ aspectRatio: "85.6 / 53.98" }} />
+            ) : activo ? (
               <canvas ref={canvasRef} className="w-full h-auto rounded-[14px] shadow-lg bg-white" style={{ aspectRatio: "85.6 / 53.98" }} />
             ) : (
               <div className="aspect-[85.6/53.98] rounded-[14px] border-2 border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center text-sm text-slate-400 text-center px-6">
@@ -380,7 +439,31 @@ export default function TarjetasSocioPage() {
             )}
           </div>
 
-          {activo && (
+          {cara === "frente" && (
+            <div className="flex flex-col gap-2">
+              <p className="text-[11px] text-slate-500">
+                El frente es igual para todos los socios. Imprimí tantos como tarjetas vayas a emitir; después dalas vuelta y cargalas otra vez para imprimir los dorsos.
+              </p>
+              {estado?.sin_tarjetas && (
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-rose-50 dark:bg-rose-500/10 text-xs font-bold text-rose-700 dark:text-rose-300">
+                  <AlertTriangle className="w-4 h-4" /> La impresora no tiene tarjetas en la bandeja.
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-bold text-slate-600 dark:text-slate-300">Cantidad</label>
+                <input type="number" min={1} max={100} value={copiasFrente}
+                  onChange={(e) => setCopiasFrente(Number(e.target.value))}
+                  className="w-20 px-3 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm tabular-nums outline-none focus:border-amber-500" />
+                <button onClick={imprimirFrentes} disabled={!!imprimiendo}
+                  className="flex-1 py-3 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black flex items-center justify-center gap-2 disabled:opacity-40 cursor-pointer">
+                  {imprimiendo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                  {imprimiendo ? `Imprimiendo ${imprimiendo}…` : `Imprimir ${Math.max(1, Math.floor(copiasFrente) || 1)} frente${Math.floor(copiasFrente) === 1 ? "" : "s"}`}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {cara === "dorso" && activo && (
             <>
               {!activo.extra_club_numero && (
                 <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-500/10 text-xs text-amber-800 dark:text-amber-300">
@@ -413,6 +496,16 @@ export default function TarjetasSocioPage() {
                 <p className="text-[11px] text-slate-400 mt-1">
                   El nombre, el logo y el QR van siempre. El QR lleva el número de socio, que es lo que la caja reconoce al escanear.
                 </p>
+                <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer mt-2">
+                  <input type="checkbox" checked={girarDorso} className="accent-amber-500 mt-1"
+                    onChange={(e) => {
+                      setGirarDorso(e.target.checked)
+                      try { localStorage.setItem("tarjetas_girar_dorso", e.target.checked ? "1" : "0") } catch {}
+                    }} />
+                  <span>Girar el dorso 180°
+                    <span className="block text-[11px] text-slate-400">activalo si al dar vuelta las tarjetas el dorso sale cabeza abajo respecto del frente</span>
+                  </span>
+                </label>
               </div>
 
               {estado?.sin_tarjetas && (
@@ -423,7 +516,7 @@ export default function TarjetasSocioPage() {
 
               <button onClick={() => imprimir([activo])} disabled={!!imprimiendo}
                 className="w-full py-3 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black flex items-center justify-center gap-2 disabled:opacity-40 cursor-pointer">
-                <Printer className="w-4 h-4" /> Imprimir esta tarjeta
+                <Printer className="w-4 h-4" /> Imprimir dorso de esta tarjeta
               </button>
             </>
           )}
