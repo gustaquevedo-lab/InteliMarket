@@ -172,26 +172,41 @@ export async function printImageViaQz({ printerName, imagenBase64, widthMm, heig
   // primero con la tarjeta que ya define el driver, solo girada; si el driver
   // no trae tamaño propio, con el tamaño en vertical (como lo describe el
   // driver) y orientacion horizontal.
-  const intentos = [
-    { orientation: horizontal ? "landscape" : "portrait", margins: 0, scaleContent: true, colorType: "color" },
-    {
-      size: { width: Math.min(widthMm, heightMm), height: Math.max(widthMm, heightMm) },
-      units: "mm",
-      orientation: horizontal ? "landscape" : "portrait",
-      margins: 0,
-      scaleContent: true,
-      colorType: "color",
-    },
-  ]
-  let ultimoError: any = null
-  for (const opciones of intentos) {
+  //
+  // Sin acceso al log de QZ en la PC no hay forma de saber de antemano que
+  // combinacion acepta cada driver, asi que se prueban todas las validas en
+  // orden. Fallan al validar el trabajo, ANTES de mandar nada a la impresora,
+  // asi que un intento fallido no gasta tarjeta ni cinta. La que funciona se
+  // recuerda en esta PC y se usa primero la proxima vez.
+  const orient = horizontal ? "landscape" : "portrait"
+  const vertical = { width: Math.min(widthMm, heightMm), height: Math.max(widthMm, heightMm) }
+  const apaisado = { width: Math.max(widthMm, heightMm), height: Math.min(widthMm, heightMm) }
+  const base = { scaleContent: true, colorType: "color" }
+  const intentos: Record<string, any> = {
+    driver_girado: { ...base, orientation: orient },
+    vertical_girado: { ...base, size: vertical, units: "mm", orientation: orient },
+    apaisado: { ...base, size: horizontal ? apaisado : vertical, units: "mm" },
+    vertical_girado_sin_margen: { ...base, size: vertical, units: "mm", orientation: orient, margins: 0 },
+    driver_solo: { ...base },
+  }
+  const CLAVE = `qz_pixel_config_${printerName}`
+  let preferida: string | null = null
+  try { preferida = localStorage.getItem(CLAVE) } catch {}
+  const orden = Object.keys(intentos).sort((a, b) => (a === preferida ? -1 : b === preferida ? 1 : 0))
+
+  const fallas: string[] = []
+  for (const nombre of orden) {
     try {
-      await qz.print(qz.configs.create(printerName, opciones), datos)
+      await qz.print(qz.configs.create(printerName, intentos[nombre]), datos)
+      try { localStorage.setItem(CLAVE, nombre) } catch {}
+      console.info(`[qz] impresion de imagen OK con la configuracion "${nombre}"`)
       return
     } catch (e: any) {
-      ultimoError = e
-      if (!/imageable|paper/i.test(String(e?.message || e))) throw e
+      const msg = String(e?.message || e)
+      // Sin QZ o sin certificado no tiene sentido seguir probando tamaños.
+      if (isQzAvailableError(e) || /blocked|sign|certificate|untrusted|anonymous/i.test(msg)) throw e
+      fallas.push(`${nombre}: ${msg}`)
     }
   }
-  throw ultimoError
+  throw new Error(`La impresora rechazó todas las configuraciones. ${fallas.join(" | ")}`)
 }
