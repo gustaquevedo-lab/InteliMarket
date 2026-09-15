@@ -194,6 +194,18 @@ async def _resolve_pessoa(db: AsyncSession, company_id: str, id_pessoa: int, rol
     p = rows[0]
 
     if rol == "supplier":
+        ruc_val = (p.get("RUC") or "").strip()
+        existing_sup = None
+        if ruc_val:
+            r_s = await db.execute(
+                select(Supplier).where(Supplier.company_id == company_id, Supplier.ruc == ruc_val)
+            )
+            existing_sup = r_s.scalars().first()
+
+        if existing_sup:
+            await _save_map(db, company_id, source_table, id_pessoa, "suppliers", existing_sup.id)
+            return existing_sup.id
+
         entity = Supplier(
             company_id=company_id,
             razon_social=p["NOME"] or f"Proveedor legacy #{id_pessoa}",
@@ -201,11 +213,38 @@ async def _resolve_pessoa(db: AsyncSession, company_id: str, id_pessoa: int, rol
         )
         target_table = "suppliers"
     else:
+        ruc_val = (p.get("RUC") or "").strip()
+        uuid_fidelizacao = _format_uuid_hex(p.get("UUID_FIDELIZACAO"))
+        existing_cust = None
+
+        if ruc_val:
+            r_c = await db.execute(
+                select(Customer).where(Customer.company_id == company_id, Customer.ruc == ruc_val)
+            )
+            existing_cust = r_c.scalars().first()
+
+        if not existing_cust and uuid_fidelizacao:
+            r_c = await db.execute(
+                select(Customer).where(Customer.company_id == company_id, Customer.extra_club_numero == uuid_fidelizacao)
+            )
+            existing_cust = r_c.scalars().first()
+
+        if existing_cust:
+            if uuid_fidelizacao and existing_cust.extra_club_numero != uuid_fidelizacao:
+                existing_cust.extra_club_numero = uuid_fidelizacao
+            if p.get("EMPLEADOR_NOME") and not existing_cust.empresa_vinculada_nombre:
+                existing_cust.empresa_vinculada_nombre = p.get("EMPLEADOR_NOME")
+            if p.get("EMPLEADOR_RUC") and not existing_cust.empresa_vinculada_ruc:
+                existing_cust.empresa_vinculada_ruc = p.get("EMPLEADOR_RUC")
+            await db.flush()
+            await _save_map(db, company_id, source_table, id_pessoa, "customers", existing_cust.id)
+            return existing_cust.id
+
         entity = Customer(
             company_id=company_id,
             razon_social=p["NOME"] or f"Cliente legacy #{id_pessoa}",
             ruc=p["RUC"], telefono=p["TELEFONE"], email=p["EMAIL"], direccion=p["ENDERECO"],
-            extra_club_numero=_format_uuid_hex(p.get("UUID_FIDELIZACAO")),
+            extra_club_numero=uuid_fidelizacao,
             empresa_vinculada_nombre=p.get("EMPLEADOR_NOME"),
             empresa_vinculada_ruc=p.get("EMPLEADOR_RUC"),
         )
