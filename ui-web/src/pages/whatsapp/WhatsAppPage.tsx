@@ -406,12 +406,13 @@ export default function WhatsAppPage() {
   const handleSaveChatbotConfig = async (overrideCfg?: any) => {
     setSavingChatbotConfig(true)
     try {
-      const cfgToSave = overrideCfg || chatbotConfig
+      const isEvent = overrideCfg && (overrideCfg.nativeEvent || overrideCfg.preventDefault || overrideCfg.target || typeof overrideCfg?.stopPropagation === "function")
+      const cfgToSave = (!isEvent && overrideCfg && typeof overrideCfg === "object") ? overrideCfg : chatbotConfig
       await api.whatsapp.saveChatbotConfig(cfgToSave)
       setChatbotConfig(cfgToSave)
       toast.success("Configuración Guardada", "Las opciones del Chatbot IA fueron actualizadas")
     } catch (e: any) {
-      toast.error("Error al guardar", e?.message || "No se pudo guardar la configuración")
+      toast.error("Error al guardar", e?.response?.data?.detail || e?.message || "No se pudo guardar la configuración")
     } finally {
       setSavingChatbotConfig(false)
     }
@@ -1642,7 +1643,7 @@ export default function WhatsAppPage() {
 
                 <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end">
                   <button
-                    onClick={handleSaveChatbotConfig}
+                    onClick={() => handleSaveChatbotConfig()}
                     disabled={savingChatbotConfig}
                     className="btn-primary py-2.5 px-6 text-xs flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700"
                   >

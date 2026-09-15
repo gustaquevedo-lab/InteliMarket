@@ -5,6 +5,7 @@ Personalizado y conectado a la base de datos real de Extra Supermercado
 from typing import Optional, Dict, Any, List
 from uuid import UUID
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import re
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, or_
@@ -17,6 +18,7 @@ from api.src.customers.models import Customer
 from api.src.loyalty.models import LoyaltyPoints
 from api.src.inventory.models import StockLot
 from api.src.companies.models import Company
+from api.src.promotions.models import Promotion
 
 
 DEFAULT_CHATBOT_CONFIG = {
@@ -199,6 +201,10 @@ class ChatbotEngine:
         if user_input in ["premios", "catalogo", "catalogo de premios", "premios temporada", "premio", "canjes"]:
             return await self._show_seasonal_prizes(conversation)
 
+        # Promociones y ofertas vigentes de Extra Supermercado
+        if user_input in ["ofertas", "oferta", "promos", "promo", "promociones", "promocion", "descuentos", "rebajas", "que ofertas hay", "que esta en promo"]:
+            return await self._show_current_promotions(conversation)
+
         # Regla de palabras clave / respuestas rápidas FAQ
         kw_match = await self._match_keyword_rule(user_input)
         if kw_match:
@@ -245,6 +251,7 @@ class ChatbotEngine:
         if modules.get("catalog_search", True):
             lines.append("1️⃣ *Catálogo & Consulta de Precios*")
             buttons.append({"id": "1", "title": "📦 Catálogo"})
+        lines.append("🔥 *Ofertas & Promociones del Día* (Enviá *OFERTAS*)")
         if modules.get("extraclub_points", True):
             lines.append("2️⃣ *Mis Puntos ExtraClub*")
             buttons.append({"id": "2", "title": "⭐ ExtraClub"})
@@ -293,7 +300,10 @@ class ChatbotEngine:
                 }
 
         # 2. Opciones estándar
-        if user_input in ["1", "productos", "catalogo", "catálogo", "precios", "precio", "buscar"]:
+        if user_input in ["ofertas", "oferta", "promos", "promo", "promociones", "promocion", "descuentos"]:
+            return await self._show_current_promotions(conversation)
+
+        elif user_input in ["1", "productos", "catalogo", "catálogo", "precios", "precio", "buscar"]:
             return {
                 "text": (
                     "📦 *Catálogo & Consulta de Precios*\n\n"
@@ -349,6 +359,58 @@ class ChatbotEngine:
                 "next_state": "menu_main"
             }
 
+    async def _get_active_promotions_for_product(self, product_id: UUID, category_id: Optional[UUID] = None) -> List[Promotion]:
+        """Obtiene las promociones vigentes hoy en Paraguay (America/Asuncion) para un producto"""
+        py_today = datetime.now(ZoneInfo("America/Asuncion")).date()
+        company_id = await self.get_company_id()
+
+        conds = [
+            Promotion.producto_ids.contains([product_id])
+        ]
+        if category_id:
+            conds.append(Promotion.categoria_ids.contains([category_id]))
+
+        stmt = select(Promotion).where(
+            Promotion.company_id == company_id,
+            Promotion.estado == "activa",
+            Promotion.valido_desde <= py_today,
+            Promotion.valido_hasta >= py_today,
+            or_(*conds)
+        ).order_by(Promotion.created_at.desc())
+
+        res = await self.db.execute(stmt)
+        promos = list(res.scalars().all())
+        active = []
+        for p in promos:
+            if p.limitar_unidades and p.stock_limite_unidades:
+                if (p.unidades_vendidas_promo or 0) >= p.stock_limite_unidades:
+                    continue
+            active.append(p)
+        return active
+
+    def _format_promo_badge(self, promo: Promotion, precio_normal: float) -> str:
+        """Formatea el badge de promoción para el mensaje de WhatsApp"""
+        if promo.tipo == "precio_fijo_oferta" and promo.precio_fijo_promocional:
+            p_oferta = float(promo.precio_fijo_promocional)
+            ahorro = precio_normal - p_oferta
+            pct = int((ahorro / precio_normal * 100)) if precio_normal > 0 else 0
+            pct_str = f" (-{pct}%)" if pct > 0 else ""
+            return f"🔥 *¡EN OFERTA! Gs. {p_oferta:,.0f}*{pct_str} _(Antes: Gs. {precio_normal:,.0f})_"
+        elif promo.tipo == "porcentaje" and promo.valor:
+            pct = int(promo.valor)
+            p_oferta = precio_normal * (1 - pct / 100)
+            return f"🔥 *¡{pct}% OFF! Gs. {p_oferta:,.0f}* _(Antes: Gs. {precio_normal:,.0f})_"
+        elif promo.tipo == "dos_por_uno":
+            return f"🔥 *¡PROMO 2x1!* _Llevás 2 por Gs. {precio_normal:,.0f}_"
+        elif promo.tipo == "tres_por_dos":
+            return f"🔥 *¡PROMO 3x2!* _Llevás 3 por el precio de 2_"
+        elif promo.tipo == "segunda_unidad_pct" and promo.valor:
+            return f"🔥 *¡2da unidad al {int(promo.valor)}% OFF!*"
+        elif promo.tipo == "combo_precio" and promo.precio_fijo_promocional:
+            return f"🔥 *¡Combo Oferta: Gs. {float(promo.precio_fijo_promocional):,.0f}!*"
+        else:
+            return f"🔥 *¡EN PROMOCIÓN!* {promo.nombre}"
+
     async def _handle_products_menu(self, conversation: WhatsAppConversation, user_input: str) -> Dict[str, Any]:
         if user_input in ["0", "menu", "volver"]:
             return await self._show_main_menu(conversation)
@@ -389,17 +451,24 @@ class ChatbotEngine:
 
         lines = []
         for i, p in enumerate(products, 1):
-            # Consultar stock actual de lotes
+            # Consultar stock actual de lotes en tiempo real
             stock_res = await self.db.execute(
                 select(func.coalesce(func.sum(StockLot.cantidad_actual), 0)).where(
                     StockLot.producto_id == p.id
                 )
             )
             stock = stock_res.scalar() or 0
-            precio = p.precio_venta or 0
+            precio = float(p.precio_venta or 0)
             precio_str = f"Gs. {precio:,.0f}" if precio > 0 else "Consultar en caja"
-            stock_str = f"Stock: {int(stock)}" if stock > 0 else "Consultar en salón"
-            lines.append(f"{i}. *{p.nombre}*\n   💵 {precio_str} | 📦 {stock_str}")
+            stock_str = f"Stock: {int(stock)} un." if stock > 0 else "Consultar en salón"
+
+            # Verificar si tiene promoción activa vigente
+            promos = await self._get_active_promotions_for_product(p.id, p.categoria_id)
+            if promos:
+                badge = self._format_promo_badge(promos[0], precio)
+                lines.append(f"{i}. *{p.nombre}*\n   {badge}\n   📦 {stock_str}")
+            else:
+                lines.append(f"{i}. *{p.nombre}*\n   💵 {precio_str} | 📦 {stock_str}")
 
         text = (
             f"🔍 *Resultados para '{clean_q}':*\n\n"
@@ -528,6 +597,64 @@ class ChatbotEngine:
         return {
             "text": f"{tmpl_content}\n\n_Enviá 0 para volver al menú principal._",
             "buttons": [{"id": "0", "title": "⬅️ Menú Principal"}],
+            "next_state": "idle",
+        }
+
+    async def _show_current_promotions(self, conversation: WhatsAppConversation) -> Dict[str, Any]:
+        """Muestra las mejores ofertas y promociones vigentes hoy en Extra Supermercado"""
+        py_today = datetime.now(ZoneInfo("America/Asuncion")).date()
+        company_id = await self.get_company_id()
+
+        stmt = (
+            select(Promotion)
+            .where(
+                Promotion.company_id == company_id,
+                Promotion.estado == "activa",
+                Promotion.valido_desde <= py_today,
+                Promotion.valido_hasta >= py_today,
+            )
+            .order_by(Promotion.created_at.desc())
+            .limit(8)
+        )
+        res = await self.db.execute(stmt)
+        promos = list(res.scalars().all())
+
+        if not promos:
+            return {
+                "text": (
+                    "🛒 *Promociones Extra Supermercado*\n\n"
+                    "En este momento estamos renovando las promociones de la semana.\n"
+                    "¡Consultanos por cualquier producto específico escribiendo su nombre (ej: *leche*, *arroz*, *carne*)!\n\n"
+                    "_Enviá 0 para volver al menú principal._"
+                ),
+                "buttons": [{"id": "0", "title": "⬅️ Volver"}],
+                "next_state": "idle",
+            }
+
+        lines = ["🔥 *¡OFERTAS & PROMOCIONES VIGENTES EN EXTRA SUPERMERCADO!* 🛒✨\n"]
+        for i, p in enumerate(promos, 1):
+            detalle = p.descripcion or p.nombre
+            hasta_str = p.valido_hasta.strftime('%d/%m')
+            if p.tipo == "precio_fijo_oferta" and p.precio_fijo_promocional:
+                precio_promo = f"Gs. {float(p.precio_fijo_promocional):,.0f}"
+                lines.append(f"{i}️⃣ *{p.nombre}*\n   🏷️ Precio Oferta: *{precio_promo}*\n   📅 Válido hasta: {hasta_str}")
+            elif p.tipo == "porcentaje" and p.valor:
+                lines.append(f"{i}️⃣ *{p.nombre}*\n   🏷️ *{int(p.valor)}% de Descuento directo*\n   📅 Válido hasta: {hasta_str}")
+            elif p.tipo == "dos_por_uno":
+                lines.append(f"{i}️⃣ *{p.nombre}*\n   🏷️ *¡Llevá 2 y Pagá 1 (2x1)!*\n   📅 Válido hasta: {hasta_str}")
+            elif p.tipo == "tres_por_dos":
+                lines.append(f"{i}️⃣ *{p.nombre}*\n   🏷️ *¡Llevá 3 y Pagá 2 (3x2)!*\n   📅 Válido hasta: {hasta_str}")
+            else:
+                lines.append(f"{i}️⃣ *{p.nombre}*\n   ℹ️ {detalle}\n   📅 Válido hasta: {hasta_str}")
+
+        lines.append("\n_Escribí el nombre de cualquier producto para ver su precio exacto y stock, o enviá 0 para volver al menú._")
+
+        return {
+            "text": "\n".join(lines),
+            "buttons": [
+                {"id": "1", "title": "📦 Catálogo"},
+                {"id": "0", "title": "⬅️ Volver al Menú"}
+            ],
             "next_state": "idle",
         }
 
