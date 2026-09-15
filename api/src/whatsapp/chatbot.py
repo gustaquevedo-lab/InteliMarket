@@ -19,60 +19,165 @@ from api.src.loyalty.models import LoyaltyPoints
 from api.src.inventory.models import StockLot
 from api.src.companies.models import Company
 from api.src.promotions.models import Promotion
+from api.src.cupones.models import CuponTicket
 
 
-DEFAULT_CHATBOT_CONFIG = {
-    "bot_name": "ExtraBot",
-    "auto_reply": True,
-    "welcome_message": "¡Hola {cliente}! 👋 Bienvenido al canal oficial de atención de Extra Supermercado.",
-    "out_of_hours_message": "¡Hola! En este momento nuestras sucursales se encuentran cerradas. Nuestro horario de atención es de Lunes a Sábados de 07:00 a 21:00 hs y Domingos de 07:30 a 13:00 hs. Dejanos tu consulta y te responderemos ni bien abramos.",
-    "business_hours_start": "07:00",
-    "business_hours_end": "21:00",
-    "business_days": ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado"],
-    "modules_enabled": {
-        "catalog_search": True,
-        "extraclub_points": True,
-        "order_tracking": True,
-        "supermarket_info": True,
-        "human_handoff": True,
-    },
-    "keywords": [
+DEFAULT_BOT_FLOW = {
+    "id": "flow-supermercado-master",
+    "name": "Flujo Oficial Extra Supermercado",
+    "active": True,
+    "nodes": [
         {
-            "id": "kw-delivery",
-            "name": "Envíos a Domicilio",
-            "keywords": ["delivery", "envio", "envíos", "domicilio", "flete"],
-            "response": "🚚 *Envíos a Domicilio — Extra Supermercado*\n\nRealizamos entregas de Lunes a Sábados de 08:00 a 19:00 hs.\n📍 *Cobertura:* Radio de hasta 15 km de nuestras sucursales.\n💵 *Costo de envío:* Gs. 15.000 (¡Envío GRATIS en compras superiores a Gs. 300.000!).\n\nPodés pasarnos tu lista de compras por este chat indicando los productos.",
-            "active": True,
+            "id": "start",
+            "title": "Bienvenida y Menú Principal",
+            "type": "buttons",
+            "content": "¡Hola {cliente}! 👋 Bienvenido al canal oficial de atención de *Extra Supermercado Mayorista* 🛒✨\n\n¿En qué podemos ayudarte hoy?",
+            "footer": "Extra Supermercado • Elija una opción",
+            "buttons": [
+                {"id": "btn_puntos", "text": "⭐ Mis Puntos", "type": "reply", "next_node": "node_puntos"},
+                {"id": "btn_ofertas", "text": "🔥 Ofertas del Día", "type": "reply", "next_node": "node_ofertas"},
+                {"id": "btn_mas_opciones", "text": "📋 Más Opciones", "type": "reply", "next_node": "node_lista_servicios"},
+            ],
+            "trigger_keywords": ["hola", "buenas", "buen dia", "buenas tardes", "buenas noches", "menu", "inicio", "empezar", "0"],
         },
         {
-            "id": "kw-banco",
-            "name": "Datos Bancarios y Pagos",
-            "keywords": ["transferencia", "banco", "alias", "pix", "datos bancarios", "cuenta", "pagar"],
-            "response": "💳 *Datos Bancarios Oficiales — Extra Supermercado*\n\n🏦 *Banco:* Banco Continental\n📄 *Razón Social:* GRUPO SANTA TERESA E.A.S.\n🆔 *RUC:* 80150377-9\n🔢 *Cta. Cte. Gs:* 01-2345678-01\n📲 *Alias / PIX:* compras@superextra.com.py\n\n_Por favor envianos tu comprobante por este medio una vez realizada la transferencia._",
-            "active": True,
+            "id": "node_puntos",
+            "title": "Saldo ExtraClub",
+            "type": "action",
+            "action_type": "extraclub_points",
+            "content": "⭐ *Tu Saldo ExtraClub — Extra Supermercado* ⭐\n\n👤 Titular: *{cliente}*\n💳 Doc: *{documento}*\n✨ Puntos Disponibles: *{puntos} Pts.*\n💰 Equivalente en Compras: *Gs. {valor_monetario}*\n\n🛒 _Podés canjear tus puntos directamente en línea de caja en tu próxima compra._",
+            "footer": "1 Punto = Gs. 100",
+            "buttons": [
+                {"id": "btn_premios", "text": "🎁 Premios Temporada", "type": "reply", "next_node": "node_premios"},
+                {"id": "btn_cupones", "text": "🎟️ Mis Cupones", "type": "reply", "next_node": "node_cupones"},
+                {"id": "btn_volver", "text": "⬅️ Menú Principal", "type": "reply", "next_node": "start"},
+            ],
+            "trigger_keywords": ["puntos", "saldo", "extraclub", "puntos acumulados", "cuanto tengo"],
         },
         {
-            "id": "kw-carniceria",
-            "name": "Carnicería y Cortes Asado",
-            "keywords": ["carniceria", "carnicería", "asado", "costilla", "vacio", "vacío", "carne"],
-            "response": "🥩 *Cortes Especiales & Carnicería — Extra Supermercado*\n\n¡Cortes frescos envasados al vacío y seleccionados para tu asado!\n🔥 Costilla de primera\n🔥 Tapa cuadril, vacío y colita\n🔥 Chorizos parrilleros artesanales\n\nEscribí el nombre del corte para consultar precio en Gs. o acercate a cualquiera de nuestras sucursales.",
-            "active": True,
-        },
-    ],
-    "custom_menu_options": [
-        {
-            "id": "opt-delivery",
-            "number": "6",
-            "title": "Envíos & Delivery a Domicilio",
-            "response": "🚚 *Envíos a Domicilio — Extra Supermercado*\n\nRealizamos entregas de Lunes a Sábados de 08:00 a 19:00 hs.\n📍 *Cobertura:* Radio de hasta 15 km de sucursales.\n💵 *Costo:* Gs. 15.000 (¡Gratis a partir de Gs. 300.000!).\n\nDejanos tu lista de productos para coordinar despacho.",
-            "active": True,
+            "id": "node_ofertas",
+            "title": "Promociones y Ofertas",
+            "type": "action",
+            "action_type": "promotions_active",
+            "content": "🔥 *OFERTAS Y PROMOCIONES ACTIVAS EN EXTRA SUPERMERCADO* 🔥\n\n{promociones_texto}\n\n¡Te esperamos en nuestro salón con los mejores precios del país!",
+            "footer": "Precios vigentes hasta agotar stock",
+            "buttons": [
+                {"id": "btn_catalogo_web", "text": "🌐 Ver Tienda Web", "type": "url", "url": "https://superextra.com.py"},
+                {"id": "btn_cupones", "text": "🎟️ Mis Cupones", "type": "reply", "next_node": "node_cupones"},
+                {"id": "btn_volver", "text": "⬅️ Menú Principal", "type": "reply", "next_node": "start"},
+            ],
+            "trigger_keywords": ["ofertas", "oferta", "promociones", "promo", "descuentos", "rebajas"],
         },
         {
-            "id": "opt-banco",
-            "number": "7",
-            "title": "Cuentas Bancarias & Pagos",
-            "response": "💳 *Datos Bancarios Oficiales — Extra Supermercado*\n\n🏦 *Banco:* Banco Continental\n📄 *Razón Social:* GRUPO SANTA TERESA E.A.S.\n🆔 *RUC:* 80150377-9\n🔢 *Cta. Cte. Gs:* 01-2345678-01\n📲 *Alias / PIX:* compras@superextra.com.py",
-            "active": True,
+            "id": "node_cupones",
+            "title": "Cupones de Sorteo",
+            "type": "action",
+            "action_type": "sorteo_cupones",
+            "content": "🎟️ *Tus Cupones de Sorteo — Extra Supermercado*\n\n👤 Cliente: *{cliente}* (Doc: {documento})\n🏆 Campaña: *{campana_sorteo}*\n\n🎯 Tenés un total de *{cupones_totales} cupones acumulados* a tu nombre.\n¡Cada compra que realizás en caja te suma más chances automáticas!",
+            "footer": "Sorteo oficial Extra Supermercado",
+            "buttons": [
+                {"id": "btn_puntos", "text": "⭐ Mis Puntos", "type": "reply", "next_node": "node_puntos"},
+                {"id": "btn_ofertas", "text": "🔥 Ver Ofertas", "type": "reply", "next_node": "node_ofertas"},
+                {"id": "btn_volver", "text": "⬅️ Menú Principal", "type": "reply", "next_node": "start"},
+            ],
+            "trigger_keywords": ["cupones", "sorteo", "cupon", "sorteos", "mis cupones"],
+        },
+        {
+            "id": "node_lista_servicios",
+            "title": "Menú Extendido (Lista)",
+            "type": "list",
+            "content": "Por favor seleccioná el servicio o departamento que deseás consultar:",
+            "button_text": "Ver Servicios 📋",
+            "footer": "Extra Supermercado Mayorista",
+            "sections": [
+                {
+                    "title": "Fidelidad & Sorteos",
+                    "rows": [
+                        {"id": "opt_pts", "title": "⭐ Saldo de Puntos", "description": "Consultá tus puntos ExtraClub acumulados", "next_node": "node_puntos"},
+                        {"id": "opt_cup", "title": "🎟️ Cupones de Sorteos", "description": "Tus cupones para el sorteo del año", "next_node": "node_cupones"},
+                        {"id": "opt_pre", "title": "🎁 Catálogo de Premios", "description": "Electrodomésticos y canjes disponibles", "next_node": "node_premios"},
+                    ],
+                },
+                {
+                    "title": "Compras & Envíos",
+                    "rows": [
+                        {"id": "opt_ofe", "title": "🔥 Ofertas del Día", "description": "Precios especiales y descuentos relámpago", "next_node": "node_ofertas"},
+                        {"id": "opt_del", "title": "🚚 Envíos a Domicilio", "description": "Costos y zonas de cobertura de delivery", "next_node": "node_delivery"},
+                        {"id": "opt_ban", "title": "💳 Cuentas Bancarias & Pagos", "description": "Datos para transferencias y PIX", "next_node": "node_banco"},
+                    ],
+                },
+                {
+                    "title": "Atención al Cliente",
+                    "rows": [
+                        {"id": "opt_suc", "title": "📍 Sucursales & Horarios", "description": "Ubicación en Google Maps y horarios", "next_node": "node_sucursales"},
+                        {"id": "opt_hum", "title": "👤 Hablar con un Asesor", "description": "Transferir chat a una persona de soporte", "next_node": "node_humano"},
+                    ],
+                },
+            ],
+            "trigger_keywords": ["servicios", "opciones", "mas", "lista"],
+        },
+        {
+            "id": "node_premios",
+            "title": "Catálogo de Premios",
+            "type": "message",
+            "content": "🎁 *Premios Disponibles para Canje ExtraClub:*\n\n☕ *1.500 Pts:* Pava Eléctrica Inox 1.8L\n🍳 *2.500 Pts:* Set de Sartenes Antiadherentes\n🥪 *3.500 Pts:* Sandwichera Grill Antiadherente\n💨 *7.000 Pts:* Freidora de Aire Digital 4.5L\n🍲 *12.000 Pts:* Horno Eléctrico de Mesa 45L\n📺 *25.000 Pts:* Smart TV 43\" Full HD\n\n💡 _También podés canjear tus puntos por dinero directo en caja (1 Punto = Gs. 100)._",
+            "footer": "Canje directo en línea de caja",
+            "buttons": [
+                {"id": "btn_puntos", "text": "⭐ Mis Puntos", "type": "reply", "next_node": "node_puntos"},
+                {"id": "btn_humano", "text": "👤 Solicitar Canje", "type": "reply", "next_node": "node_humano"},
+                {"id": "btn_volver", "text": "⬅️ Menú Principal", "type": "reply", "next_node": "start"},
+            ],
+            "trigger_keywords": ["premios", "canjes", "catalogo de premios"],
+        },
+        {
+            "id": "node_delivery",
+            "title": "Delivery & Envíos",
+            "type": "message",
+            "content": "🚚 *Envíos a Domicilio — Extra Supermercado*\n\n🕒 *Horario:* Lunes a Sábados de 08:00 a 19:00 hs.\n📍 *Cobertura:* Radio de hasta 15 km de nuestras sucursales.\n💵 *Costo de envío:* Gs. 15.000 (¡Envío GRATIS en compras a partir de Gs. 300.000!).\n\nPodés pasarnos tu lista de compras directamente por este medio.",
+            "footer": "Envíos en el día con cadena de frío",
+            "buttons": [
+                {"id": "btn_pedir", "text": "👤 Pedir a un Asesor", "type": "reply", "next_node": "node_humano"},
+                {"id": "btn_ofertas", "text": "🔥 Ver Ofertas", "type": "reply", "next_node": "node_ofertas"},
+                {"id": "btn_volver", "text": "⬅️ Menú Principal", "type": "reply", "next_node": "start"},
+            ],
+            "trigger_keywords": ["delivery", "envio", "envíos", "domicilio", "flete"],
+        },
+        {
+            "id": "node_banco",
+            "title": "Datos Bancarios y Pagos",
+            "type": "message",
+            "content": "💳 *Datos Bancarios Oficiales — Extra Supermercado*\n\n🏦 *Banco:* Banco Continental\n📄 *Razón Social:* GRUPO SANTA TERESA E.A.S.\n🆔 *RUC:* 80150377-9\n🔢 *Cta. Cte. Gs:* 01-2345678-01\n📲 *Alias / PIX:* compras@superextra.com.py\n\n_Por favor envianos tu comprobante por este medio una vez realizada la transferencia._",
+            "footer": "Cuentas oficiales verificadas",
+            "buttons": [
+                {"id": "btn_enviar_comp", "text": "👤 Hablar con Asesor", "type": "reply", "next_node": "node_humano"},
+                {"id": "btn_volver", "text": "⬅️ Menú Principal", "type": "reply", "next_node": "start"},
+            ],
+            "trigger_keywords": ["transferencia", "banco", "alias", "pix", "datos bancarios", "pagar"],
+        },
+        {
+            "id": "node_sucursales",
+            "title": "Sucursales & Horarios",
+            "type": "buttons",
+            "content": "📍 *Sucursales & Horarios — Extra Supermercado*\n\n🕒 *Horario de Atención:*\n• Lunes a Sábados: 07:00 a 21:00 hs\n• Domingos: 07:30 a 13:00 hs\n\n📌 *Casa Central:* Av. Carlos Antonio López y Curupayty, Pedro Juan Caballero, Paraguay.",
+            "footer": "Estacionamiento propio y seguridad privada",
+            "buttons": [
+                {"id": "btn_maps", "text": "📍 Abrir en Google Maps", "type": "url", "url": "https://maps.google.com/?q=Extra+Supermercado+Mayorista"},
+                {"id": "btn_humano", "text": "👤 Hablar con Asesor", "type": "reply", "next_node": "node_humano"},
+                {"id": "btn_volver", "text": "⬅️ Menú Principal", "type": "reply", "next_node": "start"},
+            ],
+            "trigger_keywords": ["horario", "horarios", "ubicacion", "sucursales", "donde estan", "direccion"],
+        },
+        {
+            "id": "node_humano",
+            "title": "Transferencia a Operador Humano",
+            "type": "action",
+            "action_type": "human_handoff",
+            "content": "👤 *¡Un asesor de atención al cliente se pondrá en contacto contigo a la brevedad!*\n\nHemos pausado la respuesta automática para que un operador humano pueda responderte de forma personalizada.\n\n_Si deseás volver al bot en cualquier momento, enviá *0* o *MENU*._",
+            "footer": "Atención personalizada Extra",
+            "buttons": [
+                {"id": "btn_volver", "text": "⬅️ Reactivar Menú Bot", "type": "reply", "next_node": "start"},
+            ],
+            "trigger_keywords": ["asesor", "humano", "persona", "operador", "ayuda", "representante"],
         },
     ],
 }
@@ -154,8 +259,182 @@ class ChatbotEngine:
             merged["keywords"] = DEFAULT_CHATBOT_CONFIG["keywords"]
         if "custom_menu_options" not in user_bot_cfg:
             merged["custom_menu_options"] = DEFAULT_CHATBOT_CONFIG["custom_menu_options"]
+        if "flow" not in user_bot_cfg or not user_bot_cfg["flow"]:
+            merged["flow"] = DEFAULT_BOT_FLOW
         self._config = merged
         return self._config
+
+    async def _render_flow_node(self, node: dict[str, Any], conversation: WhatsAppConversation) -> dict[str, Any]:
+        """Renderiza un nodo del flujo visual con datos dinámicos reales de Extra Supermercado"""
+        company_id = await self.get_company_id()
+        phone_digits = re.sub(r"\D", "", conversation.contact_phone)
+        last_digits = phone_digits[-8:] if len(phone_digits) >= 8 else phone_digits
+
+        # Buscar cliente registrado
+        stmt = select(Customer).where(
+            Customer.company_id == company_id,
+            Customer.telefono.ilike(f"%{last_digits}%")
+        ).limit(1)
+        res = await self.db.execute(stmt)
+        customer = res.scalar_one_or_none()
+
+        cliente_nombre = (customer.razon_social or customer.nombre or conversation.contact_name or "Cliente").strip() if customer else (conversation.contact_name or "Cliente")
+        documento = (customer.ci or customer.ruc or "").strip() if customer else ""
+        socio_numero = (getattr(customer, "extra_club_numero", None) or getattr(customer, "socio_numero", None) or "").strip() if customer else ""
+
+        # Puntos ExtraClub verídicos
+        total_pts = 0
+        if customer:
+            stmt_pts = select(func.coalesce(func.sum(LoyaltyPoints.puntos), 0)).where(
+                LoyaltyPoints.customer_id == customer.id
+            )
+            pts_res = await self.db.execute(stmt_pts)
+            total_pts = int(pts_res.scalar() or 0)
+        puntos_str = f"{total_pts:,}".replace(",", ".")
+        valor_monetario_str = f"{total_pts * 100:,}".replace(",", ".")
+
+        # Cupones de sorteos acumulados
+        cupones_tot = 0
+        campana_sorteo = "Gran Sorteo Aniversario Extra Supermercado"
+        if customer:
+            try:
+                tot_res = await self.db.execute(
+                    select(func.coalesce(func.sum(CuponTicket.cantidad), 0)).where(
+                        CuponTicket.cliente_id == customer.id
+                    )
+                )
+                cupones_tot = int(tot_res.scalar() or 0)
+            except Exception:
+                pass
+        cupones_str = f"{cupones_tot:,}".replace(",", ".")
+
+        # Promociones vigentes
+        promociones_texto = ""
+        action_type = node.get("action_type")
+        if action_type == "promotions_active":
+            py_today = datetime.now(ZoneInfo("America/Asuncion")).date()
+            p_stmt = (
+                select(Promotion)
+                .where(
+                    Promotion.company_id == company_id,
+                    Promotion.estado == "activa",
+                    Promotion.valido_desde <= py_today,
+                    Promotion.valido_hasta >= py_today,
+                )
+                .order_by(Promotion.created_at.desc())
+                .limit(6)
+            )
+            p_res = await self.db.execute(p_stmt)
+            promos = list(p_res.scalars().all())
+            if promos:
+                promo_lines = []
+                for idx, p in enumerate(promos, 1):
+                    if p.tipo == "precio_fijo_oferta" and p.precio_fijo_promocional:
+                        pr_str = f"Gs. {int(float(p.precio_fijo_promocional)):,}".replace(",", ".")
+                        promo_lines.append(f"{idx}️⃣ *{p.nombre}* 🏷️ {pr_str}")
+                    elif p.tipo == "porcentaje" and p.valor:
+                        promo_lines.append(f"{idx}️⃣ *{p.nombre}* 🏷️ *{int(p.valor)}% OFF*")
+                    elif p.tipo == "dos_por_uno":
+                        promo_lines.append(f"{idx}️⃣ *{p.nombre}* 🏷️ *¡2x1!*")
+                    else:
+                        promo_lines.append(f"{idx}️⃣ *{p.nombre}*")
+                promociones_texto = "\n".join(promo_lines)
+            else:
+                promociones_texto = "• Costilla de Primera: Gs. 34.000/Kg\n• Arroz Supremo 5Kg: Gs. 24.500\n• Aceite de Soja 900ml: Gs. 8.500"
+
+        # Traspaso a operador humano
+        if action_type == "human_handoff":
+            conversation.status = "needs_human"
+            await self.db.commit()
+
+        # Reemplazar variables dinámicas en el texto del nodo
+        raw_text = node.get("content", "")
+        formatted_text = raw_text.replace("{cliente}", cliente_nombre)
+        formatted_text = formatted_text.replace("{documento}", documento or "No registrado")
+        formatted_text = formatted_text.replace("{socio_numero}", socio_numero or "No registrado")
+        formatted_text = formatted_text.replace("{puntos}", puntos_str)
+        formatted_text = formatted_text.replace("{valor_monetario}", valor_monetario_str)
+        formatted_text = formatted_text.replace("{cupones_totales}", cupones_str)
+        formatted_text = formatted_text.replace("{campana_sorteo}", campana_sorteo)
+        formatted_text = formatted_text.replace("{promociones_texto}", promociones_texto)
+
+        return {
+            "text": formatted_text,
+            "type": node.get("type", "buttons" if node.get("buttons") else "message"),
+            "buttons": node.get("buttons", []),
+            "sections": node.get("sections", []),
+            "button_text": node.get("button_text", "Ver Opciones 📋"),
+            "title": node.get("title", "Extra Supermercado"),
+            "footer": node.get("footer", "Extra Supermercado Mayorista"),
+            "next_state": node.get("id"),
+        }
+
+    async def _process_visual_flow(
+        self,
+        conversation: WhatsAppConversation,
+        user_input: str,
+        flow: dict[str, Any]
+    ) -> Optional[dict[str, Any]]:
+        nodes = flow.get("nodes") or []
+        if not nodes:
+            return None
+        node_map = {n["id"]: n for n in nodes}
+        start_node = node_map.get("start") or nodes[0]
+
+        current_node_id = conversation.session_state or "start"
+        current_node = node_map.get(current_node_id) or start_node
+
+        target_node = None
+
+        # 1. Comandos universales de reinicio al menú principal
+        if user_input in ["0", "menu", "inicio", "volver", "start", "cancelar", "reiniciar"]:
+            target_node = start_node
+
+        # 2. Búsqueda de coincidencia en botones del nodo actual
+        if not target_node and current_node:
+            for idx, b in enumerate(current_node.get("buttons", [])):
+                b_id = str(b.get("id", "")).strip().lower()
+                b_text = str(b.get("text", "") or b.get("displayText", "")).strip().lower()
+                b_next = b.get("next_node")
+                if b_next and (user_input == b_id or user_input == b_text or user_input == str(idx + 1) or (len(b_text) >= 3 and b_text in user_input)):
+                    target_node = node_map.get(b_next)
+                    break
+
+        # 3. Búsqueda de coincidencia en menú de lista del nodo actual
+        if not target_node and current_node:
+            row_idx = 1
+            for sec in current_node.get("sections", []):
+                for row in sec.get("rows", []):
+                    r_id = str(row.get("id", "") or row.get("rowId", "")).strip().lower()
+                    r_title = str(row.get("title", "")).strip().lower()
+                    r_next = row.get("next_node")
+                    if r_next and (user_input == r_id or user_input == r_title or user_input == str(row_idx) or (len(user_input) >= 4 and user_input in r_title)):
+                        target_node = node_map.get(r_next)
+                        break
+                    row_idx += 1
+                if target_node:
+                    break
+
+        # 4. Búsqueda de coincidencia en palabras clave disparadoras (trigger_keywords) de cualquier nodo
+        if not target_node:
+            for n in nodes:
+                keywords = [str(k).strip().lower() for k in n.get("trigger_keywords", []) if k]
+                if any(k == user_input or (len(k) >= 4 and k in user_input) for k in keywords):
+                    target_node = n
+                    break
+
+        # 5. Si no hubo coincidencia y el nodo actual es de búsqueda de catálogo
+        if not target_node and current_node and current_node.get("action_type") == "search_catalog":
+            return await self._search_products(conversation, user_input)
+
+        # 6. Si no hay coincidencia, reiniciar a start si estaba en estado inicial
+        if not target_node:
+            if current_node_id in ("start", "idle", None):
+                target_node = start_node
+            else:
+                target_node = start_node
+
+        return await self._render_flow_node(target_node, conversation)
 
     async def _match_keyword_rule(self, user_input: str) -> Optional[Dict[str, Any]]:
         cfg = await self.get_config()
@@ -184,6 +463,14 @@ class ChatbotEngine:
         """Procesa un mensaje entrante y devuelve la respuesta del bot"""
         current_state = conversation.session_state or "idle"
         user_input = message_body.strip().lower()
+
+        # Si el bot tiene un flujo visual configurado y activo, procesar preferentemente con el motor de flujos
+        cfg = await self.get_config()
+        flow = cfg.get("flow") or DEFAULT_BOT_FLOW
+        if flow and flow.get("active", True) and flow.get("nodes"):
+            flow_resp = await self._process_visual_flow(conversation, user_input, flow)
+            if flow_resp:
+                return flow_resp
 
         # Comandos globales de salida o reseteo
         if user_input in ["0", "menu", "inicio", "volver", "cancelar"]:

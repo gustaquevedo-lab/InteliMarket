@@ -16,8 +16,9 @@ import {
   Search, Server, User, Clock, ArrowRight, MessageSquare, Terminal,
   Bot, Play, Sparkles, Filter, Radio, ChevronRight, CheckCircle,
   Building, HelpCircle, RotateCcw, Megaphone, BellRing, Users,
-  CheckCheck, AlertTriangle
+  CheckCheck, AlertTriangle, GitFork, Sliders
 } from "lucide-react"
+import BotFlowBuilder, { type BotFlow } from "./BotFlowBuilder"
 
 const DEFAULT_GATEWAY_URL = "http://100.72.38.119:8085"
 const DEFAULT_MANAGER_URL = "http://100.72.38.119:8085/manager"
@@ -84,6 +85,12 @@ export default function WhatsAppPage() {
   })
   const [loadingChatbotConfig, setLoadingChatbotConfig] = useState<boolean>(false)
   const [savingChatbotConfig, setSavingChatbotConfig] = useState<boolean>(false)
+
+  // ── Bot Visual Flow State ──
+  const [botSubTab, setBotSubTab] = useState<"flow" | "settings">("flow")
+  const [botFlow, setBotFlow] = useState<BotFlow | null>(null)
+  const [loadingFlow, setLoadingFlow] = useState<boolean>(false)
+  const [savingFlow, setSavingFlow] = useState<boolean>(false)
 
   // Modales de Reglas de Palabras Clave y Menú Personalizado
   const [showKeywordModal, setShowKeywordModal] = useState<boolean>(false)
@@ -179,6 +186,7 @@ export default function WhatsAppPage() {
       fetchConversations()
     } else if (tab === "chatbot") {
       fetchChatbotConfig()
+      fetchBotFlow()
     } else if (tab === "campaigns") {
       fetchCampaigns()
     } else if (tab === "automations") {
@@ -415,6 +423,50 @@ export default function WhatsAppPage() {
       toast.error("Error al guardar", e?.response?.data?.detail || e?.message || "No se pudo guardar la configuración")
     } finally {
       setSavingChatbotConfig(false)
+    }
+  }
+
+  // ── Flujo Visual del Chatbot (Evolution Interactive) ──
+  const fetchBotFlow = async () => {
+    setLoadingFlow(true)
+    try {
+      const data = await api.whatsapp.getBotFlow()
+      if (data?.flow) {
+        setBotFlow(data.flow)
+      }
+    } catch (e) {
+      console.error("Error fetching bot flow:", e)
+    } finally {
+      setLoadingFlow(false)
+    }
+  }
+
+  const handleSaveBotFlow = async (updatedFlow: BotFlow) => {
+    setSavingFlow(true)
+    try {
+      await api.whatsapp.saveBotFlow(updatedFlow)
+      setBotFlow(updatedFlow)
+      toast.success("Flujo Guardado", "El árbol visual y botones interactivos se guardaron correctamente.")
+    } catch (e: any) {
+      toast.error("Error al guardar flujo", e?.response?.data?.detail || e?.message || "No se pudo guardar el flujo")
+    } finally {
+      setSavingFlow(false)
+    }
+  }
+
+  const handleResetBotFlow = async () => {
+    if (!window.confirm("¿Seguro que querés restaurar el flujo oficial de Extra Supermercado? Se perderán las modificaciones no guardadas.")) return
+    setSavingFlow(true)
+    try {
+      const res = await api.whatsapp.resetBotFlow()
+      if (res?.flow) {
+        setBotFlow(res.flow)
+        toast.success("Flujo Restaurado", "Se restauró el flujo predeterminado con botones y listas interactivas.")
+      }
+    } catch (e: any) {
+      toast.error("Error al reiniciar", e?.response?.data?.detail || e?.message || "No se pudo reiniciar el flujo")
+    } finally {
+      setSavingFlow(false)
     }
   }
 
@@ -1027,7 +1079,7 @@ export default function WhatsAppPage() {
         {[
           { key: "connection", label: "Conexión QR", icon: Smartphone, count: null },
           { key: "conversations", label: "Chat en Vivo", icon: MessageSquare, count: conversations.length },
-          { key: "chatbot", label: "Chatbot IA & Simulador", icon: Bot, count: null },
+          { key: "chatbot", label: "Chatbot IA & Flujos", icon: Bot, count: null },
           { key: "campaigns", label: "Campañas Masivas", icon: Megaphone, count: campaigns.length },
           { key: "automations", label: "Automatizaciones", icon: Zap, count: rules.length },
           { key: "templates", label: "Plantillas Oficiales", icon: FileText, count: templates.length },
@@ -1523,9 +1575,60 @@ export default function WhatsAppPage() {
         </div>
       )}
 
-      {/* ── TAB 3: CHATBOT IA & ASISTENTE EXTRA SUPERMERCADO (OPCIONES INTELLIZAPP) ── */}
+      {/* ── TAB 3: CHATBOT IA & CONSTRUCTOR VISUAL DE FLUJOS ── */}
       {tab === "chatbot" && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="space-y-6">
+          {/* Sub-navegación Chatbot: Flujo Visual vs Ajustes Generales */}
+          <div className="flex items-center justify-between flex-wrap gap-3 pb-2 border-b border-slate-200 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setBotSubTab("flow")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                  botSubTab === "flow"
+                    ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/20"
+                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-750 border border-slate-200 dark:border-slate-700"
+                }`}
+              >
+                <GitFork className="w-4 h-4" />
+                <span>Constructor Visual de Flujos (Botones, Listas & URLs)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBotSubTab("settings")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                  botSubTab === "settings"
+                    ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/20"
+                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-750 border border-slate-200 dark:border-slate-700"
+                }`}
+              >
+                <Sliders className="w-4 h-4" />
+                <span>Parámetros Generales, Horarios & FAQ</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                Instancia: <code className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">extra_supermercado</code>
+              </span>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${chatbotConfig.auto_reply ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" : "bg-amber-100 text-amber-700"}`}>
+                {chatbotConfig.auto_reply ? "● Motor Activo" : "○ En Pausa"}
+              </span>
+            </div>
+          </div>
+
+          {botSubTab === "flow" && (
+            <BotFlowBuilder
+              flow={botFlow}
+              loading={loadingFlow}
+              saving={savingFlow}
+              onSave={handleSaveBotFlow}
+              onReset={handleResetBotFlow}
+            />
+          )}
+
+          {botSubTab === "settings" && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Panel Izquierdo: Configuración, Palabras Clave y Menú Personalizado */}
           <div className="lg:col-span-6 space-y-6">
             {/* Card 1: Configuración Base */}
@@ -1950,6 +2053,8 @@ export default function WhatsAppPage() {
             </div>
           </div>
         </div>
+        )}
+      </div>
       )}
 
       {/* ── TAB 4: CAMPAÑAS MASIVAS (INTELLIZAPP) ── */}

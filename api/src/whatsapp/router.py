@@ -165,9 +165,72 @@ async def save_chatbot_config(
     tenant.config = t_cfg
     flag_modified(tenant, "config")
     await db.commit()
-    await db.refresh(tenant)
-
     return {"status": "ok", "config": body}
+
+
+@router.get("/flow")
+async def get_bot_flow(
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Obtiene la configuración del flujo visual activo para el bot de WhatsApp."""
+    from api.src.tenants.models import Tenant
+    from api.src.whatsapp.chatbot import DEFAULT_BOT_FLOW
+    tenant_id = UUID(user["tenant_id"])
+    tenant = await db.get(Tenant, tenant_id)
+    t_cfg = (tenant.config or {}) if tenant else {}
+    bot_cfg = t_cfg.get("chatbot", {})
+    flow = bot_cfg.get("flow") or DEFAULT_BOT_FLOW
+    return {"status": "ok", "flow": flow}
+
+
+@router.put("/flow")
+async def save_bot_flow(
+    body: dict,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Guarda y publica la configuración del flujo visual del bot de WhatsApp."""
+    from api.src.tenants.models import Tenant
+    from sqlalchemy.orm.attributes import flag_modified
+    tenant_id = UUID(user["tenant_id"])
+    tenant = await db.get(Tenant, tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+
+    t_cfg = dict(tenant.config or {})
+    bot_cfg = dict(t_cfg.get("chatbot", {}))
+    bot_cfg["flow"] = body.get("flow") or body
+    t_cfg["chatbot"] = bot_cfg
+    tenant.config = t_cfg
+    flag_modified(tenant, "config")
+    await db.commit()
+    return {"status": "ok", "flow": bot_cfg["flow"]}
+
+
+@router.post("/flow/reset")
+async def reset_bot_flow(
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Restaura el flujo oficial recomendado para Extra Supermercado."""
+    from api.src.tenants.models import Tenant
+    from api.src.whatsapp.chatbot import DEFAULT_BOT_FLOW
+    from sqlalchemy.orm.attributes import flag_modified
+    tenant_id = UUID(user["tenant_id"])
+    tenant = await db.get(Tenant, tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+
+    t_cfg = dict(tenant.config or {})
+    bot_cfg = dict(t_cfg.get("chatbot", {}))
+    bot_cfg["flow"] = DEFAULT_BOT_FLOW
+    t_cfg["chatbot"] = bot_cfg
+    tenant.config = t_cfg
+    flag_modified(tenant, "config")
+    await db.commit()
+    return {"status": "ok", "flow": DEFAULT_BOT_FLOW}
+
 
 @router.get("/status")
 async def get_gateway_status(
@@ -690,13 +753,23 @@ async def evolution_webhook(
         clean_phone = re.sub(r"[^\d+]", "", raw_phone)
         push_name = msg_data.get("pushName") or clean_phone
 
-        # Extraer texto del mensaje
+        # Extraer texto o respuesta de botón/lista
         content = ""
         msg_content = msg_data.get("message", {})
         if "conversation" in msg_content:
             content = msg_content["conversation"]
         elif "extendedTextMessage" in msg_content:
             content = msg_content["extendedTextMessage"].get("text", "")
+        elif "buttonsResponseMessage" in msg_content:
+            b_resp = msg_content["buttonsResponseMessage"]
+            content = b_resp.get("selectedDisplayText") or b_resp.get("selectedButtonId", "")
+        elif "listResponseMessage" in msg_content:
+            l_resp = msg_content["listResponseMessage"]
+            single_reply = l_resp.get("singleSelectReply", {})
+            content = single_reply.get("selectedRowId") or l_resp.get("title", "")
+        elif "templateButtonReplyMessage" in msg_content:
+            t_resp = msg_content["templateButtonReplyMessage"]
+            content = t_resp.get("selectedDisplayText") or t_resp.get("selectedId", "")
         elif "imageMessage" in msg_content:
             content = msg_content["imageMessage"].get("caption", "[Imagen]")
         elif "documentMessage" in msg_content:
@@ -737,9 +810,42 @@ async def evolution_webhook(
                     chatbot = ChatbotEngine(db, company.id)
                     resp_data = await chatbot.process_message(conv, content)
                     if resp_data and resp_data.get("text"):
-                        await whatsapp_service.reply_to_conversation(db, tenant.id, conv.id, resp_data["text"])
+                        resp_type = resp_data.get("type", "message")
+                        # Despachar usando botones nativos interactivos, lista desplegable o texto
+                        if resp_type == "buttons" and resp_data.get("buttons"):
+                            await evolution_client.send_buttons_message(
+                                phone=clean_phone,
+                                text=resp_data["text"],
+                                buttons=resp_data["buttons"],
+                                title=resp_data.get("title", "Extra Supermercado"),
+                                footer=resp_data.get("footer", "Extra Supermercado Mayorista"),
+                            )
+                        elif resp_type == "list" and resp_data.get("sections"):
+                            await evolution_client.send_list_message(
+                                phone=clean_phone,
+                                text=resp_data["text"],
+                                sections=resp_data["sections"],
+                                button_text=resp_data.get("button_text", "Ver Opciones 📋"),
+                                title=resp_data.get("title", "Extra Supermercado"),
+                                footer=resp_data.get("footer", "Extra Supermercado Mayorista"),
+                            )
+                        else:
+                            await evolution_client.send_text_message(clean_phone, resp_data["text"])
+
+                        # Registrar mensaje saliente en la conversación del sistema
+                        outbound_msg = WhatsAppMessage(
+                            tenant_id=tenant.id,
+                            conversation_id=conv.id,
+                            direction=MessageDirection.outbound,
+                            content=resp_data["text"],
+                            message_id=f"bot-{datetime.now(timezone.utc).timestamp()}",
+                            status=MessageStatus.sent,
+                        )
+                        db.add(outbound_msg)
+                        conv.last_message_at = datetime.now(timezone.utc)
                         if resp_data.get("next_state"):
-                            await update_conversation_state(db, conv.id, resp_data["next_state"])
+                            conv.session_state = resp_data["next_state"]
+                        await db.commit()
         except Exception as bot_err:
             logger.error(f"[Evolution Webhook] Error en respuesta de chatbot: {bot_err}", exc_info=True)
 

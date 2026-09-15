@@ -326,6 +326,166 @@ class EvolutionClient:
             logger.error(f"Error al enviar multimedia a {normalized}: {e}")
             return {"success": False, "status": "error_excepcion", "detail": str(e)}
 
+    async def send_buttons_message(
+        self,
+        phone: str,
+        text: str,
+        buttons: list[dict[str, Any]],
+        title: str = "Extra Supermercado",
+        footer: str = "Extra Supermercado Mayorista",
+        instance_name: Optional[str] = None,
+        delay_ms: int = 1000,
+    ) -> Dict[str, Any]:
+        """
+        Envía un mensaje interactivo con botones nativos de WhatsApp vía Evolution API.
+        Soporta botones tipo 'reply' (respuestas rápidas) y 'url' (enlaces web).
+        Si la entrega con botones falla por compatibilidad, aplica fallback automático a texto.
+        """
+        normalized = normalize_phone_e164(phone)
+        if not normalized:
+            return {
+                "success": False,
+                "status": "error_numero_invalido",
+                "detail": f"Número '{phone}' no válido",
+            }
+
+        instance = instance_name or self.default_instance
+        url = f"{self.base_url}/message/sendButtons/{instance}"
+
+        # Normalizar estructura de botones para Evolution API
+        formatted_buttons = []
+        for i, b in enumerate(buttons[:3]):  # WhatsApp limita a 3 botones de respuesta rápida
+            btn_type = b.get("type", "reply")
+            btn_text = b.get("displayText") or b.get("text") or b.get("title") or f"Opción {i+1}"
+            btn_id = b.get("id") or b.get("rowId") or f"btn_{i+1}"
+            
+            btn_obj: dict[str, Any] = {
+                "type": btn_type,
+                "displayText": str(btn_text)[:20],  # WhatsApp limita texto del botón a 20 chars
+            }
+            if btn_type == "reply":
+                btn_obj["id"] = str(btn_id)
+            elif btn_type == "url":
+                btn_obj["url"] = b.get("url", "https://superextra.com.py")
+            elif btn_type == "call":
+                btn_obj["phoneNumber"] = b.get("phoneNumber", "+595981000000")
+            formatted_buttons.append(btn_obj)
+
+        payload = {
+            "number": normalized,
+            "title": title,
+            "description": text,
+            "footer": footer,
+            "buttons": formatted_buttons,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.post(url, json=payload, headers=self._headers())
+                if res.status_code in (200, 201):
+                    data = res.json()
+                    msg_id = data.get("key", {}).get("id") or "evolution-btn-ok"
+                    logger.info(f"Botones WhatsApp enviados a {normalized} (msg_id: {msg_id})")
+                    return {
+                        "success": True,
+                        "status": "sent",
+                        "message_id": msg_id,
+                        "data": data,
+                        "type": "buttons",
+                    }
+                else:
+                    logger.warning(f"sendButtons rechazado ({res.status_code}): {res.text}. Aplicando fallback a texto...")
+        except Exception as e:
+            logger.warning(f"Error en sendButtons: {e}. Aplicando fallback a texto...")
+
+        # Fallback a texto limpio con botones numerados y enlaces
+        fallback_lines = [text, ""]
+        number_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
+        for idx, b in enumerate(buttons):
+            em = number_emojis[idx] if idx < len(number_emojis) else f"{idx+1}."
+            b_text = b.get("displayText") or b.get("text") or b.get("title") or f"Opción {idx+1}"
+            if b.get("type") == "url" and b.get("url"):
+                fallback_lines.append(f"{em} {b_text} 👉 {b.get('url')}")
+            else:
+                fallback_lines.append(f"{em} *{b_text}*")
+        fallback_lines.append(f"\n_{footer}_")
+
+        return await self.send_text_message(normalized, "\n".join(fallback_lines), instance_name=instance, delay_ms=delay_ms)
+
+    async def send_list_message(
+        self,
+        phone: str,
+        text: str,
+        sections: list[dict[str, Any]],
+        button_text: str = "Ver Opciones 📋",
+        title: str = "Extra Supermercado",
+        footer: str = "Extra Supermercado Mayorista",
+        instance_name: Optional[str] = None,
+        delay_ms: int = 1000,
+    ) -> Dict[str, Any]:
+        """
+        Envía un menú interactivo desplegable (List Message) de WhatsApp vía Evolution API.
+        Soporta secciones con filas estructuradas (título, descripción, ID).
+        Si falla por compatibilidad, aplica fallback automático a texto.
+        """
+        normalized = normalize_phone_e164(phone)
+        if not normalized:
+            return {
+                "success": False,
+                "status": "error_numero_invalido",
+                "detail": f"Número '{phone}' no válido",
+            }
+
+        instance = instance_name or self.default_instance
+        url = f"{self.base_url}/message/sendList/{instance}"
+
+        payload = {
+            "number": normalized,
+            "title": title,
+            "description": text,
+            "buttonText": button_text[:20],
+            "footerText": footer,
+            "sections": sections,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.post(url, json=payload, headers=self._headers())
+                if res.status_code in (200, 201):
+                    data = res.json()
+                    msg_id = data.get("key", {}).get("id") or "evolution-list-ok"
+                    logger.info(f"Lista interactiva WhatsApp enviada a {normalized} (msg_id: {msg_id})")
+                    return {
+                        "success": True,
+                        "status": "sent",
+                        "message_id": msg_id,
+                        "data": data,
+                        "type": "list",
+                    }
+                else:
+                    logger.warning(f"sendList rechazado ({res.status_code}): {res.text}. Aplicando fallback...")
+        except Exception as e:
+            logger.warning(f"Error en sendList: {e}. Aplicando fallback...")
+
+        # Fallback a texto
+        fallback_lines = [f"*{title}*", text, ""]
+        num = 1
+        for sec in sections:
+            if sec.get("title"):
+                fallback_lines.append(f"📌 *{sec.get('title')}*")
+            for row in sec.get("rows", []):
+                r_title = row.get("title", f"Opción {num}")
+                r_desc = row.get("description", "")
+                if r_desc:
+                    fallback_lines.append(f"{num}️⃣ *{r_title}* — {r_desc}")
+                else:
+                    fallback_lines.append(f"{num}️⃣ *{r_title}*")
+                num += 1
+            fallback_lines.append("")
+        fallback_lines.append(f"_{footer}_")
+
+        return await self.send_text_message(normalized, "\n".join(fallback_lines), instance_name=instance, delay_ms=delay_ms)
+
 
 # Singleton
 evolution_client = EvolutionClient()

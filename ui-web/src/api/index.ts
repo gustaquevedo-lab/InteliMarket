@@ -1754,6 +1754,9 @@ export const api = {
       }
     }>("/v1/whatsapp/chatbot-config"),
     saveChatbotConfig: (data: any) => client.put<{ status: string; config: any }>("/v1/whatsapp/chatbot-config", data),
+    getBotFlow: () => client.get<{ status: string; flow: any }>("/v1/whatsapp/flow"),
+    saveBotFlow: (flow: any) => client.put<{ status: string; flow: any }>("/v1/whatsapp/flow", { flow }),
+    resetBotFlow: () => client.post<{ status: string; flow: any }>("/v1/whatsapp/flow/reset"),
   },
   crm: {
     listLeads: () => client.get<Lead[]>("/v1/crm/leads"),
