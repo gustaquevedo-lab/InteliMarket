@@ -1815,6 +1815,7 @@ async def sync_supplier_balances(db: AsyncSession, company_id: str, since: date 
 
 async def sync_purchase_orders(db: AsyncSession, company_id: str, since: date | None) -> int:
     cid = UUID(company_id) if isinstance(company_id, str) else company_id
+    nombre_por_producto = {r["ID_PRODUTO"]: r["DS_PRODUTO"] for r in await _fetch("SELECT ID_PRODUTO, DS_PRODUTO FROM est_produto")}
 
     sql = "SELECT * FROM est_ordem_compra WHERE 1=1"
     params: tuple = ()
