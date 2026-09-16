@@ -111,7 +111,7 @@ class TwilioWebhook(BaseModel):
 
 
 class SendMessageRequest(BaseModel):
-    content: str
+    content: str = ""
     media_url: Optional[str] = None
 
 

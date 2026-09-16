@@ -16,13 +16,42 @@ import {
   Search, Server, User, Clock, ArrowRight, MessageSquare, Terminal,
   Bot, Play, Sparkles, Filter, Radio, ChevronRight, CheckCircle,
   Building, HelpCircle, RotateCcw, Megaphone, BellRing, Users,
-  CheckCheck, AlertTriangle, GitFork, Sliders, Power
+  CheckCheck, AlertTriangle, GitFork, Sliders, Power,
+  Paperclip, Smile, Maximize2, Download, X, Image as ImageIcon
 } from "lucide-react"
 import BotFlowBuilder, { type BotFlow } from "./BotFlowBuilder"
 
 const DEFAULT_GATEWAY_URL = "http://100.72.38.119:8085"
 const DEFAULT_MANAGER_URL = "http://100.72.38.119:8085/manager"
 const INSTANCE_NAME = "extra_supermercado"
+
+function isImageUrl(url: string) {
+  const clean = url.toLowerCase().split("?")[0]
+  return clean.startsWith("data:image/") || /\.(jpg|jpeg|png|webp|gif)$/.test(clean)
+}
+
+function isAudioUrl(url: string) {
+  const clean = url.toLowerCase().split("?")[0]
+  return clean.startsWith("data:audio/") || /\.(mp3|ogg|wav|m4a|aac)$/.test(clean)
+}
+
+function isVideoUrl(url: string) {
+  const clean = url.toLowerCase().split("?")[0]
+  return clean.startsWith("data:video/") || /\.(mp4|webm|mov|mkv)$/.test(clean)
+}
+
+const COMMON_EMOJIS = [
+  // Atención & Saludos
+  "👋", "😊", "👍", "❤️", "🙏", "🤝", "🎉", "👏", "🤩", "😁",
+  // Supermercado & Frescos
+  "🛒", "🏪", "🥩", "🥦", "🥖", "🥛", "🍞", "🍎", "🧀", "🍗",
+  // Pagos & Finanzas
+  "💰", "💵", "🏷️", "💳", "🧾", "📲", "🪙", "🏦",
+  // Logística & Delivery
+  "📦", "🛵", "🚚", "📍", "⏰", "⏱️", "🏠", "✅",
+  // Consultas & Estados
+  "📞", "❓", "❗", "⚠️", "❌", "📄", "📋", "⭐",
+]
 
 interface GatewayStatus {
   success: boolean
@@ -62,6 +91,12 @@ export default function WhatsAppPage() {
   const [searchConv, setSearchConv] = useState<string>("")
   const [replyText, setReplyText] = useState<string>("")
   const [sendingReply, setSendingReply] = useState<boolean>(false)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [filePreview, setFilePreview] = useState<string | null>(null)
+  const [showEmojiPicker, setShowEmojiPicker] = useState<boolean>(false)
+  const [previewMediaModal, setPreviewMediaModal] = useState<{ url: string; title?: string } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const replyInputRef = useRef<HTMLInputElement>(null)
   const chatBottomRef = useRef<HTMLDivElement>(null)
 
   // ── 3. Chatbot Configuration & Simulator State ──
@@ -383,19 +418,53 @@ export default function WhatsAppPage() {
 
   const handleSendReply = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!replyText.trim() || !selectedConv) return
+    if ((!replyText.trim() && !selectedFile) || !selectedConv) return
     setSendingReply(true)
     const textToSend = replyText.trim()
     try {
-      const newMsg = await api.whatsapp.sendMessage(selectedConv.id, { content: textToSend })
+      let mediaUrlToSend: string | undefined = undefined
+      if (selectedFile) {
+        const uploadRes = await api.whatsapp.uploadMedia(selectedFile)
+        mediaUrlToSend = uploadRes.url
+      }
+      const newMsg = await api.whatsapp.sendMessage(selectedConv.id, {
+        content: textToSend,
+        media_url: mediaUrlToSend,
+      })
       setMessages((prev) => [...prev, newMsg])
       setReplyText("")
-      toast.success("Mensaje Enviado", "Despachado al WhatsApp del cliente")
+      setSelectedFile(null)
+      setFilePreview(null)
+      setShowEmojiPicker(false)
+      toast.success(
+        "Mensaje Enviado",
+        mediaUrlToSend ? "Multimedia despachado con éxito al cliente" : "Despachado al WhatsApp del cliente"
+      )
       fetchConversations()
     } catch (e: any) {
-      toast.error("Error al enviar", e?.message || "No se pudo entregar el mensaje")
+      toast.error("Error al enviar", e?.message || "No se pudo entregar el mensaje o archivo")
     } finally {
       setSendingReply(false)
+    }
+  }
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setSelectedFile(file)
+    if (file.type.startsWith("image/")) {
+      const reader = new FileReader()
+      reader.onload = (evt) => setFilePreview(evt.target?.result as string)
+      reader.readAsDataURL(file)
+    } else {
+      setFilePreview(null)
+    }
+  }
+
+  const handleInsertEmoji = (emoji: string) => {
+    setReplyText((prev) => prev + emoji)
+    if (replyInputRef.current) {
+      replyInputRef.current.focus()
     }
   }
 
@@ -1537,16 +1606,72 @@ export default function WhatsAppPage() {
                   ) : (
                     messages.map((m) => {
                       const isOutbound = m.direction === "outbound"
+                      const hasMedia = Boolean(m.media_url)
+                      const isImg = hasMedia && isImageUrl(m.media_url!)
+                      const isAud = hasMedia && isAudioUrl(m.media_url!)
+                      const isVid = hasMedia && isVideoUrl(m.media_url!)
                       return (
                         <div key={m.id} className={`flex ${isOutbound ? "justify-end" : "justify-start"}`}>
                           <div
-                            className={`max-w-md rounded-2xl p-3.5 shadow-sm text-xs ${
+                            className={`max-w-sm sm:max-w-md rounded-2xl p-3 shadow-sm text-xs ${
                               isOutbound
                                 ? "bg-emerald-600 text-white rounded-tr-none"
                                 : "bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-100 dark:border-slate-700 rounded-tl-none"
                             }`}
                           >
-                            <p className="whitespace-pre-wrap">{m.content}</p>
+                            {/* Renderizado Multimedia si existe */}
+                            {hasMedia && (
+                              <div className="mb-2">
+                                {isImg ? (
+                                  <div
+                                    className="relative group cursor-pointer overflow-hidden rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10"
+                                    onClick={() => setPreviewMediaModal({ url: m.media_url!, title: m.content })}
+                                  >
+                                    <img
+                                      src={m.media_url}
+                                      alt="WhatsApp Media"
+                                      className="max-h-64 w-auto rounded-xl object-contain transition-transform duration-200 group-hover:scale-[1.02]"
+                                      loading="lazy"
+                                    />
+                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white text-[11px] font-semibold">
+                                      <Maximize2 className="w-3.5 h-3.5" />
+                                      <span>Ampliar imagen</span>
+                                    </div>
+                                  </div>
+                                ) : isAud ? (
+                                  <div className="p-1 rounded-xl bg-black/10 dark:bg-white/10">
+                                    <audio controls src={m.media_url} className="w-full max-w-xs h-8" />
+                                  </div>
+                                ) : isVid ? (
+                                  <video controls src={m.media_url} className="max-h-64 rounded-xl w-auto" />
+                                ) : (
+                                  <a
+                                    href={m.media_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    download
+                                    className={`flex items-center gap-2 p-2 rounded-xl border transition-all ${
+                                      isOutbound
+                                        ? "bg-emerald-700/50 hover:bg-emerald-700 border-emerald-500 text-white"
+                                        : "bg-slate-100 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-800 dark:text-slate-100"
+                                    }`}
+                                  >
+                                    <FileText className="w-4 h-4 flex-shrink-0" />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-[11px] font-medium truncate">{m.content || "Documento adjunto"}</p>
+                                      <span className="text-[9px] opacity-75">Descargar archivo</span>
+                                    </div>
+                                    <Download className="w-3.5 h-3.5 flex-shrink-0 opacity-75" />
+                                  </a>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Texto o Pie de foto */}
+                            {(!hasMedia || (m.content && m.content !== "[Imagen]" && m.content !== "📷 Imagen")) && (
+                              <p className="whitespace-pre-wrap">{m.content}</p>
+                            )}
+
                             <div
                               className={`mt-1 text-[10px] flex items-center justify-end gap-1 ${
                                 isOutbound ? "text-emerald-100" : "text-slate-400"
@@ -1565,19 +1690,114 @@ export default function WhatsAppPage() {
                   <div ref={chatBottomRef} />
                 </div>
 
+                {/* Previsualización de Archivo Adjunto */}
+                {selectedFile && (
+                  <div className="px-3 py-2 bg-emerald-50 dark:bg-emerald-950/30 border-t border-emerald-100 dark:border-emerald-900/40 flex items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {filePreview ? (
+                        <img src={filePreview} alt="Preview" className="w-8 h-8 rounded-lg object-cover border border-emerald-200" />
+                      ) : (
+                        <div className="w-8 h-8 rounded-lg bg-emerald-200 dark:bg-emerald-800 flex items-center justify-center text-emerald-800 dark:text-emerald-100">
+                          <Paperclip className="w-4 h-4" />
+                        </div>
+                      )}
+                      <div className="truncate">
+                        <p className="font-bold text-slate-700 dark:text-slate-200 truncate">{selectedFile.name}</p>
+                        <p className="text-[10px] text-slate-400">{(selectedFile.size / 1024).toFixed(1)} KB</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedFile(null); setFilePreview(null); }}
+                      className="p-1 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                      title="Quitar archivo"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
                 {/* Barra Inferior para Enviar Mensajes en Vivo */}
-                <form onSubmit={handleSendReply} className="p-3 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
+                <form onSubmit={handleSendReply} className="relative p-3 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
+                  {/* Botón Emojis */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                      className={`p-2 rounded-xl transition-all ${
+                        showEmojiPicker
+                          ? "bg-amber-100 dark:bg-amber-950/40 text-amber-600"
+                          : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      }`}
+                      title="Insertar Emoji"
+                    >
+                      <Smile className="w-4 h-4" />
+                    </button>
+
+                    {/* Popover Selector de Emojis */}
+                    {showEmojiPicker && (
+                      <div className="absolute bottom-12 left-0 z-30 w-72 p-2.5 bg-white dark:bg-slate-850 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                        <div className="flex items-center justify-between pb-1 border-b border-slate-100 dark:border-slate-800 text-[11px] font-bold text-slate-500">
+                          <span>Emojis Frecuentes</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowEmojiPicker(false)}
+                            className="text-slate-400 hover:text-slate-600"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-8 gap-1 text-base max-h-48 overflow-y-auto p-1">
+                          {COMMON_EMOJIS.map((em, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => handleInsertEmoji(em)}
+                              className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-750 rounded-lg text-center transition-transform hover:scale-125"
+                            >
+                              {em}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Botón Adjuntar Archivo / Imagen */}
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-2 rounded-xl text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-all"
+                    title="Adjuntar Imagen, Video, Audio o Documento"
+                  >
+                    <Paperclip className="w-4 h-4" />
+                  </button>
                   <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    accept="image/*,video/*,audio/*,application/pdf"
+                    onChange={handleFileSelect}
+                  />
+
+                  {/* Input de Texto */}
+                  <input
+                    ref={replyInputRef}
                     type="text"
                     value={replyText}
                     onChange={(e) => setReplyText(e.target.value)}
-                    placeholder={`Responder a ${selectedConv.contact_name || selectedConv.contact_phone}...`}
+                    placeholder={
+                      selectedFile
+                        ? "Escribí un pie de foto / comentario (opcional)..."
+                        : `Responder a ${selectedConv.contact_name || selectedConv.contact_phone}...`
+                    }
                     className="input text-xs flex-1 py-2.5"
                     disabled={sendingReply}
                   />
+
                   <button
                     type="submit"
-                    disabled={sendingReply || !replyText.trim()}
+                    disabled={sendingReply || (!replyText.trim() && !selectedFile)}
                     className="btn-primary py-2.5 px-4 text-xs flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
                   >
                     {sendingReply ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
@@ -2832,6 +3052,37 @@ export default function WhatsAppPage() {
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* ── MODAL: PREVISUALIZADOR DE IMÁGENES / MULTIMEDIA ── */}
+      {previewMediaModal && (
+        <Modal
+          open={Boolean(previewMediaModal)}
+          onClose={() => setPreviewMediaModal(null)}
+          title={previewMediaModal.title || "Visualizador de Imagen WhatsApp"}
+          size="lg"
+        >
+          <div className="flex flex-col items-center justify-center p-2">
+            <img
+              src={previewMediaModal.url}
+              alt="WhatsApp Preview"
+              className="max-h-[75vh] w-auto max-w-full rounded-xl object-contain shadow-md"
+            />
+            <div className="mt-4 flex items-center justify-between w-full pt-3 border-t border-slate-200 dark:border-slate-700">
+              <span className="text-xs text-slate-500 truncate max-w-md">{previewMediaModal.title || "Imagen recibida por WhatsApp"}</span>
+              <a
+                href={previewMediaModal.url}
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-primary py-2 px-3 text-xs flex items-center gap-1.5"
+              >
+                <Download className="w-4 h-4" />
+                <span>Descargar Imagen</span>
+              </a>
+            </div>
+          </div>
         </Modal>
       )}
     </div>

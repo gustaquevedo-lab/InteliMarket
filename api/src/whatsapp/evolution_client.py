@@ -5,7 +5,10 @@ soportando normalización de números Paraguay (595) / Brasil (55), generación 
 consulta de estado de sesión, y envío transaccional de texto y archivos multimedia.
 """
 
+import base64
 import logging
+import mimetypes
+from pathlib import Path
 import re
 from typing import Any, Dict, Optional
 import httpx
@@ -13,6 +16,52 @@ import httpx
 from api.src.config import settings
 
 logger = logging.getLogger("whatsapp.evolution")
+
+_UPLOADS_DIR = Path(__file__).resolve().parents[3] / "uploads"
+
+
+def save_media_file_to_uploads(
+    b64_string: str,
+    message_id: str,
+    mimetype: Optional[str] = None,
+    original_name: Optional[str] = None,
+) -> str:
+    """
+    Decodifica base64 y guarda el archivo en uploads/whatsapp_media/.
+    Retorna la URL relativa '/uploads/whatsapp_media/{filename}'.
+    """
+    clean_b64 = b64_string
+    if "," in clean_b64:
+        header, clean_b64 = clean_b64.split(",", 1)
+        if not mimetype and "data:" in header and ";base64" in header:
+            mimetype = header.split("data:")[1].split(";base64")[0]
+
+    media_dir = _UPLOADS_DIR / "whatsapp_media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+
+    ext = "bin"
+    if mimetype:
+        guessed_ext = mimetypes.guess_extension(mimetype)
+        if guessed_ext:
+            ext = guessed_ext.lstrip(".")
+        if ext in ("jpe", "jpeg"):
+            ext = "jpeg"
+        elif "ogg" in mimetype:
+            ext = "ogg"
+        elif "mp4" in mimetype:
+            ext = "mp4"
+        elif "pdf" in mimetype:
+            ext = "pdf"
+    elif original_name and "." in original_name:
+        ext = original_name.rsplit(".", 1)[1].lower()
+
+    clean_id = re.sub(r"[^\w\-]", "", message_id or "media")
+    filename = f"{clean_id}.{ext}"
+    target_path = media_dir / filename
+
+    file_bytes = base64.b64decode(clean_b64)
+    target_path.write_bytes(file_bytes)
+    return f"/uploads/whatsapp_media/{filename}"
 
 
 def normalize_phone_e164(phone: Optional[str]) -> Optional[str]:
@@ -273,17 +322,42 @@ class EvolutionClient:
             logger.error(f"Excepción al enviar WhatsApp a {normalized}: {e}")
             return {"success": False, "status": "error_excepcion", "detail": str(e)}
 
+
+    async def get_base64_from_media_message(
+        self,
+        message_data: dict,
+        instance_name: Optional[str] = None,
+    ) -> Optional[dict]:
+        """
+        Descarga y desencripta el archivo multimedia desde Evolution API / Baileys.
+        Retorna dict con 'base64', 'mimetype', 'fileName', etc.
+        """
+        instance = instance_name or self.default_instance
+        url = f"{self.base_url}/chat/getBase64FromMediaMessage/{instance}"
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                res = await client.post(url, json={"message": message_data, "convertToMp4": False}, headers=self._headers())
+                if res.status_code in (200, 201):
+                    return res.json()
+                else:
+                    logger.warning(f"getBase64FromMediaMessage fallo ({res.status_code}): {res.text}")
+                    return None
+        except Exception as e:
+            logger.error(f"Error obteniendo base64 de multimedia: {e}")
+            return None
+
     async def send_media_message(
         self,
         phone: str,
         media_url: str,
         caption: str = "",
-        file_name: str = "documento.pdf",
-        media_type: str = "document",
+        file_name: Optional[str] = None,
+        media_type: Optional[str] = None,
         instance_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Envía un archivo multimedia (PDF, imagen, video) vía Evolution API.
+        Envía un archivo multimedia (PDF, imagen, video, audio) vía Evolution API.
+        Soporta rutas locales /uploads/... leyéndolas como base64 directo para mayor fiabilidad.
         """
         normalized = normalize_phone_e164(phone)
         if not normalized:
@@ -296,20 +370,68 @@ class EvolutionClient:
         instance = instance_name or self.default_instance
         url = f"{self.base_url}/message/sendMedia/{instance}"
 
+        # Preparar payload de multimedia
+        media_payload = media_url
+        final_file_name = file_name or "archivo"
+        final_media_type = media_type
+
+        # Si es una ruta local en /uploads/
+        if media_url.startswith("/uploads/"):
+            sub_path = media_url.replace("/uploads/", "", 1)
+            local_file = _UPLOADS_DIR / sub_path
+            if local_file.exists():
+                file_bytes = local_file.read_bytes()
+                guessed_type, _ = mimetypes.guess_type(str(local_file))
+                mtype = guessed_type or "application/octet-stream"
+                b64_content = base64.b64encode(file_bytes).decode("ascii")
+                media_payload = f"data:{mtype};base64,{b64_content}"
+                if not file_name:
+                    final_file_name = local_file.name
+                if not final_media_type:
+                    if mtype.startswith("image/"):
+                        final_media_type = "image"
+                    elif mtype.startswith("video/"):
+                        final_media_type = "video"
+                    elif mtype.startswith("audio/"):
+                        final_media_type = "audio"
+                    else:
+                        final_media_type = "document"
+
+        # Si aún no tenemos media_type, inferir por extensión o fallback a document
+        if not final_media_type:
+            low_url = media_url.lower()
+            if any(low_url.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif")):
+                final_media_type = "image"
+                if not file_name:
+                    final_file_name = "imagen.jpg"
+            elif any(low_url.endswith(ext) for ext in (".mp4", ".mov", ".avi", ".mkv", ".webm")):
+                final_media_type = "video"
+                if not file_name:
+                    final_file_name = "video.mp4"
+            elif any(low_url.endswith(ext) for ext in (".mp3", ".ogg", ".wav", ".m4a", ".aac")):
+                final_media_type = "audio"
+                if not file_name:
+                    final_file_name = "audio.mp3"
+            else:
+                final_media_type = "document"
+                if not file_name:
+                    final_file_name = "documento.pdf"
+
         payload = {
             "number": normalized,
-            "media": media_url,
-            "mediaType": media_type,
-            "caption": caption,
-            "fileName": file_name,
+            "media": media_payload,
+            "mediaType": final_media_type,
+            "caption": caption or "",
+            "fileName": final_file_name,
         }
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=25.0) as client:
                 res = await client.post(url, json=payload, headers=self._headers())
                 if res.status_code in (200, 201):
                     data = res.json()
                     msg_id = data.get("key", {}).get("id") or "evolution-media-ok"
+                    logger.info(f"Multimedia enviado con éxito a {normalized} (tipo: {final_media_type}, msg_id: {msg_id})")
                     return {
                         "success": True,
                         "status": "sent",
@@ -317,6 +439,7 @@ class EvolutionClient:
                         "data": data,
                     }
                 else:
+                    logger.warning(f"Error Evolution sendMedia ({res.status_code}): {res.text}")
                     return {
                         "success": False,
                         "status": f"http_{res.status_code}",

@@ -1727,7 +1727,12 @@ export const api = {
     listConversations: () => client.get<WhatsAppConversation[]>("/v1/whatsapp/conversations"),
     getConversation: (id: string) => client.get<WhatsAppConversation>(`/v1/whatsapp/conversations/${id}`),
     getMessages: (convId: string) => client.get<WhatsAppMessage[]>(`/v1/whatsapp/conversations/${convId}/messages`),
-    sendMessage: (convId: string, data: { content: string; media_url?: string }) => client.post<WhatsAppMessage>(`/v1/whatsapp/conversations/${convId}/messages`, data),
+    uploadMedia: (file: File) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      return requestMultipart<{ url: string; filename: string; media_type: string; size: number }>("/v1/whatsapp/upload-media", formData)
+    },
+    sendMessage: (convId: string, data: { content?: string; media_url?: string }) => client.post<WhatsAppMessage>(`/v1/whatsapp/conversations/${convId}/messages`, data),
     archiveConversation: (id: string) => client.put<void>(`/v1/whatsapp/conversations/${id}/archive`),
     deleteConversation: (id: string) => client.delete<{ status: string; deleted: number }>(`/v1/whatsapp/conversations/${id}`),
     cleanupTests: () => client.delete<{ status: string; deleted_count: number }>("/v1/whatsapp/conversations/cleanup/tests"),

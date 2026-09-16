@@ -1,10 +1,12 @@
 import logging
+from pathlib import Path
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Header
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Header, UploadFile, File, Form
 from sqlalchemy import select, delete, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +26,12 @@ from api.src.whatsapp.models import (
     MessageStatus,
     ConversationStatus,
 )
-from api.src.whatsapp.evolution_client import evolution_client, normalize_phone_e164
+from api.src.whatsapp.evolution_client import (
+    evolution_client,
+    normalize_phone_e164,
+    save_media_file_to_uploads,
+    _UPLOADS_DIR,
+)
 
 logger = logging.getLogger("whatsapp.router")
 
@@ -521,6 +528,45 @@ async def get_messages(
     ]
 
 
+@router.post("/upload-media")
+async def upload_whatsapp_media(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_auth),
+):
+    """
+    Sube un archivo multimedia (imagen, audio, video, documento) para enviar por WhatsApp.
+    Guarda el archivo de forma permanente en /uploads/whatsapp_media/ y retorna URL y metadata.
+    """
+    media_dir = _UPLOADS_DIR / "whatsapp_media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+
+    orig_name = file.filename or "archivo"
+    safe_base = re.sub(r"[^\w\-.]", "_", orig_name)
+    unique_id = uuid.uuid4().hex[:10]
+    final_name = f"{unique_id}_{safe_base}"
+    target_path = media_dir / final_name
+
+    contents = await file.read()
+    target_path.write_bytes(contents)
+
+    mtype = (file.content_type or "").lower()
+    if mtype.startswith("image/"):
+        detected_type = "image"
+    elif mtype.startswith("video/"):
+        detected_type = "video"
+    elif mtype.startswith("audio/"):
+        detected_type = "audio"
+    else:
+        detected_type = "document"
+
+    return {
+        "url": f"/uploads/whatsapp_media/{final_name}",
+        "filename": orig_name,
+        "media_type": detected_type,
+        "size": len(contents),
+    }
+
+
 @router.post("/conversations/{conv_id}/messages")
 async def send_outbound_message(
     conv_id: str,
@@ -530,7 +576,12 @@ async def send_outbound_message(
 ):
     tenant_id = UUID(user["tenant_id"])
     from uuid import UUID as U
-    msg = await whatsapp_service.send_message(db, tenant_id, U(conv_id), body.content, body.media_url)
+
+    content_str = (body.content or "").strip()
+    if not content_str and not body.media_url:
+        raise HTTPException(status_code=400, detail="El mensaje debe contener texto o un archivo adjunto")
+
+    msg = await whatsapp_service.send_message(db, tenant_id, U(conv_id), content_str, body.media_url)
     return WhatsAppMessageResponse(
         id=msg.id,
         tenant_id=msg.tenant_id,
@@ -801,9 +852,12 @@ async def evolution_webhook(
         clean_phone = re.sub(r"[^\d+]", "", raw_phone)
         push_name = msg_data.get("pushName") or clean_phone
 
-        # Extraer texto o respuesta de botón/lista
+        # Extraer texto o respuesta de botón/lista o archivos multimedia
         content = ""
+        media_url = None
         msg_content = msg_data.get("message", {})
+        msg_id = key.get("id") or uuid.uuid4().hex[:12]
+
         if "conversation" in msg_content:
             content = msg_content["conversation"]
         elif "extendedTextMessage" in msg_content:
@@ -819,11 +873,69 @@ async def evolution_webhook(
             t_resp = msg_content["templateButtonReplyMessage"]
             content = t_resp.get("selectedDisplayText") or t_resp.get("selectedId", "")
         elif "imageMessage" in msg_content:
-            content = msg_content["imageMessage"].get("caption", "[Imagen]")
+            img_m = msg_content["imageMessage"]
+            caption = img_m.get("caption", "")
+            content = caption if caption else "📷 Imagen"
+            b64 = msg_data.get("base64") or img_m.get("base64")
+            if not b64:
+                b64_info = await evolution_client.get_base64_from_media_message(msg_data, instance_name=instance)
+                if b64_info:
+                    b64 = b64_info.get("base64")
+            if b64:
+                media_url = save_media_file_to_uploads(b64, msg_id, mimetype=img_m.get("mimetype", "image/jpeg"))
         elif "documentMessage" in msg_content:
-            content = msg_content["documentMessage"].get("fileName", "[Documento]")
+            doc_m = msg_content["documentMessage"]
+            filename = doc_m.get("fileName", "documento.pdf")
+            caption = doc_m.get("caption", "")
+            content = caption or f"📄 {filename}"
+            b64 = msg_data.get("base64") or doc_m.get("base64")
+            if not b64:
+                b64_info = await evolution_client.get_base64_from_media_message(msg_data, instance_name=instance)
+                if b64_info:
+                    b64 = b64_info.get("base64")
+            if b64:
+                media_url = save_media_file_to_uploads(b64, msg_id, mimetype=doc_m.get("mimetype"), original_name=filename)
+        elif "audioMessage" in msg_content:
+            audio_m = msg_content["audioMessage"]
+            content = "🎵 Mensaje de voz"
+            b64 = msg_data.get("base64") or audio_m.get("base64")
+            if not b64:
+                b64_info = await evolution_client.get_base64_from_media_message(msg_data, instance_name=instance)
+                if b64_info:
+                    b64 = b64_info.get("base64")
+            if b64:
+                media_url = save_media_file_to_uploads(b64, msg_id, mimetype=audio_m.get("mimetype", "audio/ogg"))
+        elif "videoMessage" in msg_content:
+            vid_m = msg_content["videoMessage"]
+            caption = vid_m.get("caption", "")
+            content = caption if caption else "🎥 Video"
+            b64 = msg_data.get("base64") or vid_m.get("base64")
+            if not b64:
+                b64_info = await evolution_client.get_base64_from_media_message(msg_data, instance_name=instance)
+                if b64_info:
+                    b64 = b64_info.get("base64")
+            if b64:
+                media_url = save_media_file_to_uploads(b64, msg_id, mimetype=vid_m.get("mimetype", "video/mp4"))
+        elif "stickerMessage" in msg_content:
+            stk_m = msg_content["stickerMessage"]
+            content = "🏷️ Sticker"
+            b64 = msg_data.get("base64") or stk_m.get("base64")
+            if not b64:
+                b64_info = await evolution_client.get_base64_from_media_message(msg_data, instance_name=instance)
+                if b64_info:
+                    b64 = b64_info.get("base64")
+            if b64:
+                media_url = save_media_file_to_uploads(b64, msg_id, mimetype="image/webp")
+        elif "locationMessage" in msg_content:
+            loc = msg_content["locationMessage"]
+            name = loc.get("name") or loc.get("address") or "Ubicación compartida"
+            lat = loc.get("degreesLatitude")
+            lng = loc.get("degreesLongitude")
+            content = f"📍 {name} (https://maps.google.com/?q={lat},{lng})"
+        elif "contactMessage" in msg_content or "contactsArrayMessage" in msg_content:
+            content = "👤 Contacto compartido"
 
-        if not content:
+        if not content and not media_url:
             return {"status": "ignored", "detail": "Empty content"}
 
         # Buscar o asociar con el primer tenant disponible de la empresa
@@ -840,6 +952,7 @@ async def evolution_webhook(
             direction=MessageDirection.inbound,
             content=content,
             message_id=key.get("id"),
+            media_url=media_url,
             status=MessageStatus.delivered,
         )
         db.add(inbound_msg)
