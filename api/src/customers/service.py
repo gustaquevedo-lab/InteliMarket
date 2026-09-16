@@ -1,5 +1,7 @@
 """Customer service"""
 
+import re
+
 from sqlalchemy import select, or_, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,7 +46,7 @@ async def list_customers(
         # lados, sin afectar el resto de los campos (ruc/ci/telefono/nombre).
         def _term_conditions(term: str):
             term_sin_guiones = term.replace("-", "")
-            return (
+            condiciones = (
                 (Customer.razon_social.ilike(f"%{term}%")) |
                 (Customer.ruc.ilike(f"%{term}%")) |
                 (Customer.ci.ilike(f"%{term}%")) |
@@ -52,6 +54,19 @@ async def list_customers(
                 (Customer.extra_club_numero.ilike(f"%{term}%")) |
                 (func.replace(Customer.extra_club_numero, "-", "").ilike(f"%{term_sin_guiones}%"))
             )
+            # El lector de la tarjeta teclea el UUID del QR con la distribucion
+            # de teclado que tenga Windows: donde el QR dice "-" puede llegar
+            # "'" u otro separador. Paso en caja el 16-09-2026: llego
+            # "d5c5c7d3'a43f'4c3f'8565'f0507434d7a2" y el socio no aparecia.
+            # Si sacando todo lo que no es hexadecimal quedan los 32
+            # caracteres de un UUID, se compara tambien contra el numero de
+            # socio sin guiones, sea cual sea el separador que mando el lector.
+            solo_hex = re.sub(r"[^0-9a-fA-F]", "", term)
+            if len(solo_hex) == 32:
+                condiciones = condiciones | (
+                    func.replace(Customer.extra_club_numero, "-", "").ilike(solo_hex)
+                )
+            return condiciones
         if len(search_terms) == 1:
             query = query.where(_term_conditions(search_terms[0]))
         elif len(search_terms) > 1:
