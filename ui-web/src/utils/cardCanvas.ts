@@ -103,27 +103,26 @@ function ajustar(ctx: CanvasRenderingContext2D, texto: string, maximo: number, m
  * Correccion de errores H: tolera ~30% del codigo dañado. Una tarjeta vive en
  * una billetera y se raya; el QR tiene que seguir leyendose.
  */
-function dibujarQR(ctx: CanvasRenderingContext2D, texto: string, x: number, y: number, ladoMax: number): number {
+function crearQR(texto: string, ladoMax: number) {
   const qr = QRCode.create(texto, { errorCorrectionLevel: "H" })
   const n = qr.modules.size
-  // Sin zona de silencio propia: el recuadro blanco que va debajo ya la aporta
-  // (2,5 mm, mas que los 4 modulos que pide el lector). Antes se reservaban
-  // 2 modulos de cada lado y ademas se redondeaba para abajo, asi que el QR
-  // quedaba bastante mas chico que su recuadro.
-  const modulo = Math.max(1, Math.round(ladoMax / n))
-  const lado = modulo * n
-  const centro = Math.round((ladoMax - lado) / 2)
-  ctx.fillStyle = "#FFFFFF"
-  ctx.fillRect(x + centro, y + centro, lado, lado)
+  // Modulos de pixeles enteros, sin zona de silencio propia: la aporta el
+  // recuadro blanco, que se dibuja del tamaño exacto del QR mas 2,5 mm. Asi
+  // el QR llena su recuadro y el margen blanco queda parejo, sin depender de
+  // que el lado pedido sea multiplo de la cantidad de modulos.
+  const modulo = Math.max(1, Math.floor(ladoMax / n))
+  return { qr, n, modulo, lado: modulo * n }
+}
+
+function pintarQR(ctx: CanvasRenderingContext2D, m: ReturnType<typeof crearQR>, x: number, y: number) {
   ctx.fillStyle = "#000000" // negro puro: el driver lo manda al panel K
-  for (let f = 0; f < n; f++) {
-    for (let c = 0; c < n; c++) {
-      if (qr.modules.get(f, c)) {
-        ctx.fillRect(x + centro + c * modulo, y + centro + f * modulo, modulo, modulo)
+  for (let f = 0; f < m.n; f++) {
+    for (let c = 0; c < m.n; c++) {
+      if (m.qr.modules.get(f, c)) {
+        ctx.fillRect(x + c * m.modulo, y + f * m.modulo, m.modulo, m.modulo)
       }
     }
   }
-  return lado
 }
 
 export async function renderTarjeta(canvas: HTMLCanvasElement, d: DatosTarjeta, o: OpcionesTarjeta): Promise<void> {
@@ -205,11 +204,18 @@ export async function renderTarjeta(canvas: HTMLCanvasElement, d: DatosTarjeta, 
 
   // QR sobre recuadro blanco: sobre el azul no lo lee ningun escaner.
   if (d.numero) {
-    const pad = mm(2.5)
+    const m = crearQR(d.numero.toLowerCase(), qrLado)
+    // 2,5 mm de blanco alrededor, pero nunca menos de 4 modulos: esa es la
+    // zona de silencio que exige el lector, y con QR de pocos modulos (numeros
+    // con muchos ceros) 2,5 mm se quedaban cortos.
+    const pad = Math.max(mm(2.5), m.modulo * 4)
+    const caja = m.lado + pad * 2
+    const cx = qrX + qrLado / 2
+    const cy = qrY + qrLado / 2
     ctx.fillStyle = BLANCO
-    rectRedondeado(ctx, qrX - pad, qrY - pad, qrLado + pad * 2, qrLado + pad * 2, mm(1.5))
+    rectRedondeado(ctx, cx - caja / 2, cy - caja / 2, caja, caja, mm(1.5))
     ctx.fill()
-    dibujarQR(ctx, d.numero.toLowerCase(), qrX, qrY, qrLado)
+    pintarQR(ctx, m, cx - m.lado / 2, cy - m.lado / 2)
   }
 
   // Logo sobre pastilla blanca, abajo a la izquierda.
