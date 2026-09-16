@@ -526,83 +526,25 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
                 check = await get_credit_check(db, str(data.company_id), str(data.customer_id), monto_credito)
 
         if check.get("no_account"):
-            raise ValueError("Credit account error: No credit account for customer")
+            raise ValueError("El cliente no posee una cuenta de crédito o Extra Club.")
         if check.get("inactive"):
-            raise ValueError("Credit account error: Credit account inactive")
+            raise ValueError("La cuenta de crédito del cliente se encuentra inactiva.")
 
-        if not check["ok"]:
-            # Excede el limite disponible: la venta queda retenida, sin
-            # descontar stock ni sumar puntos, hasta que Supervisor y
-            # Gerente aprueben la excepcion (ver credit_accounts.service).
-            sale.estado = "pend_aprob_credito"
-            await db.flush()
-            app_req = await create_approval_request(
-                db, data.company_id, sale.id, data.customer_id, check["credit_account_id"],
-                monto_credito, check["limite_credito"], check["saldo_disponible"],
+        is_authorized_override = False
+        if getattr(data, "admin_override_credito", False) and data.user_id:
+            admin_result = await db.execute(select(User).where(User.id == data.user_id))
+            admin_user = admin_result.scalar_one_or_none()
+            if admin_user and (admin_user.rol in ("admin", "administrador", "gerente", "supervisor") or admin_user.is_superadmin):
+                is_authorized_override = True
+
+        if not check["ok"] and not is_authorized_override:
+            disp = check.get("saldo_disponible", Decimal("0"))
+            lim = check.get("limite_credito", Decimal("0"))
+            motivo_mora = f" (en mora por {check.get('dias_mora', 0)} días)" if check.get("en_mora") else ""
+            raise ValueError(
+                f"Línea de crédito insuficiente{motivo_mora}: el cliente dispone de {disp:,.0f} Gs. de {lim:,.0f} Gs. "
+                f"Monto a crédito solicitado: {monto_credito:,.0f} Gs. No se puede cerrar la venta sin línea suficiente."
             )
-            # Notificar a Supervisores y Administradores / Gerentes
-            # Nota: va en un savepoint propio -- si la notificacion falla (ej.
-            # tenant_id inconsistente), un INSERT fallido dentro de la misma
-            # transaccion deja TODA la transaccion abortada en Postgres, y
-            # tumbaba la venta entera (que ya estaba flush()ada) mas abajo.
-            try:
-                async with db.begin_nested():
-                    from api.src.customers.models import Customer
-                    cust_res = await db.execute(select(Customer.razon_social).where(Customer.id == data.customer_id))
-                    cust_nom = cust_res.scalar() or "Cliente"
-                    exceso = max(Decimal("0"), monto_credito - (check.get("saldo_disponible") or Decimal("0")))
-
-                    from api.src.companies.models import Company
-                    company_res = await db.execute(select(Company.tenant_id).where(Company.id == data.company_id))
-                    tenant_id = company_res.scalar_one_or_none()
-
-                    from api.src.notifications import service as notif_service
-                    target_users = await db.execute(
-                        select(User.id).where(
-                            User.rol.in_(["admin", "administrador", "gerente", "supervisor"]),
-                            User.activo == True,
-                        )
-                    )
-                    notif_body = (
-                        f"Cliente: {cust_nom} | Compra: {monto_credito:,.0f} Gs. "
-                        f"| Límite: {check.get('limite_credito', 0):,.0f} Gs. | Exceso: {exceso:,.0f} Gs."
-                    )
-                    if tenant_id:
-                        for (t_uid,) in target_users.all():
-                            await notif_service.create_notification(
-                                db,
-                                tenant_id,
-                                t_uid,
-                                "Solicitud de Crédito Retenida en Caja",
-                                notif_body,
-                                "credito",
-                                "/supervisor",
-                            )
-                    else:
-                        logger.warning(
-                            "Company %s sin tenant_id asociado, no se notifica el credito retenido",
-                            data.company_id,
-                        )
-                # Broadcast en tiempo real (SSE) a supervisores
-                try:
-                    from api.src.events.manager import manager
-                    await manager.broadcast(str(data.company_id), {
-                        "type": "credit_approval_requested",
-                        "request_id": str(app_req.id),
-                        "customer_nombre": cust_nom,
-                        "monto": float(monto_credito),
-                        "limite_credito": float(check.get("limite_credito", 0)),
-                        "exceso": float(exceso),
-                        "motivo": f"Exceso de línea por {float(exceso):,.0f} Gs.",
-                    })
-                except Exception as b_err:
-                    logger.warning("Error emitiendo SSE de crédito: %s", b_err)
-            except Exception as notif_err:
-                logger.warning("Error creando notificaciones de crédito: %s", notif_err)
-
-            await db.flush()
-            await db.refresh(sale)
-            return sale
 
         credit_result = await process_purchase(
             db,
@@ -610,9 +552,10 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             str(data.customer_id),
             monto_credito,
             sale.id,
+            bypass_limit=is_authorized_override,
         )
         if "error" in credit_result:
-            raise ValueError(f"Credit account error: {credit_result['error']}")
+            raise ValueError(f"Error en cuenta de crédito: {credit_result['error']}")
         sale.estado = "confirmado"
         # El resto de la venta (efectivo/tarjeta/qr) ya esta cubierto por lo
         # que llego en data.payments -- pero esos montos pueden venir en
@@ -629,6 +572,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         from api.src.accounts_receivable.service import create_accounts_receivable_for_sale
         await create_accounts_receivable_for_sale(
             db, str(data.company_id), str(data.customer_id), str(sale.id), monto_credito, sale.numero,
+            fecha_emision=sale.created_at,
         )
 
     await _deduct_stock_for_sale(db, sale, data)
@@ -777,6 +721,7 @@ async def finalize_approved_credit_sale(db: AsyncSession, request) -> Sale:
 
     await create_accounts_receivable_for_sale(
         db, str(sale.company_id), str(sale.customer_id), str(sale.id), sale.total, sale.numero,
+        fecha_emision=sale.created_at,
     )
 
     items = await get_sale_items(db, str(sale.id))
