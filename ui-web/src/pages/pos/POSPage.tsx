@@ -809,6 +809,7 @@ export default function POSPage() {
   const [showDevolucionModal, setShowDevolucionModal] = useState(false)
   const [devolucionStep, setDevolucionStep] = useState<"buscar" | "items">("buscar")
   const [devolucionSales, setDevolucionSales] = useState<Sale[]>([])
+  const [devolucionSalesRecientes, setDevolucionSalesRecientes] = useState<Sale[]>([])
   const [devolucionSalesLoading, setDevolucionSalesLoading] = useState(false)
   const [devolucionSearch, setDevolucionSearch] = useState("")
   const [devolucionSaleSeleccionada, setDevolucionSaleSeleccionada] = useState<Sale | null>(null)
@@ -5569,13 +5570,47 @@ export default function POSPage() {
       // Política comercial de devoluciones: compras emitidas hasta 48 horas antes
       const date48hAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
       const sales = await api.sales.list({ fecha_desde: date48hAgo, limit: 100 } as any)
-      setDevolucionSales(Array.isArray(sales) ? sales : [])
+      const list = Array.isArray(sales) ? sales : []
+      setDevolucionSales(list)
+      setDevolucionSalesRecientes(list)
     } catch (e) {
       toast.error("No se pudo cargar el historial de ventas", "Intente nuevamente.")
     } finally {
       setDevolucionSalesLoading(false)
     }
   }
+
+  // Búsqueda remota en BD para el modal de devoluciones del POS (soporte todas las fechas y nº de comprobante)
+  useEffect(() => {
+    if (!showDevolucionModal || devolucionStep !== "buscar") return
+
+    const term = devolucionSearch.trim()
+    if (!term) {
+      if (devolucionSalesRecientes.length > 0) {
+        setDevolucionSales(devolucionSalesRecientes)
+      }
+      return
+    }
+
+    setDevolucionSalesLoading(true)
+    const timer = setTimeout(async () => {
+      try {
+        const results = await api.sales.list({
+          search: term,
+          all_dates: true,
+          estado: "confirmado",
+          limit: 25,
+        })
+        setDevolucionSales(Array.isArray(results) ? results : [])
+      } catch (err) {
+        console.error("Error buscando ventas para devolución en POS:", err)
+      } finally {
+        setDevolucionSalesLoading(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [devolucionSearch, showDevolucionModal, devolucionStep, devolucionSalesRecientes])
 
   const closeDevolucionModal = () => {
     setShowDevolucionModal(false)
@@ -5825,13 +5860,14 @@ export default function POSPage() {
     const q = devolucionSearch.trim().toLowerCase()
     if (!q) return devolucionSales
     const qNum = q.replace(/\D/g, "")
-    return devolucionSales.filter((s) => {
+    const filtered = devolucionSales.filter((s) => {
       const num = (s.numero || "").toLowerCase()
       const numInt = (s.numero_interno || "").toLowerCase()
       const cNom = (s.customer_nombre || s.customer?.nombre || s.customer?.razon_social || "").toLowerCase()
       const cDoc = (s.customer_doc || s.customer?.ruc || s.customer?.ci || "").toLowerCase()
       return num.includes(q) || numInt.includes(q) || cNom.includes(q) || cDoc.includes(q) || (qNum && cDoc.includes(qNum))
     })
+    return filtered.length > 0 ? filtered : devolucionSales
   }, [devolucionSales, devolucionSearch])
 
   const updateQuantity = (id: string, delta: number) => {
@@ -9481,9 +9517,12 @@ export default function POSPage() {
                     type="text"
                     value={devolucionSearch}
                     onChange={(e) => setDevolucionSearch(e.target.value)}
-                    placeholder="Filtrar por número de comprobante..."
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl pl-9 pr-3 py-2.5 text-sm text-slate-900 dark:text-white font-bold outline-none focus:border-rose-500"
+                    placeholder="Filtrar por número de comprobante, RUC o cliente..."
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl pl-9 pr-9 py-2.5 text-sm text-slate-900 dark:text-white font-bold outline-none focus:border-rose-500"
                   />
+                  {devolucionSalesLoading && (
+                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-500 animate-spin" />
+                  )}
                 </div>
 
                 {devolucionSalesLoading ? (
