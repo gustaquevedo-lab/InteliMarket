@@ -106,16 +106,20 @@ function ajustar(ctx: CanvasRenderingContext2D, texto: string, maximo: number, m
 function dibujarQR(ctx: CanvasRenderingContext2D, texto: string, x: number, y: number, ladoMax: number): number {
   const qr = QRCode.create(texto, { errorCorrectionLevel: "H" })
   const n = qr.modules.size
-  const margen = 2 // zona de silencio minima que exige el lector
-  const modulo = Math.floor(ladoMax / (n + margen * 2))
-  const lado = modulo * (n + margen * 2)
+  // Sin zona de silencio propia: el recuadro blanco que va debajo ya la aporta
+  // (2,5 mm, mas que los 4 modulos que pide el lector). Antes se reservaban
+  // 2 modulos de cada lado y ademas se redondeaba para abajo, asi que el QR
+  // quedaba bastante mas chico que su recuadro.
+  const modulo = Math.max(1, Math.round(ladoMax / n))
+  const lado = modulo * n
+  const centro = Math.round((ladoMax - lado) / 2)
   ctx.fillStyle = "#FFFFFF"
-  ctx.fillRect(x, y, lado, lado)
+  ctx.fillRect(x + centro, y + centro, lado, lado)
   ctx.fillStyle = "#000000" // negro puro: el driver lo manda al panel K
   for (let f = 0; f < n; f++) {
     for (let c = 0; c < n; c++) {
       if (qr.modules.get(f, c)) {
-        ctx.fillRect(x + (c + margen) * modulo, y + (f + margen) * modulo, modulo, modulo)
+        ctx.fillRect(x + centro + c * modulo, y + centro + f * modulo, modulo, modulo)
       }
     }
   }

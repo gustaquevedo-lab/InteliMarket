@@ -2630,13 +2630,25 @@ export default function POSPage() {
     }
   }
 
+  // El lector de la tarjeta teclea el UUID del QR, pero lo hace con la
+  // distribucion de teclado que tenga Windows: donde el QR dice "-" puede
+  // llegar "'" (paso en caja el 16-09: el servidor recibio
+  // "d5c5c7d3'a43f'4c3f'8565'f0507434d7a2" y no encontro al socio). Por eso
+  // el numero se reconstruye a partir de los 32 caracteres hexadecimales,
+  // sea cual sea el separador que haya mandado el lector.
+  const normalizarCodigoSocio = (texto: string): string | null => {
+    const hex = (texto || "").replace(/[^0-9a-fA-F]/g, "").toLowerCase()
+    if (hex.length !== 32) return null
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+
   // Busqueda de socio Extra Club por numero/RUC/cedula/nombre -- mismo
   // criterio de fallback pedido explicitamente ("estandar, con fallback a
   // cedula y nombre"), ya cubierto por el search del backend que matchea
   // extra_club_numero/ruc/ci/razon_social en un solo query.
   useEffect(() => {
     if (!activeMethods.has("extra_club")) return
-    const query = extraClubQuery.trim()
+    const query = normalizarCodigoSocio(extraClubQuery) || extraClubQuery.trim()
     if (!query) { setExtraClubResults([]); setExtraClubSearching(false); return }
     const timer = setTimeout(async () => {
       setExtraClubSearching(true)
@@ -2684,7 +2696,7 @@ export default function POSPage() {
   // -- no toca el carrito ni el cliente de la venta, es solo lectura.
   useEffect(() => {
     if (!showExtraClubBalanceModal) return
-    const query = balanceModalQuery.trim()
+    const query = normalizarCodigoSocio(balanceModalQuery) || balanceModalQuery.trim()
     if (!query) { setBalanceModalResults([]); setBalanceModalSearching(false); return }
     const timer = setTimeout(async () => {
       setBalanceModalSearching(true)
@@ -4971,9 +4983,11 @@ export default function POSPage() {
     }
 
     // 1.5 TARJETA QR / CÓDIGO DE SOCIO EXTRA CLUB (Búsqueda Offline-First en Memoria Local)
-    const looksLikeExtraClubCode = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(code)
-    if (!qtyPrefix && looksLikeExtraClubCode) {
-      const cleanCode = code.toLowerCase()
+    // Acepta el UUID con guiones, sin separadores o con el separador que haya
+    // puesto el teclado del lector: lo que importa son los 32 hexadecimales.
+    const codigoSocio = qtyPrefix ? null : normalizarCodigoSocio(code)
+    if (codigoSocio) {
+      const cleanCode = codigoSocio
       // Búsqueda en memoria local (0ms, 100% offline)
       const localMatch = customers.find((c) =>
         c.extra_club_numero?.toLowerCase() === cleanCode ||
@@ -4993,8 +5007,8 @@ export default function POSPage() {
       }
 
       try {
-        const found = (await api.customers.list({ search: code, limit: 5 })) || []
-        const match = found.find((c) => c.extra_club_numero?.toLowerCase() === cleanCode || (c as any).ruc_sin_dv === code || c.ruc === code)
+        const found = (await api.customers.list({ search: cleanCode, limit: 5 })) || []
+        const match = found.find((c) => c.extra_club_numero?.toLowerCase() === cleanCode || (c as any).ruc_sin_dv === cleanCode || c.ruc === cleanCode)
 
         if (match) {
           const normalized = normalizeCustomer(match)
