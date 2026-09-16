@@ -336,6 +336,25 @@ async def _resolve_producto(db: AsyncSession, company_id: str, id_produto: int, 
     if existing:
         return existing
 
+    cid = UUID(company_id) if isinstance(company_id, str) else company_id
+
+    # Fallback 1: Buscar si ya existe por SKU exacto (que almacena el ID_PRODUTO de Nemuha)
+    sku_str = str(id_produto).strip()
+    p_res = await db.execute(select(Product.id).where(Product.company_id == cid, Product.sku == sku_str))
+    p_id = p_res.scalar_one_or_none()
+    if p_id:
+        await _save_map(db, company_id, "est_produto", id_produto, "products", p_id)
+        return p_id
+
+    # Fallback 2: Buscar si ya existe por código de barra si está disponible
+    if codigo_barra and str(codigo_barra).strip():
+        cb_str = str(codigo_barra).strip()
+        p_res = await db.execute(select(Product.id).where(Product.company_id == cid, Product.codigo_barra == cb_str))
+        p_id = p_res.scalar_one_or_none()
+        if p_id:
+            await _save_map(db, company_id, "est_produto", id_produto, "products", p_id)
+            return p_id
+
     # VL_PRECO_VENDA_VAREJO es el precio de venta minorista real en Ñemuha --
     # antes no se traia nunca aca, asi que todo producto descubierto por
     # primera vez via una venta/compra (en vez de por el import de catalogo)
@@ -1457,6 +1476,8 @@ async def _resolve_deposito(db: AsyncSession, company_id: str, id_filial: int) -
 
 
 async def sync_stock(db: AsyncSession, company_id: str, since: date | None) -> int:
+    cid = UUID(company_id) if isinstance(company_id, str) else company_id
+
     # Solo tomar existencias activas (BO_ATIVO = 1) agrupadas por producto y filial.
     # Esto evita que códigos de barra inactivos/descontinuados con cantidades viejas
     # pisen el stock real activo (donde ingresan las compras nuevas).
@@ -1487,51 +1508,105 @@ async def sync_stock(db: AsyncSession, company_id: str, since: date | None) -> i
             LEFT JOIN nemuha_record_map m ON m.target_id = s.id AND m.source_table = 'ven_venda'
             WHERE m.id IS NULL
               AND s.created_at >= '2026-08-31 00:00:00-04'
-              AND s.estado != 'anulada'
+              AND s.estado IN ('confirmado', 'completada', 'completado', 'pagado')
             GROUP BY si.product_id
         """)
     )
     ventas_intelimarket = {r.product_id: Decimal(str(r.cant_vendida)) for r in ventas_res}
 
-    count = 0
+    # Pre-cargar mapeo de productos en memoria para evitar miles de queries individuales
+    maps_res = await db.execute(
+        select(NemuhaRecordMap.source_pk, NemuhaRecordMap.target_id).where(
+            NemuhaRecordMap.company_id == cid,
+            NemuhaRecordMap.source_table == "est_produto",
+        )
+    )
+    product_id_map: dict[int, UUID] = {row.source_pk: row.target_id for row in maps_res}
+
+    # Pre-cargar productos en memoria por sku y código de barra
+    prods_res = await db.execute(
+        select(Product.id, Product.sku, Product.codigo_barra, Product.costo_promedio).where(
+            Product.company_id == cid
+        )
+    )
+    sku_to_id: dict[str, UUID] = {}
+    cb_to_id: dict[str, UUID] = {}
+    prod_cost_map: dict[UUID, Decimal] = {}
+    for p_id, p_sku, p_cb, p_cost in prods_res:
+        if p_sku:
+            sku_to_id[p_sku.strip()] = p_id
+        if p_cb:
+            cb_to_id[p_cb.strip()] = p_id
+        prod_cost_map[p_id] = p_cost or Decimal("0")
+
     warehouse_cache: dict[int, UUID] = {}
     for r in rows:
+        fid = r["idFilial"]
+        if fid not in warehouse_cache:
+            warehouse_cache[fid] = await _resolve_deposito(db, company_id, fid)
+
+    default_wid = warehouse_cache.get(1)
+
+    # Pre-cargar existencias actuales en memoria
+    stocks_res = await db.execute(
+        select(Stock).where(Stock.warehouse_id.in_(list(warehouse_cache.values())))
+    )
+    stock_cache: dict[tuple[UUID, UUID], Stock] = {
+        (s.warehouse_id, s.product_id): s for s in stocks_res.scalars().all()
+    }
+
+    count = 0
+    prods_to_update_cost: dict[UUID, Decimal] = {}
+
+    for r in rows:
+        id_prod = r["idProduto"]
         id_filial = r["idFilial"]
-        if id_filial not in warehouse_cache:
-            warehouse_cache[id_filial] = await _resolve_deposito(db, company_id, id_filial)
-        warehouse_id = warehouse_cache[id_filial]
+        warehouse_id = warehouse_cache.get(id_filial, default_wid)
 
-        tasa_iva = Decimal("10")  # no crítico para stock — placeholder si hay que crear el producto acá
-        product_id = await _resolve_producto(db, company_id, r["idProduto"], r["codigoBarra"], tasa_iva)
+        product_id = product_id_map.get(id_prod)
+        if not product_id:
+            product_id = sku_to_id.get(str(id_prod))
+            if not product_id and r.get("codigoBarra"):
+                product_id = cb_to_id.get(str(r["codigoBarra"]).strip())
 
-        result = await db.execute(
-            select(Stock).where(Stock.warehouse_id == warehouse_id, Stock.product_id == product_id)
-        )
-        stock = result.scalars().first()
+            if product_id:
+                product_id_map[id_prod] = product_id
+                await _save_map(db, company_id, "est_produto", id_prod, "products", product_id)
+            else:
+                tasa_iva = Decimal("10")
+                product_id = await _resolve_producto(db, company_id, id_prod, r["codigoBarra"], tasa_iva)
+                product_id_map[id_prod] = product_id
+
+        key = (warehouse_id, product_id)
+        stock = stock_cache.get(key)
         qtd_legacy = Decimal(str(r["qtdAtual"] or 0))
         qty_vendida = ventas_intelimarket.get(product_id, Decimal("0"))
-        # Stock neto: lo que tiene el legacy menos lo que vendió Intelimarket desde que arrancó el POS nuevo
         cantidad = max(0, round(qtd_legacy - qty_vendida))
         costo = Decimal(str(r["vlCustoMedioGs"] or 0))
 
         if stock:
-            stock.cantidad = cantidad
-            stock.costo_unitario = costo
+            if stock.cantidad != cantidad or stock.costo_unitario != costo:
+                stock.cantidad = cantidad
+                stock.costo_unitario = costo
+                stock.updated_at = func.now()
         else:
-            db.add(Stock(warehouse_id=warehouse_id, product_id=product_id, cantidad=cantidad, costo_unitario=costo))
+            new_stock = Stock(warehouse_id=warehouse_id, product_id=product_id, cantidad=cantidad, costo_unitario=costo)
+            db.add(new_stock)
+            stock_cache[key] = new_stock
 
-        # vlCustoMedioGs es el costo promedio real del legado -- antes se
-        # guardaba solo en Stock.costo_unitario y nunca se propagaba a
-        # Product.costo_promedio, dejando el 100% de los productos (11.163)
-        # con costo cero: sin margen ni valuacion de inventario posible.
-        if costo > 0:
-            product_result = await db.execute(select(Product).where(Product.id == product_id))
-            product = product_result.scalar_one_or_none()
-            if product and product.costo_promedio != costo:
-                product.costo_promedio = costo
-                product.ultimo_costo = costo
+        if costo > 0 and prod_cost_map.get(product_id) != costo:
+            prods_to_update_cost[product_id] = costo
+            prod_cost_map[product_id] = costo
 
         count += 1
+
+    if prods_to_update_cost:
+        for p_id, p_costo in prods_to_update_cost.items():
+            await db.execute(
+                update(Product)
+                .where(Product.id == p_id)
+                .values(costo_promedio=p_costo, ultimo_costo=p_costo)
+            )
 
     await db.flush()
     return count
@@ -2512,6 +2587,13 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
                 tipo_venta=tipo_venta_val,
             )
             db.add(new_prod)
+            await db.flush()
+            try:
+                id_prod_int = int(sku)
+                await _save_map(db, str(cid), "est_produto", id_prod_int, "products", new_prod.id)
+            except Exception:
+                pass
+            sku_to_prod[sku] = new_prod
     # 3. Leer escalas por cantidad de MySQL
     rows_tiers = await _fetch("""
         SELECT ID_PRODUTO, QTD_PRODUTO, VL_PRECO_VENDA_VAREJO
