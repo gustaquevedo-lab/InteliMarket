@@ -36,12 +36,37 @@ export const OPCIONES_DEFAULT: OpcionesTarjeta = {
   mostrarLimite: false,
 }
 
-const MARCA_CLARO = "#F59E0B"
-const MARCA = "#B45309"
-const TINTA = "#1C1917"
-const TENUE = "#57534E"
+// Paleta y medidas del generador Extra Club (intelicard), que es el diseño que
+// el cliente usa. Alli la tarjeta se arma en milimetros con jsPDF; aca se
+// dibuja a 300 dpi, asi que todo se convierte con mm() y pt().
+const FONDO = "#0B1638"
+const PANEL = "#101E46"
+const BANDA = "#0E1A40"
+const NARANJA = "#EE7B1D"
+const ETIQUETA = "#EE963C"
+const BLANCO = "#FFFFFF"
+const NUMERO = "#93A3C9"
 const FUENTE = "Arial, Helvetica, sans-serif"
 const MONO = "'Courier New', Consolas, monospace"
+
+const PX_POR_MM = TARJETA_PX.ancho / TARJETA_MM.ancho
+const mm = (v: number) => v * PX_POR_MM
+const pt = (v: number) => (v * 300) / 72
+
+/** Rectangulo redondeado, con respaldo por si el navegador no trae roundRect. */
+function rectRedondeado(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath()
+  if (typeof (ctx as any).roundRect === "function") {
+    ;(ctx as any).roundRect(x, y, w, h, r)
+    return
+  }
+  ctx.moveTo(x + r, y)
+  ctx.arcTo(x + w, y, x + w, y + h, r)
+  ctx.arcTo(x + w, y + h, x, y + h, r)
+  ctx.arcTo(x, y + h, x, y, r)
+  ctx.arcTo(x, y, x + w, y, r)
+  ctx.closePath()
+}
 
 let logoPromesa: Promise<HTMLImageElement | null> | null = null
 function cargarLogo(): Promise<HTMLImageElement | null> {
@@ -67,20 +92,6 @@ function ajustar(ctx: CanvasRenderingContext2D, texto: string, maximo: number, m
     ctx.font = `${peso} ${t}px ${FUENTE}`
   }
   return t
-}
-
-/** Parte un nombre largo en dos lineas por la palabra mas cercana a la mitad. */
-function partirEnDos(texto: string): [string, string] {
-  const palabras = texto.split(/\s+/)
-  if (palabras.length < 2) return [texto, ""]
-  let mejor = 1
-  let dif = Infinity
-  for (let i = 1; i < palabras.length; i++) {
-    const a = palabras.slice(0, i).join(" ").length
-    const b = palabras.slice(i).join(" ").length
-    if (Math.abs(a - b) < dif) { dif = Math.abs(a - b); mejor = i }
-  }
-  return [palabras.slice(0, mejor).join(" "), palabras.slice(mejor).join(" ")]
 }
 
 /**
@@ -119,89 +130,93 @@ export async function renderTarjeta(canvas: HTMLCanvasElement, d: DatosTarjeta, 
   const ctx = canvas.getContext("2d")!
   ctx.imageSmoothingEnabled = true
   ctx.textBaseline = "alphabetic"
+  ctx.textAlign = "left"
 
-  // Fondo y marca. El borde izquierdo y la base van a sangre: la ZC300 imprime
-  // de borde a borde.
-  ctx.fillStyle = "#FFFFFF"
+  // Fondo: azul profundo, panel izquierdo mas claro y banda de transicion.
+  ctx.fillStyle = FONDO
   ctx.fillRect(0, 0, W, H)
-  const franja = ctx.createLinearGradient(0, 0, 0, H)
-  franja.addColorStop(0, MARCA_CLARO)
-  franja.addColorStop(1, MARCA)
-  ctx.fillStyle = franja
-  ctx.fillRect(0, 0, 36, H)
-  ctx.fillStyle = MARCA
-  ctx.fillRect(0, H - 16, W, 16)
+  ctx.fillStyle = PANEL
+  ctx.fillRect(0, 0, W * 0.61, H)
+  ctx.fillStyle = BANDA
+  ctx.fillRect(W * 0.61 - mm(4), 0, mm(8), H)
 
-  const X0 = 78
-  // Zona del QR a la derecha; el texto no puede invadirla.
-  const QR_LADO_MAX = 300
-  const qrX = W - QR_LADO_MAX - 56
-  const anchoTexto = qrX - X0 - 34
+  // Franjas naranjas al ras, arriba y abajo.
+  ctx.fillStyle = NARANJA
+  ctx.fillRect(0, 0, W, mm(1.6))
+  ctx.fillRect(0, H - mm(1.6), W, mm(1.6))
 
-  // Logo
-  const logo = await cargarLogo()
-  if (logo) {
-    const lh = 74
-    const lw = Math.min((logo.width * lh) / logo.height, anchoTexto)
-    ctx.drawImage(logo, X0, 50, lw, (logo.height * lw) / logo.width)
+  // Titulo centrado y linea punteada debajo.
+  ctx.fillStyle = BLANCO
+  ctx.font = `bold ${pt(6.2)}px ${FUENTE}`
+  ctx.textAlign = "center"
+  ctx.fillText("TARJETA DE FIDELIDAD  ·  EXTRA CLUB", W / 2, mm(5.6))
+  ctx.textAlign = "left"
+  ctx.strokeStyle = BLANCO
+  ctx.lineWidth = Math.max(1, mm(0.12))
+  ctx.setLineDash([mm(0.8), mm(1.4)])
+  ctx.beginPath()
+  ctx.moveTo(mm(5), mm(7.8))
+  ctx.lineTo(W - mm(5), mm(7.8))
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  const fx = mm(5)
+  const qrLado = mm(24)
+  const qrX = W - qrLado - mm(5)
+  const qrY = (H - qrLado) / 2 + mm(1)
+  const anchoTexto = qrX - fx - mm(5)
+
+  // Campo: etiqueta naranja chica arriba, valor blanco en negrita debajo.
+  const campo = (etiqueta: string, valor: string, etiquetaY: number, tamañoPt: number) => {
+    ctx.fillStyle = ETIQUETA
+    ctx.font = `bold ${pt(5.2)}px ${FUENTE}`
+    ctx.fillText(etiqueta, fx, mm(etiquetaY))
+    ctx.fillStyle = BLANCO
+    const t = ajustar(ctx, valor, pt(tamañoPt), pt(tamañoPt * 0.7), anchoTexto)
+    ctx.font = `bold ${t}px ${FUENTE}`
+    let txt = valor
+    while (txt.length > 2 && ctx.measureText(txt).width > anchoTexto) txt = txt.slice(0, -1)
+    ctx.fillText(txt, fx, mm(etiquetaY + 1.8 + tamañoPt * 0.38))
   }
 
-  // Rotulo de pertenencia
-  ctx.fillStyle = MARCA
-  ctx.font = `bold 25px ${FUENTE}`
-  ;(ctx as any).letterSpacing = "5px"
-  ctx.fillText("SOCIO EXTRA CLUB", X0, 176)
-  ;(ctx as any).letterSpacing = "0px"
+  campo("BENEFICIARIO", (d.nombre || "").toUpperCase().trim(), 11.5, 10)
 
-  // Nombre: una linea si entra con un tamaño digno; si no, dos.
-  const nombre = (d.nombre || "").toUpperCase().trim()
-  let y = 246
-  ctx.fillStyle = TINTA
-  const t1 = ajustar(ctx, nombre, 52, 40, anchoTexto)
-  ctx.font = `bold ${t1}px ${FUENTE}`
-  if (ctx.measureText(nombre).width <= anchoTexto) {
-    ctx.fillText(nombre, X0, y)
-    y += 20
-  } else {
-    const [a, b] = partirEnDos(nombre)
-    const t2 = Math.min(ajustar(ctx, a, 42, 26, anchoTexto), ajustar(ctx, b, 42, 26, anchoTexto))
-    ctx.font = `bold ${t2}px ${FUENTE}`
-    ctx.fillText(a, X0, y - 8)
-    ctx.fillText(b, X0, y - 8 + t2 + 6)
-    y += t2 + 16
-  }
+  // Dos renglones mas, con lo que este elegido. Mas no entran sin pisar el logo.
+  const extras: [string, string][] = []
+  if (o.mostrarEmpresa) extras.push(["EMPRESA", d.empresa || "—"])
+  if (o.mostrarDocumento) extras.push(["CÉDULA / RUC", d.documento || "—"])
+  if (o.mostrarCiudad && d.ciudad) extras.push(["CIUDAD", d.ciudad])
+  if (o.mostrarLimite && d.limite != null) extras.push(["LÍNEA DE CRÉDITO", `Gs. ${fmtGs(d.limite)}`])
+  const renglones = [23, 32.5]
+  extras.slice(0, 2).forEach(([etiqueta, valor], i) => campo(etiqueta, valor, renglones[i], 7.8))
 
-  // Datos elegidos, uno por linea
-  const lineas: string[] = []
-  if (o.mostrarDocumento && d.documento) lineas.push(`Documento  ${d.documento}`)
-  if (o.mostrarEmpresa && d.empresa) lineas.push(`Convenio  ${d.empresa}`)
-  if (o.mostrarCiudad && d.ciudad) lineas.push(d.ciudad)
-  if (o.mostrarLimite && d.limite != null) lineas.push(`Línea de crédito  Gs. ${fmtGs(d.limite)}`)
-  ctx.fillStyle = TENUE
-  for (const l of lineas) {
-    y += 44
-    ajustar(ctx, l, 27, 18, anchoTexto, "normal")
-    ctx.fillText(l, X0, y)
-  }
-
-  // Numero de socio en texto, para cargarlo a mano si el QR no se puede leer.
+  // Numero de socio en texto chico, para cargarlo a mano si el QR no se lee.
   if (o.mostrarNumero && d.numero) {
-    ctx.fillStyle = TINTA
-    ctx.font = `bold 21px ${MONO}`
+    ctx.fillStyle = NUMERO
+    ctx.font = `${pt(4.6)}px ${MONO}`
     let num = d.numero.toUpperCase()
     while (ctx.measureText(num).width > anchoTexto && num.length > 8) num = num.slice(0, -1)
-    ctx.fillText(num, X0, H - 50)
+    ctx.fillText(num, fx, mm(40.5))
   }
 
-  // QR
+  // QR sobre recuadro blanco: sobre el azul no lo lee ningun escaner.
   if (d.numero) {
-    const lado = dibujarQR(ctx, d.numero.toLowerCase(), qrX, 64, QR_LADO_MAX)
-    ctx.fillStyle = TENUE
-    ctx.font = `bold 19px ${FUENTE}`
-    ctx.textAlign = "center"
-    ctx.fillText("Presentá en caja", qrX + lado / 2, 64 + lado + 36)
-    ctx.textAlign = "left"
+    const pad = mm(2.5)
+    ctx.fillStyle = BLANCO
+    rectRedondeado(ctx, qrX - pad, qrY - pad, qrLado + pad * 2, qrLado + pad * 2, mm(1.5))
+    ctx.fill()
+    dibujarQR(ctx, d.numero.toLowerCase(), qrX, qrY, qrLado)
   }
+
+  // Logo sobre pastilla blanca, abajo a la izquierda.
+  const logo = await cargarLogo()
+  const logoW = mm(18)
+  const logoH = (logoW * 328) / 1000
+  const logoY = H - logoH - mm(3.4)
+  ctx.fillStyle = BLANCO
+  rectRedondeado(ctx, fx - mm(1), logoY - mm(0.8), logoW + mm(2), logoH + mm(1.6), mm(1.2))
+  ctx.fill()
+  if (logo) ctx.drawImage(logo, fx, logoY, logoW, logoH)
 }
 
 let anversoPromesa: Promise<HTMLImageElement | null> | null = null
