@@ -1,5 +1,5 @@
 import React, { useRef } from "react"
-import { Printer, X, Truck, CheckCircle2, Clock, Ban, Package, Building2, FileText } from "lucide-react"
+import { Printer, X, Truck, CheckCircle2, Clock, Ban, Building2, FileCheck, ShieldCheck, UserCheck } from "lucide-react"
 import { formatDate, formatDateTime, formatPYG } from "../../utils/format"
 
 export interface DevolucionItemPrint {
@@ -8,6 +8,8 @@ export interface DevolucionItemPrint {
   producto_nombre?: string
   sku?: string
   codigo_barra?: string
+  codigo_barras?: string
+  codigo_interno?: string
   factura_numero?: string
   cantidad: number
   valor_unitario: number
@@ -25,6 +27,8 @@ export interface DevolucionDocPrint {
   proveedor_nombre?: string
   supplier_nombre?: string
   proveedor_ruc?: string
+  proveedor_telefono?: string
+  proveedor_direccion?: string
   almacen_nombre?: string
   fecha_creacion?: string
   fecha?: string
@@ -36,7 +40,9 @@ export interface DevolucionDocPrint {
   nota_credito_monto?: number
   estado: "pendiente" | "autorizado" | "completado" | "rechazado" | string
   autorizado_at?: string
+  autorizado_por_nombre?: string
   completado_at?: string
+  completado_por_nombre?: string
   rechazado_at?: string
   motivo_rechazo?: string
   observaciones?: string
@@ -53,10 +59,12 @@ export const DevolucionProveedorPrintModal: React.FC<Props> = ({ devolucion, onC
   const printAreaRef = useRef<HTMLDivElement>(null)
 
   const items: DevolucionItemPrint[] = devolucion.items || devolucion.raw?.items || []
-  const proveedorNombre = devolucion.proveedor_nombre || devolucion.supplier_nombre || devolucion.raw?.proveedor_nombre || "Proveedor Sin Nombre"
-  const proveedorRuc = devolucion.proveedor_ruc || devolucion.raw?.proveedor_ruc || "—"
+  const proveedorNombre = devolucion.proveedor_nombre || devolucion.supplier_nombre || devolucion.raw?.proveedor_nombre || "Proveedor Sin Asignar"
+  const proveedorRuc = devolucion.proveedor_ruc || devolucion.raw?.proveedor_ruc || devolucion.raw?.supplier?.ruc || "—"
+  const proveedorTel = devolucion.proveedor_telefono || devolucion.raw?.proveedor_telefono || devolucion.raw?.supplier?.telefono || "—"
+  const proveedorDir = devolucion.proveedor_direccion || devolucion.raw?.proveedor_direccion || devolucion.raw?.supplier?.direccion || "—"
   const codigo = devolucion.codigo || devolucion.raw?.codigo || `DEV-${devolucion.id.slice(0, 8).toUpperCase()}`
-  const totalDevuelto = devolucion.valor_total_estimado ?? devolucion.monto ?? devolucion.raw?.valor_total_estimado ?? 0
+  const totalDevuelto = Number(devolucion.valor_total_estimado ?? devolucion.monto ?? devolucion.raw?.valor_total_estimado ?? 0)
   const totalBultos = items.reduce((acc, it) => acc + (Number(it.cantidad) || 0), 0)
   const almacen = devolucion.almacen_nombre || devolucion.raw?.almacen_nombre || "Depósito Central"
 
@@ -64,331 +72,138 @@ export const DevolucionProveedorPrintModal: React.FC<Props> = ({ devolucion, onC
   const yaImpactoStock = estado === "completado"
 
   const handlePrint = () => {
-    const printContent = printAreaRef.current
-    if (!printContent) {
+    const container = printAreaRef.current
+    if (!container) {
       window.print()
       return
     }
 
-    const printWindow = window.open("", "_blank", "width=900,height=750")
-    if (!printWindow) {
+    // Usar iframe oculto inyectando todos los estilos de la aplicación (Tailwind, Google Fonts)
+    // para replicar con exactitud milimétrica el diseño del reporte premium y evitar que el navegador bloquee popups
+    const existingIframe = document.getElementById("devolucion-print-iframe")
+    if (existingIframe) {
+      existingIframe.remove()
+    }
+
+    const iframe = document.createElement("iframe")
+    iframe.id = "devolucion-print-iframe"
+    iframe.style.position = "fixed"
+    iframe.style.right = "0"
+    iframe.style.bottom = "0"
+    iframe.style.width = "0"
+    iframe.style.height = "0"
+    iframe.style.border = "none"
+    document.body.appendChild(iframe)
+
+    const doc = iframe.contentWindow?.document
+    if (!doc) {
       window.print()
       return
     }
 
-    printWindow.document.write(`
+    // Copiar estilos activos compilados de Tailwind y la app
+    const headStyles = Array.from(document.querySelectorAll("link[rel='stylesheet'], style"))
+      .map((el) => el.outerHTML)
+      .join("\n")
+
+    const printableHtml = container.innerHTML
+
+    doc.open()
+    doc.write(`
       <!DOCTYPE html>
       <html lang="es">
         <head>
           <meta charset="utf-8">
-          <title>Devolución a Proveedor ${codigo} - Extra Supermercado</title>
+          <title>Remito de Devolución ${codigo} - Extra Supermercado</title>
+          ${headStyles}
           <style>
             @page {
               size: A4 portrait;
-              margin: 10mm 12mm 12mm 12mm;
+              margin: 8mm 10mm 10mm 10mm;
             }
             * {
-              box-sizing: border-box;
+              box-sizing: border-box !important;
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
+              color-adjust: exact !important;
             }
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-              color: #0f172a;
-              background: #fff;
-              margin: 0;
-              padding: 0;
-              font-size: 11px;
-              line-height: 1.35;
+            html, body {
+              margin: 0 !important;
+              padding: 0 !important;
+              background: #ffffff !important;
+              color: #0f172a !important;
+              font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+              -webkit-font-smoothing: antialiased !important;
             }
-            .header-box {
-              border-bottom: 2px solid #0f172a;
-              padding-bottom: 10px;
-              margin-bottom: 12px;
-              display: flex;
-              justify-content: space-between;
-              align-items: flex-start;
+            .font-mono {
+              font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace !important;
+              font-variant-numeric: tabular-nums !important;
             }
-            .title-main {
-              font-size: 18px;
-              font-weight: 900;
-              color: #0f172a;
-              text-transform: uppercase;
-              letter-spacing: -0.5px;
-              margin: 0 0 2px 0;
+            .print-sheet {
+              width: 100% !important;
+              max-width: 100% !important;
+              margin: 0 auto !important;
+              padding: 0 !important;
+              background: #ffffff !important;
+              border: none !important;
+              box-shadow: none !important;
             }
-            .subtitle-main {
-              font-size: 12px;
-              font-weight: 700;
-              color: #e11d48;
-              margin: 0 0 4px 0;
+            table {
+              border-collapse: collapse !important;
+              width: 100% !important;
             }
-            .company-info {
-              font-size: 10px;
-              color: #475569;
+            .page-break-avoid {
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
             }
-            .doc-card {
-              border: 2px solid #0f172a;
-              border-radius: 8px;
-              padding: 8px 14px;
-              text-align: right;
-              background-color: #f8fafc;
-            }
-            .doc-card .doc-num {
-              font-family: ui-monospace, monospace;
-              font-size: 15px;
-              font-weight: 900;
-              color: #0f172a;
-            }
-            .doc-card .doc-date {
-              font-size: 10px;
-              color: #475569;
-              margin-top: 3px;
-            }
-            .stock-alert-box {
-              margin: 12px 0;
-              padding: 10px 14px;
-              border-radius: 6px;
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              font-weight: 700;
-              border: 1.5px solid;
-            }
-            .stock-impact-yes {
-              background-color: #f0fdf4;
-              border-color: #16a34a;
-              color: #14532d;
-            }
-            .stock-impact-pending {
-              background-color: #eff6ff;
-              border-color: #2563eb;
-              color: #1e3a8a;
-            }
-            .stock-impact-none {
-              background-color: #fffbeb;
-              border-color: #d97706;
-              color: #78350f;
-            }
-            .stock-impact-rejected {
-              background-color: #fef2f2;
-              border-color: #dc2626;
-              color: #7f1d1d;
-            }
-            .info-grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 12px;
-              margin-bottom: 14px;
-            }
-            .info-panel {
-              border: 1px solid #cbd5e1;
-              border-radius: 6px;
-              padding: 8px 12px;
-              background-color: #f8fafc;
-            }
-            .info-panel h4 {
-              margin: 0 0 6px 0;
-              font-size: 10px;
-              font-weight: 900;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              color: #64748b;
-              border-bottom: 1px dashed #cbd5e1;
-              padding-bottom: 3px;
-            }
-            .info-row {
-              display: flex;
-              justify-content: space-between;
-              font-size: 10.5px;
-              margin-bottom: 3px;
-            }
-            .info-row .lbl {
-              color: #64748b;
-              font-weight: 600;
-            }
-            .info-row .val {
-              color: #0f172a;
-              font-weight: 700;
-              text-align: right;
-            }
-            table.items-table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-bottom: 14px;
-              font-size: 10px;
-            }
-            table.items-table th {
-              background-color: #0f172a;
-              color: #ffffff;
-              font-weight: 800;
-              text-transform: uppercase;
-              font-size: 9px;
-              letter-spacing: 0.5px;
-              padding: 6px 8px;
-              text-align: left;
-            }
-            table.items-table td {
-              padding: 6px 8px;
-              border-bottom: 1px solid #e2e8f0;
-              color: #1e293b;
-              vertical-align: top;
-            }
-            table.items-table tr:nth-child(even) td {
-              background-color: #f8fafc;
-            }
-            .text-right {
-              text-align: right;
-            }
-            .text-center {
-              text-align: center;
-            }
-            .mono {
-              font-family: ui-monospace, monospace;
-            }
-            .badge-motivo {
-              display: inline-block;
-              padding: 1px 5px;
-              border-radius: 4px;
-              background-color: #e2e8f0;
-              font-weight: 700;
-              font-size: 8.5px;
-              text-transform: uppercase;
-              color: #334155;
-            }
-            .totals-box {
-              display: flex;
-              justify-content: flex-end;
-              margin-bottom: 18px;
-            }
-            .totals-table {
-              width: 280px;
-              border: 1.5px solid #0f172a;
-              border-radius: 6px;
-              overflow: hidden;
-            }
-            .totals-table td {
-              padding: 6px 10px;
-              font-size: 11px;
-            }
-            .totals-table .total-row {
-              background-color: #0f172a;
-              color: #fff;
-              font-weight: 900;
-              font-size: 13px;
-            }
-            .timeline-steps {
-              display: flex;
-              border: 1px solid #cbd5e1;
-              border-radius: 6px;
-              margin-bottom: 18px;
-              overflow: hidden;
-              background: #fff;
-            }
-            .step-box {
-              flex: 1;
-              padding: 6px 8px;
-              border-right: 1px solid #cbd5e1;
-              font-size: 9px;
-            }
-            .step-box:last-child {
-              border-right: none;
-            }
-            .step-box .step-num {
-              font-weight: 900;
-              color: #64748b;
-              margin-bottom: 2px;
-            }
-            .step-box .step-title {
-              font-weight: 800;
-              font-size: 10px;
-              color: #0f172a;
-            }
-            .step-box.active {
-              background-color: #f0fdf4;
-            }
-            .signatures-box {
-              margin-top: 25px;
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 25px;
-              page-break-inside: avoid;
-            }
-            .sig-card {
-              border: 1px dashed #64748b;
-              border-radius: 6px;
-              padding: 12px;
-              min-height: 100px;
-              display: flex;
-              flex-col;
-              flex-direction: column;
-              justify-content: space-between;
-              background-color: #fafafa;
-            }
-            .sig-line {
-              margin-top: 40px;
-              border-top: 1px solid #0f172a;
-              text-align: center;
-              padding-top: 4px;
-              font-weight: 700;
-              font-size: 10px;
-            }
-            .sig-details {
-              font-size: 9px;
-              color: #64748b;
-              line-height: 1.4;
-              margin-top: 4px;
-            }
-            .footer-note {
-              margin-top: 20px;
-              text-align: center;
-              font-size: 8.5px;
-              color: #94a3b8;
-              border-top: 1px solid #e2e8f0;
-              padding-top: 6px;
+            .no-print {
+              display: none !important;
             }
           </style>
         </head>
         <body>
-          ${printContent.innerHTML}
-          <script>
-            window.onload = function() {
-              window.print();
-              setTimeout(function() { window.close(); }, 500);
-            };
-          </script>
+          <div class="print-sheet">
+            ${printableHtml}
+          </div>
         </body>
       </html>
     `)
-    printWindow.document.close()
+    doc.close()
+
+    setTimeout(() => {
+      iframe.contentWindow?.focus()
+      iframe.contentWindow?.print()
+    }, 350)
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
       <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-4xl w-full max-h-[94vh] flex flex-col shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-        {/* Modal Top Bar */}
-        <div className="p-4 sm:px-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-slate-50 dark:bg-slate-800/60">
+        {/* Barra superior del Modal */}
+        <div className="p-4 sm:px-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-slate-50 dark:bg-slate-800/60 no-print">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-600 to-rose-600 flex items-center justify-center text-white shadow-md">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-rose-600 flex items-center justify-center text-white shadow-md">
               <Printer className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white flex items-center gap-2">
-                <span>Comprobante Oficial de Devolución</span>
-                <span className="font-mono text-xs px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 font-bold border border-amber-200 dark:border-amber-800">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-indigo-600 text-white">
+                  Reporte Premium A4
+                </span>
+                <span className="font-mono text-xs font-bold text-slate-700 dark:text-slate-300">
                   {codigo}
                 </span>
+              </div>
+              <h3 className="font-black text-sm sm:text-base text-slate-900 dark:text-white mt-0.5">
+                Remito Oficial de Devolución de Mercadería
               </h3>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Formato legal y logístico para entrega física a transportista y registro de egreso de stock
-              </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <button
               onClick={handlePrint}
-              className="px-4 py-2 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-2 shadow-lg shadow-rose-600/25 transition-all transform active:scale-95"
+              className="px-4 py-2 rounded-xl text-xs font-black bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-2 shadow-lg shadow-indigo-600/25 transition transform active:scale-95"
             >
               <Printer className="w-4 h-4" />
               <span>Imprimir Remito A4</span>
@@ -403,94 +218,103 @@ export const DevolucionProveedorPrintModal: React.FC<Props> = ({ devolucion, onC
           </div>
         </div>
 
-        {/* Scrollable Printable Document Container */}
-        <div className="p-4 sm:p-8 overflow-y-auto flex-1 bg-slate-100 dark:bg-slate-950/50 flex justify-center">
+        {/* Contenedor del Documento Imprimible */}
+        <div className="p-4 sm:p-8 overflow-y-auto flex-1 bg-slate-100 dark:bg-slate-950/60 flex justify-center">
           <div
             ref={printAreaRef}
-            className="w-full max-w-[800px] bg-white text-slate-900 p-8 rounded-2xl shadow-sm border border-slate-200 print:border-0 print:shadow-none print:p-0"
+            className="w-full max-w-[800px] bg-white text-slate-900 p-8 rounded-2xl shadow-sm border border-slate-200 print:border-0 print:shadow-none print:p-0 space-y-4"
           >
-            {/* Header Documento */}
-            <div className="border-b-2 border-slate-900 pb-3 mb-3 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-              <div>
-                <h1 className="text-xl font-black text-slate-900 tracking-tight uppercase m-0 leading-tight">
-                  EXTRA SUPERMERCADO MAYORISTA
-                </h1>
-                <h2 className="text-xs font-black text-rose-600 uppercase tracking-widest mt-0.5 mb-1">
-                  GRUPO SANTA TERESA E.A.S.
-                </h2>
-                <div className="text-[10px] text-slate-500 leading-relaxed">
-                  <p className="m-0 font-bold text-slate-700">RUC: 80150377-9 · Sucursal Casa Central</p>
-                  <p className="m-0">Supermercado Retail & Distribución Mayorista · Asunción, Paraguay</p>
-                  <p className="m-0">Teléfono: (021) 000-0000 · Sistema Central InteliMarket</p>
-                </div>
-              </div>
-
-              <div className="border-2 border-slate-900 rounded-xl p-3 bg-slate-50 text-right min-w-[220px]">
-                <span className="text-[9px] font-black uppercase tracking-wider text-slate-500 block">
-                  ORDEN & REMITO DE DEVOLUCIÓN
-                </span>
-                <span className="font-mono text-base font-black text-slate-900 block mt-0.5">
-                  {codigo}
-                </span>
-                <span className="text-[10px] text-slate-600 block mt-1">
-                  Emisión: <strong>{devolucion.fecha_creacion ? formatDateTime(devolucion.fecha_creacion) : formatDateTime(new Date())}</strong>
-                </span>
-                <span className="text-[9px] text-slate-500 block font-mono">
-                  Depósito: <strong>{almacen}</strong>
-                </span>
-              </div>
-            </div>
-
-            {/* Banner de Impacto en Stock y Etapas */}
-            <div
-              className={`p-3 rounded-xl mb-4 border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
-                yaImpactoStock
-                  ? "bg-emerald-50 border-emerald-500 text-emerald-900"
-                  : estado === "autorizado"
-                  ? "bg-blue-50 border-blue-500 text-blue-900"
-                  : estado === "rechazado"
-                  ? "bg-rose-50 border-rose-500 text-rose-900"
-                  : "bg-amber-50 border-amber-500 text-amber-900"
-              }`}
-            >
-              <div>
-                <div className="flex items-center gap-2">
-                  {yaImpactoStock ? (
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                  ) : estado === "autorizado" ? (
-                    <Truck className="w-5 h-5 text-blue-600 shrink-0" />
-                  ) : estado === "rechazado" ? (
-                    <Ban className="w-5 h-5 text-rose-600 shrink-0" />
-                  ) : (
-                    <Clock className="w-5 h-5 text-amber-600 shrink-0" />
-                  )}
-                  <div>
-                    <span className="font-black uppercase tracking-wide block text-sm">
-                      {yaImpactoStock
-                        ? "✓ STOCK EGRESADO DEL INVENTARIO — SALIDA FÍSICA CONFIRMADA"
-                        : estado === "autorizado"
-                        ? "SALIDA AUTORIZADA — PENDIENTE DE RETIRO EN DEPÓSITO"
-                        : estado === "rechazado"
-                        ? "DEVOLUCIÓN RECHAZADA — SIN IMPACTO EN STOCK"
-                        : "SOLICITUD EN TRÁMITE — SIN IMPACTO EN STOCK"}
-                    </span>
-                    <span className="text-[11px] block opacity-90">
-                      {yaImpactoStock
-                        ? `Se descontaron ${totalBultos} unidades del stock del depósito con movimiento tipo 'devolucion_proveedor'.`
-                        : estado === "autorizado"
-                        ? "La devolución fue aprobada comercialmente. Los productos deben ser entregados al proveedor para descontar el stock."
-                        : estado === "rechazado"
-                        ? `Motivo de rechazo: ${devolucion.motivo_rechazo || "No especificado"}.`
-                        : "La solicitud está en borrador/revisión. La mercadería permanece en gaveta hasta su autorización y egreso."}
-                    </span>
+            {/* ── 1. ENCABEZADO INSTITUCIONAL OFICIAL EXTRA SUPERMERCADO ── */}
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b-2 border-indigo-600 pb-3">
+              <div className="flex items-start gap-3.5">
+                <img
+                  src="/logo_extra.png"
+                  alt="Extra Supermercado Mayorista"
+                  className="h-12 w-auto object-contain flex-shrink-0"
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = "none"
+                  }}
+                />
+                <div className="space-y-0.5">
+                  <h1 className="text-base font-black uppercase tracking-tight text-slate-900 leading-tight m-0">
+                    Extra Supermercado Mayorista
+                  </h1>
+                  <p className="text-[11px] font-black text-indigo-600 leading-tight m-0 uppercase tracking-wide">
+                    GRUPO SANTA TERESA E.A.S.
+                  </p>
+                  <div className="text-[10px] text-slate-500 leading-relaxed pt-0.5">
+                    <div><strong>RUC:</strong> 80150377-9 · <strong>Timbrado:</strong> 18545636</div>
+                    <div>Alejo García esquina Carlos Antonio López — Pedro Juan Caballero, Amambay, Paraguay</div>
+                    <div>Teléfono: +595 992 052200 · Email: contacto@superextra.com.py</div>
                   </div>
                 </div>
               </div>
 
+              {/* Recuadro Oficial de Expediente de Devolución */}
+              <div className="sm:text-right space-y-1 bg-slate-50 p-3 rounded-xl border border-slate-300 min-w-[220px]">
+                <span className="inline-block px-2.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-900 border border-indigo-200">
+                  Remito Oficial de Devolución
+                </span>
+                <div className="text-lg font-black font-mono text-indigo-600 leading-none pt-0.5">
+                  N° {codigo}
+                </div>
+                <div className="text-[10.5px] text-slate-600 pt-0.5">
+                  Fecha Emisión: <strong>{devolucion.fecha_creacion ? formatDateTime(devolucion.fecha_creacion) : devolucion.fecha ? formatDate(devolucion.fecha) : formatDateTime(new Date())}</strong>
+                </div>
+                <div className="text-[10px] text-slate-500 font-mono">
+                  Depósito Origen: <strong>{almacen}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* ── 2. BANNER DE TRAZABILIDAD & IMPACTO EN STOCK POR ETAPAS ── */}
+            <div
+              className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
+                yaImpactoStock
+                  ? "bg-emerald-50 border-emerald-500 text-emerald-950"
+                  : estado === "autorizado"
+                  ? "bg-blue-50 border-blue-500 text-blue-950"
+                  : estado === "rechazado"
+                  ? "bg-rose-50 border-rose-500 text-rose-950"
+                  : "bg-amber-50 border-amber-500 text-amber-950"
+              }`}
+            >
+              <div className="flex items-start gap-2.5">
+                {yaImpactoStock ? (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                ) : estado === "autorizado" ? (
+                  <Truck className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                ) : estado === "rechazado" ? (
+                  <Ban className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                ) : (
+                  <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <span className="font-black uppercase tracking-wide block text-xs">
+                    {yaImpactoStock
+                      ? "✓ STOCK EGRESADO DEL INVENTARIO — SALIDA FÍSICA CONFIRMADA"
+                      : estado === "autorizado"
+                      ? "SALIDA AUTORIZADA — PENDIENTE DE RETIRO EN DEPÓSITO"
+                      : estado === "rechazado"
+                      ? "SOLICITUD RECHAZADA — SIN IMPACTO EN STOCK"
+                      : "SOLICITUD EN TRÁMITE — SIN EGRESO DE INVENTARIO"}
+                  </span>
+                  <span className="text-[10.5px] block opacity-90 leading-tight mt-0.5">
+                    {yaImpactoStock
+                      ? `Se descontaron ${totalBultos} unidades del depósito bajo movimiento Kardex 'devolucion_proveedor'. Saldo de compra imputado.`
+                      : estado === "autorizado"
+                      ? "Devolución aprobada comercialmente. Mercadería separada en zona de despacho para entrega física a transportista."
+                      : estado === "rechazado"
+                      ? `Motivo de rechazo: ${devolucion.motivo_rechazo || "No cumple condiciones de devolución comercial"}.`
+                      : "Solicitud registrada en revisión. No descuenta stock físico ni contable hasta su autorización y entrega."}
+                  </span>
+                </div>
+              </div>
+
               <div className="sm:text-right shrink-0">
-                <span className="text-[10px] uppercase font-bold text-slate-500 block">IMPACTO EN STOCK:</span>
+                <span className="text-[9px] uppercase font-bold text-slate-500 block">IMPACTO EN STOCK:</span>
                 <span
-                  className={`px-2.5 py-0.5 rounded-full text-xs font-black uppercase inline-block ${
+                  className={`px-2.5 py-0.5 rounded-full text-[10.5px] font-black uppercase inline-block font-mono ${
                     yaImpactoStock
                       ? "bg-emerald-600 text-white"
                       : estado === "autorizado"
@@ -503,235 +327,240 @@ export const DevolucionProveedorPrintModal: React.FC<Props> = ({ devolucion, onC
               </div>
             </div>
 
-            {/* Trazabilidad por Etapas (Circuito) */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4 text-[10px]">
-              <div className={`p-2.5 rounded-lg border ${devolucion.fecha_creacion ? "border-emerald-300 bg-emerald-50/50" : "border-slate-200 bg-slate-50"}`}>
+            {/* ── 3. TIMELINE DE 4 ETAPAS DEL CIRCUITO ADMINISTRATIVO ── */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+              <div className={`p-2 rounded-lg border ${devolucion.fecha_creacion || devolucion.fecha ? "border-emerald-300 bg-emerald-50/50" : "border-slate-200 bg-slate-50"}`}>
                 <span className="font-bold text-slate-400 block uppercase text-[8px]">Etapa 1</span>
-                <span className="font-extrabold text-slate-900 block text-[11px]">1. Solicitud & Imputación</span>
-                <span className="text-slate-500 block mt-0.5">{devolucion.fecha_creacion ? formatDate(devolucion.fecha_creacion) : "—"}</span>
-                <span className="font-mono text-[9px] text-emerald-700 font-bold">✓ Registrada</span>
+                <span className="font-black text-slate-900 block text-[10.5px]">1. Solicitud Registrada</span>
+                <span className="text-slate-500 block">{devolucion.fecha_creacion ? formatDate(devolucion.fecha_creacion) : devolucion.fecha ? formatDate(devolucion.fecha) : "Completada"}</span>
+                <span className="font-mono text-[9px] text-emerald-700 font-bold">✓ En Sistema</span>
               </div>
 
-              <div className={`p-2.5 rounded-lg border ${devolucion.autorizado_at ? "border-emerald-300 bg-emerald-50/50" : estado === "autorizado" || yaImpactoStock ? "border-blue-300 bg-blue-50/50" : "border-slate-200 bg-slate-50"}`}>
+              <div className={`p-2 rounded-lg border ${devolucion.autorizado_at || estado === "autorizado" || yaImpactoStock ? "border-blue-300 bg-blue-50/50" : "border-slate-200 bg-slate-50"}`}>
                 <span className="font-bold text-slate-400 block uppercase text-[8px]">Etapa 2</span>
-                <span className="font-extrabold text-slate-900 block text-[11px]">2. Aprobación Comercial</span>
-                <span className="text-slate-500 block mt-0.5">{devolucion.autorizado_at ? formatDate(devolucion.autorizado_at) : estado === "autorizado" || yaImpactoStock ? "Aprobada" : "Pendiente"}</span>
+                <span className="font-black text-slate-900 block text-[10.5px]">2. Aprobación Comercial</span>
+                <span className="text-slate-500 block">{devolucion.autorizado_at ? formatDate(devolucion.autorizado_at) : estado === "autorizado" || yaImpactoStock ? "Aprobada" : "En Espera"}</span>
                 <span className={`font-mono text-[9px] font-bold ${devolucion.autorizado_at || estado === "autorizado" || yaImpactoStock ? "text-blue-700" : "text-slate-400"}`}>
-                  {devolucion.autorizado_at || estado === "autorizado" || yaImpactoStock ? "✓ Aprobada" : "En Espera"}
+                  {devolucion.autorizado_at || estado === "autorizado" || yaImpactoStock ? "✓ Aprobada" : "Pendiente"}
                 </span>
               </div>
 
-              <div className={`p-2.5 rounded-lg border ${yaImpactoStock ? "border-emerald-500 bg-emerald-50/80 shadow-xs" : "border-slate-200 bg-slate-50"}`}>
+              <div className={`p-2 rounded-lg border ${yaImpactoStock ? "border-emerald-300 bg-emerald-50/50" : "border-slate-200 bg-slate-50"}`}>
                 <span className="font-bold text-slate-400 block uppercase text-[8px]">Etapa 3</span>
-                <span className="font-extrabold text-slate-900 block text-[11px]">3. Salida Física / Stock</span>
-                <span className="text-slate-500 block mt-0.5">{devolucion.completado_at ? formatDate(devolucion.completado_at) : "Pendiente salida"}</span>
-                <span className={`font-mono text-[9px] font-black ${yaImpactoStock ? "text-emerald-700" : "text-amber-600"}`}>
-                  {yaImpactoStock ? "✓ Egreso Inventario OK" : "Pendiente"}
+                <span className="font-black text-slate-900 block text-[10.5px]">3. Salida Física / Kardex</span>
+                <span className="text-slate-500 block">{devolucion.completado_at ? formatDate(devolucion.completado_at) : yaImpactoStock ? "Egresada" : "En Depósito"}</span>
+                <span className={`font-mono text-[9px] font-bold ${yaImpactoStock ? "text-emerald-700" : "text-slate-400"}`}>
+                  {yaImpactoStock ? "✓ Egreso Confirmado" : "Pendiente Retiro"}
                 </span>
               </div>
 
-              <div className={`p-2.5 rounded-lg border ${devolucion.nota_credito_numero ? "border-emerald-300 bg-emerald-50/50" : "border-slate-200 bg-slate-50"}`}>
+              <div className={`p-2 rounded-lg border ${devolucion.nota_credito_numero ? "border-emerald-300 bg-emerald-50/50" : "border-slate-200 bg-slate-50"}`}>
                 <span className="font-bold text-slate-400 block uppercase text-[8px]">Etapa 4</span>
-                <span className="font-extrabold text-slate-900 block text-[11px]">4. Nota de Crédito / P2P</span>
-                <span className="text-slate-500 block mt-0.5">{devolucion.nota_credito_numero ? `NC: ${devolucion.nota_credito_numero}` : "Sin NC aún"}</span>
+                <span className="font-black text-slate-900 block text-[10.5px]">4. Nota de Crédito</span>
+                <span className="text-slate-500 block font-mono">{devolucion.nota_credito_numero || "A liquidar"}</span>
                 <span className={`font-mono text-[9px] font-bold ${devolucion.nota_credito_numero ? "text-emerald-700" : "text-slate-400"}`}>
-                  {devolucion.nota_credito_numero ? "✓ Compensada" : "Por liquidar"}
+                  {devolucion.nota_credito_numero ? "✓ Liquidado" : "Pendiente"}
                 </span>
               </div>
             </div>
 
-            {/* Paneles de Datos: Proveedor y Depósito */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 text-xs">
-              <div className="border border-slate-300 rounded-xl p-3 bg-slate-50">
-                <h4 className="m-0 font-black text-slate-400 uppercase text-[9px] tracking-wider border-b border-slate-200 pb-1 mb-1.5 flex items-center gap-1.5">
-                  <Building2 className="w-3.5 h-3.5 text-slate-600" />
-                  Datos del Proveedor Destinatario
-                </h4>
-                <div className="space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Razón Social:</span>
-                    <strong className="text-slate-900 text-right">{proveedorNombre}</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">RUC Proveedor:</span>
-                    <span className="font-mono font-bold text-slate-800">{proveedorRuc}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Factura de Origen Afectada:</span>
-                    <span className="font-mono text-slate-700">
-                      {devolucion.raw?.numero_factura_origen || items.find(i => i.factura_numero)?.factura_numero ? `#${devolucion.raw?.numero_factura_origen || items.find(i => i.factura_numero)?.factura_numero}` : "Sin factura específica (Ajuste directo)"}
-                    </span>
-                  </div>
+            {/* ── 4. PANELES DE INFORMACIÓN EN 2 COLUMNAS ── */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              {/* Proveedor */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-300 space-y-1">
+                <div className="font-black uppercase tracking-wider text-[10px] text-indigo-600 flex items-center gap-1.5 border-b border-slate-200 pb-1">
+                  <Building2 className="w-3.5 h-3.5" /> Datos del Proveedor Destinatario
                 </div>
+                <div><strong>Razón Social:</strong> {proveedorNombre}</div>
+                <div><strong>RUC:</strong> <span className="font-mono">{proveedorRuc}</span></div>
+                <div><strong>Teléfono:</strong> <span className="font-mono">{proveedorTel}</span></div>
+                <div><strong>Dirección:</strong> {proveedorDir}</div>
               </div>
 
-              <div className="border border-slate-300 rounded-xl p-3 bg-slate-50">
-                <h4 className="m-0 font-black text-slate-400 uppercase text-[9px] tracking-wider border-b border-slate-200 pb-1 mb-1.5 flex items-center gap-1.5">
-                  <Package className="w-3.5 h-3.5 text-slate-600" />
-                  Datos del Depósito y Logística
-                </h4>
-                <div className="space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Depósito Origen Salida:</span>
-                    <strong className="text-slate-900">{almacen}</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Tipo de Documento:</span>
-                    <span className="font-bold text-slate-800 uppercase">Devolución Comercial / Merma</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Fecha Estimada Retiro:</span>
-                    <span className="font-mono text-slate-800">
-                      {devolucion.fecha_estimada_retiro ? formatDate(devolucion.fecha_estimada_retiro) : "Inmediata al retiro"}
-                    </span>
-                  </div>
+              {/* Condiciones y Transporte */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-300 space-y-1">
+                <div className="font-black uppercase tracking-wider text-[10px] text-indigo-600 flex items-center gap-1.5 border-b border-slate-200 pb-1">
+                  <FileCheck className="w-3.5 h-3.5" /> Condiciones de Imputación y Retiro
                 </div>
+                <div><strong>Factura Afectada:</strong> <span className="font-mono font-bold">{items[0]?.factura_numero || devolucion.raw?.numero_factura_origen || "Ajuste Directo / Sin Factura"}</span></div>
+                <div><strong>Moneda de Operación:</strong> Guaraníes (PYG)</div>
+                <div><strong>Depósito de Despacho:</strong> {almacen}</div>
+                <div><strong>Fecha Estimada Retiro:</strong> {devolucion.fecha_estimada_retiro ? formatDate(devolucion.fecha_estimada_retiro) : "Coordinación inmediata"}</div>
               </div>
             </div>
 
-            {/* Tabla Detallada de Ítems Devueltos */}
-            <div className="mb-4">
-              <h4 className="font-black text-xs text-slate-900 uppercase tracking-wide mb-2 flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-rose-600" />
-                Detalle de Mercadería Devuelta ({items.length} ítems)
-              </h4>
-
-              <div className="border border-slate-300 rounded-xl overflow-hidden">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-900 text-white font-extrabold uppercase text-[9px] tracking-wider">
-                      <th className="p-2 text-center w-8">#</th>
-                      <th className="p-2">Cód. Barras</th>
-                      <th className="p-2">SKU</th>
-                      <th className="p-2">Descripción del Producto</th>
-                      <th className="p-2">Lote / Venc.</th>
-                      <th className="p-2">Motivo</th>
-                      <th className="p-2 text-right">Cant.</th>
-                      <th className="p-2 text-right">Costo Unit.</th>
-                      <th className="p-2 text-right">Subtotal</th>
+            {/* ── 5. TABLA PREMIUM DE MERCADERÍA DEVUELTA ── */}
+            <div className="overflow-x-auto w-full border border-slate-300 rounded-xl">
+              <table className="w-full text-left text-xs min-w-[650px]">
+                <thead className="bg-slate-900 text-white font-black uppercase text-[9px] tracking-wider border-b border-slate-900">
+                  <tr>
+                    <th className="p-2 text-center w-8">#</th>
+                    <th className="p-2 w-24">Cód. Interno</th>
+                    <th className="p-2 w-32">Cód. Barra</th>
+                    <th className="p-2">Descripción del Producto</th>
+                    <th className="p-2 w-28">Lote / Vto.</th>
+                    <th className="p-2 w-28">Motivo</th>
+                    <th className="p-2 text-right w-16">Cant.</th>
+                    <th className="p-2 text-right w-24">Unitario Gs.</th>
+                    <th className="p-2 text-right w-28">Subtotal Gs.</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {items.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="p-6 text-center text-slate-400 italic">
+                        No hay ítems registrados en el detalle de esta devolución.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 font-medium text-[10.5px]">
-                    {items.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} className="p-6 text-center text-slate-400">
-                          No se encontraron ítems desglosados en este registro.
-                        </td>
-                      </tr>
-                    ) : (
-                      items.map((it, idx) => {
-                        const subtotal = (it.valor_total != null) ? Number(it.valor_total) : (Number(it.cantidad) || 0) * (Number(it.valor_unitario) || 0)
-                        return (
-                          <tr key={idx} className="hover:bg-slate-50">
-                            <td className="p-2 text-center font-bold text-slate-400 font-mono text-[10px]">{idx + 1}</td>
-                            <td className="p-2 font-mono text-[10px] font-bold text-slate-800">
-                              {it.codigo_barra || "—"}
-                            </td>
-                            <td className="p-2 font-mono text-[10px] text-slate-600">
-                              {it.sku || "—"}
-                            </td>
-                            <td className="p-2 font-bold text-slate-900 max-w-[200px]">
-                              {it.producto_nombre || "Producto sin nombre"}
-                              {it.detalle && (
-                                <span className="block text-[9px] font-normal text-slate-500 italic mt-0.5">
-                                  Nota: {it.detalle}
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-2 font-mono text-[9.5px] text-slate-600 whitespace-nowrap">
-                              {it.lote ? `Lote: ${it.lote}` : ""}
-                              {it.fecha_vencimiento ? `${it.lote ? " · " : ""}Vto: ${it.fecha_vencimiento}` : (!it.lote ? "—" : "")}
-                            </td>
-                            <td className="p-2">
-                              <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-800 font-bold text-[9px] uppercase tracking-wide">
-                                {it.motivo || "devolución"}
+                  ) : (
+                    items.map((it, idx) => {
+                      const cant = Number(it.cantidad || 0)
+                      const unit = Number(it.valor_unitario || 0)
+                      const sub = Number(it.valor_total || (cant * unit))
+                      const isEven = idx % 2 === 0
+                      const skuVal = it.sku || it.codigo_interno || "—"
+                      const barVal = it.codigo_barra || it.codigo_barras || "—"
+
+                      return (
+                        <tr
+                          key={idx}
+                          className={`${isEven ? "bg-white" : "bg-slate-50/80"} hover:bg-slate-100 transition-colors`}
+                        >
+                          <td className="p-2 text-center font-mono text-slate-400 text-[10px]">
+                            {idx + 1}
+                          </td>
+                          <td className="p-2 font-mono font-semibold text-slate-700 text-[10px]">
+                            {skuVal}
+                          </td>
+                          <td className="p-2 font-mono text-slate-500 text-[10px]">
+                            {barVal}
+                          </td>
+                          <td className="p-2 font-bold text-slate-900">
+                            {it.producto_nombre || "Producto"}
+                            {it.detalle && (
+                              <span className="block text-[9px] font-normal text-slate-500 italic mt-0.5">
+                                Nota: {it.detalle}
                               </span>
-                            </td>
-                            <td className="p-2 text-right font-mono font-black text-slate-900">
-                              {it.cantidad}
-                            </td>
-                            <td className="p-2 text-right font-mono text-slate-700">
-                              {formatPYG(it.valor_unitario)}
-                            </td>
-                            <td className="p-2 text-right font-mono font-black text-rose-700">
-                              {formatPYG(subtotal)}
-                            </td>
-                          </tr>
-                        )
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                            )}
+                          </td>
+                          <td className="p-2 font-mono text-[9.5px] text-slate-600">
+                            {it.lote ? `Lote: ${it.lote}` : ""}
+                            {it.fecha_vencimiento ? `${it.lote ? " · " : ""}Vto: ${it.fecha_vencimiento}` : (!it.lote ? "—" : "")}
+                          </td>
+                          <td className="p-2">
+                            <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-800 font-bold text-[8.5px] uppercase tracking-wide">
+                              {it.motivo || "Devolución"}
+                            </span>
+                          </td>
+                          <td className="p-2 text-right font-mono font-black text-slate-900">
+                            {cant.toLocaleString()}
+                          </td>
+                          <td className="p-2 text-right font-mono text-slate-700">
+                            {formatPYG(unit)}
+                          </td>
+                          <td className="p-2 text-right font-mono font-black text-slate-900">
+                            {formatPYG(sub)}
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
 
-            {/* Totales y Observaciones */}
-            <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-6">
-              <div className="flex-1 w-full text-xs">
+            {/* ── 6. TOTALES Y OBSERVACIONES ── */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              <div className="space-y-2 text-xs">
                 {devolucion.observaciones && (
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-700">
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-300 text-slate-700">
                     <strong className="block text-[10px] uppercase font-bold text-slate-400 mb-0.5">Observaciones Generales:</strong>
                     <p className="m-0 text-[11px] leading-relaxed italic">"{devolucion.observaciones}"</p>
                   </div>
                 )}
                 {devolucion.nota_credito_numero && (
-                  <div className="mt-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 font-bold text-[11px] flex items-center justify-between">
-                    <span>Nota de Crédito Proveedor Emitida:</span>
+                  <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 font-bold text-[11px] flex items-center justify-between">
+                    <span>Nota de Crédito Vinculada:</span>
                     <span className="font-mono text-xs">{devolucion.nota_credito_numero}</span>
                   </div>
                 )}
               </div>
 
-              <div className="border-2 border-slate-900 rounded-xl overflow-hidden w-full sm:w-[280px] shrink-0 text-xs">
+              <div className="border border-slate-300 rounded-xl overflow-hidden text-xs self-start">
                 <div className="p-2.5 bg-slate-50 border-b border-slate-200 flex justify-between">
-                  <span className="text-slate-600 font-bold">Total Unidades Devueltas:</span>
-                  <span className="font-mono font-black text-slate-900">{totalBultos} UN</span>
+                  <span className="text-slate-600 font-bold">Total Unidades Egresadas:</span>
+                  <span className="font-mono font-black text-slate-900">{totalBultos.toLocaleString()} UN</span>
                 </div>
                 <div className="p-3 bg-slate-900 text-white flex justify-between items-center">
-                  <span className="font-black uppercase tracking-wider text-xs">TOTAL DEVOLUCIÓN:</span>
-                  <span className="font-mono font-black text-base text-rose-400">{formatPYG(totalDevuelto)}</span>
+                  <span className="font-black uppercase tracking-wider text-xs">TOTAL DEVOLUCIÓN (PYG):</span>
+                  <span className="font-mono font-black text-lg text-emerald-400">{formatPYG(totalDevuelto)}</span>
                 </div>
               </div>
             </div>
 
-            {/* Firmas de Conformidad (Legal y Logística) */}
-            <div className="mt-8 pt-4 border-t border-slate-300 grid grid-cols-1 sm:grid-cols-2 gap-8 page-break-inside-avoid">
-              <div className="border border-dashed border-slate-400 rounded-xl p-4 bg-slate-50/50 flex flex-col justify-between min-h-[120px]">
-                <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-6">
-                  ENTREGADO POR: EXTRA SUPERMERCADO MAYORISTA
-                </div>
-                <div>
-                  <div className="border-t border-slate-900 pt-1 text-center">
-                    <span className="font-black text-xs block text-slate-900">Responsable de Depósito / Mermas</span>
-                    <span className="text-[10px] text-slate-500 block">Firma, Aclaración y C.I.</span>
+            {/* ── 7. CASILLAS PARA LAS 4 FIRMAS PERTINENTES Y SELLOS (CONTROL INTERNO TOTAL) ── */}
+            <div className="pt-6 border-t border-slate-300 page-break-avoid">
+              <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 text-center mb-3">
+                CONSTANCIA DE CONFORMIDAD Y CIRCUITOS DE AUTORIZACIÓN (EXTRA SUPERMERCADO MAYORISTA)
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center text-[10.5px]">
+                {/* 1. Depósito */}
+                <div className="border border-slate-300 rounded-xl p-2.5 bg-slate-50/70 flex flex-col justify-between min-h-[125px]">
+                  <div className="flex items-center justify-center gap-1 text-[9px] font-black uppercase text-indigo-700">
+                    <Building2 className="w-3 h-3" /> 1. Depósito / Mermas
+                  </div>
+                  <div className="mt-10 border-t border-slate-400 pt-1 text-[9.5px]">
+                    <div className="font-black text-slate-800">Entregó Mercadería</div>
+                    <div className="text-[8.5px] text-slate-500">Firma, Aclaración y C.I.</div>
                   </div>
                 </div>
-              </div>
 
-              <div className="border border-dashed border-slate-400 rounded-xl p-4 bg-slate-50/50 flex flex-col justify-between min-h-[120px]">
-                <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-6">
-                  RECIBIDO CONFORME: PROVEEDOR / TRANSPORTISTA
+                {/* 2. Administración / Compras */}
+                <div className="border border-slate-300 rounded-xl p-2.5 bg-slate-50/70 flex flex-col justify-between min-h-[125px]">
+                  <div className="flex items-center justify-center gap-1 text-[9px] font-black uppercase text-indigo-700">
+                    <UserCheck className="w-3 h-3" /> 2. Compras / Admin.
+                  </div>
+                  <div className="mt-10 border-t border-slate-400 pt-1 text-[9.5px]">
+                    <div className="font-black text-slate-800">Autorizó Devolución</div>
+                    <div className="text-[8.5px] text-slate-500">Firma, Aclaración y C.I.</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="border-t border-slate-900 pt-1 text-center">
-                    <span className="font-black text-xs block text-slate-900">Receptor / Chofer Autorizado</span>
-                    <span className="text-[10px] text-slate-500 block">Aclaración, C.I., Chapa Vehículo y Fecha</span>
+
+                {/* 3. Seguridad / Portería */}
+                <div className="border border-slate-300 rounded-xl p-2.5 bg-slate-50/70 flex flex-col justify-between min-h-[125px]">
+                  <div className="flex items-center justify-center gap-1 text-[9px] font-black uppercase text-indigo-700">
+                    <ShieldCheck className="w-3 h-3" /> 3. Portería / Salida
+                  </div>
+                  <div className="mt-10 border-t border-slate-400 pt-1 text-[9.5px]">
+                    <div className="font-black text-slate-800">Control de Bultos</div>
+                    <div className="text-[8.5px] text-slate-500">Firma, C.I. y Hora Salida</div>
+                  </div>
+                </div>
+
+                {/* 4. Transportista / Proveedor */}
+                <div className="border border-slate-300 rounded-xl p-2.5 bg-slate-50/70 flex flex-col justify-between min-h-[125px]">
+                  <div className="flex items-center justify-center gap-1 text-[9px] font-black uppercase text-rose-700">
+                    <Truck className="w-3 h-3" /> 4. Transportista
+                  </div>
+                  <div className="mt-10 border-t border-slate-400 pt-1 text-[9.5px]">
+                    <div className="font-black text-slate-800">Recibí Conforme</div>
+                    <div className="text-[8.5px] text-slate-500">Aclaración, C.I. y Chapa</div>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Pie de página institucional */}
-            <div className="mt-6 pt-3 border-t border-slate-200 text-center text-[9px] text-slate-400 font-mono">
-              Comprobante de uso logístico y fiscal interno · Extra Supermercado Mayorista · GRUPO SANTA TERESA E.A.S. (RUC 80150377-9) · Asunción, Paraguay
+            {/* ── 8. PIE DE PÁGINA FISCAL & LEGAL ── */}
+            <div className="pt-3 border-t border-slate-200 text-center text-[8.5px] text-slate-400 font-mono">
+              Extra Supermercado Mayorista · GRUPO SANTA TERESA E.A.S. · RUC 80150377-9 · Pedro Juan Caballero, Paraguay · Documento válido para amparo logístico de mercadería en tránsito
             </div>
           </div>
         </div>
 
-        {/* Modal Bottom Bar */}
-        <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/60">
+        {/* Barra inferior del Modal */}
+        <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/60 no-print">
           <span className="text-xs text-slate-500 dark:text-slate-400">
-            {yaImpactoStock ? "✓ Documento listo para archivo y contabilidad" : "⚠️ Documento pendiente de firma de entrega física"}
+            {yaImpactoStock ? "✓ Stock egresado formalmente de Kardex" : "⚠️ Mercadería en trámite / pendiente de firma de entrega"}
           </span>
           <div className="flex gap-2">
             <button
@@ -742,10 +571,10 @@ export const DevolucionProveedorPrintModal: React.FC<Props> = ({ devolucion, onC
             </button>
             <button
               onClick={handlePrint}
-              className="px-5 py-2 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-2 shadow-lg shadow-rose-600/25"
+              className="px-5 py-2 rounded-xl text-xs font-black bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-2 shadow-lg shadow-indigo-600/25"
             >
               <Printer className="w-4 h-4" />
-              <span>Imprimir Documento</span>
+              <span>Imprimir Remito A4</span>
             </button>
           </div>
         </div>
@@ -753,4 +582,5 @@ export const DevolucionProveedorPrintModal: React.FC<Props> = ({ devolucion, onC
     </div>
   )
 }
+
 export default DevolucionProveedorPrintModal
