@@ -737,13 +737,15 @@ export default function CustomersPage() {
                         {c.es_agente_retencion && (
                           <div>
                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase ${
-                              c.regimen_retencion === "agro_exportador"
+                              c.regimen_retencion === "maquila"
+                                ? "bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30"
+                                : c.regimen_retencion === "agro_exportador"
                                 ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30"
                                 : c.regimen_retencion === "agro_granos"
                                 ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
                                 : "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30"
-                            }`} title={`Agente Retentor DNIT (${c.porcentaje_retencion_iva || 30}% IVA)`}>
-                              {c.regimen_retencion === "agro_exportador" ? "🌾 Agro 70%" : c.regimen_retencion === "agro_granos" ? "🌱 Agro 10%" : `🏢 Ret. ${c.porcentaje_retencion_iva || 30}%`}
+                            }`} title={`Agente Retentor DNIT (${c.regimen_retencion === "maquila" ? "100%" : (c.porcentaje_retencion_iva || 30)}% IVA)`}>
+                              {c.regimen_retencion === "maquila" ? "🏭 Maquila 100%" : c.regimen_retencion === "agro_exportador" ? "🌾 Agro (70%/30%)" : c.regimen_retencion === "agro_granos" ? "🌱 Agro 10%" : `🏢 Ret. ${c.porcentaje_retencion_iva || 30}%`}
                             </span>
                           </div>
                         )}
@@ -1132,7 +1134,7 @@ export default function CustomersPage() {
                         <label className="block font-black uppercase text-[10px] text-indigo-600 dark:text-indigo-400 mb-1.5">
                           Régimen Impositivo del Agente Retentor (DNIT / Paraguay)
                         </label>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                           <button
                             type="button"
                             onClick={() => setForm(f => ({ ...f, regimen_retencion: "general", porcentaje_retencion_iva: 30 }))}
@@ -1160,10 +1162,27 @@ export default function CustomersPage() {
                             }`}
                           >
                             <div className="font-extrabold text-xs flex items-center gap-1.5">
-                              <span>🌾 Sector Agro / Agroexportador</span>
+                              <span>🌾 Sector Agro / Exportador</span>
                             </div>
                             <div className={`text-[10px] mt-1 ${form.regimen_retencion === "agro_exportador" ? "text-amber-950 font-medium" : "text-slate-400"}`}>
-                              70% del IVA en compras de bienes gravados al 10% (Art. 37 Dto. 3107/19)
+                              70% IVA al 10% · 30% IVA al 5% (Art. 37 Dto. 3107/19)
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setForm(f => ({ ...f, regimen_retencion: "maquila", porcentaje_retencion_iva: 100 }))}
+                            className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between ${
+                              form.regimen_retencion === "maquila"
+                                ? "bg-purple-600 text-white border-purple-600 shadow-md shadow-purple-600/20 font-black"
+                                : "bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-purple-400"
+                            }`}
+                          >
+                            <div className="font-extrabold text-xs flex items-center gap-1.5">
+                              <span>🏭 Régimen Maquila</span>
+                            </div>
+                            <div className={`text-[10px] mt-1 ${form.regimen_retencion === "maquila" ? "text-purple-100" : "text-slate-400"}`}>
+                              100% de todo el IVA generado (Ley 1064/97 y Ley 7547/25)
                             </div>
                           </button>
 
@@ -1177,10 +1196,10 @@ export default function CustomersPage() {
                             }`}
                           >
                             <div className="font-extrabold text-xs flex items-center gap-1.5">
-                              <span>🌱 Acopio Granos Estado Natural</span>
+                              <span>🌱 Acopio Granos Brutos</span>
                             </div>
                             <div className={`text-[10px] mt-1 ${form.regimen_retencion === "agro_granos" ? "text-emerald-100" : "text-slate-400"}`}>
-                              10% del IVA (Soja, maíz, trigo - Art. 90 inc. d Ley 6380)
+                              10% del IVA (Soja, maíz, trigo - Art. 90 inc. d)
                             </div>
                           </button>
                         </div>
@@ -1208,11 +1227,13 @@ export default function CustomersPage() {
 
                         <div className="sm:col-span-2 text-[11px] leading-relaxed p-2.5 rounded-xl bg-slate-100 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300">
                           {form.regimen_retencion === "agro_exportador" ? (
-                            <span>🌾 <b>Regla Agro / Exportadores (Decreto 3107/19 Art. 37 num. 1):</b> Al comprar mercaderías e insumos gravados al 10%, retienen el <b>70% del IVA</b> (siempre que supere 10 jornales = ₲ 1.076.270).</span>
+                            <span>🌾 <b>Regla Agro / Exportadores (Decreto 3107/19 Art. 37):</b> Retienen el <b>70% del IVA</b> en productos gravados al 10% y el <b>30% del IVA</b> en productos gravados al 5% (canasta básica familiar). Exentas: 0%.</span>
+                          ) : form.regimen_retencion === "maquila" ? (
+                            <span>🏭 <b>Regla de Maquila (Ley 1064/97 y Ley 7547/25):</b> Las maquiladoras son agentes de retención del <b>100% del IVA</b> en todas las compras locales para solicitar luego su recupero fiscal ante DNIT.</span>
                           ) : form.regimen_retencion === "agro_granos" ? (
-                            <span>🌱 <b>Regla Productos Agrícolas en Estado Natural (Art. 37 num. 3):</b> Retienen el <b>10% del IVA</b> en compras de granos y oleaginosas sin procesar.</span>
+                            <span>🌱 <b>Regla Productos Agrícolas en Estado Natural (Art. 37 num. 3):</b> Retienen el <b>10% del IVA</b> en compras de granos sin procesar.</span>
                           ) : (
-                            <span>🏢 <b>Régimen General DNIT (Art. 44 Dto. 3107/19):</b> Retienen el <b>30% del IVA</b> en compras generales de supermercado que superen 10 jornales mínimos.</span>
+                            <span>🏢 <b>Régimen General DNIT (Art. 44 Dto. 3107/19):</b> Retienen el <b>30% del IVA</b> real generado por la factura en compras generales de supermercado.</span>
                           )}
                         </div>
                       </div>
@@ -1850,14 +1871,18 @@ export default function CustomersPage() {
                   <span className="text-slate-400">Agente Retención DNIT:</span>
                   {viewingCustomer.es_agente_retencion ? (
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase border ${
-                      viewingCustomer.regimen_retencion === "agro_exportador"
+                      viewingCustomer.regimen_retencion === "maquila"
+                        ? "bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30"
+                        : viewingCustomer.regimen_retencion === "agro_exportador"
                         ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
                         : viewingCustomer.regimen_retencion === "agro_granos"
                         ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
                         : "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30"
                     }`}>
-                      {viewingCustomer.regimen_retencion === "agro_exportador"
-                        ? "🌾 AGROEXPORTADOR (70% IVA)"
+                      {viewingCustomer.regimen_retencion === "maquila"
+                        ? "🏭 MAQUILA (100% IVA)"
+                        : viewingCustomer.regimen_retencion === "agro_exportador"
+                        ? "🌾 AGROEXPORTADOR (70%/30% IVA)"
                         : viewingCustomer.regimen_retencion === "agro_granos"
                         ? "🌱 AGRO GRANOS (10% IVA)"
                         : `SÍ (${viewingCustomer.porcentaje_retencion_iva || 30}% IVA)`}

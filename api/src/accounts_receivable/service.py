@@ -318,15 +318,23 @@ async def get_receivable_summary(db: AsyncSession, company_id: str) -> dict:
 
 async def list_customer_pending_documents(db: AsyncSession, company_id: str, customer_id: str) -> list[dict]:
     """Documentos pendientes de un cliente, para el modal de registrar pago —
-    ordenados por vencimiento (mas viejo primero) para facilitar el reparto."""
+    ordenados por vencimiento (mas viejo primero) para facilitar el reparto.
+    Incluye desglose fiscal exacto (IVA 10%, IVA 5%, exentas) vinculado a la venta para cálculo de retenciones Tesakã."""
     result = await db.execute(
         text("""
-            SELECT id, numero_documento, fecha_emision, fecha_vencimiento, moneda,
-                   monto_original, saldo_pendiente,
-                   CASE WHEN fecha_vencimiento IS NULL THEN 0 ELSE (CURRENT_DATE - fecha_vencimiento)::int END as dias_mora
-            FROM accounts_receivable
-            WHERE company_id = :company_id AND customer_id = :customer_id AND estado = 'pendiente'
-            ORDER BY fecha_vencimiento ASC NULLS LAST
+            SELECT ar.id, ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento, ar.moneda,
+                   ar.monto_original, ar.saldo_pendiente,
+                   CASE WHEN ar.fecha_vencimiento IS NULL THEN 0 ELSE (CURRENT_DATE - ar.fecha_vencimiento)::int END as dias_mora,
+                   COALESCE(s.iva_10, 0) as iva_10,
+                   COALESCE(s.iva_5, 0) as iva_5,
+                   COALESCE(s.base_gravada_10, 0) as base_gravada_10,
+                   COALESCE(s.base_gravada_5, 0) as base_gravada_5,
+                   COALESCE(s.base_exenta, 0) as base_exenta,
+                   COALESCE(s.total, ar.monto_original) as total_factura
+            FROM accounts_receivable ar
+            LEFT JOIN sales s ON ar.sale_id = s.id
+            WHERE ar.company_id = :company_id AND ar.customer_id = :customer_id AND ar.estado = 'pendiente'
+            ORDER BY ar.fecha_vencimiento ASC NULLS LAST
         """),
         {"company_id": company_id, "customer_id": customer_id},
     )

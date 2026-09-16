@@ -68,6 +68,12 @@ interface PendingDoc {
   monto_original: number
   saldo_pendiente: number
   dias_mora: number
+  iva_10?: number
+  iva_5?: number
+  base_gravada_10?: number
+  base_gravada_5?: number
+  base_exenta?: number
+  total_factura?: number
 }
 
 interface CollectionAction {
@@ -155,6 +161,7 @@ export default function AccountsReceivablePage() {
   const [retencionNumeroComprobante, setRetencionNumeroComprobante] = useState("")
   const [retencionFecha, setRetencionFecha] = useState(() => getTodayAsuncion())
   const [retencionPorcentaje, setRetencionPorcentaje] = useState(30)
+  const [retencionRegimen, setRetencionRegimen] = useState<string>("general")
   const [paymentCustomerInfo, setPaymentCustomerInfo] = useState<{
     razon_social: string
     ruc?: string
@@ -500,12 +507,16 @@ export default function AccountsReceivablePage() {
     setRetencionPorcentaje(30)
 
     if (custInfo) {
+      const reg = custInfo.regimen_retencion || (custInfo.porcentaje_retencion_iva === 100 ? "maquila" : (custInfo.porcentaje_retencion_iva === 70 ? "agro_exportador" : "general"))
+      setRetencionRegimen(reg)
       setPaymentCustomerInfo(custInfo)
       if (custInfo.porcentaje_retencion_iva) {
         setRetencionPorcentaje(Number(custInfo.porcentaje_retencion_iva))
-      } else if (custInfo.regimen_retencion === "agro_exportador") {
+      } else if (reg === "maquila") {
+        setRetencionPorcentaje(100)
+      } else if (reg === "agro_exportador") {
         setRetencionPorcentaje(70)
-      } else if (custInfo.regimen_retencion === "agro_granos") {
+      } else if (reg === "agro_granos") {
         setRetencionPorcentaje(10)
       }
     } else {
@@ -513,17 +524,21 @@ export default function AccountsReceivablePage() {
       const foundDoc = docs.find(d => (d.customer_id === customerId || (d as any).customer?.id === customerId))
       if (foundDoc) {
         const cObj = (foundDoc as any).customer
+        const reg = cObj?.regimen_retencion || (cObj?.porcentaje_retencion_iva === 100 ? "maquila" : (cObj?.porcentaje_retencion_iva === 70 ? "agro_exportador" : "general"))
+        setRetencionRegimen(reg)
         setPaymentCustomerInfo({
           razon_social: foundDoc.customer_name || cObj?.razon_social || "Cliente",
           ruc: foundDoc.customer_ruc || cObj?.ruc,
           empresa_vinculada: cObj?.empresa_vinculada_nombre,
           es_agente_retencion: cObj?.es_agente_retencion,
-          regimen_retencion: cObj?.regimen_retencion,
+          regimen_retencion: reg,
           porcentaje_retencion_iva: cObj?.porcentaje_retencion_iva,
         })
         if (cObj?.porcentaje_retencion_iva) {
           setRetencionPorcentaje(Number(cObj.porcentaje_retencion_iva))
-        } else if (cObj?.regimen_retencion === "agro_exportador") {
+        } else if (reg === "maquila") {
+          setRetencionPorcentaje(100)
+        } else if (reg === "agro_exportador") {
           setRetencionPorcentaje(70)
         }
       } else {
@@ -531,12 +546,13 @@ export default function AccountsReceivablePage() {
       }
     }
 
-    // Consultar datos completos del cliente para verificar si es Agente de Retención DNIT / Agro
+    // Consultar datos completos del cliente para verificar si es Agente de Retención DNIT / Agro / Maquila
     api.customers.get(customerId).then(fullCust => {
       if (fullCust) {
         const esAgente = Boolean(fullCust.es_agente_retencion)
-        const regimen = (fullCust as any).regimen_retencion || (fullCust.porcentaje_retencion_iva === 70 ? "agro_exportador" : "general")
-        const defaultPct = regimen === "agro_exportador" ? 70 : (regimen === "agro_granos" ? 10 : 30)
+        const regimen = (fullCust as any).regimen_retencion || (fullCust.porcentaje_retencion_iva === 100 ? "maquila" : (fullCust.porcentaje_retencion_iva === 70 ? "agro_exportador" : "general"))
+        setRetencionRegimen(regimen)
+        const defaultPct = regimen === "maquila" ? 100 : (regimen === "agro_exportador" ? 70 : (regimen === "agro_granos" ? 10 : 30))
         const pctRet = fullCust.porcentaje_retencion_iva != null ? Number(fullCust.porcentaje_retencion_iva) : defaultPct
 
         setPaymentCustomerInfo({
@@ -598,13 +614,76 @@ export default function AccountsReceivablePage() {
   const isAgenteRetentor = Boolean(paymentCustomerInfo?.es_agente_retencion)
   const superaUmbralRetencion = montoTotalPago >= UMBRAL_RETENCION_GS
 
-  // Si no se editó manualmente, calcular porcentaje del IVA (IVA 10% = Total / 11; Retención = IVA * pct / 100)
+  // ⚖️ Cálculo Exacto de IVA y Retención Fiscal (Ley 6380/19, Dto 3107/19, Ley 1064/97 Maquila)
+  // Las facturas de supermercado contienen una mezcla de IVA 10%, IVA 5% (canasta básica) y Exentas.
+  // La retención legal se calcula sobre el IVA real de cada alícuota, NO como porcentaje del total.
+  const retencionDetalle = useMemo(() => {
+    let totIva10 = 0
+    let totIva5 = 0
+    let totExenta = 0
+    let tieneDesgloseReal = false
+
+    pendingDocs.forEach(d => {
+      const asignado = parseFloat(allocations[d.id]) || 0
+      if (asignado <= 0) return
+
+      const totalDoc = d.total_factura || d.monto_original || asignado
+      const ratio = totalDoc > 0 ? Math.min(1, asignado / totalDoc) : 1
+
+      if ((d.iva_10 != null && d.iva_10 > 0) || (d.iva_5 != null && d.iva_5 > 0) || (d.base_exenta != null && d.base_exenta > 0)) {
+        tieneDesgloseReal = true
+        totIva10 += Math.round((d.iva_10 || 0) * ratio)
+        totIva5 += Math.round((d.iva_5 || 0) * ratio)
+        totExenta += Math.round((d.base_exenta || 0) * ratio)
+      } else {
+        // Fallback para documentos sin desglose en BD
+        totIva10 += Math.round(asignado / 11)
+      }
+    })
+
+    const totIva = totIva10 + totIva5
+
+    // Reglas según régimen impositivo:
+    // 1. Agroexportador (Art. 37 Dto 3107/19): 70% del IVA al 10%, 30% del IVA al 5%
+    // 2. Maquila (Ley 1064/97 y Ley 7547/25): 100% de todo el IVA generado (tanto 10% como 5%)
+    // 3. Agro Granos (Art. 37 num 3): 10% del IVA
+    // 4. Régimen General (Art. 44): 30% del IVA (o retencionPorcentaje configurable)
+    let retIva10 = 0
+    let retIva5 = 0
+
+    if (retencionRegimen === "agro_exportador") {
+      retIva10 = Math.round(totIva10 * 0.70)
+      retIva5 = Math.round(totIva5 * 0.30)
+    } else if (retencionRegimen === "maquila") {
+      retIva10 = totIva10
+      retIva5 = totIva5
+    } else if (retencionRegimen === "agro_granos") {
+      retIva10 = Math.round(totIva10 * 0.10)
+      retIva5 = Math.round(totIva5 * 0.10)
+    } else {
+      const pct = (retencionPorcentaje != null ? retencionPorcentaje : 30) / 100
+      retIva10 = Math.round(totIva10 * pct)
+      retIva5 = Math.round(totIva5 * pct)
+    }
+
+    const retTotal = retIva10 + retIva5
+
+    return {
+      totIva10,
+      totIva5,
+      totExenta,
+      totIva,
+      retIva10,
+      retIva5,
+      retTotal,
+      tieneDesgloseReal,
+    }
+  }, [pendingDocs, allocations, retencionRegimen, retencionPorcentaje])
+
   const montoRetencionSugerido = useMemo(() => {
     if (!aplicaRetencion || montoTotalPago <= 0) return 0
-    const pct = retencionPorcentaje || 30
-    const iva10Aprox = Math.round(montoTotalPago / 11)
-    return Math.round(iva10Aprox * (pct / 100))
-  }, [aplicaRetencion, montoTotalPago, retencionPorcentaje])
+    return retencionDetalle.retTotal
+  }, [aplicaRetencion, montoTotalPago, retencionDetalle])
 
   const montoRetencionFinal = useMemo(() => {
     if (!aplicaRetencion) return 0
@@ -2273,15 +2352,19 @@ export default function AccountsReceivablePage() {
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase shrink-0 border ${
                       paymentCustomerInfo?.regimen_retencion === 'agro_exportador'
                         ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                        : paymentCustomerInfo?.regimen_retencion === 'maquila'
+                        ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30'
                         : paymentCustomerInfo?.regimen_retencion === 'agro_granos'
                         ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
                         : 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
                     }`}>
                       {paymentCustomerInfo?.regimen_retencion === 'agro_exportador'
-                        ? '🌾 Agroexportador (70% IVA)'
+                        ? '🌾 Agroexportador (70% al 10% · 30% al 5%)'
+                        : paymentCustomerInfo?.regimen_retencion === 'maquila'
+                        ? '🏭 Maquila (100% IVA)'
                         : paymentCustomerInfo?.regimen_retencion === 'agro_granos'
                         ? '🌱 Agro Granos (10% IVA)'
-                        : '🏢 Agente Retentor DNIT'}
+                        : '🏢 Agente Retentor DNIT (30% IVA)'}
                     </span>
                   )}
                 </h3>
@@ -2329,12 +2412,14 @@ export default function AccountsReceivablePage() {
                 </div>
               )}
 
-              {/* ⚖️ PANEL DE RETENCIÓN DE IVA DNIT / SET (Ley 6380/19 - Dto 3107/19 - Incluye Variación Sector Agro) */}
+              {/* ⚖️ PANEL DE RETENCIÓN DE IVA DNIT / SET (Ley 6380/19 - Dto 3107/19 - Agro & Maquila) */}
               {(isAgenteRetentor || aplicaRetencion) && (
                 <div className={`p-4 rounded-2xl border transition-all ${
                   aplicaRetencion
-                    ? (paymentCustomerInfo?.regimen_retencion === 'agro_exportador' || retencionPorcentaje === 70)
+                    ? retencionRegimen === 'agro_exportador'
                       ? "bg-gradient-to-br from-amber-50/90 via-amber-50/40 to-slate-50 dark:from-amber-950/40 dark:via-slate-900 dark:to-slate-900 border-amber-300 dark:border-amber-700/60 shadow-md shadow-amber-500/5"
+                      : retencionRegimen === 'maquila'
+                      ? "bg-gradient-to-br from-purple-50/90 via-purple-50/40 to-slate-50 dark:from-purple-950/40 dark:via-slate-900 dark:to-slate-900 border-purple-300 dark:border-purple-700/60 shadow-md shadow-purple-500/5"
                       : "bg-gradient-to-br from-indigo-50/90 via-indigo-50/40 to-slate-50 dark:from-indigo-950/40 dark:via-slate-900 dark:to-slate-900 border-indigo-300 dark:border-indigo-800 shadow-md shadow-indigo-500/5"
                     : "bg-slate-50/80 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700"
                 }`}>
@@ -2342,13 +2427,19 @@ export default function AccountsReceivablePage() {
                     <div className="flex items-start gap-3">
                       <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition font-bold ${
                         aplicaRetencion
-                          ? (paymentCustomerInfo?.regimen_retencion === 'agro_exportador' || retencionPorcentaje === 70)
+                          ? retencionRegimen === 'agro_exportador'
                             ? "bg-amber-600 text-white shadow-md shadow-amber-600/30"
+                            : retencionRegimen === 'maquila'
+                            ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
+                            : retencionRegimen === 'agro_granos'
+                            ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30"
                             : "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
                           : "bg-slate-200 dark:bg-slate-700 text-slate-400"
                       }`}>
-                        {(paymentCustomerInfo?.regimen_retencion === 'agro_exportador' || retencionPorcentaje === 70 || paymentCustomerInfo?.regimen_retencion === 'agro_granos' || retencionPorcentaje === 10) ? (
+                        {retencionRegimen === 'agro_exportador' || retencionRegimen === 'agro_granos' ? (
                           <span className="text-base">🌾</span>
+                        ) : retencionRegimen === 'maquila' ? (
+                          <span className="text-base">🏭</span>
                         ) : (
                           <Building2 className="w-5 h-5" />
                         )}
@@ -2356,11 +2447,13 @@ export default function AccountsReceivablePage() {
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
-                            {(paymentCustomerInfo?.regimen_retencion === 'agro_exportador' || retencionPorcentaje === 70)
+                            {retencionRegimen === 'agro_exportador'
                               ? "Retención IVA - Sector Agro / Agroexportador"
-                              : (paymentCustomerInfo?.regimen_retencion === 'agro_granos' || retencionPorcentaje === 10)
+                              : retencionRegimen === 'maquila'
+                              ? "Retención IVA - Régimen Maquila (Ley 1064/97 y Ley 7547/25)"
+                              : retencionRegimen === 'agro_granos'
                               ? "Retención IVA - Granos Estado Natural"
-                              : "Retención IVA - Agente Retentor DNIT"}
+                              : "Retención IVA - Agente Retentor DNIT (Régimen General)"}
                           </h4>
                           {superaUmbralRetencion ? (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500 text-white">
@@ -2373,11 +2466,13 @@ export default function AccountsReceivablePage() {
                           )}
                         </div>
                         <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
-                          {(paymentCustomerInfo?.regimen_retencion === 'agro_exportador' || retencionPorcentaje === 70)
-                            ? "Régimen Agroexportador (Decreto N° 3107/2019 Art. 37 num. 1): Retiene el 70% del IVA en compras de mercaderías e insumos gravados al 10% que superen 10 jornales mínimos."
-                            : (paymentCustomerInfo?.regimen_retencion === 'agro_granos' || retencionPorcentaje === 10)
-                            ? "Régimen Productos Agrícolas en Estado Natural (Decreto 3107/19 Art. 37 num. 3): Retiene el 10% del IVA en compras de granos y oleaginosas."
-                            : "Régimen General DNIT (Decreto N° 3107/2019 Art. 44): Retiene el 30% del IVA en compras generales de supermercado."}
+                          {retencionRegimen === 'agro_exportador'
+                            ? "Decreto N° 3107/2019 Art. 37: 70% del IVA en compras gravadas al 10% y 30% del IVA en canasta familiar gravada al 5%."
+                            : retencionRegimen === 'maquila'
+                            ? "Ley N° 1064/1997 y Ley N° 7547/2025: Las empresas maquiladoras retienen el 100% de todo el IVA generado (10% y 5%) en adquisiciones locales."
+                            : retencionRegimen === 'agro_granos'
+                            ? "Decreto N° 3107/2019 Art. 37 num. 3: Retiene el 10% del IVA en productos agrícolas en estado natural."
+                            : "Decreto N° 3107/2019 Art. 44: Retiene el 30% del IVA en compras generales de bienes y servicios."}
                         </p>
                       </div>
                     </div>
@@ -2396,52 +2491,52 @@ export default function AccountsReceivablePage() {
 
                   {aplicaRetencion && (
                     <div className="mt-3.5 pt-3.5 border-t border-indigo-200 dark:border-indigo-900/60 space-y-3">
-                      {/* Botones de Selección Rápida de Tasa de Retención */}
+                      {/* Botones de Selección Rápida de Régimen Legal */}
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Tasa de Retención IVA:</span>
+                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Régimen Legal:</span>
                         <button
                           type="button"
-                          onClick={() => { setRetencionPorcentaje(70); setMontoRetencionManual(""); }}
+                          onClick={() => { setRetencionRegimen("agro_exportador"); setRetencionPorcentaje(70); setMontoRetencionManual(""); }}
                           className={`px-2.5 py-1 rounded-xl text-xs font-black transition border flex items-center gap-1 cursor-pointer ${
-                            retencionPorcentaje === 70
+                            retencionRegimen === "agro_exportador"
                               ? "bg-amber-500 text-slate-950 border-amber-500 shadow-sm"
                               : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-amber-400"
                           }`}
                         >
-                          <span>🌾 Agro (70%)</span>
+                          <span>🌾 Agro (70% al 10% · 30% al 5%)</span>
                         </button>
                         <button
                           type="button"
-                          onClick={() => { setRetencionPorcentaje(30); setMontoRetencionManual(""); }}
+                          onClick={() => { setRetencionRegimen("general"); setRetencionPorcentaje(30); setMontoRetencionManual(""); }}
                           className={`px-2.5 py-1 rounded-xl text-xs font-black transition border flex items-center gap-1 cursor-pointer ${
-                            retencionPorcentaje === 30
+                            retencionRegimen === "general"
                               ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
                               : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-indigo-400"
                           }`}
                         >
-                          <span>🏢 General (30%)</span>
+                          <span>🏢 General (30% IVA)</span>
                         </button>
                         <button
                           type="button"
-                          onClick={() => { setRetencionPorcentaje(10); setMontoRetencionManual(""); }}
+                          onClick={() => { setRetencionRegimen("maquila"); setRetencionPorcentaje(100); setMontoRetencionManual(""); }}
                           className={`px-2.5 py-1 rounded-xl text-xs font-black transition border flex items-center gap-1 cursor-pointer ${
-                            retencionPorcentaje === 10
+                            retencionRegimen === "maquila"
+                              ? "bg-purple-600 text-white border-purple-600 shadow-sm"
+                              : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-purple-400"
+                          }`}
+                        >
+                          <span>🏭 Maquila (100% IVA)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setRetencionRegimen("agro_granos"); setRetencionPorcentaje(10); setMontoRetencionManual(""); }}
+                          className={`px-2.5 py-1 rounded-xl text-xs font-black transition border flex items-center gap-1 cursor-pointer ${
+                            retencionRegimen === "agro_granos"
                               ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
                               : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-emerald-400"
                           }`}
                         >
                           <span>🌱 Granos (10%)</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setRetencionPorcentaje(100); setMontoRetencionManual(""); }}
-                          className={`px-2.5 py-1 rounded-xl text-xs font-black transition border flex items-center gap-1 cursor-pointer ${
-                            retencionPorcentaje === 100
-                              ? "bg-purple-600 text-white border-purple-600 shadow-sm"
-                              : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-purple-400"
-                          }`}
-                        >
-                          <span>🏛️ 100% Exportador</span>
                         </button>
                       </div>
 
@@ -2472,7 +2567,7 @@ export default function AccountsReceivablePage() {
                         <div>
                           <div className="flex items-center justify-between">
                             <label className="label-field text-[11px] font-bold text-indigo-950 dark:text-indigo-200">
-                              Monto Retención ({retencionPorcentaje}% IVA)
+                              Monto Retención Tesakã
                             </label>
                             {montoRetencionManual !== "" && (
                               <button
@@ -2480,7 +2575,7 @@ export default function AccountsReceivablePage() {
                                 onClick={() => setMontoRetencionManual("")}
                                 className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer"
                               >
-                                Auto ({retencionPorcentaje}%)
+                                Auto ({retencionRegimen === 'agro_exportador' ? '70%/30%' : `${retencionPorcentaje}%`})
                               </button>
                             )}
                           </div>
@@ -2494,15 +2589,61 @@ export default function AccountsReceivablePage() {
                         </div>
                       </div>
 
-                      {/* Desglose Bimonetario / Contable */}
-                      <div className="p-3 rounded-xl bg-indigo-100/60 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-900 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                        <div className="text-[11px] text-indigo-900 dark:text-indigo-200">
-                          <span>Total Facturas: <b>{formatPYG(montoTotalPago)}</b></span>
-                          <span className="mx-2 text-indigo-400">·</span>
-                          <span>Retención ({retencionPorcentaje}% IVA): <b className="text-amber-700 dark:text-amber-400">-{formatPYG(montoRetencionFinal)}</b></span>
+                      {/* Desglose Fiscal SIFEN / Tesakã */}
+                      <div className="p-3 rounded-xl bg-indigo-100/60 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-900 space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs border-b border-indigo-200/70 dark:border-indigo-900/80 pb-2">
+                          <div className="text-[11px] text-indigo-950 dark:text-indigo-200 font-semibold flex items-center gap-2">
+                            <span>Total Facturas: <b>{formatPYG(montoTotalPago)}</b></span>
+                            {retencionDetalle.tieneDesgloseReal ? (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                                SIFEN Alícuotas Reales
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                                Base Est.
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs font-extrabold text-emerald-700 dark:text-emerald-400 font-mono">
+                            Neto Efectivo/Banco a Percibir: {formatPYG(montoEfectivoRecibido)}
+                          </div>
                         </div>
-                        <div className="text-xs font-extrabold text-emerald-700 dark:text-emerald-400 font-mono">
-                          Efectivo/Banco a Cobrar: {formatPYG(montoEfectivoRecibido)}
+
+                        {/* Detalle por tasa impositiva (10%, 5%, Exenta) */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                          <div className="p-2 rounded-lg bg-white/70 dark:bg-slate-900/70 border border-indigo-100 dark:border-indigo-900/50">
+                            <span className="text-[10px] uppercase font-bold text-slate-500 block">IVA 10% Factura</span>
+                            <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{formatPYG(retencionDetalle.totIva10)}</span>
+                            <span className="text-[10px] text-amber-700 dark:text-amber-400 font-bold block mt-0.5">
+                              Ret. -{formatPYG(retencionDetalle.retIva10)}
+                            </span>
+                          </div>
+
+                          <div className="p-2 rounded-lg bg-white/70 dark:bg-slate-900/70 border border-indigo-100 dark:border-indigo-900/50">
+                            <span className="text-[10px] uppercase font-bold text-slate-500 block">IVA 5% Canasta</span>
+                            <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{formatPYG(retencionDetalle.totIva5)}</span>
+                            <span className="text-[10px] text-amber-700 dark:text-amber-400 font-bold block mt-0.5">
+                              Ret. -{formatPYG(retencionDetalle.retIva5)}
+                            </span>
+                          </div>
+
+                          <div className="p-2 rounded-lg bg-white/70 dark:bg-slate-900/70 border border-indigo-100 dark:border-indigo-900/50">
+                            <span className="text-[10px] uppercase font-bold text-slate-500 block">Exenta / 0%</span>
+                            <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{formatPYG(retencionDetalle.totExenta)}</span>
+                            <span className="text-[10px] text-slate-400 font-bold block mt-0.5">
+                              Ret. ₲ 0
+                            </span>
+                          </div>
+
+                          <div className="p-2 rounded-lg bg-amber-100/60 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60">
+                            <span className="text-[10px] uppercase font-black text-amber-900 dark:text-amber-300 block">Total Retenido</span>
+                            <span className="font-mono font-extrabold text-amber-700 dark:text-amber-400 block text-xs">
+                              -{formatPYG(montoRetencionFinal)}
+                            </span>
+                            <span className="text-[9px] text-slate-500 dark:text-slate-400 block truncate">
+                              Comprobante Tesakã
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
