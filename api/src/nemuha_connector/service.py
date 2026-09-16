@@ -1814,7 +1814,7 @@ async def sync_supplier_balances(db: AsyncSession, company_id: str, since: date 
 # tiene QTD_PRODUTO_ENTREGUE > 0 sin estar finalizada la orden.
 
 async def sync_purchase_orders(db: AsyncSession, company_id: str, since: date | None) -> int:
-    nombre_por_producto = {r["ID_PRODUTO"]: r["DS_PRODUTO"] for r in await _fetch("SELECT ID_PRODUTO, DS_PRODUTO FROM est_produto")}
+    cid = UUID(company_id) if isinstance(company_id, str) else company_id
 
     sql = "SELECT * FROM est_ordem_compra WHERE 1=1"
     params: tuple = ()
@@ -1823,20 +1823,29 @@ async def sync_purchase_orders(db: AsyncSession, company_id: str, since: date | 
         params = (since,)
     ordenes = await _fetch(sql, params)
 
+    maps_res = await db.execute(
+        select(NemuhaRecordMap.source_pk, NemuhaRecordMap.target_id).where(
+            NemuhaRecordMap.company_id == cid,
+            NemuhaRecordMap.source_table == "est_ordem_compra",
+        )
+    )
+    mapped_orders = {row.source_pk: row.target_id for row in maps_res}
+
     count = 0
     for o in ordenes:
-        existing_id = await _get_mapped_target(db, company_id, "est_ordem_compra", o["ID_ORDEM_COMPRA"])
+        existing_id = mapped_orders.get(o["ID_ORDEM_COMPRA"])
         if existing_id:
-            # La orden ya fue sincronizada, pero su estado en el legado sigue
-            # avanzando despues (confirmado -> parcial -> completado/cancelado)
-            # a medida que llegan recepciones — sin esto, quedaba congelada en
-            # el primer estado visto para siempre, aunque ya estuviera recibida.
+            # Si en el legado ya fue finalizado o cancelado, y ya está sincronizado, no volver a traer ítems
+            cancelado = bool(o["BO_CANCELADO"])
+            finalizado = bool(o["BO_FINALIZADO"])
+            if cancelado or finalizado:
+                count += 1
+                continue
+
             items_rows = await _fetch(
                 "SELECT * FROM est_item_ordem_compra WHERE ID_ORDEM_COMPRA = %s",
                 (o["ID_ORDEM_COMPRA"],),
             )
-            cancelado = bool(o["BO_CANCELADO"])
-            finalizado = bool(o["BO_FINALIZADO"])
             confirmado = bool(o["BO_CONFIRMADO"])
             algo_entregado = any((it["QTD_PRODUTO_ENTREGUE"] or 0) > 0 for it in items_rows)
             if cancelado:
@@ -1943,6 +1952,8 @@ async def sync_purchase_orders(db: AsyncSession, company_id: str, since: date | 
 
 
 async def sync_purchase_receipts(db: AsyncSession, company_id: str, since: date | None) -> int:
+    cid = UUID(company_id) if isinstance(company_id, str) else company_id
+
     sql = "SELECT * FROM est_recepcao_ordem_compra WHERE 1=1"
     params: tuple = ()
     if since:
@@ -1952,16 +1963,36 @@ async def sync_purchase_receipts(db: AsyncSession, company_id: str, since: date 
 
     warehouse_id = await _resolve_deposito(db, company_id, 1)
 
+    maps_res = await db.execute(
+        select(NemuhaRecordMap.source_pk).where(
+            NemuhaRecordMap.company_id == cid,
+            NemuhaRecordMap.source_table == "est_recepcao_ordem_compra",
+        )
+    )
+    mapped_receipt_pks = set(maps_res.scalars().all())
+
+    po_maps_res = await db.execute(
+        select(NemuhaRecordMap.source_pk, NemuhaRecordMap.target_id).where(
+            NemuhaRecordMap.company_id == cid,
+            NemuhaRecordMap.source_table == "est_ordem_compra",
+        )
+    )
+    po_map = {row.source_pk: row.target_id for row in po_maps_res}
+
+    from api.src.inventory.models import StockLot
+
     count = 0
     for r in recepciones:
-        existing_id = await _get_mapped_target(db, company_id, "est_recepcao_ordem_compra", r["ID_RECEPCAO_ORDEM_COMPRA"])
-        if existing_id:
+        if r["ID_RECEPCAO_ORDEM_COMPRA"] in mapped_receipt_pks:
             count += 1
             continue
 
-        purchase_order_id = await _get_mapped_target(db, company_id, "est_ordem_compra", r["ID_ORDEM_COMPRA"])
+        purchase_order_id = po_map.get(r["ID_ORDEM_COMPRA"])
         if not purchase_order_id:
-            continue
+            purchase_order_id = await _get_mapped_target(db, company_id, "est_ordem_compra", r["ID_ORDEM_COMPRA"])
+            if not purchase_order_id:
+                continue
+            po_map[r["ID_ORDEM_COMPRA"]] = purchase_order_id
 
         po_row = await db.execute(
             select(PurchaseOrder.supplier_id).where(PurchaseOrder.id == purchase_order_id)
@@ -2002,7 +2033,24 @@ async def sync_purchase_receipts(db: AsyncSession, company_id: str, since: date 
         receipt.items = receipt_items
         db.add(receipt)
         await db.flush()
+
+        if receipt.estado == "completado":
+            for it_item in receipt_items:
+                if it_item.cantidad_recibida > 0:
+                    db.add(StockLot(
+                        company_id=cid,
+                        warehouse_id=warehouse_id,
+                        product_id=it_item.product_id,
+                        cantidad=int(it_item.cantidad_recibida),
+                        cantidad_disponible=int(it_item.cantidad_recibida),
+                        costo_unitario=it_item.costo_unitario,
+                        costo_total=it_item.total,
+                        referencia=f"REC-{r['ID_RECEPCAO_ORDEM_COMPRA']}",
+                        fecha_ingreso=receipt.fecha,
+                    ))
+
         await _save_map(db, company_id, "est_recepcao_ordem_compra", r["ID_RECEPCAO_ORDEM_COMPRA"], "purchase_receipts", receipt.id)
+        mapped_receipt_pks.add(r["ID_RECEPCAO_ORDEM_COMPRA"])
         count += 1
 
     return count
