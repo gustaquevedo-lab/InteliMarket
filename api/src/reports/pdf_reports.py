@@ -447,13 +447,37 @@ def generate_sales_by_supplier_pdf(
         prov_ruc = supplier_info.get("ruc", "—")
         doc, styles = _base_doc(buffer, f"Ventas - {prov_nombre}", company, generated_by)
         elements = _company_header(
-            company, styles, f"Ventas por Proveedor: {prov_nombre}",
-            f"RUC: {prov_ruc} — Período evaluado: {periodo_str}",
+            company, styles, "AUDITORÍA DE VENTAS POR PROVEEDOR",
+            f"Período evaluado: {periodo_str}",
             generated_by,
         )
 
+        # Recuadro destacado del Proveedor para total claridad y personería
+        prov_box_data = [
+            [
+                Paragraph(f"<b>PROVEEDOR:</b> <font color='#047857' size=10><b>{prov_nombre.upper()}</b></font>", styles["Normal"]),
+                Paragraph(f"<b>RUC:</b> <font size=10><b>{prov_ruc}</b></font>", styles["Normal"]),
+            ],
+            [
+                Paragraph(f"<b>Período de Ventas:</b> {periodo_str}", styles["Small"]),
+                Paragraph(f"<b>Total Artículos Registrados:</b> {len(product_items):,} SKUs", styles["Small"]),
+            ]
+        ]
+        prov_box = Table(prov_box_data, colWidths=[120 * mm, 66 * mm])
+        prov_box.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F0FDF4")),
+            ("BOX", (0, 0), (-1, -1), 1, HexColor("#86EFAC")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#BBF7D0")),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        elements.append(prov_box)
+        elements.append(Spacer(1, 3 * mm))
+
         if not product_items:
-            elements.append(Paragraph("Sin ventas registradas de este proveedor para el período seleccionado.", styles["Small"]))
+            elements.append(Paragraph(f"Sin ventas registradas para el proveedor <b>{prov_nombre}</b> (RUC: {prov_ruc}) en el período seleccionado.", styles["Small"]))
             _build(doc, elements)
             return buffer.getvalue()
 
@@ -465,6 +489,7 @@ def generate_sales_by_supplier_pdf(
 
         elements.append(Paragraph("<b>1. Resumen Consolidado del Proveedor</b>", styles["SectionTitle"]))
         resumen_data = [
+            ("Proveedor Auditado", f"{prov_nombre} (RUC: {prov_ruc})", False),
             ("Ventas Totales Registradas", _fmt_gs(total_ventas), False),
             ("Costo de Mercadería Vendida (CMV)", _fmt_gs(total_costo), False),
             ("Margen Bruto Comercial", f"{_fmt_gs(total_margen)} ({margen_global_pct}%)", True),
@@ -474,9 +499,9 @@ def generate_sales_by_supplier_pdf(
         elements.append(_totals_table(resumen_data))
         elements.append(Spacer(1, 4 * mm))
 
-        elements.append(Paragraph("<b>2. Detalle de Artículos / Productos Vendidos</b>", styles["SectionTitle"]))
+        elements.append(Paragraph(f"<b>2. Detalle Completo de Artículos Vendidos ({len(product_items)} SKUs)</b>", styles["SectionTitle"]))
         t_data = [["#", "SKU", "Código Barra", "Descripción del Producto", "Unidades", "Venta Total (Gs.)", "Costo (Gs.)", "Margen (Gs.)", "Margen %"]]
-        for idx, it in enumerate(product_items[:120], 1):
+        for idx, it in enumerate(product_items, 1):
             t_data.append([
                 str(idx),
                 str(it.get("sku", "—"))[:12],
@@ -490,7 +515,7 @@ def generate_sales_by_supplier_pdf(
             ])
 
         col_widths = [8 * mm, 16 * mm, 24 * mm, 52 * mm, 18 * mm, 26 * mm, 24 * mm, 24 * mm, 14 * mm]
-        t = Table(t_data, colWidths=col_widths)
+        t = Table(t_data, colWidths=col_widths, repeatRows=1)
         t.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
             ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),

@@ -234,10 +234,10 @@ async def get_sales_by_supplier(
     company_id: str,
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
-    limit: int = 100,
+    limit: Optional[int] = None,
     supplier_id: Optional[str] = None,
 ) -> list:
-    params = {"limit": limit, "company_id": company_id}
+    params: dict = {"company_id": company_id}
     where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
     where += _build_tz_filter(fecha_desde, fecha_hasta, params, "v.fecha")
 
@@ -247,6 +247,11 @@ async def get_sales_by_supplier(
         else:
             where += " AND sup.id = :supplier_id"
             params["supplier_id"] = supplier_id
+
+    limit_clause = ""
+    if limit and limit > 0:
+        limit_clause = "LIMIT :limit"
+        params["limit"] = limit
 
     query = f"""
         SELECT
@@ -264,7 +269,7 @@ async def get_sales_by_supplier(
         WHERE {where}
         GROUP BY sup.id, sup.razon_social, sup.nombre_fantasia, sup.ruc
         ORDER BY total_ventas DESC
-        LIMIT :limit
+        {limit_clause}
     """
     results = (await _exec(db, query, params)).all()
     total_general = float(sum(r["total_ventas"] or 0 for r in results)) or 1.0
@@ -298,9 +303,9 @@ async def get_sales_by_supplier_products(
     supplier_id: str,
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
-    limit: int = 200,
+    limit: Optional[int] = None,
 ) -> list[dict]:
-    params = {"limit": limit, "company_id": company_id}
+    params: dict = {"company_id": company_id}
     where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
     where += _build_tz_filter(fecha_desde, fecha_hasta, params, "v.fecha")
 
@@ -309,6 +314,11 @@ async def get_sales_by_supplier_products(
     else:
         where += " AND sup.id = :supplier_id"
         params["supplier_id"] = supplier_id
+
+    limit_clause = ""
+    if limit and limit > 0:
+        limit_clause = "LIMIT :limit"
+        params["limit"] = limit
 
     query = f"""
         SELECT
@@ -326,7 +336,7 @@ async def get_sales_by_supplier_products(
         WHERE {where}
         GROUP BY p.id, p.nombre, p.sku, p.codigo_barra
         ORDER BY total_ventas DESC
-        LIMIT :limit
+        {limit_clause}
     """
     results = (await _exec(db, query, params)).all()
     total_general = float(sum(r["total_ventas"] or 0 for r in results)) or 1.0

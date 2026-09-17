@@ -3,7 +3,7 @@ import {
   BarChart3, TrendingUp, DollarSign, ShoppingCart, Percent,
   FileSpreadsheet, FileText, RefreshCcw, Loader2, Filter, Layers, CreditCard,
   Calendar, CheckCircle2, AlertTriangle, ArrowUpRight, ArrowDownRight, UserCheck,
-  ShieldCheck, HelpCircle, ChevronRight, Download, Building2, Search, X, ArrowLeft, PackageCheck
+  ShieldCheck, HelpCircle, ChevronRight, ChevronDown, Download, Building2, Search, X, ArrowLeft, PackageCheck
 } from "lucide-react"
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -31,6 +31,8 @@ export default function ReportsPage() {
   const [supplierProducts, setSupplierProducts] = useState<any[]>([])
   const [loadingSupplierProducts, setLoadingSupplierProducts] = useState(false)
   const [productSearch, setProductSearch] = useState("")
+  const [supplierPickerOpen, setSupplierPickerOpen] = useState(false)
+  const [supplierSearchText, setSupplierSearchText] = useState("")
 
   // Selector de fechas con zona horaria America/Asuncion
   const todayStr = useMemo(() => new Date().toISOString().split("T")[0], [])
@@ -294,6 +296,15 @@ export default function ReportsPage() {
     if (!selectedSupplierId || selectedSupplierId === "todos") return null
     return suppliersData.find((s: any) => s.supplier_id === selectedSupplierId) || null
   }, [suppliersData, selectedSupplierId])
+
+  const filteredSuppliersForPicker = useMemo(() => {
+    if (!supplierSearchText.trim()) return suppliersData
+    const q = supplierSearchText.toLowerCase()
+    return suppliersData.filter((s: any) =>
+      (s.proveedor && s.proveedor.toLowerCase().includes(q)) ||
+      (s.ruc && s.ruc.toLowerCase().includes(q))
+    )
+  }, [suppliersData, supplierSearchText])
 
   const filteredSupplierProducts = useMemo(() => {
     if (!productSearch.trim()) return supplierProducts
@@ -805,33 +816,138 @@ export default function ReportsPage() {
       {/* ── CONTENIDO TAB: VENTAS POR PROVEEDOR ── */}
       {activeTab === "proveedores" && (
         <div className="space-y-6">
-          {/* Barra de Selección y Filtro de Proveedor */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+          {/* Barra de Selección y Buscador de Proveedor */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm relative z-30">
             <div className="flex items-center gap-3 flex-wrap">
               <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300">
                 <Building2 className="w-4 h-4 text-emerald-600" />
-                <span>Seleccionar Proveedor:</span>
+                <span>Proveedor:</span>
               </div>
-              <select
-                value={selectedSupplierId}
-                onChange={(e) => {
-                  setSelectedSupplierId(e.target.value)
-                  setProductSearch("")
-                }}
-                className="text-xs font-bold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 max-w-xs md:max-w-md"
-              >
-                <option value="">🏢 Todos los Proveedores (Consolidado General)</option>
-                {suppliersData.map((s: any) => (
-                  <option key={s.supplier_id} value={s.supplier_id}>
-                    {s.proveedor} {s.ruc && s.ruc !== "—" ? `(${s.ruc})` : ""} — {formatPYG(s.total_ventas)}
-                  </option>
-                ))}
-              </select>
+
+              {/* Combobox con buscador interactivo en vivo */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setSupplierPickerOpen(!supplierPickerOpen)}
+                  className="flex items-center justify-between gap-3 text-xs font-bold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 min-w-[280px] sm:min-w-[360px] max-w-lg text-left hover:border-emerald-500 transition shadow-sm cursor-pointer"
+                >
+                  <div className="flex items-center gap-2 truncate">
+                    <Search className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    {selectedSupplierObj ? (
+                      <span className="truncate">
+                        <span className="text-emerald-700 dark:text-emerald-400 font-extrabold">{selectedSupplierObj.proveedor}</span>
+                        {selectedSupplierObj.ruc && selectedSupplierObj.ruc !== "—" && (
+                          <span className="text-slate-400 font-mono text-[11px] ml-1.5 font-normal">({selectedSupplierObj.ruc})</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 dark:text-slate-400 font-normal">
+                        🔍 Buscar o seleccionar proveedor...
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${supplierPickerOpen ? "rotate-180" : ""}`} />
+                </button>
+
+                {supplierPickerOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setSupplierPickerOpen(false)}
+                    />
+                    <div className="absolute left-0 top-full mt-2 z-50 w-full sm:w-[420px] bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden animate-fade-in">
+                      {/* Input buscador dentro del desplegable */}
+                      <div className="p-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60">
+                        <div className="relative">
+                          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            type="text"
+                            autoFocus
+                            value={supplierSearchText}
+                            onChange={(e) => setSupplierSearchText(e.target.value)}
+                            placeholder="Escriba nombre de proveedor o RUC..."
+                            className="w-full pl-9 pr-8 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                          />
+                          {supplierSearchText && (
+                            <button
+                              type="button"
+                              onClick={() => setSupplierSearchText("")}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Lista de proveedores filtrada */}
+                      <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedSupplierId("")
+                            setProductSearch("")
+                            setSupplierPickerOpen(false)
+                          }}
+                          className={`w-full text-left px-4 py-2.5 text-xs flex items-center justify-between hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition cursor-pointer ${
+                            !selectedSupplierId ? "bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 font-bold" : "text-slate-700 dark:text-slate-200"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Building2 className="w-4 h-4 text-slate-400" />
+                            <span>🏢 Todos los Proveedores (Consolidado General)</span>
+                          </div>
+                          {!selectedSupplierId && <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
+                        </button>
+
+                        {filteredSuppliersForPicker.length === 0 ? (
+                          <div className="py-8 text-center text-xs text-slate-400">
+                            No se encontraron proveedores que coincidan con "{supplierSearchText}"
+                          </div>
+                        ) : (
+                          filteredSuppliersForPicker.map((s: any) => {
+                            const isSelected = selectedSupplierId === s.supplier_id
+                            return (
+                              <button
+                                key={s.supplier_id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedSupplierId(s.supplier_id)
+                                  setProductSearch("")
+                                  setSupplierPickerOpen(false)
+                                }}
+                                className={`w-full text-left px-4 py-2.5 text-xs flex items-center justify-between hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition cursor-pointer ${
+                                  isSelected ? "bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 font-bold" : "text-slate-700 dark:text-slate-200"
+                                }`}
+                              >
+                                <div className="truncate pr-3">
+                                  <div className="font-bold text-slate-900 dark:text-slate-100 truncate">{s.proveedor}</div>
+                                  <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5 font-mono">
+                                    <span>RUC: {s.ruc || "—"}</span>
+                                    <span>·</span>
+                                    <span>{s.skus_vendidos} SKUs</span>
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <div className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                    {formatPYG(s.total_ventas)}
+                                  </div>
+                                  {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 ml-auto mt-0.5" />}
+                                </div>
+                              </button>
+                            )
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
             {selectedSupplierObj ? (
               <div className="flex items-center gap-2.5">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                   <PackageCheck className="w-3.5 h-3.5 text-emerald-600" />
                   Filtrando: <strong>{selectedSupplierObj.proveedor}</strong>
                 </span>
@@ -840,7 +956,7 @@ export default function ReportsPage() {
                     setSelectedSupplierId("")
                     setProductSearch("")
                   }}
-                  className="flex items-center gap-1 px-3 py-1 text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-xl hover:bg-slate-200 transition cursor-pointer"
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-xl hover:bg-slate-200 transition cursor-pointer"
                   title="Quitar filtro y ver ranking consolidado"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -853,6 +969,51 @@ export default function ReportsPage() {
               </span>
             )}
           </div>
+
+          {/* Banner de Identificación Destacada del Proveedor */}
+          {selectedSupplierObj && (
+            <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-950 rounded-2xl p-5 border border-emerald-500/40 text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4 animate-fade-in">
+              <div className="flex items-start md:items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-400 shrink-0">
+                  <Building2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-black uppercase tracking-widest bg-emerald-500/20 text-emerald-300 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                      PROVEEDOR AUDITADO
+                    </span>
+                    <span className="text-xs font-mono font-bold bg-white/10 text-slate-200 px-2.5 py-0.5 rounded-md">
+                      RUC: {selectedSupplierObj.ruc || "—"}
+                    </span>
+                  </div>
+                  <h2 className="text-xl font-black text-white mt-1 tracking-tight">
+                    {selectedSupplierObj.proveedor}
+                  </h2>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Período: <strong className="text-emerald-300">{fechaDesde || "Inicio"}</strong> al <strong className="text-emerald-300">{fechaHasta || "Hoy"}</strong> · Auditoría del 100% de artículos vendidos ({supplierProducts.length} SKUs registrados sin límite)
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <button
+                  onClick={() => {
+                    setSelectedSupplierId("")
+                    setProductSearch("")
+                  }}
+                  className="px-3.5 py-2 text-xs font-bold text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <X className="w-4 h-4" /> Ver Todos los Proveedores
+                </button>
+                <button
+                  onClick={handleExportPdf}
+                  disabled={downloadingPdf}
+                  className="px-3.5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition flex items-center gap-1.5 shadow-md shadow-emerald-950/40 cursor-pointer disabled:opacity-50"
+                >
+                  <FileText className="w-4 h-4" /> Exportar PDF de este Proveedor
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Top 4 KPI cards adaptadas al filtro */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -957,7 +1118,7 @@ export default function ReportsPage() {
                     </h3>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5 ml-7">
-                    RUC: <strong>{selectedSupplierObj.ruc || "—"}</strong> · Desglose por artículo, costo de reposición y margen comercial
+                    RUC: <strong>{selectedSupplierObj.ruc || "—"}</strong> · Auditoría del 100% de artículos vendidos ({supplierProducts.length} productos sin límite)
                   </p>
                 </div>
 
@@ -974,7 +1135,7 @@ export default function ReportsPage() {
                     />
                   </div>
                   <span className="text-[11px] font-mono text-slate-400 whitespace-nowrap">
-                    {filteredSupplierProducts.length} de {supplierProducts.length}
+                    {filteredSupplierProducts.length} {productSearch ? `de ${supplierProducts.length}` : "artículos"}
                   </span>
                 </div>
               </div>

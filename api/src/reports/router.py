@@ -95,7 +95,7 @@ async def sales_by_product(fecha_desde: date | None = Query(None), fecha_hasta: 
 async def sales_by_supplier(
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
-    limit: int = Query(100, le=500),
+    limit: int | None = Query(None),
     supplier_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth)
@@ -108,7 +108,7 @@ async def sales_by_supplier_products(
     supplier_id: str = Query(...),
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
-    limit: int = Query(200, le=500),
+    limit: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth)
 ):
@@ -215,7 +215,7 @@ async def export_sales_by_product(fecha_desde: date | None = Query(None), fecha_
 async def export_sales_by_supplier_xlsx(
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
-    limit: int = Query(200, le=1000),
+    limit: int | None = Query(None),
     supplier_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth)
@@ -240,7 +240,7 @@ async def export_sales_by_supplier_xlsx(
 async def export_sales_by_supplier_pdf(
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
-    limit: int = Query(200, le=1000),
+    limit: int | None = Query(None),
     supplier_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth)

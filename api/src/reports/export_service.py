@@ -540,7 +540,7 @@ def export_sales_by_supplier(
         ws.title = "Artículos Proveedor"
         prov_nombre = supplier_info.get("proveedor", "Proveedor")
         prov_ruc = supplier_info.get("ruc", "—")
-        _write_title(ws, f"Ventas de Productos — {prov_nombre} (RUC: {prov_ruc})", fecha_desde, fecha_hasta)
+        _write_title(ws, f"Auditoría de Ventas — Proveedor: {prov_nombre} (RUC: {prov_ruc})", fecha_desde, fecha_hasta)
 
         headers = [
             "#",
@@ -568,9 +568,30 @@ def export_sales_by_supplier(
                 f"{item.get('margen_pct', 0):.1f}%",
                 f"{item.get('participacion_pct', 0):.1f}%",
             ))
+
+        _write_data(ws, headers, rows)
+
+        # Fila de Totales Generales del Proveedor
+        tot_unidades = sum(it.get("unidades_vendidas", 0) for it in product_items)
+        tot_ventas = sum(it.get("total_ventas", 0) for it in product_items)
+        tot_costo = sum(it.get("costo_total", 0) for it in product_items)
+        tot_margen = tot_ventas - tot_costo
+        tot_margen_pct = round((tot_margen / max(tot_ventas, 1)) * 100, 1)
+
+        tot_row = 4 + len(rows)
+        ws.cell(row=tot_row, column=4, value="TOTAL GENERAL PROVEEDOR").font = BOLD_FONT
+        ws.cell(row=tot_row, column=5, value=tot_unidades).font = BOLD_FONT
+        ws.cell(row=tot_row, column=6, value=tot_ventas).font = BOLD_FONT
+        ws.cell(row=tot_row, column=6).number_format = CURRENCY_FMT
+        ws.cell(row=tot_row, column=7, value=tot_costo).font = BOLD_FONT
+        ws.cell(row=tot_row, column=7).number_format = CURRENCY_FMT
+        ws.cell(row=tot_row, column=8, value=tot_margen).font = BOLD_FONT
+        ws.cell(row=tot_row, column=8).number_format = CURRENCY_FMT
+        ws.cell(row=tot_row, column=9, value=f"{tot_margen_pct}%").font = BOLD_FONT
+        ws.cell(row=tot_row, column=10, value="100.0%").font = BOLD_FONT
     else:
         ws.title = "Ventas por Proveedor"
-        _write_title(ws, "Informe de Ventas y Margen por Proveedor", fecha_desde, fecha_hasta)
+        _write_title(ws, "Informe General de Ventas y Margen por Proveedor", fecha_desde, fecha_hasta)
 
         headers = [
             "Ranking",
@@ -599,7 +620,8 @@ def export_sales_by_supplier(
                 f"{item.get('participacion_pct', 0):.1f}%",
             ))
 
-    _write_data(ws, headers, rows)
+        _write_data(ws, headers, rows)
+
     _auto_width(ws)
 
     buf = io.BytesIO()
