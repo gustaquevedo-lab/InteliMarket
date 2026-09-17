@@ -25,6 +25,13 @@ async def trigger_sync(body: TriggerSyncRequest, db: AsyncSession = Depends(get_
     return run
 
 
+@router.post("/sync/finance", response_model=NemuhaSyncRunResponse, dependencies=[Depends(require_auth)])
+async def trigger_finance_sync(body: TriggerSyncRequest, db: AsyncSession = Depends(get_db)):
+    """Sincroniza el lote integral de Finanzas y Tesorería (AR, AP, Bancos, Cajas, Gastos) de forma idempotente."""
+    run = await service.run_sync(db, str(body.company_id), body.since, service.FINANCE_TREASURY_MODULES)
+    return run
+
+
 @router.get("/runs", response_model=list[NemuhaSyncRunResponse], dependencies=[Depends(require_auth)])
 async def list_runs(company_id: str = Query(), limit: int = Query(20, ge=1, le=100), db: AsyncSession = Depends(get_db)):
     result = await db.execute(

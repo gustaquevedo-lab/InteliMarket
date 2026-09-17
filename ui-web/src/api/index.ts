@@ -2759,6 +2759,14 @@ export const api = {
       return await res.blob();
     },
   },
+  nemuhaConnector: {
+    sync: (data: { company_id: string; since?: string; modules?: string[] }) =>
+      client.post<any>("/v1/nemuha-connector/sync", data),
+    syncFinance: (data: { company_id: string; since?: string }) =>
+      client.post<any>("/v1/nemuha-connector/sync/finance", data),
+    runs: (company_id: string, limit?: number) =>
+      client.get<any[]>("/v1/nemuha-connector/runs", { company_id, limit: limit || 20 }),
+  },
   expenses: {
     categories: {
       list: () => client.get<ExpenseCategory[]>("/v1/expenses/categories"),

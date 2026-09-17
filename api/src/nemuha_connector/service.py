@@ -624,16 +624,37 @@ async def sync_bank_accounts(db: AsyncSession, company_id: str, since: date | No
     """)
     count = 0
     for r in rows:
+        moneda = MONEDA_MAP.get(r["ID_MOEDA"], "PYG")
+        if moneda == "BRL":
+            continue  # En Paraguay los bancos operan en PYG o USD, las divisas BRL se manejan solo en efectivo de bóveda
+
         existing_id = await _get_mapped_target(db, company_id, "bc_conta_banco", r["ID_CONTA"])
         if existing_id:
             count += 1
             continue
+
+        nr_cta = (r["NR_CONTA"] or "").strip()
+        existing_acct = None
+        if nr_cta:
+            acct_res = await db.execute(
+                select(BankAccount).where(
+                    BankAccount.company_id == uuid.UUID(str(company_id)),
+                    BankAccount.numero_cuenta == nr_cta,
+                )
+            )
+            existing_acct = acct_res.scalars().first()
+
+        if existing_acct:
+            await _save_map(db, company_id, "bc_conta_banco", r["ID_CONTA"], "bank_accounts", existing_acct.id)
+            count += 1
+            continue
+
         account = BankAccount(
-            company_id=company_id,
+            company_id=uuid.UUID(str(company_id)),
             banco=r["DS_BANCO"],
-            tipo="cuenta_corriente",  # el legacy no distingue tipo de cuenta — valor por defecto, a confirmar con el cliente
-            numero_cuenta=r["NR_CONTA"] or f"CTA-{r['ID_CONTA']}",
-            moneda=MONEDA_MAP.get(r["ID_MOEDA"], "PYG"),
+            tipo="cuenta_corriente",  # el legacy no distingue tipo de cuenta — valor por defecto
+            numero_cuenta=nr_cta or f"CTA-{r['ID_CONTA']}",
+            moneda=moneda,
             titular=r["DS_CONTA"],
         )
         db.add(account)
@@ -2747,6 +2768,23 @@ AVAILABLE_SYNC_MODULES = {
     "exchange_rates": sync_exchange_rates,
     "fiscal_setup": sync_fiscal_setup,
 }
+
+# Módulos de Finanzas y Tesorería para importación integral sin duplicados
+FINANCE_TREASURY_MODULES = [
+    "accounts_payable",
+    "supplier_invoice_payments",
+    "accounts_receivable",
+    "credit_accounts",
+    "extra_club_numeros",
+    "bank_accounts",
+    "bank_transactions",
+    "bank_balances",
+    "cash_sessions",
+    "cash_register_movements",
+    "cash_deposit_gaps",
+    "expense_categories",
+    "petty_cash_expenses",
+]
 
 # Módulos activos en sincronizaciones periódicas automáticas (1. Catálogo/Precios, 2. Stock e Inventario, 3. Compras y Proveedores)
 DEFAULT_ACTIVE_MODULES = [
