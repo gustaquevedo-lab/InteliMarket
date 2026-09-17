@@ -544,8 +544,11 @@ export default function ChequesPage() {
                   <div className="col-span-2">
                     <label className="label-sm">Cuenta Bancaria Origen</label>
                     <select className="input text-xs" value={form.bank_account_id} onChange={e => setForm(f => ({ ...f, bank_account_id: e.target.value }))}>
-                      <option value="">Seleccionar cuenta...</option>
-                      {bankAccounts.map((ba: any) => <option key={ba.id} value={ba.id}>{ba.banco} — {ba.numero_cuenta} ({ba.moneda})</option>)}
+                      {bankAccounts.map((ba: any) => (
+                        <option key={ba.id} value={ba.id}>
+                          {ba.alias ? `[${ba.alias}] ` : ""}{ba.banco} — {ba.numero_cuenta} ({ba.moneda})
+                        </option>
+                      ))}
                     </select>
                   </div>
                 )}

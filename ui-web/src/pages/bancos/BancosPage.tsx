@@ -6,7 +6,7 @@ import {
   Plus, Loader2, Landmark, CheckCircle, XCircle, Upload, Wand2, AlertTriangle,
   Settings2, ShieldCheck, ShieldAlert, FileDown, Search, ArrowUpRight,
   ArrowDownRight, FileSpreadsheet, Receipt, RefreshCw, Calendar, Clock,
-  DollarSign, Check, X, FileText, Filter, Eye, ChevronRight
+  DollarSign, Check, X, FileText, Filter, Eye, ChevronRight, Pencil, Trash2
 } from "lucide-react"
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts"
 import { useAuth } from "../../context/AuthContext"
@@ -76,6 +76,8 @@ export default function BancosPage() {
   // Modales y formularios
   const [showBankForm, setShowBankForm] = useState(false)
   const [bankForm, setBankForm] = useState({ banco: "", alias: "", tipo: "corriente", numero_cuenta: "", moneda: "PYG", saldo_inicial: "", titular: "" })
+  const [editingBank, setEditingBank] = useState<BankAccount | null>(null)
+  const [editBankForm, setEditBankForm] = useState({ banco: "", alias: "", tipo: "corriente", numero_cuenta: "", moneda: "PYG", titular: "", saldo_minimo_alerta: "", activo: true })
   const [showImportBank, setShowImportBank] = useState(false)
   const now = new Date()
   const [importForm, setImportForm] = useState<{ mes: number; anio: number; file: File | null }>({ mes: now.getMonth() + 1, anio: now.getFullYear(), file: null })
@@ -106,7 +108,17 @@ export default function BancosPage() {
       ])
 
       const rawBanks = b.status === "fulfilled" && Array.isArray(b.value) ? b.value : []
-      // Directiva de Gusta: Eliminar/ocultar cuentas en R$, bancos operan en PYG / USD
+      // Directiva inmutable Extra Supermercado: Purgar y eliminar cualquier cuenta en BRL
+      const brlAccounts = rawBanks.filter((acc: BankAccount) => acc.moneda === "BRL")
+      if (brlAccounts.length > 0) {
+        for (const brlAcc of brlAccounts) {
+          try {
+            await api.financial.banks.delete(brlAcc.id)
+          } catch (purgeErr) {
+            console.error("Error al purgar cuenta BRL:", purgeErr)
+          }
+        }
+      }
       const validBanks = rawBanks.filter((acc: BankAccount) => acc.moneda !== "BRL")
       setBanks(validBanks)
 
@@ -181,6 +193,57 @@ export default function BancosPage() {
       setBankForm({ banco: "", alias: "", tipo: "corriente", numero_cuenta: "", moneda: "PYG", saldo_inicial: "", titular: "" })
       fetchAll()
     } catch (e: any) { toast.error("Error", e.message) }
+  }
+
+  const handleOpenEditBank = (b: BankAccount) => {
+    setEditingBank(b)
+    setEditBankForm({
+      banco: b.banco || "",
+      alias: b.alias || "",
+      tipo: b.tipo || "corriente",
+      numero_cuenta: b.numero_cuenta || "",
+      moneda: b.moneda || "PYG",
+      titular: b.titular || "",
+      saldo_minimo_alerta: b.saldo_minimo_alerta != null ? String(b.saldo_minimo_alerta) : "",
+      activo: b.activo !== false,
+    })
+  }
+
+  const handleUpdateBank = async () => {
+    if (!editingBank) return
+    try {
+      await api.financial.banks.update(editingBank.id, {
+        banco: editBankForm.banco.trim(),
+        alias: editBankForm.alias.trim() || null,
+        tipo: editBankForm.tipo,
+        numero_cuenta: editBankForm.numero_cuenta.trim(),
+        titular: editBankForm.titular.trim() || null,
+        saldo_minimo_alerta: editBankForm.saldo_minimo_alerta ? Number(editBankForm.saldo_minimo_alerta) : null,
+        activo: editBankForm.activo,
+      })
+      toast.success("Cuenta actualizada", `Cuenta ${editBankForm.alias ? `[${editBankForm.alias}] ` : ""}${editBankForm.banco} modificada exitosamente.`)
+      setEditingBank(null)
+      fetchAll()
+    } catch (e: any) {
+      toast.error("Error al actualizar cuenta", e.message)
+    }
+  }
+
+  const handleDeleteBank = async (b: BankAccount) => {
+    const label = b.alias ? `[${b.alias}] ${b.banco}` : `${b.banco} (${b.numero_cuenta})`
+    if (!window.confirm(`¿Está seguro de que desea eliminar la cuenta bancaria ${label}? Esta acción no se puede deshacer.`)) {
+      return
+    }
+    try {
+      await api.financial.banks.delete(b.id)
+      toast.success("Cuenta eliminada", `La cuenta ${label} ha sido eliminada.`)
+      if (selectedBank === b.id) {
+        setSelectedBank("")
+      }
+      fetchAll()
+    } catch (e: any) {
+      toast.error("Error al eliminar cuenta", e.message || "No se pudo eliminar la cuenta.")
+    }
   }
 
   const handleSaveUmbral = async () => {
@@ -722,28 +785,53 @@ export default function BancosPage() {
                       >
                         <div className="flex items-start justify-between">
                           <div>
-                            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">{b.tipo} · {b.moneda}</span>
-                            <h4 className="text-base font-bold text-gray-900 dark:text-white mt-0.5">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-400">{b.tipo} · {b.moneda}</span>
+                            <div className="mt-1">
                               {b.alias ? (
-                                <span className="flex items-center gap-1.5 flex-wrap">
-                                  <span>{b.alias}</span>
-                                  <span className="text-xs font-normal text-gray-400">({b.banco})</span>
-                                </span>
+                                <div>
+                                  <span className="inline-block text-xs font-black text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800">
+                                    {b.alias}
+                                  </span>
+                                  <h4 className="text-sm font-bold text-gray-900 dark:text-white mt-1">
+                                    {b.banco}
+                                  </h4>
+                                </div>
                               ) : (
-                                b.banco
+                                <div className="flex items-center gap-1.5">
+                                  <h4 className="text-base font-bold text-gray-900 dark:text-white">
+                                    {b.banco}
+                                  </h4>
+                                  <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+                                    Sin Alias
+                                  </span>
+                                </div>
                               )}
-                            </h4>
+                            </div>
                             <div className="text-xs text-gray-500 font-mono mt-0.5">{b.numero_cuenta}</div>
                           </div>
                           <div className="flex items-center gap-1">
                             <button
+                              onClick={e => { e.stopPropagation(); handleOpenEditBank(b); }}
+                              className="p-1.5 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 rounded-lg text-slate-400 hover:text-indigo-600 transition"
+                              title="Editar alias y datos de la cuenta"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
                               onClick={e => { e.stopPropagation(); setUmbralModal({ id: b.id, valor: b.saldo_minimo_alerta != null ? String(b.saldo_minimo_alerta) : "" }); }}
-                              className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-400 hover:text-gray-600"
+                              className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-400 hover:text-gray-600 transition"
                               title="Configurar umbral de alerta"
                             >
                               <Settings2 className="w-4 h-4" />
                             </button>
-                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">
+                            <button
+                              onClick={e => { e.stopPropagation(); handleDeleteBank(b); }}
+                              className="p-1.5 hover:bg-red-50 dark:hover:bg-red-950/50 rounded-lg text-slate-400 hover:text-red-500 transition"
+                              title="Eliminar cuenta bancaria"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs ml-1">
                               {b.moneda}
                             </div>
                           </div>
@@ -1553,6 +1641,99 @@ export default function BancosPage() {
               <button onClick={handleCreateBank} disabled={!bankForm.banco || !bankForm.numero_cuenta} className="btn-primary text-xs disabled:opacity-50">
                 Guardar Cuenta
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Editar Cuenta Bancaria */}
+      {editingBank && (
+        <div className="modal-overlay" onClick={() => setEditingBank(null)}>
+          <div className="modal-content max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Editar Cuenta Bancaria</h3>
+                <p className="text-xs text-slate-500">Modificar nickname / alias y datos de la cuenta</p>
+              </div>
+              <button onClick={() => setEditingBank(null)} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="label-field font-bold text-indigo-600 dark:text-indigo-400">Alias / Nickname de la Cuenta</label>
+                <input
+                  className="input-field font-semibold text-sm border-indigo-300 dark:border-indigo-700"
+                  placeholder="Ej: Cta. Recaudación Central, Cta. Proveedores Itaú"
+                  value={editBankForm.alias}
+                  onChange={e => setEditBankForm({ ...editBankForm, alias: e.target.value })}
+                />
+                <p className="text-[11px] text-slate-400 mt-1">Este alias aparecerá en Bóveda, Gastos, Cheques y Conciliaciones.</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="label-field">Nombre del Banco *</label>
+                  <input className="input-field" placeholder="Ej: Banco Continental" value={editBankForm.banco} onChange={e => setEditBankForm({ ...editBankForm, banco: e.target.value })} />
+                </div>
+                <div>
+                  <label className="label-field">N° de Cuenta *</label>
+                  <input className="input-field font-mono" placeholder="Ej: 123456789" value={editBankForm.numero_cuenta} onChange={e => setEditBankForm({ ...editBankForm, numero_cuenta: e.target.value })} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label-field">Tipo de Cuenta</label>
+                  <select className="input-field" value={editBankForm.tipo} onChange={e => setEditBankForm({ ...editBankForm, tipo: e.target.value })}>
+                    <option value="corriente">Cuenta Corriente</option>
+                    <option value="ahorro">Caja de Ahorro</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label-field">Moneda</label>
+                  <input className="input-field bg-slate-100 dark:bg-slate-800 text-slate-500 font-bold font-mono cursor-not-allowed" value={editBankForm.moneda} disabled />
+                </div>
+              </div>
+              <div>
+                <label className="label-field">Titular de la Cuenta</label>
+                <input className="input-field" placeholder="Ej: Extra Supermercado S.A." value={editBankForm.titular} onChange={e => setEditBankForm({ ...editBankForm, titular: e.target.value })} />
+              </div>
+              <div>
+                <label className="label-field">Umbral de Saldo Mínimo (Alerta)</label>
+                <input className="input-field font-mono" type="number" placeholder="Ej: 10000000" value={editBankForm.saldo_minimo_alerta} onChange={e => setEditBankForm({ ...editBankForm, saldo_minimo_alerta: e.target.value })} />
+              </div>
+              <div className="flex items-center gap-2 pt-2">
+                <input
+                  type="checkbox"
+                  id="bank_activo_edit"
+                  checked={editBankForm.activo}
+                  onChange={e => setEditBankForm({ ...editBankForm, activo: e.target.checked })}
+                  className="rounded text-indigo-600"
+                />
+                <label htmlFor="bank_activo_edit" className="text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                  Cuenta Activa para Operaciones
+                </label>
+              </div>
+            </div>
+            <div className="p-6 border-t flex justify-between items-center">
+              <button
+                type="button"
+                onClick={() => { const b = editingBank; setEditingBank(null); handleDeleteBank(b); }}
+                className="btn-ghost text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 text-xs flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Eliminar
+              </button>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setEditingBank(null)} className="btn-ghost text-xs">Cancelar</button>
+                <button
+                  type="button"
+                  onClick={handleUpdateBank}
+                  disabled={!editBankForm.banco || !editBankForm.numero_cuenta}
+                  className="btn-primary text-xs disabled:opacity-50"
+                >
+                  Guardar Cambios
+                </button>
+              </div>
             </div>
           </div>
         </div>

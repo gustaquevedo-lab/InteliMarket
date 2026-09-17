@@ -295,7 +295,11 @@ export default function BovedaPage() {
   const saldoBovedaUSD = vault?.saldo_en_boveda_usd || 0
   const saldoBovedaBRL = vault?.saldo_en_boveda_brl || 0
 
-  const bankName = (id?: string) => banks.find(b => b.id === id)?.banco || "Banco"
+  const bankName = (id?: string) => {
+    const b = banks.find(x => x.id === id)
+    if (!b) return "Banco"
+    return b.alias ? `[${b.alias}] ${b.banco}` : b.banco
+  }
 
   const apVencido90 = Number(apAging?.aging_buckets?.find(b => b.rango.includes("+90"))?.monto || 0)
   const arVencido90 = Number(arAging?.buckets?.find(b => b.rango.includes("+90"))?.monto || 0)
@@ -372,10 +376,16 @@ export default function BovedaPage() {
                 🏢 Extra Supermercado (Central)
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-300">
-                💰 {formatPYG(saldoBovedaPYG)} en custodia
+                🇵🇾 {formatPYG(saldoBovedaPYG)}
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-teal-300">
+                🇧🇷 R$ {saldoBovedaBRL.toLocaleString("es-PY", { minimumFractionDigits: 2 })}
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-cyan-300">
+                🇺🇸 US$ {saldoBovedaUSD.toLocaleString("es-PY", { minimumFractionDigits: 2 })}
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-blue-300">
-                🏦 {banks.length} cuentas bancarias conciliadas
+                🏦 {banks.length} cuentas bancarias
               </span>
             </div>
           </div>
@@ -400,50 +410,78 @@ export default function BovedaPage() {
           </div>
         </div>
 
-        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
-        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+        {/* 📊 BARRA DE KPIS EJECUTIVOS MULTIMONEDA */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5 mt-6 pt-6 border-t border-slate-800/80">
+          {/* 1. Custodia PYG */}
+          <div className="space-y-1 bg-slate-900/70 p-3.5 rounded-2xl border border-emerald-500/30 shadow-sm relative overflow-hidden">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Custodia en Bóveda</span>
-              <Lock className="w-4 h-4 text-emerald-400" />
+              <span className="text-[10px] font-extrabold text-emerald-400 uppercase tracking-wider">Custodia PYG (Gs.)</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono">PYG</span>
             </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+            <p className="text-xl lg:text-2xl font-black font-mono tracking-tight text-emerald-400 mt-1">
               {formatPYG(saldoBovedaPYG)}
             </p>
-            <p className="text-[11px] text-slate-400 font-mono">USD ${saldoBovedaUSD.toLocaleString("es-PY")} · BRL R${saldoBovedaBRL.toLocaleString("es-PY")}</p>
+            <p className="text-[10px] text-slate-400 truncate">Venta & recaudación local</p>
           </div>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+          {/* 2. Custodia BRL (Reales) */}
+          <div className="space-y-1 bg-slate-900/70 p-3.5 rounded-2xl border border-teal-500/30 shadow-sm relative overflow-hidden">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Saldos Bancarios (PYG)</span>
-              <Landmark className="w-4 h-4 text-blue-400" />
+              <span className="text-[10px] font-extrabold text-teal-400 uppercase tracking-wider">Custodia Reales (R$)</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300 border border-teal-500/30 font-mono">BRL</span>
             </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+            <p className="text-xl lg:text-2xl font-black font-mono tracking-tight text-teal-300 mt-1">
+              R$ {saldoBovedaBRL.toLocaleString("es-PY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+            <p className="text-[10px] text-slate-400 truncate">Divisas cobradas en gaveta</p>
+          </div>
+
+          {/* 3. Custodia USD (Dólares) */}
+          <div className="space-y-1 bg-slate-900/70 p-3.5 rounded-2xl border border-cyan-500/30 shadow-sm relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-extrabold text-cyan-400 uppercase tracking-wider">Custodia Dólares (US$)</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-mono">USD</span>
+            </div>
+            <p className="text-xl lg:text-2xl font-black font-mono tracking-tight text-cyan-300 mt-1">
+              US$ {saldoBovedaUSD.toLocaleString("es-PY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+            <p className="text-[10px] text-slate-400 truncate">Divisa extranjera en gaveta</p>
+          </div>
+
+          {/* 4. Bancos */}
+          <div className="space-y-1 bg-slate-900/70 p-3.5 rounded-2xl border border-blue-500/30 shadow-sm relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-extrabold text-blue-400 uppercase tracking-wider">Saldos Bancarios</span>
+              <Landmark className="w-3.5 h-3.5 text-blue-400" />
+            </div>
+            <p className="text-xl lg:text-2xl font-black font-mono tracking-tight text-blue-300 mt-1">
               {formatPYG(saldoTotalPYG)}
             </p>
-            <p className="text-[11px] text-slate-400 font-mono">{banks.length} cuentas conciliadas</p>
+            <p className="text-[10px] text-slate-400 truncate">{banks.length} cuentas conciliadas</p>
           </div>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+          {/* 5. Entregas en Tránsito */}
+          <div className="space-y-1 bg-slate-900/70 p-3.5 rounded-2xl border border-amber-500/30 shadow-sm relative overflow-hidden">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Entregas en Tránsito</span>
-              <ShieldAlert className="w-4 h-4 text-amber-400" />
+              <span className="text-[10px] font-extrabold text-amber-400 uppercase tracking-wider">En Tránsito</span>
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
             </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+            <p className="text-xl lg:text-2xl font-black font-mono tracking-tight text-amber-400 mt-1">
               {vault?.entregas_pendientes || 0}
             </p>
-            <p className="text-[11px] text-slate-400">Cierres POS esperando custodia</p>
+            <p className="text-[10px] text-slate-400 truncate">Cierres POS pendientes</p>
           </div>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+          {/* 6. Remesas Doble Firma */}
+          <div className="space-y-1 bg-slate-900/70 p-3.5 rounded-2xl border border-purple-500/30 shadow-sm relative overflow-hidden">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Remesas Doble Firma</span>
-              <KeyRound className="w-4 h-4 text-purple-400" />
+              <span className="text-[10px] font-extrabold text-purple-400 uppercase tracking-wider">Doble Firma</span>
+              <KeyRound className="w-3.5 h-3.5 text-purple-400" />
             </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-purple-300">
+            <p className="text-xl lg:text-2xl font-black font-mono tracking-tight text-purple-300 mt-1">
               {depositApprovals.length}
             </p>
-            <p className="text-[11px] text-slate-400">Supervisor + Gerencia</p>
+            <p className="text-[10px] text-slate-400 truncate">Supervisor + Gerencia</p>
           </div>
         </div>
       </div>
@@ -606,6 +644,7 @@ export default function BovedaPage() {
                       <th className="p-3">Origen</th>
                       <th className="p-3">Estado</th>
                       <th className="p-3 text-right">Monto (PYG)</th>
+                      <th className="p-3 text-right">Divisas (R$ / US$)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -626,6 +665,24 @@ export default function BovedaPage() {
                         </td>
                         <td className="p-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
                           {formatPYG(e.monto_pyg)}
+                        </td>
+                        <td className="p-3 text-right font-mono text-xs">
+                          {Number(e.monto_brl || 0) > 0 || Number(e.monto_usd || 0) > 0 ? (
+                            <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                              {Number(e.monto_brl || 0) > 0 && (
+                                <span className="px-1.5 py-0.5 rounded bg-teal-50 dark:bg-teal-950/50 text-teal-700 dark:text-teal-300 font-bold border border-teal-200 dark:border-teal-800 text-[11px]">
+                                  R$ {Number(e.monto_brl).toLocaleString("es-PY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              )}
+                              {Number(e.monto_usd || 0) > 0 && (
+                                <span className="px-1.5 py-0.5 rounded bg-cyan-50 dark:bg-cyan-950/50 text-cyan-700 dark:text-cyan-300 font-bold border border-cyan-200 dark:border-cyan-800 text-[11px]">
+                                  US$ {Number(e.monto_usd).toLocaleString("es-PY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -773,9 +830,16 @@ export default function BovedaPage() {
             {banks.map(b => (
               <div key={b.id} className="card p-5 border hover:border-indigo-300 dark:hover:border-indigo-700 transition">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800">
-                    {b.banco}
-                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {b.alias && (
+                      <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800">
+                        {b.alias}
+                      </span>
+                    )}
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      {b.banco}
+                    </span>
+                  </div>
                   <span className="text-[10px] font-mono text-gray-400">{b.moneda}</span>
                 </div>
                 <p className="text-xl font-extrabold text-gray-900 dark:text-white font-mono">
@@ -1227,21 +1291,43 @@ export default function BovedaPage() {
             </p>
 
             {/* Resumen del Lote de Remesas Seleccionadas */}
-            <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Total a Depositar</span>
-                <span className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">
-                  {formatPYG(
-                    vaultEntries
-                      .filter((e) => selectedEntries.includes(e.id))
-                      .reduce((sum, e) => sum + Number(e.monto_pyg || 0), 0)
+            {(() => {
+              const selectedList = vaultEntries.filter((e) => selectedEntries.includes(e.id))
+              const totalPyg = selectedList.reduce((sum, e) => sum + Number(e.monto_pyg || 0), 0)
+              const totalBrl = selectedList.reduce((sum, e) => sum + Number(e.monto_brl || 0), 0)
+              const totalUsd = selectedList.reduce((sum, e) => sum + Number(e.monto_usd || 0), 0)
+
+              return (
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Total a Depositar (PYG)</span>
+                      <span className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">
+                        {formatPYG(totalPyg)}
+                      </span>
+                    </div>
+                    <span className="px-2.5 py-1 rounded-lg bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold text-xs border border-indigo-200 dark:border-indigo-800/50">
+                      {selectedEntries.length} entrega(s) de caja
+                    </span>
+                  </div>
+                  {(totalBrl > 0 || totalUsd > 0) && (
+                    <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center gap-2 flex-wrap text-xs">
+                      <span className="text-[10px] font-semibold text-slate-500">Divisas en el lote:</span>
+                      {totalBrl > 0 && (
+                        <span className="px-2 py-0.5 rounded bg-teal-50 dark:bg-teal-950/50 text-teal-700 dark:text-teal-300 font-bold border border-teal-200 dark:border-teal-800 font-mono text-[11px]">
+                          R$ {totalBrl.toLocaleString("es-PY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      )}
+                      {totalUsd > 0 && (
+                        <span className="px-2 py-0.5 rounded bg-cyan-50 dark:bg-cyan-950/50 text-cyan-700 dark:text-cyan-300 font-bold border border-cyan-200 dark:border-cyan-800 font-mono text-[11px]">
+                          US$ {totalUsd.toLocaleString("es-PY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      )}
+                    </div>
                   )}
-                </span>
-              </div>
-              <span className="px-2.5 py-1 rounded-lg bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold text-xs border border-indigo-200 dark:border-indigo-800/50">
-                {selectedEntries.length} entrega(s) de caja
-              </span>
-            </div>
+                </div>
+              )
+            })()}
 
             <div className="space-y-3 text-xs">
               {/* Selector de Cuenta Bancaria */}
@@ -1256,7 +1342,7 @@ export default function BovedaPage() {
                 >
                   {banks.map((b) => (
                     <option key={b.id} value={b.id}>
-                      {b.banco} — {b.numero_cuenta || "Sin número"} ({b.moneda || "PYG"}) · Saldo: {formatPYG(b.saldo_actual || 0)}
+                      {b.alias ? `[${b.alias}] ` : ""}{b.banco} — {b.numero_cuenta || "Sin número"} ({b.moneda || "PYG"}) · Saldo: {formatPYG(b.saldo_actual || 0)}
                     </option>
                   ))}
                 </select>

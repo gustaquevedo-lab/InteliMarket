@@ -729,7 +729,8 @@ async def create_bank_account(db: AsyncSession, data: BankAccountCreate) -> Bank
 async def list_bank_accounts(db: AsyncSession, company_id: str) -> list[BankAccount]:
     result = await db.execute(
         select(BankAccount).where(
-            BankAccount.company_id == uuid.UUID(company_id)
+            BankAccount.company_id == uuid.UUID(company_id),
+            BankAccount.moneda != "BRL",
         ).order_by(BankAccount.banco)
     )
     return list(result.scalars().all())

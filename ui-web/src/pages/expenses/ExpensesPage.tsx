@@ -2870,7 +2870,7 @@ export default function ExpensesPage() {
                           <option value="">Seleccionar cuenta bancaria...</option>
                           {bankAccounts.map(b => (
                             <option key={b.id} value={b.id}>
-                              {b.banco || "Banco"} — {b.numero_cuenta} ({formatPYG(b.saldo_actual || 0)})
+                              {b.alias ? `[${b.alias}] ` : ""}{b.banco || "Banco"} — {b.numero_cuenta} ({formatPYG(b.saldo_actual || 0)})
                             </option>
                           ))}
                         </select>
@@ -2937,7 +2937,7 @@ export default function ExpensesPage() {
                   <option value="">Sin Débito Bancario Automático (Efectivo)</option>
                   {bankAccounts.map(b => (
                     <option key={b.id} value={b.id}>
-                      {b.banco || "Banco"} — {b.numero_cuenta} ({formatPYG(b.saldo_actual || 0)})
+                      {b.alias ? `[${b.alias}] ` : ""}{b.banco || "Banco"} — {b.numero_cuenta} ({formatPYG(b.saldo_actual || 0)})
                     </option>
                   ))}
                 </select>

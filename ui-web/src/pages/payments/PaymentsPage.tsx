@@ -686,8 +686,11 @@ export default function PaymentsPage() {
               <div>
                 <label className="label-sm">Cuenta Bancaria Pagadora</label>
                 <select className="input text-xs" value={runForm.bank_account_id} onChange={e => setRunForm(f => ({ ...f, bank_account_id: e.target.value }))}>
-                  <option value="">Seleccionar cuenta...</option>
-                  {bankAccounts.map((b: any) => <option key={b.id} value={b.id}>{b.banco} — {b.numero_cuenta} ({b.moneda})</option>)}
+                  {bankAccounts.map((b: any) => (
+                    <option key={b.id} value={b.id}>
+                      {b.alias ? `[${b.alias}] ` : ""}{b.banco} — {b.numero_cuenta} ({b.moneda})
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>
@@ -738,8 +741,11 @@ export default function PaymentsPage() {
                 <div className="col-span-2">
                   <label className="label-sm">Cuenta Bancaria de Débito</label>
                   <select className="input text-xs" value={payForm.bank_account_id} onChange={e => setPayForm(f => ({ ...f, bank_account_id: e.target.value }))}>
-                    <option value="">Seleccionar cuenta...</option>
-                    {bankAccounts.map((b: any) => <option key={b.id} value={b.id}>{b.banco} — {b.numero_cuenta} ({b.moneda})</option>)}
+                    {bankAccounts.map((b: any) => (
+                      <option key={b.id} value={b.id}>
+                        {b.alias ? `[${b.alias}] ` : ""}{b.banco} — {b.numero_cuenta} ({b.moneda})
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>
