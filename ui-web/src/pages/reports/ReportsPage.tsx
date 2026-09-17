@@ -3,7 +3,7 @@ import {
   BarChart3, TrendingUp, DollarSign, ShoppingCart, Percent,
   FileSpreadsheet, FileText, RefreshCcw, Loader2, Filter, Layers, CreditCard,
   Calendar, CheckCircle2, AlertTriangle, ArrowUpRight, ArrowDownRight, UserCheck,
-  ShieldCheck, HelpCircle, ChevronRight, Download
+  ShieldCheck, HelpCircle, ChevronRight, Download, Building2, Search
 } from "lucide-react"
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -15,7 +15,7 @@ import { formatPYG } from "../../utils/format"
 
 const COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#64748b", "#14b8a6", "#f97316"]
 
-type TabKey = "utilidad_7_lineas" | "medios_pago" | "cajeras" | "categorias"
+type TabKey = "utilidad_7_lineas" | "medios_pago" | "proveedores" | "cajeras" | "categorias"
 
 export default function ReportsPage() {
   const toast = useToast()
@@ -23,6 +23,10 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [downloadingXlsx, setDownloadingXlsx] = useState(false)
+
+  // Proveedores
+  const [suppliersData, setSuppliersData] = useState<any[]>([])
+  const [supplierSearch, setSupplierSearch] = useState("")
 
   // Selector de fechas con zona horaria America/Asuncion
   const todayStr = useMemo(() => new Date().toISOString().split("T")[0], [])
@@ -73,12 +77,16 @@ export default function ReportsPage() {
   const fetchReportData = useCallback(async () => {
     setLoading(true)
     try {
-      const [execRes, catRes] = await Promise.allSettled([
+      const [execRes, catRes, supRes] = await Promise.allSettled([
         api.reports.salesExecutiveProfitability({
           fecha_desde: fechaDesde || undefined,
           fecha_hasta: fechaHasta || undefined,
         }),
         api.reports.salesByCategory({
+          fecha_desde: fechaDesde || undefined,
+          fecha_hasta: fechaHasta || undefined,
+        }),
+        api.reports.salesBySupplier({
           fecha_desde: fechaDesde || undefined,
           fecha_hasta: fechaHasta || undefined,
         }),
@@ -100,6 +108,10 @@ export default function ReportsPage() {
           { categoria: "Limpieza & Higiene", monto: 285900000, porcentaje: 6.5, items: 8400 },
         ])
       }
+
+      if (supRes.status === "fulfilled" && Array.isArray(supRes.value)) {
+        setSuppliersData(supRes.value)
+      }
     } catch (err: any) {
       toast.error("Error al cargar informe", err.message || "Error desconocido")
     } finally {
@@ -115,11 +127,19 @@ export default function ReportsPage() {
   const handleExportPdf = async () => {
     setDownloadingPdf(true)
     try {
-      await api.reports.downloadSalesExecutivePdf({
-        fecha_desde: fechaDesde || undefined,
-        fecha_hasta: fechaHasta || undefined,
-      })
-      toast.success("PDF Descargado", "Informe institucional generado con membrete fiscal")
+      if (activeTab === "proveedores") {
+        await api.reports.downloadSalesBySupplierPdf({
+          fecha_desde: fechaDesde || undefined,
+          fecha_hasta: fechaHasta || undefined,
+        })
+        toast.success("PDF Descargado", "Informe de Ventas por Proveedor generado con membrete fiscal")
+      } else {
+        await api.reports.downloadSalesExecutivePdf({
+          fecha_desde: fechaDesde || undefined,
+          fecha_hasta: fechaHasta || undefined,
+        })
+        toast.success("PDF Descargado", "Informe institucional generado con membrete fiscal")
+      }
     } catch (err: any) {
       toast.error("Error al generar PDF", err.message)
     } finally {
@@ -131,11 +151,19 @@ export default function ReportsPage() {
   const handleExportXlsx = async () => {
     setDownloadingXlsx(true)
     try {
-      await api.reports.downloadSalesExecutiveXlsx({
-        fecha_desde: fechaDesde || undefined,
-        fecha_hasta: fechaHasta || undefined,
-      })
-      toast.success("Excel Descargado", "Planilla multihistorial descargada con formato contable")
+      if (activeTab === "proveedores") {
+        await api.reports.downloadSalesBySupplierXlsx({
+          fecha_desde: fechaDesde || undefined,
+          fecha_hasta: fechaHasta || undefined,
+        })
+        toast.success("Excel Descargado", "Planilla de Ventas por Proveedor descargada")
+      } else {
+        await api.reports.downloadSalesExecutiveXlsx({
+          fecha_desde: fechaDesde || undefined,
+          fecha_hasta: fechaHasta || undefined,
+        })
+        toast.success("Excel Descargado", "Planilla multihistorial descargada con formato contable")
+      }
     } catch (err: any) {
       toast.error("Error al exportar Excel", err.message)
     } finally {
@@ -181,6 +209,41 @@ export default function ReportsPage() {
     { cajera: "María González (Boca 014)", turnos: 24, tickets: 4320, total_ventas: 496000000, descuentos: 4800000, ticket_promedio: 114814, porcentaje_ventas: 11.3 },
     { cajera: "Sandra Romero (Boca 015)", turnos: 25, tickets: 4500, total_ventas: 516000000, descuentos: 5000000, ticket_promedio: 114666, porcentaje_ventas: 11.7 },
   ]
+
+  // Memoized cálculos de proveedores
+  const filteredSuppliers = useMemo(() => {
+    if (!supplierSearch.trim()) return suppliersData
+    const q = supplierSearch.toLowerCase()
+    return suppliersData.filter((s: any) =>
+      (s.proveedor && s.proveedor.toLowerCase().includes(q)) ||
+      (s.ruc && s.ruc.toLowerCase().includes(q))
+    )
+  }, [suppliersData, supplierSearch])
+
+  const top10SuppliersChart = useMemo(() => {
+    return suppliersData.slice(0, 10).map((s: any) => ({
+      name: s.proveedor.length > 20 ? s.proveedor.substring(0, 19) + "…" : s.proveedor,
+      fullName: s.proveedor,
+      total_ventas: s.total_ventas,
+      utilidad_bruta: s.utilidad_bruta,
+    }))
+  }, [suppliersData])
+
+  const supplierStats = useMemo(() => {
+    const totalVentas = suppliersData.reduce((acc, s) => acc + (s.total_ventas || 0), 0)
+    const totalCosto = suppliersData.reduce((acc, s) => acc + (s.costo_total || 0), 0)
+    const totalUtilidad = suppliersData.reduce((acc, s) => acc + (s.utilidad_bruta || 0), 0)
+    const totalUnidades = suppliersData.reduce((acc, s) => acc + (s.unidades_vendidas || 0), 0)
+    const margenPct = totalVentas > 0 ? (totalUtilidad / totalVentas) * 100 : 0
+    return {
+      totalVentas,
+      totalCosto,
+      totalUtilidad,
+      totalUnidades,
+      margenPct,
+      count: suppliersData.length,
+    }
+  }, [suppliersData])
 
   return (
     <div className="space-y-6 animate-fade-in-up pb-16">
@@ -254,7 +317,7 @@ export default function ReportsPage() {
               className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white text-xs font-black shadow-lg shadow-red-500/20 transition cursor-pointer active:scale-95 disabled:opacity-50"
             >
               {downloadingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-              PDF Oficial
+              {activeTab === "proveedores" ? "PDF Proveedores" : "PDF Oficial"}
             </button>
             <button
               onClick={handleExportXlsx}
@@ -262,7 +325,7 @@ export default function ReportsPage() {
               className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black shadow-lg shadow-emerald-500/25 transition cursor-pointer active:scale-95 disabled:opacity-50"
             >
               {downloadingXlsx ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
-              Exportar Excel
+              {activeTab === "proveedores" ? "Excel Proveedores" : "Exportar Excel"}
             </button>
           </div>
         </div>
@@ -381,19 +444,19 @@ export default function ReportsPage() {
 
         {/* KPI 4 */}
         <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
-          <div className="h-1 w-full bg-gradient-to-r from-emerald-600 to-green-500 absolute top-0 left-0" />
+          <div className="h-1 w-full bg-gradient-to-r from-emerald-600 to-teal-600 absolute top-0 left-0" />
           <div className="flex items-center justify-between mb-1">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">7. Resultado Comercial Neto</span>
-            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700">
+            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl font-black font-mono text-emerald-700 dark:text-emerald-300">
+          <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
             {formatPYG(resumen.resultado_neto)}
           </p>
           <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span>Post Descuentos & NC</span>
-            <span className="text-emerald-700 dark:text-emerald-300 font-bold font-mono">
+            <span>Línea 7 Ejecutiva</span>
+            <span className="text-emerald-600 font-bold font-mono">
               {resumen.resultado_neto_pct ? resumen.resultado_neto_pct.toFixed(2) : resumen.margen_bruto_pct.toFixed(2)}% Neto
             </span>
           </div>
@@ -401,10 +464,10 @@ export default function ReportsPage() {
       </div>
 
       {/* ── TABS DE NAVEGACIÓN ── */}
-      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2 overflow-x-auto">
         <button
           onClick={() => setActiveTab("utilidad_7_lineas")}
-          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
+          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
             activeTab === "utilidad_7_lineas"
               ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow"
               : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
@@ -414,8 +477,19 @@ export default function ReportsPage() {
           Ventas con Utilidad (7 Líneas Ejecutivas)
         </button>
         <button
+          onClick={() => setActiveTab("proveedores")}
+          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
+            activeTab === "proveedores"
+              ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/20"
+              : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+          }`}
+        >
+          <Building2 className="w-4 h-4" />
+          Ventas por Proveedor
+        </button>
+        <button
           onClick={() => setActiveTab("medios_pago")}
-          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
+          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
             activeTab === "medios_pago"
               ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow"
               : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
@@ -426,7 +500,7 @@ export default function ReportsPage() {
         </button>
         <button
           onClick={() => setActiveTab("cajeras")}
-          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
+          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
             activeTab === "cajeras"
               ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow"
               : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
@@ -437,7 +511,7 @@ export default function ReportsPage() {
         </button>
         <button
           onClick={() => setActiveTab("categorias")}
-          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
+          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
             activeTab === "categorias"
               ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow"
               : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
@@ -645,6 +719,238 @@ export default function ReportsPage() {
             </div>
             <div className="text-[11px] text-slate-400 border-t border-slate-100 dark:border-slate-800 pt-3">
               💡 <em>Cobranzas en Reales (R$) y Dólares (US$) se concilian en gaveta al tipo de cambio de apertura.</em>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CONTENIDO TAB: VENTAS POR PROVEEDOR ── */}
+      {activeTab === "proveedores" && (
+        <div className="space-y-6">
+          {/* Top 4 KPI cards de proveedores */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+              <div className="h-1 w-full bg-gradient-to-r from-emerald-500 to-teal-500 absolute top-0 left-0" />
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Venta Proveedores</span>
+                <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600">
+                  <DollarSign className="w-4 h-4" />
+                </div>
+              </div>
+              <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+                {formatPYG(supplierStats.totalVentas)}
+              </p>
+              <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <span>{supplierStats.count} Proveedores</span>
+                <span className="text-emerald-600 font-bold font-mono">100% Facturación</span>
+              </div>
+            </div>
+
+            <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+              <div className="h-1 w-full bg-gradient-to-r from-blue-500 to-indigo-500 absolute top-0 left-0" />
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Costo Total (CMV)</span>
+                <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600">
+                  <ShoppingCart className="w-4 h-4" />
+                </div>
+              </div>
+              <p className="text-2xl font-black font-mono text-blue-600 dark:text-blue-400">
+                {formatPYG(supplierStats.totalCosto)}
+              </p>
+              <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <span>Costo de Reposición</span>
+                <span className="text-blue-600 font-bold font-mono">
+                  {supplierStats.totalVentas > 0 ? ((supplierStats.totalCosto / supplierStats.totalVentas) * 100).toFixed(1) : 0}% de venta
+                </span>
+              </div>
+            </div>
+
+            <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+              <div className="h-1 w-full bg-gradient-to-r from-amber-500 to-orange-500 absolute top-0 left-0" />
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Margen Bruto Total</span>
+                <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600">
+                  <Percent className="w-4 h-4" />
+                </div>
+              </div>
+              <p className="text-2xl font-black font-mono text-amber-600 dark:text-amber-400">
+                {formatPYG(supplierStats.totalUtilidad)}
+              </p>
+              <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <span>Margen Ponderado</span>
+                <span className="text-amber-600 font-bold font-mono">{supplierStats.margenPct.toFixed(2)}%</span>
+              </div>
+            </div>
+
+            <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+              <div className="h-1 w-full bg-gradient-to-r from-purple-500 to-pink-500 absolute top-0 left-0" />
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Volumen Despachado</span>
+                <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/50 text-purple-600">
+                  <TrendingUp className="w-4 h-4" />
+                </div>
+              </div>
+              <p className="text-2xl font-black font-mono text-purple-600 dark:text-purple-400">
+                {supplierStats.totalUnidades.toLocaleString("es-PY")}
+              </p>
+              <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <span>Unidades / Kilos</span>
+                <span className="text-purple-600 font-bold font-mono">En Salón</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Gráfico Top 10 Proveedores */}
+          {top10SuppliersChart.length > 0 && (
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                    Top 10 Proveedores por Facturación
+                  </h3>
+                  <p className="text-xs text-slate-400">Proveedores de mayor impacto en la venta del período</p>
+                </div>
+              </div>
+
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={top10SuppliersChart} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                    <XAxis type="number" tickFormatter={(v) => `${(v / 1000000).toFixed(0)}M`} />
+                    <YAxis dataKey="name" type="category" width={160} tick={{ fontSize: 11 }} />
+                    <Tooltip
+                      formatter={(value: any, name: string) => [
+                        formatPYG(Number(value)),
+                        name === "total_ventas" ? "Facturación" : "Margen Bruto",
+                      ]}
+                      labelFormatter={(_: any, payload: any) => payload?.[0]?.payload?.fullName || ""}
+                    />
+                    <Bar dataKey="total_ventas" fill="#10b981" radius={[0, 6, 6, 0]} name="Facturación Total" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {/* Tabla detallada de ventas por proveedor */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden space-y-4 p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div>
+                <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-emerald-600" />
+                  Ranking Detallado de Ventas por Proveedor
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Auditoría completa de facturación bruta, costo de reposición, margen comercial y unidades por distribuidor
+                </p>
+              </div>
+
+              {/* Filtro de búsqueda */}
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={supplierSearch}
+                    onChange={(e) => setSupplierSearch(e.target.value)}
+                    placeholder="Buscar proveedor o RUC..."
+                    className="pl-9 pr-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 w-56 sm:w-64"
+                  />
+                </div>
+                <span className="text-[11px] font-mono text-slate-400 whitespace-nowrap">
+                  {filteredSuppliers.length} de {suppliersData.length}
+                </span>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-bold text-[10px]">
+                  <tr>
+                    <th className="py-3 px-3 w-12 text-center">#</th>
+                    <th className="py-3 px-3">Proveedor / Razón Social</th>
+                    <th className="py-3 px-3">RUC</th>
+                    <th className="py-3 px-3 text-right">SKUs</th>
+                    <th className="py-3 px-3 text-right">Unidades</th>
+                    <th className="py-3 px-3 text-right">Total Ventas (Gs.)</th>
+                    <th className="py-3 px-3 text-right">Costo Total (Gs.)</th>
+                    <th className="py-3 px-3 text-right">Margen Bruto (Gs.)</th>
+                    <th className="py-3 px-3 text-right">Margen %</th>
+                    <th className="py-3 px-3 text-right">% Part.</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {filteredSuppliers.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="py-12 text-center text-slate-400">
+                        <Building2 className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                        No se encontraron ventas de proveedores para el período seleccionado.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredSuppliers.map((s: any, idx: number) => {
+                      const isTop3 = idx < 3 && !supplierSearch
+                      return (
+                        <tr key={s.supplier_id || idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
+                          <td className="py-3 px-3 text-center">
+                            <span
+                              className={`inline-flex items-center justify-center w-6 h-6 rounded-full font-black text-[10px] ${
+                                isTop3
+                                  ? idx === 0
+                                    ? "bg-amber-400/20 text-amber-600 border border-amber-400/40"
+                                    : idx === 1
+                                    ? "bg-slate-300/30 text-slate-600 border border-slate-400/40"
+                                    : "bg-amber-700/20 text-amber-800 border border-amber-700/40"
+                                  : "text-slate-400 font-mono"
+                              }`}
+                            >
+                              {idx + 1}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3">
+                            <div className="font-bold text-slate-900 dark:text-slate-100">{s.proveedor}</div>
+                          </td>
+                          <td className="py-3 px-3 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                            {s.ruc || "—"}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono text-slate-600 dark:text-slate-300">
+                            {s.skus_vendidos}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono text-slate-600 dark:text-slate-300">
+                            {Number(s.unidades_vendidas || 0).toLocaleString("es-PY")}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
+                            {formatPYG(s.total_ventas)}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono text-slate-500 dark:text-slate-400">
+                            {formatPYG(s.costo_total)}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono font-bold text-amber-600 dark:text-amber-400">
+                            {formatPYG(s.utilidad_bruta)}
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                                s.margen_pct >= 25
+                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                  : s.margen_pct >= 15
+                                  ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+                                  : "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                              }`}
+                            >
+                              {Number(s.margen_pct || 0).toFixed(2)}%
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono text-slate-500 font-bold">
+                            {Number(s.participacion_pct || 0).toFixed(2)}%
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

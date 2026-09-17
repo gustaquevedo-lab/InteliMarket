@@ -428,3 +428,77 @@ def generate_inventory_valuation_pdf(company: dict, data: dict, fecha_corte: dat
     return buffer.getvalue()
 
 
+def generate_sales_by_supplier_pdf(company: dict, items: list[dict], fecha_desde: date | None, fecha_hasta: date | None, generated_by: str = "") -> bytes:
+    from reportlab.lib.colors import HexColor
+    buffer = io.BytesIO()
+    periodo_str = f"{fecha_desde.strftime('%d/%m/%Y') if fecha_desde else 'Inicio'} al {fecha_hasta.strftime('%d/%m/%Y') if fecha_hasta else 'Hoy'}"
+    doc, styles = _base_doc(buffer, "Ventas por Proveedor", company, generated_by)
+    elements = _company_header(
+        company, styles, "Informe de Ventas por Proveedor",
+        f"Período evaluado: {periodo_str}",
+        generated_by,
+    )
+
+    if not items:
+        elements.append(Paragraph("Sin ventas registradas para el período seleccionado.", styles["Small"]))
+        _build(doc, elements)
+        return buffer.getvalue()
+
+    total_ventas = sum(it.get("total_ventas", 0) for it in items)
+    total_costo = sum(it.get("costo_total", 0) for it in items)
+    total_margen = total_ventas - total_costo
+    margen_global_pct = round((total_margen / max(total_ventas, 1)) * 100, 1)
+
+    elements.append(Paragraph("<b>1. Resumen Ejecutivo Consolidado</b>", styles["SectionTitle"]))
+    resumen_data = [
+        ("Ventas Totales Registradas", _fmt_gs(total_ventas), False),
+        ("Costo de Mercadería Vendida (CMV)", _fmt_gs(total_costo), False),
+        ("Margen Bruto Total", f"{_fmt_gs(total_margen)} ({margen_global_pct}%)", True),
+        ("Total Proveedores Activos con Venta", str(len(items)), False),
+    ]
+    elements.append(_totals_table(resumen_data, styles))
+    elements.append(Spacer(1, 4 * mm))
+
+    elements.append(Paragraph("<b>2. Ranking de Proveedores por Volumen de Venta</b>", styles["SectionTitle"]))
+    t_data = [["#", "Proveedor", "RUC", "SKUs", "Unidades", "Venta Total (Gs.)", "Margen (Gs.)", "Margen %", "Part."]]
+    for idx, it in enumerate(items[:60], 1):
+        t_data.append([
+            str(idx),
+            it.get("proveedor", "")[:28],
+            it.get("ruc", "—")[:12],
+            str(it.get("skus_vendidos", 0)),
+            f"{it.get('unidades_vendidas', 0):,.0f}",
+            _fmt_gs(it.get("total_ventas", 0)),
+            _fmt_gs(it.get("utilidad_bruta", 0)),
+            f"{it.get('margen_pct', 0):.1f}%",
+            f"{it.get('participacion_pct', 0):.1f}%",
+        ])
+
+    col_widths = [8 * mm, 46 * mm, 20 * mm, 12 * mm, 18 * mm, 28 * mm, 26 * mm, 16 * mm, 12 * mm]
+    t = Table(t_data, colWidths=col_widths)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, GRAY_LIGHT]),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
+    ]))
+    elements.append(t)
+    elements.append(Spacer(1, 4 * mm))
+
+    elements.append(Paragraph(
+        "<b>Nota:</b> Información generada en base a las ventas efectivas registradas en el POS de Extra Supermercado "
+        "y asociadas al proveedor habitual de cada producto. Horario oficial de Paraguay (America/Asuncion).",
+        styles["Small"],
+    ))
+
+    _build(doc, elements)
+    return buffer.getvalue()
+
+
+

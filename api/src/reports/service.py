@@ -229,6 +229,61 @@ async def get_sales_by_product(db: AsyncSession, company_id: str, fecha_desde: O
     ]
 
 
+async def get_sales_by_supplier(
+    db: AsyncSession,
+    company_id: str,
+    fecha_desde: Optional[date] = None,
+    fecha_hasta: Optional[date] = None,
+    limit: int = 100,
+) -> list:
+    params = {"limit": limit, "company_id": company_id}
+    where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
+    where += _build_tz_filter(fecha_desde, fecha_hasta, params, "v.fecha")
+
+    query = f"""
+        SELECT
+            COALESCE(sup.id::text, 'sin_proveedor') as supplier_id,
+            COALESCE(sup.razon_social, sup.nombre_fantasia, 'Sin Proveedor Asignado') as proveedor,
+            COALESCE(sup.ruc, '—') as ruc,
+            COUNT(DISTINCT p.id) as skus_vendidos,
+            SUM(vi.cantidad) as unidades_vendidas,
+            SUM(vi.total) as total_ventas,
+            SUM(vi.cantidad * COALESCE(vi.costo_unitario, p.costo_promedio, p.ultimo_costo, 0)) as costo_total
+        FROM sales v
+        JOIN sale_items vi ON vi.sale_id = v.id
+        JOIN products p ON p.id = vi.product_id
+        LEFT JOIN suppliers sup ON sup.id = p.supplier_id
+        WHERE {where}
+        GROUP BY sup.id, sup.razon_social, sup.nombre_fantasia, sup.ruc
+        ORDER BY total_ventas DESC
+        LIMIT :limit
+    """
+    results = (await _exec(db, query, params)).all()
+    total_general = float(sum(r["total_ventas"] or 0 for r in results)) or 1.0
+
+    items = []
+    for r in results:
+        monto = float(r["total_ventas"] or 0)
+        costo = float(r["costo_total"] or 0)
+        utilidad = monto - costo
+        margen_pct = round((utilidad / max(monto, 1.0)) * 100, 1)
+        participacion_pct = round((monto / total_general) * 100, 1)
+
+        items.append({
+            "supplier_id": r["supplier_id"],
+            "proveedor": r["proveedor"],
+            "ruc": r["ruc"],
+            "skus_vendidos": int(r["skus_vendidos"] or 0),
+            "unidades_vendidas": float(r["unidades_vendidas"] or 0),
+            "total_ventas": monto,
+            "costo_total": costo,
+            "utilidad_bruta": utilidad,
+            "margen_pct": margen_pct,
+            "participacion_pct": participacion_pct,
+        })
+    return items
+
+
 async def get_sales_by_client(db: AsyncSession, company_id: str, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
     params = {"company_id": company_id}
     where = "v.estado <> 'cancelado' AND v.company_id = :company_id"

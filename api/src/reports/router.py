@@ -91,6 +91,11 @@ async def sales_by_product(fecha_desde: date | None = Query(None), fecha_hasta: 
     return await service.get_sales_by_product(db, user["company_id"], fecha_desde, fecha_hasta, limit)
 
 
+@router.get("/sales/by-supplier")
+async def sales_by_supplier(fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), limit: int = Query(100, le=500), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.get_sales_by_supplier(db, user["company_id"], fecha_desde, fecha_hasta, limit)
+
+
 @router.get("/sales/by-client")
 async def sales_by_client(fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     return await service.get_sales_by_client(db, user["company_id"], fecha_desde, fecha_hasta)
@@ -185,6 +190,35 @@ async def export_sales_by_product(fecha_desde: date | None = Query(None), fecha_
     data = await service.get_sales_by_product(db, user["company_id"], fecha_desde, fecha_hasta, limit)
     xlsx = export_service.export_sales_by_product(data, fecha_desde, fecha_hasta)
     return _excel_response(xlsx, "top_productos.xlsx")
+
+
+@router.get("/export/sales-by-supplier.xlsx")
+async def export_sales_by_supplier_xlsx(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    limit: int = Query(200, le=1000),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    data = await service.get_sales_by_supplier(db, user["company_id"], fecha_desde, fecha_hasta, limit)
+    xlsx = export_service.export_sales_by_supplier(data, fecha_desde, fecha_hasta)
+    return _excel_response(xlsx, f"ventas_por_proveedor_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.xlsx")
+
+
+@router.get("/export/sales-by-supplier.pdf")
+async def export_sales_by_supplier_pdf(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    limit: int = Query(200, le=1000),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    company_id = user["company_id"]
+    data = await service.get_sales_by_supplier(db, company_id, fecha_desde, fecha_hasta, limit)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Auditoría Interna"
+    pdf_bytes = pdf_reports.generate_sales_by_supplier_pdf(company, data, fecha_desde, fecha_hasta, generated_by)
+    return _pdf_response(pdf_bytes, f"ventas_por_proveedor_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.pdf")
 
 
 @router.get("/export/sales-by-client")
