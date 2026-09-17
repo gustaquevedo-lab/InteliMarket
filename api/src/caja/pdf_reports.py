@@ -30,7 +30,7 @@ from reportlab.platypus import Paragraph, Spacer, Table, TableStyle, KeepTogethe
 from api.src.integrated_finance.pdf_reports import (
     _base_doc, _base_landscape_doc, _company_header, _company_landscape_header,
     _fmt_gs, _build, _totals_table,
-    RED, GRAY_LIGHT, PRIMARY_COLOR, WHITE, FONT_BOLD,
+    RED, GRAY_LIGHT, PRIMARY_COLOR, WHITE, FONT_BOLD, FONT_REGULAR,
     GRAY_DARK, GRAY_MEDIUM,
 )
 
@@ -79,21 +79,48 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
     # 0. CANALES OPERATIVOS ACTIVOS CON MOVIMIENTO (> 0) EN EL PERÍODO
     # ─────────────────────────────────────────────────────────────────────────
     CANDIDATE_CHANNELS = [
-        ("monto_efectivo", "Efec. PYG", "PYG"),
-        ("monto_efectivo_brl", "Reales (R$)", "BRL"),
-        ("monto_efectivo_usd", "Dólares ($)", "USD"),
-        ("monto_bancard", "Bancard POS", "PYG"),
-        ("monto_dinelco", "Dinelco POS", "PYG"),
-        ("monto_qr", "Cobro QR", "PYG"),
-        ("monto_pix", "PIX Plug", "BRL"),
-        ("monto_transferencia", "Transf. SIPAP", "PYG"),
-        ("monto_extra_club", "Extra Club", "PYG"),
-        ("monto_cheque", "Cheques", "PYG"),
-        ("monto_otro", "Otros Medios", "PYG"),
+        ("monto_efectivo", "Efec. PYG", "PYG", False),
+        ("monto_efectivo_brl", "Reales (R$)", "BRL", False),
+        ("monto_efectivo_usd", "Dólares ($)", "USD", False),
+        ("total_drops_gs", "(-) Retiros", "PYG", True),
+        ("monto_bancard_debito", "Bancard Déb.", "PYG", False),
+        ("monto_bancard_credito", "Bancard Créd.", "PYG", False),
+        ("monto_bancard_qr", "Bancard QR", "PYG", False),
+        ("monto_dinelco_debito", "Dinelco Déb.", "PYG", False),
+        ("monto_dinelco_credito", "Dinelco Créd.", "PYG", False),
+        ("monto_dinelco_qr", "Dinelco QR", "PYG", False),
+        ("monto_plugpay_pix", "Plug Pay PIX", "PYG", False),
+        ("monto_bancard_pix", "Bancard PIX", "PYG", False),
+        ("monto_dinelco_pix", "Dinelco PIX", "PYG", False),
+        ("monto_extra_club", "Extra Club", "PYG", False),
+        ("monto_transferencia", "Transf. SIPAP", "PYG", False),
+        ("monto_cheque", "Cheques", "PYG", False),
+        ("monto_otro", "Otros Medios", "PYG", False),
     ]
 
+    # Soporte de respaldo para registros legacy agrupados si no tienen desglose específico
+    tot_b_deb = sum(s.get("monto_bancard_debito") or 0 for s in sessiones)
+    tot_b_cred = sum(s.get("monto_bancard_credito") or 0 for s in sessiones)
+    if tot_b_deb == 0 and tot_b_cred == 0 and sum(s.get("monto_bancard") or 0 for s in sessiones) > 0:
+        CANDIDATE_CHANNELS.append(("monto_bancard", "Bancard POS", "PYG", False))
+
+    tot_d_deb = sum(s.get("monto_dinelco_debito") or 0 for s in sessiones)
+    tot_d_cred = sum(s.get("monto_dinelco_credito") or 0 for s in sessiones)
+    if tot_d_deb == 0 and tot_d_cred == 0 and sum(s.get("monto_dinelco") or 0 for s in sessiones) > 0:
+        CANDIDATE_CHANNELS.append(("monto_dinelco", "Dinelco POS", "PYG", False))
+
+    tot_b_qr = sum(s.get("monto_bancard_qr") or 0 for s in sessiones)
+    tot_d_qr = sum(s.get("monto_dinelco_qr") or 0 for s in sessiones)
+    if tot_b_qr == 0 and tot_d_qr == 0 and sum(s.get("monto_qr") or 0 for s in sessiones) > 0:
+        CANDIDATE_CHANNELS.append(("monto_qr", "Cobro QR", "PYG", False))
+
+    tot_p_pix = sum(s.get("monto_plugpay_pix") or 0 for s in sessiones)
+    tot_b_pix = sum(s.get("monto_bancard_pix") or 0 for s in sessiones)
+    if tot_p_pix == 0 and tot_b_pix == 0 and sum(s.get("monto_pix") or 0 for s in sessiones) > 0:
+        CANDIDATE_CHANNELS.append(("monto_pix", "Cobro PIX", "PYG", False))
+
     active_channels = []
-    for field_key, label, curr in CANDIDATE_CHANNELS:
+    for field_key, label, curr, is_ded in CANDIDATE_CHANNELS:
         tot_val = sum(s.get(field_key) or 0 for s in sessiones)
         if tot_val > 0:
             active_channels.append({
@@ -101,6 +128,7 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
                 "label": label,
                 "currency": curr,
                 "total": tot_val,
+                "is_deduction": is_ded,
             })
 
     # Si por alguna razón no hubiera ningún medio (período vacío), al menos dejamos Efectivo PYG
@@ -110,9 +138,12 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
             "label": "Efec. PYG",
             "currency": "PYG",
             "total": 0,
+            "is_deduction": False,
         })
 
     # Totales acumulados
+    total_facturado_periodo = sum(s.get("total_facturado_pyg") or 0 for s in sessiones)
+    total_drops_periodo = sum(s.get("total_drops_gs") or 0 for s in sessiones)
     total_esperado = sum(s.get("monto_cierre_esperado") or 0 for s in sessiones)
     total_contado = sum((s.get("monto_total") if s.get("monto_total") is not None else s.get("monto_cierre")) or 0 for s in sessiones)
     total_diferencia = total_contado - total_esperado
@@ -135,21 +166,21 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
 
     kpi_data = [
         [
-            Paragraph("<font size=6 color='#64748B'><b>TOTAL RENDIDO (DECLARADO/AUDITADO)</b></font><br/>"
-                      f"<font size=10.5 color='#0F172A'><b>{_fmt_gs(total_contado)}</b></font><br/>"
-                      "<font size=5.8 color='#94A3B8'>Efectivo físico + Comprobantes</font>", styles["Normal"]),
-            Paragraph("<font size=6 color='#64748B'><b>TOTAL ESPERADO SISTEMA</b></font><br/>"
+            Paragraph("<font size=6 color='#64748B'><b>1. TOTAL FACTURADO (VENTAS)</b></font><br/>"
+                      f"<font size=10.5 color='#0F172A'><b>{_fmt_gs(total_facturado_periodo)}</b></font><br/>"
+                      "<font size=5.8 color='#94A3B8'>Ventas brutas del período</font>", styles["Normal"]),
+            Paragraph("<font size=6 color='#64748B'><b>2. (-) RETIROS / CASH DROPS</b></font><br/>"
+                      f"<font size=10.5 color='{'#DC2626' if total_drops_periodo > 0 else '#0F172A'}'><b>{f'-{_fmt_gs(total_drops_periodo)}' if total_drops_periodo > 0 else '0 Gs.'}</b></font><br/>"
+                      f"<font size=5.8 color='#94A3B8'>Sangrías remitidas a Bóveda</font>", styles["Normal"]),
+            Paragraph("<font size=6 color='#64748B'><b>3. (=) TOTAL ESPERADO EN CIERRE</b></font><br/>"
                       f"<font size=10.5 color='#0F172A'><b>{_fmt_gs(total_esperado)}</b></font><br/>"
-                      "<font size=5.8 color='#94A3B8'>Total facturado neto - Retiros</font>", styles["Normal"]),
-            Paragraph("<font size=6 color='#64748B'><b>DIFERENCIA NETA CONSOLIDADA</b></font><br/>"
+                      f"<font size=5.8 color='#94A3B8'>Efectivo gaveta + Comprobantes</font>", styles["Normal"]),
+            Paragraph("<font size=6 color='#64748B'><b>4. TOTAL RENDIDO AUDITADO</b></font><br/>"
+                      f"<font size=10.5 color='#0F172A'><b>{_fmt_gs(total_contado)}</b></font><br/>"
+                      f"<font size=5.8 color='#94A3B8'>Efectivo físico + Comprobantes</font>", styles["Normal"]),
+            Paragraph("<font size=6 color='#64748B'><b>5. DIFERENCIA NETA CONSOLIDADA</b></font><br/>"
                       f"<font size=10.5 color='{dif_color}'><b>{card_dif_text}</b></font><br/>"
                       f"<font size=5.8 color='{dif_color}'><b>{dictamen_global}</b></font>", styles["Normal"]),
-            Paragraph("<font size=6 color='#64748B'><b>COMPROBANTES NO EFECTIVO</b></font><br/>"
-                      f"<font size=10.5 color='#1E40AF'><b>{_fmt_gs(sum_electronico_total)}</b></font><br/>"
-                      "<font size=5.8 color='#94A3B8'>Bancard + QR + PIX + Club + etc.</font>", styles["Normal"]),
-            Paragraph("<font size=6 color='#64748B'><b>AUDITORÍA DE TERMINALES</b></font><br/>"
-                      f"<font size=10.5 color='#0F172A'><b>{len(sessiones)} Turnos</b></font><br/>"
-                      f"<font size=5.8 color='{'#059669' if total_pendientes == 0 else '#D97706'}'><b>{total_verificadas} verificadas en Bóveda / {total_pendientes} pendientes</b></font>", styles["Normal"]),
         ]
     ]
     t_kpis = Table(kpi_data, colWidths=[54.6 * mm, 54.6 * mm, 54.6 * mm, 54.6 * mm, 54.6 * mm])
@@ -174,15 +205,22 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
     # ─────────────────────────────────────────────────────────────────────────
     res_medios_cells = []
     for ch in active_channels:
-        if ch["currency"] == "BRL":
-            v_str = f"R$ {ch['total']:,.2f}"
-        elif ch["currency"] == "USD":
-            v_str = f"US$ {ch['total']:,.2f}"
+        if ch["field"] == "monto_efectivo_brl":
+            tot_brl = sum(s.get("monto_efectivo_brl") or 0 for s in sessiones)
+            tot_brl_gs = sum(s.get("monto_efectivo_brl_gs") or 0 for s in sessiones)
+            v_str = f"R$ {tot_brl:,.2f} (₲ {_fmt_val(tot_brl_gs)})"
+        elif ch["field"] == "monto_efectivo_usd":
+            tot_usd = sum(s.get("monto_efectivo_usd") or 0 for s in sessiones)
+            tot_usd_gs = sum(s.get("monto_efectivo_usd_gs") or 0 for s in sessiones)
+            v_str = f"US$ {tot_usd:,.2f} (₲ {_fmt_val(tot_usd_gs)})"
+        elif ch.get("is_deduction"):
+            v_str = f"-{_fmt_gs(ch['total'])}"
         else:
             v_str = _fmt_gs(ch["total"])
+        color_val = "#DC2626" if ch.get("is_deduction") else "#0F172A"
         res_medios_cells.append(
-            Paragraph(f"<font size=5.8 color='#64748B'>{ch['label']}:</font> "
-                      f"<font size=6.5 color='#0F172A'><b>{v_str}</b></font>", styles["Normal"])
+            Paragraph(f"<font size=5.5 color='#64748B'>{ch['label']}:</font> "
+                      f"<font size=6.2 color='{color_val}'><b>{v_str}</b></font>", styles["Normal"])
         )
 
     w_cell = (273.0 / len(res_medios_cells)) * mm
@@ -208,34 +246,53 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
     head_center = styles.get("CellHeadCenter", styles["Normal"])
     cell_text = styles.get("CellText", styles["Normal"])
     cell_bold = styles.get("CellTextBold", styles["Normal"])
-    cell_num = styles.get("CellNum", styles["MetaRight"])
-    cell_num_bold = styles.get("CellNumBold", styles["MetaRight"])
+
+    num_ch = len(active_channels)
+    if num_ch <= 6:
+        font_sz = 6.2
+        leading_sz = 7.8
+        pad_lr = 1.6
+    elif num_ch <= 8:
+        font_sz = 5.8
+        leading_sz = 7.2
+        pad_lr = 1.2
+    elif num_ch <= 10:
+        font_sz = 5.4
+        leading_sz = 6.8
+        pad_lr = 1.0
+    else:
+        font_sz = 4.8
+        leading_sz = 6.0
+        pad_lr = 0.8
+
+    t_cell_num = ParagraphStyle("TCellNum", fontName=FONT_REGULAR, fontSize=font_sz, leading=leading_sz, textColor=GRAY_DARK, alignment=TA_RIGHT)
+    t_cell_num_bold = ParagraphStyle("TCellNumBold", fontName=FONT_BOLD, fontSize=font_sz, leading=leading_sz, textColor=GRAY_DARK, alignment=TA_RIGHT)
+    t_cell_head_r = ParagraphStyle("TCellHeadR", fontName=FONT_BOLD, fontSize=font_sz, leading=leading_sz, textColor=HexColor("#0F172A"), alignment=TA_RIGHT)
+    t_cell_center = ParagraphStyle("TCellCenter", fontName=FONT_REGULAR, fontSize=font_sz, leading=leading_sz, textColor=GRAY_DARK, alignment=TA_CENTER)
 
     # Columnas fijas iniciales y finales:
-    # Caja (16mm), Cajero/a Responsable (44mm), [Canales Activos], Total Rendido (26mm), Esperado (26mm), Diferencia (24mm), Dictamen (22mm)
-    FIXED_START_W = 16.0 + 44.0  # 60mm
-    FIXED_END_W = 26.0 + 26.0 + 24.0 + 22.0  # 98mm
-    TOTAL_FIXED_W = FIXED_START_W + FIXED_END_W  # 158mm
-    AVAIL_CH_W = 273.0 - TOTAL_FIXED_W  # 115mm para canales dinámicos
-    each_ch_w = AVAIL_CH_W / len(active_channels)
+    # Caja (14mm), Cajero/a (38mm) = 52mm
+    # Total Rend. (23mm), Esperado (23mm), Diferencia (22mm), Dictamen (18mm) = 86mm
+    # Total fijo = 138mm. Ancho disponible para canales = 273 - 138 = 135mm
+    each_ch_w = 135.0 / num_ch
 
     header_row = [
         Paragraph("<b>Caja</b>", head_left),
         Paragraph("<b>Cajero/a Responsable</b>", head_left),
     ]
-    col_widths = [16 * mm, 44 * mm]
+    col_widths = [14 * mm, 38 * mm]
 
     for ch in active_channels:
-        header_row.append(Paragraph(f"<b>{ch['label']}</b>", head_right))
+        header_row.append(Paragraph(f"<b>{ch['label']}</b>", t_cell_head_r))
         col_widths.append(each_ch_w * mm)
 
     header_row.extend([
-        Paragraph("<b>Total Rend.</b>", head_right),
-        Paragraph("<b>Esperado</b>", head_right),
-        Paragraph("<b>Diferencia</b>", head_right),
+        Paragraph("<b>Total Rend.</b>", t_cell_head_r),
+        Paragraph("<b>Esperado</b>", t_cell_head_r),
+        Paragraph("<b>Diferencia</b>", t_cell_head_r),
         Paragraph("<b>Dictamen</b>", head_center),
     ])
-    col_widths.extend([26 * mm, 26 * mm, 24 * mm, 22 * mm])
+    col_widths.extend([23 * mm, 23 * mm, 22 * mm, 18 * mm])
 
     table_rows = [header_row]
 
@@ -246,8 +303,8 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
         ("BOTTOMPADDING", (0, 0), (-1, 0), 3),
         ("TOPPADDING", (0, 0), (-1, 0), 3),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 1.5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 1.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), pad_lr),
+        ("RIGHTPADDING", (0, 0), (-1, -1), pad_lr),
     ]
 
     for idx, s in enumerate(sessiones, start=1):
@@ -266,37 +323,46 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
             badge_color = "#DC2626" if req_rev else "#64748B"
 
         caja_cell = Paragraph(f"<b>{s.get('register_nombre') or 'Caja'}</b>", cell_bold)
-        cajero_txt = f"{s.get('cajero_nombre') or '—'}" + (" <font color='#059669' size=5.5><b>✓VERIF</b></font>" if is_verificada else " <font color='#64748B' size=5.5>⏳PEND</font>")
+        cajero_txt = f"{s.get('cajero_nombre') or '—'}" + (" <font color='#059669' size=5><b>✓VERIF</b></font>" if is_verificada else " <font color='#64748B' size=5>⏳PEND</font>")
         cajero_cell = Paragraph(cajero_txt, cell_text)
 
         row_cells = [caja_cell, cajero_cell]
 
         for ch in active_channels:
             f_key = ch["field"]
-            cur = ch["currency"]
-            if cur == "BRL":
+            is_deduction = ch.get("is_deduction", False)
+            if f_key == "monto_efectivo_brl":
                 val_brl = s.get("monto_efectivo_brl") or 0
                 val_gs = s.get("monto_efectivo_brl_gs") or (val_brl * s.get("tasa_brl", 1130))
                 if val_brl > 0:
-                    c_p = Paragraph(f"<b>R$ {val_brl:,.2f}</b><br/><font size=5.2 color='#64748B'>(₲ {val_gs:,.0f})</font>", cell_num)
+                    c_p = Paragraph(f"<b>R$ {val_brl:,.2f}</b><br/><font size=4.8 color='#64748B'>(₲ {_fmt_val(val_gs)})</font>", t_cell_num)
                 else:
-                    c_p = Paragraph("—", styles.get("CellHeadCenter", styles["Normal"]))
-            elif cur == "USD":
+                    c_p = Paragraph("—", t_cell_center)
+            elif f_key == "monto_efectivo_usd":
                 val_usd = s.get("monto_efectivo_usd") or 0
                 val_gs = s.get("monto_efectivo_usd_gs") or (val_usd * s.get("tasa_usd", 5840))
                 if val_usd > 0:
-                    c_p = Paragraph(f"<b>US$ {val_usd:,.2f}</b><br/><font size=5.2 color='#64748B'>(₲ {val_gs:,.0f})</font>", cell_num)
+                    c_p = Paragraph(f"<b>US$ {val_usd:,.2f}</b><br/><font size=4.8 color='#64748B'>(₲ {_fmt_val(val_gs)})</font>", t_cell_num)
                 else:
-                    c_p = Paragraph("—", styles.get("CellHeadCenter", styles["Normal"]))
+                    c_p = Paragraph("—", t_cell_center)
+            elif is_deduction:
+                v = s.get(f_key) or 0
+                if v > 0:
+                    c_p = Paragraph(f"<font color='#DC2626'><b>-{_fmt_val(v)}</b></font>", t_cell_num)
+                else:
+                    c_p = Paragraph("—", t_cell_center)
             else:
                 v = s.get(f_key) or 0
-                c_p = Paragraph(f"<b>{_fmt_val(v)}</b>" if v > 0 else "—", cell_num if v > 0 else styles.get("CellHeadCenter", styles["Normal"]))
+                if v > 0:
+                    c_p = Paragraph(f"<b>{_fmt_val(v)}</b>", t_cell_num)
+                else:
+                    c_p = Paragraph("—", t_cell_center)
             row_cells.append(c_p)
 
-        cont_cell = Paragraph(f"<b>{_fmt_val(cont)}</b>", cell_num_bold)
-        esp_cell = Paragraph(_fmt_val(esp), cell_num)
-        dif_cell = Paragraph(f"<font color='{badge_color}'><b>{dif_txt}</b></font>", cell_num_bold)
-        dict_cell = Paragraph(f"<font size=6 color='{badge_color}'><b>{estado_badge}</b></font>", styles.get("CellHeadCenter", styles["Normal"]))
+        cont_cell = Paragraph(f"<b>{_fmt_val(cont)}</b>", t_cell_num_bold)
+        esp_cell = Paragraph(_fmt_val(esp), t_cell_num)
+        dif_cell = Paragraph(f"<font color='{badge_color}'><b>{dif_txt}</b></font>", t_cell_num_bold)
+        dict_cell = Paragraph(f"<font size=5.5 color='{badge_color}'><b>{estado_badge}</b></font>", styles.get("CellHeadCenter", styles["Normal"]))
 
         row_cells.extend([cont_cell, esp_cell, dif_cell, dict_cell])
         table_rows.append(row_cells)
@@ -316,24 +382,27 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
     tot_cells = [tot_label, ""]
     for ch in active_channels:
         f_key = ch["field"]
-        cur = ch["currency"]
-        if cur == "BRL":
+        is_deduction = ch.get("is_deduction", False)
+        if f_key == "monto_efectivo_brl":
             tot_brl = sum(s.get("monto_efectivo_brl") or 0 for s in sessiones)
             tot_brl_gs = sum(s.get("monto_efectivo_brl_gs") or 0 for s in sessiones)
-            p_tot = Paragraph(f"<b>R$ {tot_brl:,.2f}</b><br/><font size=5.2 color='#64748B'>(₲ {tot_brl_gs:,.0f})</font>", head_right)
-        elif cur == "USD":
+            p_tot = Paragraph(f"<b>R$ {tot_brl:,.2f}</b><br/><font size=4.8 color='#64748B'>(₲ {_fmt_val(tot_brl_gs)})</font>", t_cell_head_r)
+        elif f_key == "monto_efectivo_usd":
             tot_usd = sum(s.get("monto_efectivo_usd") or 0 for s in sessiones)
             tot_usd_gs = sum(s.get("monto_efectivo_usd_gs") or 0 for s in sessiones)
-            p_tot = Paragraph(f"<b>US$ {tot_usd:,.2f}</b><br/><font size=5.2 color='#64748B'>(₲ {tot_usd_gs:,.0f})</font>", head_right)
+            p_tot = Paragraph(f"<b>US$ {tot_usd:,.2f}</b><br/><font size=4.8 color='#64748B'>(₲ {_fmt_val(tot_usd_gs)})</font>", t_cell_head_r)
+        elif is_deduction:
+            tot_drop = sum(s.get(f_key) or 0 for s in sessiones)
+            p_tot = Paragraph(f"<font color='#DC2626'><b>-{_fmt_val(tot_drop)}</b></font>", t_cell_head_r) if tot_drop > 0 else Paragraph("0", t_cell_head_r)
         else:
-            tot_pyg = sum(s.get(f_key) or 0 for s in sessiones)
-            p_tot = Paragraph(f"<b>{_fmt_val(tot_pyg)}</b>", head_right)
+            tot_val = sum(s.get(f_key) or 0 for s in sessiones)
+            p_tot = Paragraph(f"<b>{_fmt_val(tot_val)}</b>", t_cell_head_r)
         tot_cells.append(p_tot)
 
-    tot_cont = Paragraph(f"<b>{_fmt_val(total_contado)}</b>", head_right)
-    tot_esp = Paragraph(f"<b>{_fmt_val(total_esperado)}</b>", head_right)
-    tot_dif = Paragraph(f"<b>{tot_dif_txt}</b>", head_right)
-    tot_dict = Paragraph("<font size=6><b>TOTAL</b></font>", head_center)
+    tot_cont = Paragraph(f"<b>{_fmt_val(total_contado)}</b>", t_cell_head_r)
+    tot_esp = Paragraph(f"<b>{_fmt_val(total_esperado)}</b>", t_cell_head_r)
+    tot_dif = Paragraph(f"<b>{tot_dif_txt}</b>", t_cell_head_r)
+    tot_dict = Paragraph("<font size=5.5><b>TOTAL</b></font>", head_center)
 
     tot_cells.extend([tot_cont, tot_esp, tot_dif, tot_dict])
 
