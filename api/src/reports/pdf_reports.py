@@ -428,7 +428,7 @@ def generate_inventory_valuation_pdf(company: dict, data: dict, fecha_corte: dat
     return buffer.getvalue()
 
 
-def generate_sales_by_supplier_pdf(company: dict, items: list[dict], fecha_desde: date | None, fecha_hasta: date | None, generated_by: str = "") -> bytes:
+def generate_sales_by_supplier_pdf(company: dict, items: list[dict], fecha_desde: date | None = None, fecha_hasta: date | None = None, generated_by: str = "") -> bytes:
     from reportlab.lib.colors import HexColor
     buffer = io.BytesIO()
     periodo_str = f"{fecha_desde.strftime('%d/%m/%Y') if fecha_desde else 'Inicio'} al {fecha_hasta.strftime('%d/%m/%Y') if fecha_hasta else 'Hoy'}"
@@ -456,7 +456,7 @@ def generate_sales_by_supplier_pdf(company: dict, items: list[dict], fecha_desde
         ("Margen Bruto Total", f"{_fmt_gs(total_margen)} ({margen_global_pct}%)", True),
         ("Total Proveedores Activos con Venta", str(len(items)), False),
     ]
-    elements.append(_totals_table(resumen_data, styles))
+    elements.append(_totals_table(resumen_data))
     elements.append(Spacer(1, 4 * mm))
 
     elements.append(Paragraph("<b>2. Ranking de Proveedores por Volumen de Venta</b>", styles["SectionTitle"]))
