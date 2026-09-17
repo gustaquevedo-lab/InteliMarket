@@ -90,6 +90,7 @@ from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseOrderItem,
 from api.src.customers.models import Customer
 from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment, BankAccount, BankTransaction, SupplierCreditNote, SupplierReturn, PayrollMovement
 from api.src.petty_cash.models import Expense, ExpenseCategory
+from api.src.fixed_assets.models import FixedAsset
 from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 from api.src.products.models import Product
 from api.src.smart_pricing.models import TieredPrice
