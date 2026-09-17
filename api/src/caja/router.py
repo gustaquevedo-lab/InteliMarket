@@ -18,7 +18,7 @@ from api.src.caja.schemas import (
     ConfirmHandoffRequest, DepositVaultEntriesRequest, RejectVaultDepositRequest,
     ConfirmCashDropRequest, RejectCashDropRequest, VoidCashDropRequest,
     CreateTreasuryRemittanceRequest, ReceiveTreasuryRemittanceRequest,
-    DepositVaultToBankRequest, SavePunteoAuditRequest,
+    DepositVaultToBankRequest, DepositVaultAmountToBankRequest, SavePunteoAuditRequest,
     PaymentMethodBankMappingUpdate, PaymentMethodBankMappingResponse,
     CashShortageConfigUpdate, CashShortageConfigResponse,
     ResolveCashShortageRequest, IncorporateSessionVaultAndBanksRequest,
@@ -823,6 +823,29 @@ async def deposit_vault_to_bank(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/vault/deposit-amount-to-bank")
+async def deposit_vault_amount_to_bank(
+    body: DepositVaultAmountToBankRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        return await service.deposit_vault_amount_to_bank(
+            db,
+            user["company_id"],
+            user.get("id"),
+            str(body.bank_account_id),
+            body.monto_pyg,
+            body.numero_boleta,
+            body.transportadora,
+            body.fecha_deposito,
+            body.observaciones,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 
 # ── Mapeo de Cuentas Bancarias para Medios de Pago Electrónicos ────────

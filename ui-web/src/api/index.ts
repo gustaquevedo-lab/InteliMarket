@@ -1166,6 +1166,180 @@ export interface ConsolidatedDashboard { total_branches: number; total_ventas: n
 export type ApiError = { detail: string; code?: string }
 
 // ========== API CLIENT ==========
+
+export interface Supplier360Response {
+  supplier: {
+    id: string
+    razon_social: string
+    ruc: string
+    ci?: string
+    telefono?: string
+    email?: string
+    direccion?: string
+    ciudad?: string
+    contacto_nombre?: string
+    contacto_telefono?: string
+    contacto_email?: string
+    banco?: string
+    cuenta_bancaria?: string
+    plazo_pago_dias: number
+    plazo_entrega_promedio: number
+    rating: number
+    tipo_proveedor: string
+    moneda_default: string
+    condicion_iva: string
+    activo: boolean
+    notas?: string
+  }
+  kpis: {
+    deuda_total_facturas: number
+    deuda_vencida: number
+    deuda_al_dia: number
+    facturas_pendientes_count: number
+    facturas_vencidas_count: number
+    total_facturas_historico: number
+    cheques_diferidos_pendientes_monto: number
+    cheques_diferidos_pendientes_count: number
+    cheques_compensados_monto: number
+    exposicion_financiera_total: number
+    dpo_promedio_dias: number
+    total_compras_historico: number
+    total_ordenes_compra: number
+    otif_rate: number
+    stock_unidades_total: number
+    stock_valorizado_costo: number
+    stock_valorizado_venta: number
+    total_productos_suministrados: number
+    ventas_sellout_monto: number
+    ventas_sellout_unidades: number
+    ganancia_bruta_monto: number
+    margen_bruto_pct: number
+    reclamos_nc_pendientes_monto: number
+    reclamos_nc_resueltos_monto: number
+    reclamos_nc_total_monto: number
+  }
+  aging_buckets: {
+    vencido: number
+    dias_1_30: number
+    dias_31_60: number
+    dias_mas_60: number
+  }
+  facturas: Array<{
+    id: string
+    numero_factura: string
+    timbrado?: string
+    fecha_emision: string
+    fecha_vencimiento: string
+    subtotal: number
+    total: number
+    saldo_pendiente: number
+    moneda: string
+    estado: string
+    condicion: string
+    dias_vencido: number
+    es_vencida: boolean
+    bloqueada_para_pago: boolean
+    monto_retenido_nc: number
+    requiere_nc: boolean
+  }>
+  cheques: Array<{
+    id: string
+    numero: string
+    banco_emisor: string
+    beneficiario: string
+    monto: number
+    moneda: string
+    fecha_emision: string
+    fecha_pago: string
+    diferido: boolean
+    estado: string
+    dias_restantes: number
+    concepto?: string
+  }>
+  pagos_historial: Array<{
+    id: string
+    invoice_id: string
+    invoice_numero: string
+    fecha_pago: string
+    monto: number
+    moneda: string
+    payment_method: string
+    referencia?: string
+    estado: string
+  }>
+  ordenes_compra: Array<{
+    id: string
+    numero: string
+    fecha: string
+    fecha_entrega_estimada?: string
+    estado: string
+    total: number
+    moneda: string
+    condiciones_pago?: string
+    observaciones?: string
+  }>
+  recepciones: Array<{
+    id: string
+    numero: string
+    fecha: string
+    total: number
+    estado: string
+    proveedor_ref?: string
+    requiere_revision: boolean
+    motivo_revision?: string
+    observaciones?: string
+  }>
+  reclamos_nc: Array<{
+    id: string
+    numero_solicitud: string
+    invoice_id?: string
+    invoice_numero?: string
+    tipo_motivo: string
+    monto_reclamado: number
+    estado: string
+    nc_recibida_numero?: string
+    nc_recibida_monto: number
+    nc_recibida_fecha?: string
+    observaciones?: string
+  }>
+  productos: Array<{
+    id: string
+    nombre: string
+    sku: string
+    codigo_barra: string
+    costo_promedio: number
+    ultimo_costo: number
+    precio_venta: number
+    stock_actual: number
+    stock_minimo: number
+    estado_stock: "quiebre" | "bajo" | "optimo"
+    valor_stock_costo: number
+    valor_stock_venta: number
+    margen_unitario_pct: number
+    unidades_vendidas: number
+    ventas_gs: number
+    ganancia_bruta_gs: number
+  }>
+  top_vendidos: Array<any>
+  evolucion_mensual: Array<{
+    mes: string
+    label: string
+    compras: number
+    pagos: number
+  }>
+  informe_gerencial: {
+    resumen_ejecutivo: string
+    salud_deuda: string
+    diagnostico_deuda: string
+    evaluacion_operativa: string
+    diagnostico_operativo: string
+    evaluacion_rentabilidad: string
+    diagnostico_rentabilidad: string
+    recomendaciones: string[]
+    fecha_auditoria: string
+  }
+}
+
 export const api = {
   auth: {
     login: (data: { email: string; password: string }) => client.post<{ access_token: string; refresh_token: string }>("/v1/auth/login", data),
@@ -1631,6 +1805,7 @@ export const api = {
     entries: (params?: { estado?: string }) => client.get<VaultEntry[]>("/v1/vault/entries", params as any),
     deposit: (data: { entry_ids: string[]; bank_transaction_id?: string }) => client.post<{ deposited?: boolean; depositadas?: number; pending_approval?: boolean; request_id?: string; monto_total_pyg?: number }>("/v1/vault/deposit", data),
     depositToBank: (data: { entry_ids: string[]; bank_account_id: string; numero_boleta: string; transportadora?: string; fecha_deposito?: string; observaciones?: string }) => client.post<any>("/v1/vault/deposit-to-bank", data),
+    depositAmountToBank: (data: { monto_pyg: number; bank_account_id: string; numero_boleta: string; transportadora?: string; fecha_deposito?: string; observaciones?: string }) => client.post<any>("/v1/vault/deposit-amount-to-bank", data),
     depositApprovals: {
       list: (estado?: string) => client.get<{ id: string; entry_ids: string[]; monto_total_pyg: number; estado: string; aprobado_supervisor_id: string | null; aprobado_gerente_id: string | null; created_at: string }[]>("/v1/vault/deposit-approvals", estado ? { estado } : undefined),
       approve: (id: string) => client.post<{ success: boolean; completo: boolean }>(`/v1/vault/deposit-approvals/${id}/approve`, {}),
@@ -1841,6 +2016,12 @@ export const api = {
     evaluateSupplier: (id: string, data: { company_id: string; puntaje_calidad?: number; puntaje_entrega?: number; puntaje_precio?: number; puntaje_atencion?: number; comentarios?: string }) =>
       client.post<any>(`/v1/suppliers/${id}/evaluate`, data),
     getSupplierEvaluations: (id: string) => client.get<any[]>(`/v1/suppliers/${id}/evaluations`),
+    getSupplier360: (supplierId: string) =>
+      client.get<Supplier360Response>(`/v1/purchases/suppliers/${supplierId}/360`, { company_id: COMPANY_ID }),
+    downloadSupplier360Pdf: (supplierId: string, razonSocial?: string) => {
+      const clean = (razonSocial || "proveedor").replace(/\s+/g, "_")
+      return downloadAuthenticated(`/v1/purchases/suppliers/${supplierId}/360/pdf?company_id=${COMPANY_ID}`, {}, `Informe_360_${clean}.pdf`)
+    },
     getSupplierPerformance: (id: string) => client.get<{ supplier_id: string; razon_social: string; total_orders: number; total_spent: number; on_time_rate: number | null; avg_quality_score: number | null; avg_delivery_score: number | null; avg_price_score: number | null; avg_attention_score: number | null; overall_rating: number | null; last_evaluation_date: string | null }>(`/v1/suppliers/${id}/performance`),
     getSupplierPriceHistory: (id: string) => client.get<{ product_id: string; product_nombre: string; sku: string; purchase_order_id: string; fecha_orden: string; precio_unitario: number; cantidad: number }[]>(`/v1/suppliers/${id}/price-history`),
     requisitions: {

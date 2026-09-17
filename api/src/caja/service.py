@@ -2937,6 +2937,164 @@ async def deposit_vault_to_bank(
     }
 
 
+async def deposit_vault_amount_to_bank(
+    db: AsyncSession,
+    company_id: str,
+    user_id: str | None,
+    bank_account_id: str,
+    monto_pyg: Decimal | float | int,
+    numero_boleta: str,
+    transportadora: str | None = None,
+    fecha_deposito_str: str | None = None,
+    observaciones: str | None = None,
+) -> dict:
+    cid = uuid.UUID(company_id)
+    bid = uuid.UUID(bank_account_id)
+    monto_dep = Decimal(str(monto_pyg))
+    if monto_dep <= Decimal("0"):
+        raise ValueError("El monto a depositar debe ser mayor a 0")
+
+    # 1. Verificar cuenta bancaria destino
+    acc_res = await db.execute(select(BankAccount).where(BankAccount.id == bid, BankAccount.company_id == cid))
+    acc = acc_res.scalar_one_or_none()
+    if not acc:
+        raise ValueError("Cuenta bancaria destino no encontrada")
+
+    # 2. Verificar saldo disponible en bóveda
+    saldo_boveda_res = await db.execute(
+        select(func.coalesce(func.sum(VaultEntry.monto_pyg), 0))
+        .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda")
+    )
+    saldo_boveda = Decimal(str(saldo_boveda_res.scalar() or 0))
+    if monto_dep > saldo_boveda:
+        raise ValueError(
+            f"El monto a depositar (₲ {monto_dep:,.0f}) supera el saldo disponible en bóveda (₲ {saldo_boveda:,.0f})"
+        )
+
+    # Fecha del depósito
+    f_dep = date.today()
+    if fecha_deposito_str:
+        try:
+            f_dep = date.fromisoformat(fecha_deposito_str.split("T")[0])
+        except Exception:
+            f_dep = date.today()
+
+    # 3. Crear BankTransaction
+    desc = f"Depósito Bóveda a Cuenta - Boleta #{numero_boleta}" + (f" ({transportadora})" if transportadora else "")
+    if observaciones:
+        desc += f" - {observaciones}"
+
+    bank_tx = BankTransaction(
+        company_id=cid,
+        bank_account_id=acc.id,
+        fecha=f_dep,
+        tipo="deposito",
+        monto=monto_dep,
+        moneda="PYG",
+        categoria="deposito_recaudacion_caja",
+        descripcion=desc,
+        referencia=numero_boleta,
+        conciliado=False,
+    )
+    db.add(bank_tx)
+    await db.flush()
+    await db.refresh(bank_tx)
+
+    # 4. Acreditar saldo en la cuenta bancaria
+    acc.saldo_actual = (acc.saldo_actual or Decimal("0")) + monto_dep
+
+    # 5. Registrar salida en Libro Diario de Bóveda (CashRegisterMovement)
+    reg_res = await db.execute(
+        select(CashRegister).where(CashRegister.company_id == cid).order_by(CashRegister.activo.desc(), CashRegister.created_at.asc()).limit(1)
+    )
+    main_reg = reg_res.scalar_one_or_none()
+    if main_reg:
+        user_nombre = "Tesorería"
+        if user_id:
+            u_res = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+            u_obj = u_res.scalar_one_or_none()
+            if u_obj:
+                user_nombre = u_obj.nombre or u_obj.email or "Tesorería"
+
+        db.add(CashRegisterMovement(
+            company_id=cid,
+            register_id=main_reg.id,
+            tipo="retiro",
+            monto=monto_dep,
+            moneda="PYG",
+            fecha=datetime.now(TZ_ASUNCION),
+            usuario=user_nombre,
+            observaciones=f"Depósito en {acc.banco} ({acc.numero_cuenta or 'Sin cuenta'}) — Boleta #{numero_boleta}" + (f" ({transportadora})" if transportadora else "") + (f" — {observaciones}" if observaciones else ""),
+        ))
+
+    # 6. Consumir entradas de bóveda FIFO
+    entries_res = await db.execute(
+        select(VaultEntry)
+        .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda")
+        .order_by(VaultEntry.created_at.asc())
+    )
+    vault_entries = list(entries_res.scalars().all())
+
+    now_dt = datetime.now(timezone.utc)
+    remaining = monto_dep
+    entradas_afectadas = 0
+
+    for e in vault_entries:
+        if remaining <= Decimal("0"):
+            break
+        entradas_afectadas += 1
+        e_monto = Decimal(str(e.monto_pyg or 0))
+
+        if e_monto <= remaining:
+            # Consumo total de esta entrada
+            e.estado = "depositado"
+            e.fecha_deposito = now_dt
+            e.bank_transaction_id = bank_tx.id
+            if user_id:
+                e.registrado_por = uuid.UUID(user_id)
+            remaining -= e_monto
+        else:
+            # Fraccionamiento: e_monto > remaining
+            remanente_monto = e_monto - remaining
+            remanente_entry = VaultEntry(
+                company_id=cid,
+                branch_id=e.branch_id,
+                origen="remanente",
+                handoff_id=e.handoff_id,
+                monto_pyg=remanente_monto,
+                monto_usd=Decimal("0"),
+                monto_brl=Decimal("0"),
+                estado="en_boveda",
+                registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
+                observaciones=f"Remanente en bóveda tras depósito parcial Boleta #{numero_boleta}",
+            )
+            db.add(remanente_entry)
+
+            # La entrada actual queda depositada por la porción transferida
+            e.monto_pyg = remaining
+            e.estado = "depositado"
+            e.fecha_deposito = now_dt
+            e.bank_transaction_id = bank_tx.id
+            if user_id:
+                e.registrado_por = uuid.UUID(user_id)
+            remaining = Decimal("0")
+            break
+
+    await db.flush()
+
+    return {
+        "success": True,
+        "monto_total_pyg": float(monto_dep),
+        "entradas_afectadas": entradas_afectadas,
+        "saldo_restante_boveda_pyg": float(saldo_boveda - monto_dep),
+        "bank_transaction_id": str(bank_tx.id),
+        "banco_nombre": acc.banco,
+        "numero_cuenta": acc.numero_cuenta,
+        "numero_boleta": numero_boleta,
+    }
+
+
+
 # ── Datos para reportes PDF ────────────────────────────────────────────
 
 async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date | datetime, fecha_hasta: date | datetime) -> list[dict]:

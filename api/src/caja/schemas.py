@@ -148,6 +148,16 @@ class DepositVaultToBankRequest(BaseModel):
     observaciones: Optional[str] = None
 
 
+class DepositVaultAmountToBankRequest(BaseModel):
+    monto_pyg: Decimal
+    bank_account_id: UUID
+    numero_boleta: str
+    transportadora: Optional[str] = None
+    fecha_deposito: Optional[str] = None
+    observaciones: Optional[str] = None
+
+
+
 class TreasuryRemittanceItemResponse(BaseModel):
     id: UUID
     remittance_id: UUID
