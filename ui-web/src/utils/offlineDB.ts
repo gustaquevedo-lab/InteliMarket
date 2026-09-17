@@ -85,16 +85,55 @@ async function openDBOnce(): Promise<IDBDatabase> {
   return db
 }
 
+// Autocuracion best-effort: borra del store los registros que salieron null
+// al leerlos (corrupcion de IndexedDB, tipicamente por un apagado abrupto
+// del Electron a mitad de una escritura -- visto en vivo en Caja 3, 17-sep).
+// No bloquea al llamador: si falla, la proxima lectura los vuelve a filtrar
+// en memoria igual, asi que nunca vuelven a tumbar nada, se reparen o no.
+function _repararRegistrosCorruptos(storeName: string, keys: IDBValidKey[]): void {
+  if (keys.length === 0) return
+  console.warn(`[offlineDB] ${keys.length} registro(s) corrupto(s) en "${storeName}", autoreparando...`)
+  openDBOnce().then((db) => {
+    try {
+      const tx = db.transaction(storeName, "readwrite")
+      const store = tx.objectStore(storeName)
+      for (const k of keys) store.delete(k)
+    } catch (e) {
+      console.warn(`[offlineDB] No se pudo autoreparar "${storeName}":`, e)
+    }
+  }).catch(() => {})
+}
+
+// Filtra los registros null/corruptos de un resultado de lectura y dispara
+// la autocuracion en segundo plano si encontro alguno.
+function _limpiar<T>(storeName: string, values: (T | null | undefined)[], keys: IDBValidKey[]): T[] {
+  const badKeys: IDBValidKey[] = []
+  const clean: T[] = []
+  values.forEach((v, i) => {
+    if (v == null) badKeys.push(keys[i])
+    else clean.push(v)
+  })
+  _repararRegistrosCorruptos(storeName, badKeys)
+  return clean
+}
+
 async function getStore<T>(storeName: string): Promise<T[]> {
   try {
     const db = await openDBOnce()
-    return new Promise((resolve, reject) => {
+    const { values, keys } = await new Promise<{ values: (T | null)[]; keys: IDBValidKey[] }>((resolve, reject) => {
       const tx = db.transaction(storeName, "readonly")
       const store = tx.objectStore(storeName)
-      const request = store.getAll()
-      request.onsuccess = () => resolve((request.result as T[]) || [])
-      request.onerror = () => reject(request.error)
+      const valuesReq = store.getAll()
+      const keysReq = store.getAllKeys()
+      let values: (T | null)[] | null = null
+      let keys: IDBValidKey[] | null = null
+      const tryResolve = () => { if (values !== null && keys !== null) resolve({ values, keys }) }
+      valuesReq.onsuccess = () => { values = (valuesReq.result as (T | null)[]) || []; tryResolve() }
+      keysReq.onsuccess = () => { keys = keysReq.result || []; tryResolve() }
+      valuesReq.onerror = () => reject(valuesReq.error)
+      keysReq.onerror = () => reject(keysReq.error)
     })
+    return _limpiar(storeName, values, keys)
   } catch (e) {
     console.warn(`[offlineDB] Error getting store ${storeName}:`, e)
     return []
@@ -104,14 +143,21 @@ async function getStore<T>(storeName: string): Promise<T[]> {
 async function getByIndex<T>(storeName: string, indexName: string, value: string): Promise<T[]> {
   try {
     const db = await openDBOnce()
-    return new Promise((resolve, reject) => {
+    const { values, keys } = await new Promise<{ values: (T | null)[]; keys: IDBValidKey[] }>((resolve, reject) => {
       const tx = db.transaction(storeName, "readonly")
       const store = tx.objectStore(storeName)
       const index = store.index(indexName)
-      const request = index.getAll(value)
-      request.onsuccess = () => resolve((request.result as T[]) || [])
-      request.onerror = () => reject(request.error)
+      const valuesReq = index.getAll(value)
+      const keysReq = index.getAllKeys(value)
+      let values: (T | null)[] | null = null
+      let keys: IDBValidKey[] | null = null
+      const tryResolve = () => { if (values !== null && keys !== null) resolve({ values, keys }) }
+      valuesReq.onsuccess = () => { values = (valuesReq.result as (T | null)[]) || []; tryResolve() }
+      keysReq.onsuccess = () => { keys = keysReq.result || []; tryResolve() }
+      valuesReq.onerror = () => reject(valuesReq.error)
+      keysReq.onerror = () => reject(keysReq.error)
     })
+    return _limpiar(storeName, values, keys)
   } catch (e) {
     console.warn(`[offlineDB] Error getByIndex ${storeName}.${indexName}:`, e)
     return []
