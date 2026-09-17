@@ -3139,7 +3139,7 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
     if not rows:
         return []
 
-    # 1. Obtener pagos reales registrados por el POS para todas las sesiones del período
+    # 1. Obtener pagos reales registrados por el POS para todas las sesiones del período (fallback)
     session_ids = [session_obj.id for session_obj, _, _ in rows]
     payments_by_session: dict[uuid.UUID, dict] = {}
 
@@ -3201,7 +3201,7 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             else:
                 payments_by_session[sid]["otro"] += m
 
-    # 2. Reconciliaciones oficiales en paralelo
+    # 2. Reconciliaciones oficiales en paralelo con taxonomía canónica completa
     recon_tasks = [get_session_reconciliation_data(db, s_obj.id) for s_obj, _, _ in rows]
     recon_results = await asyncio.gather(*recon_tasks, return_exceptions=True)
     recon_by_session = {}
@@ -3232,21 +3232,60 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
         is_verificada = session_obj.estado == "verificada" or (handoff and handoff.estado == "confirmado")
         tiene_confirmacion_tesoreria = handoff and handoff.monto_confirmado_pyg is not None
 
-        # Desglose por Procesador / Canal Operativo de Tesorería acordado
-        m_bancard = float(pays.get("bancard", 0))
-        m_dinelco = float(pays.get("dinelco", 0))
-        m_qr = float(pays.get("qr", 0))
-        m_pix = float(pays.get("pix", 0))
-        m_transf = float(pays.get("transferencia", 0))
-        m_extra_club = float(pays.get("extra_club", 0))
-        m_cheque = float(count.monto_cheque or 0) or float(pays.get("cheque", 0))
-        m_otro = float(count.monto_otro or 0) or float(pays.get("otro", 0))
+        # ── 1. Extraer desglose detallado canónico de recon ──
+        ch_gs: dict[str, float] = {}
+        ch_orig: dict[str, float] = {}
+        if recon and recon.get("desglose_detallado"):
+            for d in recon["desglose_detallado"]:
+                k = d.get("clave")
+                if k:
+                    ch_gs[k] = float(d.get("monto_gs") or 0)
+                    ch_orig[k] = float(d.get("monto_orig") or 0)
+
+        # Retiros / Cash Drops confirmados
+        d_pyg = float(recon.get("drops_pyg") or 0) if recon else 0.0
+        d_brl = float(recon.get("drops_brl") or 0) if recon else 0.0
+        d_usd = float(recon.get("drops_usd") or 0) if recon else 0.0
+        total_drops_gs = float(recon.get("total_drops_gs") or 0) if recon else 0.0
+
+        # Canales detallados reales
+        m_bancard_deb = ch_gs.get("BANCARD_DEBITO", 0.0)
+        m_bancard_cred = ch_gs.get("BANCARD_CREDITO", 0.0)
+        m_bancard_qr = ch_gs.get("BANCARD_QR", 0.0)
+        m_bancard_pix = ch_gs.get("BANCARD_PIX", 0.0)
+        m_dinelco_deb = ch_gs.get("DINELCO_DEBITO", 0.0)
+        m_dinelco_cred = ch_gs.get("DINELCO_CREDITO", 0.0)
+        m_dinelco_qr = ch_gs.get("DINELCO_QR", 0.0)
+        m_dinelco_pix = ch_gs.get("DINELCO_PIX", 0.0)
+        m_plugpay_pix = ch_gs.get("PLUGPAY_PIX", 0.0)
+        m_plugpay_cred = ch_gs.get("PLUGPAY_CREDITO", 0.0)
+        m_extra_club = ch_gs.get("EXTRA_CLUB", 0.0)
+        m_transf = ch_gs.get("TRANSFERENCIA", 0.0)
+        m_cheque = ch_gs.get("CHEQUES", 0.0) or float(count.monto_cheque or 0)
+        m_otro = ch_gs.get("OTROS", 0.0) or float(count.monto_otro or 0)
+
+        # Fallback a pays si recon no tenía desglose
+        if not ch_gs and pays:
+            m_bancard_deb = float(pays.get("bancard", 0))
+            m_dinelco_deb = float(pays.get("dinelco", 0))
+            m_bancard_qr = float(pays.get("qr", 0))
+            m_plugpay_pix = float(pays.get("pix", 0))
+            m_transf = float(pays.get("transferencia", 0))
+            m_extra_club = float(pays.get("extra_club", 0))
+            m_cheque = float(count.monto_cheque or 0) or float(pays.get("cheque", 0))
+            m_otro = float(count.monto_otro or 0) or float(pays.get("otro", 0))
 
         legacy_tarjeta = float(count.monto_tarjeta or 0)
-        if legacy_tarjeta > 0 and (m_bancard + m_dinelco) == 0:
-            m_bancard = legacy_tarjeta
+        if legacy_tarjeta > 0 and (m_bancard_deb + m_bancard_cred + m_dinelco_deb + m_dinelco_cred) == 0:
+            m_bancard_deb = legacy_tarjeta
 
-        no_efectivo_pyg = m_bancard + m_dinelco + m_qr + m_pix + m_transf + m_extra_club + m_cheque + m_otro
+        no_efectivo_pyg = (
+            float(recon.get("total_no_efectivo_gs") or 0)
+            if recon
+            else (m_bancard_deb + m_bancard_cred + m_bancard_qr + m_bancard_pix +
+                  m_dinelco_deb + m_dinelco_cred + m_dinelco_qr + m_dinelco_pix +
+                  m_plugpay_pix + m_plugpay_cred + m_extra_club + m_transf + m_cheque + m_otro)
+        )
 
         # Efectivo Físico: si Tesorería ya punteó y confirmó el sobre en Bóveda, se toman sus datos oficiales
         if tiene_confirmacion_tesoreria:
@@ -3270,15 +3309,17 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
         # Total Rendido = Efectivo recibido + Vouchers no efectivo
         monto_rendido_total = m_efectivo_total_gs + no_efectivo_pyg
 
-        # Total Esperado = Total facturado a justificar del turno = Efectivo neto esperado + No efectivo
+        # Total Esperado = Total neto a justificar en cierre = Efectivo neto esperado en gaveta (restando drops) + No efectivo
         if recon:
             esp_ef_gs = float(recon.get("esperado_total_gs") or 0)
             monto_esperado_total = esp_ef_gs + no_efectivo_pyg
             total_facturado_pyg = float(recon.get("total_cobrado_gs") or 0)
+            ventas_ef_total_gs = float(recon.get("ventas_ef_total_gs") or 0)
         else:
-            esp_ef_gs = max(0.0, float(count.monto_total or 0) - float(count.diferencia or 0) - no_efectivo_pyg)
+            ventas_ef_total_gs = max(0.0, float(count.monto_total or 0) - float(count.diferencia or 0) - no_efectivo_pyg)
+            esp_ef_gs = max(0.0, ventas_ef_total_gs - total_drops_gs)
             monto_esperado_total = esp_ef_gs + no_efectivo_pyg
-            total_facturado_pyg = monto_esperado_total
+            total_facturado_pyg = ventas_ef_total_gs + no_efectivo_pyg
 
         diferencia_gs = monto_rendido_total - monto_esperado_total
 
@@ -3298,6 +3339,11 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             "monto_cierre_esperado": monto_esperado_total,
             "monto_cierre": monto_rendido_total,
             "total_facturado_pyg": total_facturado_pyg,
+            "ventas_ef_total_gs": ventas_ef_total_gs,
+            "total_drops_gs": total_drops_gs,
+            "drops_pyg": d_pyg,
+            "drops_brl": d_brl,
+            "drops_usd": d_usd,
             "no_efectivo_pyg": no_efectivo_pyg,
             "monto_efectivo": m_ef_pyg,
             "monto_efectivo_usd": m_ef_usd,
@@ -3308,15 +3354,27 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             "efectivo_esperado_gs": esp_ef_gs,
             "tasa_brl": tasa_brl,
             "tasa_usd": tasa_usd,
-            "monto_bancard": m_bancard,
-            "monto_dinelco": m_dinelco,
-            "monto_qr": m_qr,
-            "monto_pix": m_pix,
-            "monto_transferencia": m_transf,
+            # Desglose canónico detallado
+            "monto_bancard_debito": m_bancard_deb,
+            "monto_bancard_credito": m_bancard_cred,
+            "monto_bancard_qr": m_bancard_qr,
+            "monto_bancard_pix": m_bancard_pix,
+            "monto_dinelco_debito": m_dinelco_deb,
+            "monto_dinelco_credito": m_dinelco_cred,
+            "monto_dinelco_qr": m_dinelco_qr,
+            "monto_dinelco_pix": m_dinelco_pix,
+            "monto_plugpay_pix": m_plugpay_pix,
+            "monto_plugpay_credito": m_plugpay_cred,
             "monto_extra_club": m_extra_club,
+            "monto_transferencia": m_transf,
             "monto_cheque": m_cheque,
             "monto_otro": m_otro,
-            "monto_tarjeta": m_bancard + m_dinelco,
+            # Compatibilidad agrupada legacy
+            "monto_bancard": m_bancard_deb + m_bancard_cred,
+            "monto_dinelco": m_dinelco_deb + m_dinelco_cred,
+            "monto_qr": m_bancard_qr + m_dinelco_qr,
+            "monto_pix": m_plugpay_pix + m_bancard_pix + m_dinelco_pix,
+            "monto_tarjeta": m_bancard_deb + m_bancard_cred + m_dinelco_deb + m_dinelco_cred,
             "monto_total": monto_rendido_total,
             "diferencia": diferencia_gs,
             "diferencia_usd": float(count.diferencia_usd or 0),
@@ -3326,6 +3384,7 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             "is_verificada": is_verificada,
             "tesorera_nombre": handoff.recibido_por_nombre if handoff else None,
             "observaciones": count.observaciones or session_obj.observaciones or "",
+            "desglose_detallado": recon.get("desglose_detallado", []) if recon else [],
         })
     return out
 

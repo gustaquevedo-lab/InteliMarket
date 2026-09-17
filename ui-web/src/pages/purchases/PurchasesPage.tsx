@@ -1,3 +1,4 @@
+import Supplier360Modal from "./Supplier360Modal"
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import {
@@ -5738,157 +5739,17 @@ export default function PurchasesPage() {
         </div>
       )}
       {/* ──────────────────────────────────────────────────────────────────────────
-          MODAL: FICHA 360° DEL PROVEEDOR (SCORECARD OTIF & HISTORIAL DE PRECIOS)
+          MODAL: VISIÓN 360° DEL PROVEEDOR (SCORECARD, DEUDAS, CHEQUES DIFERIDOS, STOCK & SELL-OUT)
       ────────────────────────────────────────────────────────────────────────── */}
       {showSupplier360Modal && selectedSupplierFor360 && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-200">
-            {/* Header Modal */}
-            <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-4 bg-slate-50/50 dark:bg-slate-800/40">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                    Ficha 360° del Proveedor
-                  </span>
-                  <span className="text-xs text-gray-400 font-mono">ID: {selectedSupplierFor360.id.slice(0, 8)}</span>
-                </div>
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                  <Building2 className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
-                  {selectedSupplierFor360.razon_social}
-                </h3>
-                <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-gray-500 font-mono">
-                  <span>RUC: <strong className="text-gray-700 dark:text-gray-300">{selectedSupplierFor360.ruc || "—"}</strong></span>
-                  <span>Plazo Pago: <strong className="text-indigo-600">{selectedSupplierFor360.plazo_pago_dias || 30} Días</strong></span>
-                  {selectedSupplierFor360.telefono && <span>Tel: <strong className="text-gray-700 dark:text-gray-300">{selectedSupplierFor360.telefono}</strong></span>}
-                </div>
-              </div>
-
-              <button
-                onClick={() => setShowSupplier360Modal(false)}
-                className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Contenido Modal */}
-            <div className="p-6 overflow-y-auto space-y-6 flex-1">
-              {loadingSupplier360 ? (
-                <div className="py-16 text-center text-xs text-gray-400">
-                  <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-indigo-500" />
-                  Calculando métricas OTIF e historial de precios...
-                </div>
-              ) : (
-                <>
-                  {/* Scorecard OTIF Cards */}
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3 flex items-center gap-2">
-                      <Star className="w-4 h-4 text-amber-500" />
-                      Scorecard de Desempeño & Cumplimiento (OTIF)
-                    </h4>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Entrega a Tiempo (OTIF)</span>
-                        <p className="text-lg font-black font-mono text-emerald-600 mt-1">
-                          {supplier360Performance?.on_time_rate !== null && supplier360Performance?.on_time_rate !== undefined
-                            ? `${Number(supplier360Performance.on_time_rate).toFixed(0)}%`
-                            : "97%"}
-                        </p>
-                        <span className="text-[10px] text-gray-400">Nivel de servicio óptimo</span>
-                      </div>
-
-                      <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Calidad de Mercadería</span>
-                        <p className="text-lg font-black font-mono text-indigo-600 mt-1">
-                          {supplier360Performance?.avg_quality_score
-                            ? `${Number(supplier360Performance.avg_quality_score).toFixed(1)} / 5.0`
-                            : "4.9 / 5.0"}
-                        </p>
-                        <span className="text-[10px] text-gray-400">Baja tasa de mermas</span>
-                      </div>
-
-                      <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Total Órdenes Históricas</span>
-                        <p className="text-lg font-black font-mono text-gray-900 dark:text-white mt-1">
-                          {supplier360Performance?.total_orders || orders.filter(o => o.supplier_id === selectedSupplierFor360.id).length || 1}
-                        </p>
-                        <span className="text-[10px] text-gray-400">Órdenes emitidas</span>
-                      </div>
-
-                      <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Gasto Total Acumulado</span>
-                        <p className="text-lg font-black font-mono text-teal-600 mt-1">
-                          {formatPYG(supplier360Performance?.total_spent || orders.filter(o => o.supplier_id === selectedSupplierFor360.id).reduce((acc, o) => acc + (o.total || 0), 0) || 0)}
-                        </p>
-                        <span className="text-[10px] text-gray-400">Facturación histórica</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Historial de Precios de Compra por Producto */}
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3 flex items-center gap-2">
-                      <History className="w-4 h-4 text-indigo-500" />
-                      Historial de Precios de Compra por Producto & Fluctuaciones
-                    </h4>
-
-                    {supplier360PriceHistory.length === 0 ? (
-                      <div className="p-8 text-center text-xs text-gray-400 border border-dashed border-slate-200 dark:border-slate-700 rounded-xl">
-                        No hay variaciones de precios registradas para este proveedor.
-                      </div>
-                    ) : (
-                      <div className="card overflow-hidden border border-slate-200 dark:border-slate-700 shadow-none">
-                        <table className="w-full text-left text-xs">
-                          <thead className="bg-slate-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
-                            <tr>
-                              <th className="p-3">Producto</th>
-                              <th className="p-3">SKU</th>
-                              <th className="p-3">Fecha de Compra</th>
-                              <th className="p-3 text-right">Cantidad</th>
-                              <th className="p-3 text-right">Precio Unitario Pagado</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                            {supplier360PriceHistory.map((ph, idx) => (
-                              <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                                <td className="p-3 font-medium text-gray-900 dark:text-white">
-                                  {ph.product_nombre || "Producto"}
-                                </td>
-                                <td className="p-3 font-mono text-gray-500 text-[11px]">
-                                  {ph.sku || "—"}
-                                </td>
-                                <td className="p-3 text-gray-500 font-mono">
-                                  {ph.fecha_orden ? formatDate(ph.fecha_orden) : "—"}
-                                </td>
-                                <td className="p-3 text-right font-mono text-gray-700 dark:text-gray-300">
-                                  {ph.cantidad}
-                                </td>
-                                <td className="p-3 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                                  {formatPYG(ph.precio_unitario || 0)}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Footer Modal */}
-            <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setShowSupplier360Modal(false)}
-                className="btn-primary text-xs px-6 py-2"
-              >
-                Cerrar Ficha
-              </button>
-            </div>
-          </div>
-        </div>
+        <Supplier360Modal
+          supplierId={selectedSupplierFor360.id}
+          supplierNombre={selectedSupplierFor360.razon_social}
+          onClose={() => {
+            setShowSupplier360Modal(false)
+            setSelectedSupplierFor360(null)
+          }}
+        />
       )}
 
       {/* ──────────────────────────────────────────────────────────────────────────

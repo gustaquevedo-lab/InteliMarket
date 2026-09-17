@@ -1,3 +1,4 @@
+import Supplier360Modal from "../purchases/Supplier360Modal"
 import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   CreditCard, Search, Plus, Filter, Download, Eye, CheckCircle2,
@@ -29,6 +30,8 @@ export default function PaymentsPage() {
   const [search, setSearch] = useState("")
   const [filterSupplier, setFilterSupplier] = useState("all")
   const [filterVencimiento, setFilterVencimiento] = useState("all")
+  const [selected360SupplierId, setSelected360SupplierId] = useState<string | null>(null)
+  const [selected360SupplierNombre, setSelected360SupplierNombre] = useState<string | null>(null)
 
   // Selección múltiple para Lote de Pago
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([])
@@ -397,15 +400,21 @@ export default function PaymentsPage() {
             <p className="text-[11px] text-slate-400">Mediano plazo</p>
           </div>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+          <div
+            onClick={() => setTab("aging")}
+            className="space-y-1 bg-slate-900/60 hover:bg-slate-850 p-3.5 rounded-2xl border border-slate-800/80 hover:border-purple-500/40 transition cursor-pointer group"
+            title="Ver Matriz de Proveedores con Deudas"
+          >
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Proveedores Deuda</span>
+              <span className="text-[11px] font-bold text-slate-400 group-hover:text-purple-300 uppercase tracking-wider">Proveedores Deuda</span>
               <Building2 className="w-4 h-4 text-purple-400" />
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-purple-300">
               {analytics.proveedoresConDeuda}
             </p>
-            <p className="text-[11px] text-slate-400">Cuentas corrientes</p>
+            <p className="text-[11px] text-slate-400 group-hover:text-purple-400 flex items-center gap-1 font-bold">
+              Ver listado AP <ArrowRight className="w-3 h-3" />
+            </p>
           </div>
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
@@ -532,7 +541,21 @@ export default function PaymentsPage() {
                           </td>
                           <td className="p-3.5">
                             <p className="font-extrabold text-gray-900 dark:text-white font-mono">{inv.numero_factura || "Factura S/N"}</p>
-                            <p className="text-[10px] text-gray-400 font-bold">{inv.supplier_nombre || supplierMap[inv.supplier_id] || "Proveedor"}</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelected360SupplierId(inv.supplier_id)
+                                setSelected360SupplierNombre(inv.supplier_nombre || supplierMap[inv.supplier_id])
+                              }}
+                              className="mt-1 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 hover:bg-rose-600 hover:text-white font-bold text-[10px] transition group border border-rose-200/60 dark:border-rose-900/40"
+                              title="Abrir Visión 360° del Proveedor"
+                            >
+                              <Building2 className="w-3 h-3" />
+                              <span className="truncate max-w-[160px]">{inv.supplier_nombre || supplierMap[inv.supplier_id] || "Proveedor"}</span>
+                              <span className="text-[9px] bg-rose-200 dark:bg-rose-900 text-rose-800 dark:text-rose-200 group-hover:bg-white group-hover:text-rose-700 px-1 py-0.2 rounded font-black">
+                                360°
+                              </span>
+                            </button>
                           </td>
                           <td className="p-3.5">
                             <p className="font-mono text-gray-800 dark:text-gray-200">{inv.fecha_vencimiento ? formatDate(inv.fecha_vencimiento) : "Sin fecha"}</p>
@@ -593,18 +616,47 @@ export default function PaymentsPage() {
                   <th className="p-3.5 text-right font-mono text-blue-600">31 a 60 Días</th>
                   <th className="p-3.5 text-right font-mono text-gray-500">+60 Días</th>
                   <th className="p-3.5 text-center">Facturas</th>
+                  <th className="p-3.5 text-center">Visión 360°</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
                 {supplierAging.slice(0, 50).map((s, idx) => (
                   <tr key={idx} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40">
-                    <td className="p-3.5 font-extrabold text-gray-900 dark:text-white">{s.supplier_nombre}</td>
+                    <td className="p-3.5 font-extrabold text-gray-900 dark:text-white">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelected360SupplierId(s.supplier_id)
+                          setSelected360SupplierNombre(s.supplier_nombre)
+                        }}
+                        className="flex items-center gap-1.5 text-left group hover:text-rose-600 transition"
+                        title="Abrir Visión 360° del Proveedor"
+                      >
+                        <span className="group-hover:underline">{s.supplier_nombre}</span>
+                        <span className="p-1 rounded-md bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 group-hover:bg-rose-600 group-hover:text-white transition">
+                          <Eye className="w-3 h-3" />
+                        </span>
+                      </button>
+                    </td>
                     <td className="p-3.5 text-right font-mono font-black text-gray-900 dark:text-white">{formatPYG(s.total)}</td>
                     <td className="p-3.5 text-right font-mono font-bold text-red-600">{formatPYG(s.vencido)}</td>
                     <td className="p-3.5 text-right font-mono text-amber-600">{formatPYG(s.dias_1_30)}</td>
                     <td className="p-3.5 text-right font-mono text-blue-600">{formatPYG(s.dias_31_60)}</td>
                     <td className="p-3.5 text-right font-mono text-gray-500">{formatPYG(s.dias_mas_60)}</td>
                     <td className="p-3.5 text-center font-mono font-bold text-gray-400">{s.facturas_count}</td>
+                    <td className="p-3.5 text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelected360SupplierId(s.supplier_id)
+                          setSelected360SupplierNombre(s.supplier_nombre)
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 hover:bg-rose-600 hover:text-white font-bold text-[10px] transition flex items-center gap-1 mx-auto"
+                        title="Abrir Visión 360° Completa"
+                      >
+                        <Eye className="w-3 h-3" /> 360°
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -772,6 +824,17 @@ export default function PaymentsPage() {
             </form>
           </div>
         </div>
+      )}
+    
+      {selected360SupplierId && (
+        <Supplier360Modal
+          supplierId={selected360SupplierId}
+          supplierNombre={selected360SupplierNombre || undefined}
+          onClose={() => {
+            setSelected360SupplierId(null)
+            setSelected360SupplierNombre(null)
+          }}
+        />
       )}
     </div>
   )

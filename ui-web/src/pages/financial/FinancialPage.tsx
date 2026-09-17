@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
+import Supplier360Modal from "../purchases/Supplier360Modal"
 import { api, type SupplierInvoice, type Budget, type PaymentRun, type CashFlowProjection, type FinancialDashboard, type BankAccount } from "../../api"
 import { formatPYG, formatDate, getTodayAsuncion } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
@@ -71,6 +72,8 @@ export default function FinancialPage() {
   const [filterSupplier, setFilterSupplier] = useState("todos")
   const [filterFechaCorte, setFilterFechaCorte] = useState("")
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null)
+  const [selected360SupplierId, setSelected360SupplierId] = useState<string | null>(null)
+  const [selected360SupplierNombre, setSelected360SupplierNombre] = useState<string | null>(null)
 
   // Modales AP y Pagos
   const [showInvoiceForm, setShowInvoiceForm] = useState(false)
@@ -747,9 +750,24 @@ export default function FinancialPage() {
 
                   <div className="space-y-3 max-h-64 overflow-y-auto">
                     {aging.slice(0, 8).map((sup: any) => (
-                      <div key={sup.supplier_id} className="p-3 rounded-xl border bg-gray-50/50 dark:bg-slate-800/40 flex items-center justify-between text-xs">
+                      <div
+                        key={sup.supplier_id}
+                        onClick={() => {
+                          if (sup.supplier_id) {
+                            setSelected360SupplierId(sup.supplier_id)
+                            setSelected360SupplierNombre(sup.razon_social || sup.supplier_name)
+                          }
+                        }}
+                        className="p-3 rounded-xl border bg-gray-50/50 dark:bg-slate-800/40 hover:bg-rose-50/50 dark:hover:bg-rose-950/20 border-slate-200 dark:border-slate-800 hover:border-rose-300 transition cursor-pointer flex items-center justify-between text-xs group"
+                        title="Ver Visión 360° del Proveedor"
+                      >
                         <div>
-                          <div className="font-bold text-gray-900 dark:text-white">{sup.razon_social || sup.supplier_name || "Proveedor"}</div>
+                          <div className="font-bold text-gray-900 dark:text-white group-hover:text-rose-600 flex items-center gap-1.5 transition">
+                            <span>{sup.razon_social || sup.supplier_name || "Proveedor"}</span>
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-rose-100 dark:bg-rose-950 text-rose-600 font-extrabold opacity-0 group-hover:opacity-100 transition">
+                              360°
+                            </span>
+                          </div>
                           <div className="text-gray-400 text-[11px] mt-0.5">
                             {sup.vencido > 0 ? (
                               <span className="text-red-500 font-semibold">Vencido: {formatPYG(sup.vencido)}</span>
@@ -759,7 +777,7 @@ export default function FinancialPage() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <span className="font-mono font-bold text-sm text-gray-900 dark:text-white">
+                          <span className="font-mono font-bold text-sm text-gray-900 dark:text-white group-hover:text-rose-600 transition">
                             {formatPYG(sup.total_pendiente || sup.saldo_total || sup.total || 0)}
                           </span>
                         </div>
@@ -894,7 +912,22 @@ export default function FinancialPage() {
                                 </button>
                               </td>
                               <td className="p-3.5 font-bold text-gray-900 dark:text-white max-w-xs truncate" title={inv.supplier_nombre}>
-                                <div>{inv.supplier_nombre || "Proveedor General"}</div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (inv.supplier_id) {
+                                      setSelected360SupplierId(inv.supplier_id)
+                                      setSelected360SupplierNombre(inv.supplier_nombre || null)
+                                    }
+                                  }}
+                                  className="text-left group hover:text-rose-600 transition flex items-center gap-1.5"
+                                  title="Abrir Visión 360° del Proveedor"
+                                >
+                                  <span className="group-hover:underline">{inv.supplier_nombre || "Proveedor General"}</span>
+                                  <span className="p-1 rounded-md bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 group-hover:bg-rose-600 group-hover:text-white transition">
+                                    <Eye className="w-3 h-3" />
+                                  </span>
+                                </button>
                                 {linkedNCs.length > 0 && (
                                   <span className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-600 dark:text-purple-400 mt-0.5">
                                     <FileText className="w-3 h-3" /> {linkedNCs.length} NC vinculada(s)
@@ -1997,6 +2030,17 @@ export default function FinancialPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {selected360SupplierId && (
+        <Supplier360Modal
+          supplierId={selected360SupplierId}
+          supplierNombre={selected360SupplierNombre || undefined}
+          onClose={() => {
+            setSelected360SupplierId(null)
+            setSelected360SupplierNombre(null)
+          }}
+        />
       )}
     </div>
   )

@@ -937,3 +937,50 @@ async def complete_purchase_supplier_return(
     nc_num = body.nota_credito_numero if body else None
     return await returns_service.complete_supplier_return(db, cid, uuid.UUID(return_id), uid, nc_num)
 
+
+
+# ── Visión 360° Integral del Proveedor (Cuentas por Pagar & Comercial) ────────
+
+from api.src.purchases import supplier_360_service
+from api.src.purchases import supplier_360_pdf
+
+
+@router.get("/purchases/suppliers/{supplier_id}/360")
+@router.get("/suppliers/{supplier_id}/360")
+async def get_supplier_360_endpoint(
+    supplier_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Retorna la Visión 360° Integral del Proveedor con todas sus dimensiones financieras, operativas y de sell-out."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    sid = uuid.UUID(supplier_id)
+    return await supplier_360_service.get_supplier_360(db, cid, sid)
+
+
+@router.get("/purchases/suppliers/{supplier_id}/360/pdf")
+@router.get("/suppliers/{supplier_id}/360/pdf")
+async def export_supplier_360_pdf_endpoint(
+    supplier_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Genera y descarga el Informe Gerencial 360° del Proveedor en PDF editorial de alta fidelidad."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    sid = uuid.UUID(supplier_id)
+    data = await supplier_360_service.get_supplier_360(db, cid, sid)
+    company = await _get_company_info(db, str(cid))
+    user_name = user.get("nombre") or user.get("email") or "Auditoría Financiera"
+    pdf_bytes = supplier_360_pdf.generate_supplier_360_pdf(company, data, generated_by=user_name)
+    rz_clean = (data.get("supplier", {}).get("razon_social") or "proveedor").replace(" ", "_")
+    filename = f"Informe_360_{rz_clean}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
