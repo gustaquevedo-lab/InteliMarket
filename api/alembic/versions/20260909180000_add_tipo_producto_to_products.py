@@ -18,17 +18,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Agrega columna tipo_producto a products (producto | materia_prima | insumo | servicio)
-    op.add_column(
-        'products',
-        sa.Column(
-            'tipo_producto',
-            sa.String(20),
-            nullable=False,
-            server_default='producto',
-            comment='Clasificación: producto (final venta), materia_prima (recetas/producción), insumo (uso interno), servicio'
-        ),
-    )
-    op.create_index('ix_products_tipo_producto', 'products', ['tipo_producto'])
+    op.execute("""
+        ALTER TABLE products
+        ADD COLUMN IF NOT EXISTS tipo_producto VARCHAR(20) DEFAULT 'producto' NOT NULL
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_products_tipo_producto ON products (tipo_producto)")
 
 
 def downgrade() -> None:
