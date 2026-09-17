@@ -32,6 +32,21 @@ const HEARTBEAT_INTERVAL_MS = 15000
 const HEARTBEAT_TIMEOUT_MS = 4000
 const FAILS_TO_GO_OFFLINE = 2
 
+// crypto.randomUUID() exige "contexto seguro" (HTTPS o localhost) -- las
+// cajas reales cargan por HTTP plano en la LAN (http://192.168.0.10:5173),
+// asi que ahi NO existe y tira TypeError. Mismo patron ya usado en
+// CustomersPage.tsx para el mismo problema.
+function generarUUIDLocal(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID()
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === "x" ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
 async function checkServerReachable(): Promise<boolean> {
   try {
     const ctrl = new AbortController()
@@ -150,7 +165,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   }
 
   const addPendingSale = async (data: unknown): Promise<string> => {
-    const id = crypto.randomUUID()
+    const id = generarUUIDLocal()
     const now = new Date().toISOString()
     const sale: PendingSale = {
       id,

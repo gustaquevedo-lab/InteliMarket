@@ -199,6 +199,20 @@ function patchEscposTicketCustomer(b64: string, name: string, doc: string): stri
   }
   return b64
 }
+// crypto.randomUUID() exige "contexto seguro" (HTTPS o localhost) -- las
+// cajas reales cargan por HTTP plano en la LAN (http://192.168.0.10:5173),
+// asi que ahi NO existe y tira TypeError. Mismo patron ya usado en
+// CustomersPage.tsx para el mismo problema.
+function generarUUIDLocal(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID()
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === "x" ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
 function escposPadRight(s: string, n: number): string {
   s = escposStripAccents(s)
   return s.length >= n ? s.slice(0, n) : s + ' '.repeat(n - s.length)
@@ -3152,42 +3166,110 @@ export default function POSPage() {
     const fondoBrl = parseFloat(montoAperturaBrl.replace(/,/g, ".") || "0") || 300
     const fondoUsd = parseFloat(montoAperturaUsd.replace(/,/g, ".") || "0") || 0
     setSubmittingApertura(true)
+    const aperturaPayload = {
+      cash_register_id: cashRegisterId || undefined,
+      user_id: user?.id,
+      cajero_nombre: user?.nombre || "Cajero",
+      monto_apertura: fondoPyg,
+      monto_apertura_brl: fondoBrl,
+      monto_apertura_usd: fondoUsd,
+    }
+    // Sin esto, si el servidor estaba caido justo al empezar el turno, la
+    // cajera no podia ni abrir la caja -- no vendia nada, ni en efectivo,
+    // aunque el resto del sistema offline (venta, ticket) si funcionara.
+    // Con timeout corto: si falla, se abre con una sesion PROVISORIA local
+    // (UUID propio) y se reconcilia con la real apenas vuelva la conexion
+    // (ver reconciliarSesionProvisoria mas abajo).
+    let sessionId: string
+    let sessionPendienteSync = false
     try {
-      const session = await api.caja.sessions.create({
-        cash_register_id: cashRegisterId || undefined,
-        user_id: user?.id,
-        cajero_nombre: user?.nombre || "Cajero",
-        monto_apertura: fondoPyg,
-        monto_apertura_brl: fondoBrl,
-        monto_apertura_usd: fondoUsd,
-      })
-      const registro = {
-        puntoEmision,
-        cajeroId: user?.id,
-        cajeroNombre: user?.nombre || "Cajero",
-        fechaApertura: new Date().toISOString(),
-        fondoPyg,
-        fondoBrl: parseFloat(montoAperturaBrl.replace(/,/g, ".") || "0"),
-        fondoUsd: parseFloat(montoAperturaUsd.replace(/,/g, ".") || "0"),
-        cashSessionId: session.id,
-      }
-      localStorage.setItem(userCajaKey, JSON.stringify(registro))
-      cajaAbiertaRef.current = true
-      cashSessionIdRef.current = session.id
-      setCashSessionId(session.id)
-      setCajaAbierta(true)
-      setShowAperturaModal(false)
+      const session = await withTimeout(api.caja.sessions.create(aperturaPayload), 1500)
+      sessionId = session.id
+    } catch (err: any) {
+      sessionId = generarUUIDLocal()
+      sessionPendienteSync = true
+      console.warn("No se pudo abrir la sesión en el servidor, abriendo en modo local:", err)
+    }
+    const registro = {
+      puntoEmision,
+      cajeroId: user?.id,
+      cajeroNombre: user?.nombre || "Cajero",
+      fechaApertura: new Date().toISOString(),
+      fondoPyg,
+      fondoBrl: parseFloat(montoAperturaBrl.replace(/,/g, ".") || "0"),
+      fondoUsd: parseFloat(montoAperturaUsd.replace(/,/g, ".") || "0"),
+      cashSessionId: sessionId,
+      sessionPendienteSync,
+      aperturaPayload: sessionPendienteSync ? aperturaPayload : undefined,
+    }
+    localStorage.setItem(userCajaKey, JSON.stringify(registro))
+    cajaAbiertaRef.current = true
+    cashSessionIdRef.current = sessionId
+    setCashSessionId(sessionId)
+    setCajaAbierta(true)
+    setShowAperturaModal(false)
+    setSubmittingApertura(false)
+    if (sessionPendienteSync) {
+      toast.warning(
+        "Caja abierta en modo local",
+        "No se pudo confirmar con el servidor -- podés vender igual, se sincroniza sola cuando vuelva la conexión."
+      )
+    } else {
       toast.success(
         "¡Caja Habilitada con Éxito!",
         `${PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision} abierta para operar.`
       )
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.message || "Verifique la conexión con el servidor e intente de nuevo."
-      toast.error("No se pudo abrir la caja", msg)
-    } finally {
-      setSubmittingApertura(false)
     }
   }
+
+  // ── RECONCILIACIÓN DE SESIÓN PROVISORIA (Fase 2 offline-first) ──────────
+  // Si la caja se abrió sin servidor (sessionPendienteSync), en cuanto el
+  // heartbeat de OfflineContext confirma que hay conexión real: crea la
+  // sesión de verdad con los datos originales de apertura, y reescribe el
+  // session_id de cualquier venta que haya quedado en la cola offline
+  // apuntando al UUID provisorio -- antes de que esa cola se sincronice,
+  // para que ninguna venta quede huérfana del arqueo de esa sesión.
+  const reconciliandoSesionRef = useRef(false)
+  useEffect(() => {
+    if (!serverOnline) return
+    // No alcanza con reaccionar SOLO al cambio de serverOnline -- si ya
+    // estaba online cuando se creo la sesion provisoria (ej. una falla
+    // puntual de esa request nada mas, sin caida real detectada por el
+    // heartbeat), el efecto nunca se hubiera vuelto a disparar. Por eso
+    // reintenta el chequeo cada 20s mientras haya conexion, no solo una vez.
+    let cancelled = false
+    const tryReconcile = async () => {
+      if (cancelled || reconciliandoSesionRef.current) return
+      let registro: any = null
+      try { registro = JSON.parse(localStorage.getItem(userCajaKey) || "null") } catch (e) {}
+      if (!registro?.sessionPendienteSync || !registro?.aperturaPayload) return
+
+      reconciliandoSesionRef.current = true
+      const sesionProvisoria = registro.cashSessionId as string
+      try {
+        const session = await api.caja.sessions.create(registro.aperturaPayload)
+        const pendientes = await offlineDB.pendingSales.getAll()
+        for (const p of pendientes) {
+          const data = p.data as any
+          if (data?.session_id === sesionProvisoria) {
+            await offlineDB.pendingSales.update({ ...p, data: { ...data, session_id: session.id } })
+          }
+        }
+        const registroActualizado = { ...registro, cashSessionId: session.id, sessionPendienteSync: false, aperturaPayload: undefined }
+        localStorage.setItem(userCajaKey, JSON.stringify(registroActualizado))
+        cashSessionIdRef.current = session.id
+        setCashSessionId(session.id)
+        toast.success("Turno sincronizado", "La apertura de caja ya quedó registrada en el servidor.")
+      } catch (err) {
+        console.warn("No se pudo reconciliar la sesión provisoria todavía, se reintenta en el próximo chequeo:", err)
+      } finally {
+        reconciliandoSesionRef.current = false
+      }
+    }
+    tryReconcile()
+    const interval = setInterval(tryReconcile, 20000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [serverOnline])
 
   // ── DETECCIÓN AUTOMÁTICA DE TURNO ACTIVO / PAUSADO (NÓMADA & MODELO A) ──
   useEffect(() => {
