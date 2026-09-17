@@ -163,6 +163,41 @@ async def generate_suggestions(company_id: UUID, db: AsyncSession, proveedor_id:
             suggestions.append(sup)
 
     await db.commit()
+    return await _enrich_suggestions(suggestions, db)
+
+
+async def _enrich_suggestions(suggestions: list, db: AsyncSession) -> list:
+    """`ReplenishmentSuggestionResponse` declara producto_nombre/proveedor_nombre/
+    revisado_nombre, pero ninguno es columna real de ReplenishmentSuggestion --
+    sin esto, todo consumidor de /replenishment/suggestions y /replenishment/
+    generate recibía esos campos siempre en null (nunca se habían usado desde
+    ningún frontend, así que nadie lo había notado)."""
+    if not suggestions:
+        return suggestions
+    from api.src.purchases.models import Supplier
+    from api.src.auth.models import User
+
+    prod_ids = {s.producto_id for s in suggestions if s.producto_id}
+    sup_ids = {s.proveedor_id for s in suggestions if s.proveedor_id}
+    user_ids = {s.revisado_por for s in suggestions if s.revisado_por}
+
+    productos = {}
+    if prod_ids:
+        r = await db.execute(select(Product.id, Product.nombre).where(Product.id.in_(prod_ids)))
+        productos = {row.id: row.nombre for row in r.all()}
+    proveedores = {}
+    if sup_ids:
+        r = await db.execute(select(Supplier.id, Supplier.razon_social).where(Supplier.id.in_(sup_ids)))
+        proveedores = {row.id: row.razon_social for row in r.all()}
+    usuarios = {}
+    if user_ids:
+        r = await db.execute(select(User.id, User.nombre).where(User.id.in_(user_ids)))
+        usuarios = {row.id: row.nombre for row in r.all()}
+
+    for s in suggestions:
+        s.producto_nombre = productos.get(s.producto_id)
+        s.proveedor_nombre = proveedores.get(s.proveedor_id) if s.proveedor_id else None
+        s.revisado_nombre = usuarios.get(s.revisado_por) if s.revisado_por else None
     return suggestions
 
 
@@ -172,7 +207,7 @@ async def list_suggestions(company_id: UUID, db: AsyncSession, estado: Optional[
         q = q.where(ReplenishmentSuggestion.estado == estado)
     q = q.order_by(ReplenishmentSuggestion.fecha_generacion.desc())
     result = await db.execute(q)
-    return result.scalars().all()
+    return await _enrich_suggestions(list(result.scalars().all()), db)
 
 
 async def review_suggestion(suggestion_id: UUID, data, db: AsyncSession, user_id: UUID):
@@ -192,7 +227,7 @@ async def review_suggestion(suggestion_id: UUID, data, db: AsyncSession, user_id
         sug.notas = data.notas
     await db.commit()
     await db.refresh(sug)
-    return sug
+    return (await _enrich_suggestions([sug], db))[0]
 
 
 # ---------------------------------------------------------------------------

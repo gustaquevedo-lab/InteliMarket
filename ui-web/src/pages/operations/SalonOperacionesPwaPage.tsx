@@ -54,13 +54,17 @@ export interface MermaItem {
 
 export interface ReposicionItem {
   id: string
+  suggestion_id?: string
   producto_id: string
   producto_nombre: string
   cantidad: number
   urgencia: "alta" | "normal"
-  estado: "pendiente" | "en_camino" | "completado"
+  estado: "pendiente" | "en_camino" | "completado" | "requisitada"
   sector: string
   hora: string
+  stock_actual?: number
+  punto_pedido?: number
+  costo_unitario_estimado?: number
 }
 
 export interface TemperaturaItem {
@@ -177,6 +181,10 @@ export default function SalonOperacionesPwaPage() {
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment")
   const [lastScannedCode, setLastScannedCode] = useState<string>("")
   const [cameraError, setCameraError] = useState<string | null>(null)
+  // "granted" ya lo sabemos sin pedir la cámara (evita el mensaje "otorgue el
+  // permiso" cuando el navegador ya lo concedió y lo que falló fue otra cosa:
+  // cámara ocupada, facingMode no soportado, contexto no seguro, etc.)
+  const [cameraPermission, setCameraPermission] = useState<"unknown" | "granted" | "denied" | "prompt">("unknown")
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -233,21 +241,12 @@ export default function SalonOperacionesPwaPage() {
   const [defaultWarehouseId, setDefaultWarehouseId] = useState<string | null>(null)
 
   // ── ESTADOS DE REPOSICIÓN SALÓN ➔ DEPÓSITO ──
-  const [reposiciones, setReposiciones] = useState<ReposicionItem[]>(() => {
-    try {
-      const saved = localStorage.getItem("extra_salon_reposiciones")
-      return saved ? JSON.parse(saved) : []
-    } catch {
-      return []
-    }
-  })
-
-  const saveReposiciones = (newList: ReposicionItem[]) => {
-    setReposiciones(newList)
-    try {
-      localStorage.setItem("extra_salon_reposiciones", JSON.stringify(newList))
-    } catch {}
-  }
+  // Ya no se persiste en localStorage: la lista es siempre el reflejo en
+  // vivo del motor real de reposición (api.replenishment), no un borrador
+  // local -- guardar una copia vieja acá solo generaría datos fantasma.
+  const [reposiciones, setReposiciones] = useState<ReposicionItem[]>([])
+  const [loadingReposiciones, setLoadingReposiciones] = useState(false)
+  const [generandoRequisicion, setGenerandoRequisicion] = useState<string | null>(null)
 
   const [repoProd, setRepoProd] = useState<Product | null>(null)
   const [repoQty, setRepoQty] = useState("")
@@ -340,30 +339,48 @@ export default function SalonOperacionesPwaPage() {
     }
   }, [])
 
-  // ── CARGAR SUGERENCIAS DE REPOSICIÓN REALES ──
+  // ── CARGAR PRODUCTOS CON QUIEBRE INMINENTE (motor real de reposición) ──
+  // Antes esto pegaba a api.supermer.suggestions (sugerencias de compra a
+  // proveedor, un objeto totalmente distinto) y leía campos que no existen
+  // ahi (s.sugerido, s.urgencia, s.sector) -- por eso nunca listaba nada
+  // util. El motor correcto es api.replenishment, que calcula stock vs
+  // punto de pedido por producto y ya soporta "solo_criticos".
+  const mapSuggestion = (s: any): ReposicionItem => ({
+    id: String(s.id),
+    suggestion_id: String(s.id),
+    producto_id: String(s.producto_id),
+    producto_nombre: s.producto_nombre || "Producto",
+    cantidad: Number(s.cantidad_sugerida || 0),
+    urgencia: Number(s.stock_actual || 0) <= 0 ? "alta" : "normal",
+    estado: s.estado === "aprobada" || s.oc_generada ? "requisitada" : "pendiente",
+    sector: "Depósito Central",
+    hora: new Date(s.fecha_generacion || s.created_at || Date.now()).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }),
+    stock_actual: Number(s.stock_actual || 0),
+    punto_pedido: Number(s.punto_pedido || 0),
+    costo_unitario_estimado: Number(s.costo_unitario_estimado || 0),
+  })
+
   const loadSugerenciasReposicion = useCallback(async () => {
+    setLoadingReposiciones(true)
     try {
-      const res = await api.supermer.suggestions.list({ estado: "pendiente" })
-      if (Array.isArray(res) && res.length > 0) {
-        const mapped: ReposicionItem[] = res.map((s: any) => ({
-          id: String(s.id),
-          producto_id: String(s.producto_id),
-          producto_nombre: s.producto_nombre || "Producto en góndola",
-          cantidad: Number(s.sugerido || s.cantidad || 12),
-          urgencia: (s.urgencia === "critica" || s.prioridad === "alta") ? "alta" : "normal",
-          estado: "pendiente",
-          sector: s.sector || s.categoria || "Góndola",
-          hora: new Date(s.created_at || Date.now()).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
-        }))
-        // Unir con las existentes evitando duplicados
-        setReposiciones(prev => {
-          const ids = new Set(prev.map(p => p.id))
-          const fresh = mapped.filter(m => !ids.has(m.id))
-          return [...fresh, ...prev]
-        })
+      let res = await api.replenishment.suggestions.list({ estado: "pendiente" })
+      if (!Array.isArray(res) || res.length === 0) {
+        // No hay sugerencias frescas todavia -- generarlas ahora mismo,
+        // filtrando solo los productos realmente en quiebre/critico.
+        try {
+          res = await api.replenishment.generate({ solo_criticos: true })
+        } catch (genErr) {
+          console.warn("No se pudieron generar sugerencias de reposición:", genErr)
+          res = []
+        }
+      }
+      if (Array.isArray(res)) {
+        setReposiciones(res.map(mapSuggestion))
       }
     } catch (err) {
       console.warn("No se pudieron cargar sugerencias de reposición:", err)
+    } finally {
+      setLoadingReposiciones(false)
     }
   }, [])
 
@@ -404,6 +421,31 @@ export default function SalonOperacionesPwaPage() {
     loadSugerenciasReposicion()
     loadLotesProduccion()
   }, [loadCatalog, loadMermas, loadSugerenciasReposicion, loadLotesProduccion])
+
+  // ── DETECTAR PERMISO DE CÁMARA YA OTORGADO (sin pedirlo) ──
+  // Antes de esto la UI siempre pedía "activar cámara" aunque el navegador ya
+  // tuviera el permiso concedido de una sesión anterior, porque nunca se
+  // consultaba el estado real -- solo se sabía si getUserMedia fallaba o no.
+  useEffect(() => {
+    let cancelled = false
+    if (!("permissions" in navigator)) return
+    navigator.permissions
+      .query({ name: "camera" as PermissionName })
+      .then((status) => {
+        if (cancelled) return
+        setCameraPermission(status.state as "granted" | "denied" | "prompt")
+        status.onchange = () => {
+          if (!cancelled) setCameraPermission(status.state as "granted" | "denied" | "prompt")
+        }
+      })
+      .catch(() => {
+        // Safari/algunos navegadores no exponen "camera" en permissions.query
+        if (!cancelled) setCameraPermission("unknown")
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // ── OBTENER STOCK REAL DE UN PRODUCTO ──
   const fetchProductStock = async (prodId: string) => {
@@ -493,6 +535,7 @@ export default function SalonOperacionesPwaPage() {
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints)
       streamRef.current = stream
+      setCameraPermission("granted")
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream
@@ -551,9 +594,33 @@ export default function SalonOperacionesPwaPage() {
       }
     } catch (err: any) {
       console.error("Error al iniciar cámara:", err)
-      setCameraError(err?.message || "No se pudo acceder a la cámara. Compruebe los permisos del navegador.")
       setCameraActive(false)
-      toast.error("Error de Cámara", "Asegúrese de otorgar permisos de cámara en el navegador.")
+
+      // getUserMedia lanza distintos err.name segun la causa real -- antes
+      // se le mostraba al usuario "otorgue permisos" para CUALQUIER falla
+      // (camara ocupada, facingMode no soportado, hardware ausente,
+      // contexto no seguro), aunque el permiso ya estuviera concedido.
+      const name = err?.name || ""
+      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        setCameraPermission("denied")
+        setCameraError("Permiso de cámara denegado. Habilitalo en la configuración del navegador o del sistema operativo para este sitio.")
+        toast.error("Permiso de Cámara Denegado", "Habilitá el acceso a la cámara en la configuración del navegador/dispositivo.")
+      } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        setCameraError("No se encontró ninguna cámara en este dispositivo.")
+        toast.error("Sin Cámara Disponible", "El dispositivo no tiene una cámara utilizable.")
+      } else if (name === "NotReadableError" || name === "TrackStartError") {
+        setCameraError("La cámara está siendo usada por otra aplicación o pestaña. Cerrala e intentá de nuevo.")
+        toast.error("Cámara Ocupada", "Otra app o pestaña está usando la cámara ahora mismo.")
+      } else if (name === "OverconstrainedError" || name === "ConstraintNotSatisfiedError") {
+        setCameraError("La cámara no soporta la configuración pedida (cámara trasera). Probá con la cámara frontal.")
+        toast.error("Configuración No Soportada", "Probá cambiar a la cámara frontal.")
+      } else if (!window.isSecureContext) {
+        setCameraError("La cámara solo funciona en conexión segura (HTTPS).")
+        toast.error("Conexión No Segura", "Accedé por HTTPS para poder usar la cámara.")
+      } else {
+        setCameraError(err?.message || "No se pudo acceder a la cámara.")
+        toast.error("Error de Cámara", err?.message || "No se pudo acceder a la cámara.")
+      }
     }
   }
 
@@ -744,31 +811,52 @@ export default function SalonOperacionesPwaPage() {
     }
   }
 
-  // ── ACCIÓN: PEDIR REPOSICIÓN AL DEPÓSITO ──
-  const handleConfirmReposicion = (e: React.FormEvent) => {
+  // ── ACCIÓN: GENERAR REQUISICIÓN DE COMPRA POR QUIEBRE INMINENTE ──
+  // Antes esto solo guardaba un "aviso" de texto en localStorage que nadie
+  // en Compras podía ver. Ahora genera una PurchaseRequisition real
+  // (api.purchases.requisitions.create), que aparece directamente en
+  // Gestión de Compras, y marca la sugerencia como aprobada para que no
+  // se repita en la próxima carga.
+  const handleConfirmReposicion = async (e: React.FormEvent) => {
     e.preventDefault()
-    const prod = repoProd || scannedProduct
-    if (!prod) {
-      toast.warning("Seleccione Producto", "Indique el producto a reponer en góndola.")
+    const item = reposiciones.find(r => r.producto_id === (repoProd?.id || scannedProduct?.id))
+    if (!item) {
+      toast.warning("Seleccione Producto", "Elegí un producto con quiebre inminente de la lista.")
       return
     }
-    const cant = parseInt(repoQty) || 12
+    const cant = parseFloat(repoQty) || item.cantidad || 1
 
-    const nuevaRepo: ReposicionItem = {
-      id: `rep-${Date.now()}`,
-      producto_id: prod.id,
-      producto_nombre: prod.nombre,
-      cantidad: cant,
-      urgencia: repoUrgencia,
-      estado: "pendiente",
-      sector: prod.categoria?.nombre || "Góndola General",
-      hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }),
+    setGenerandoRequisicion(item.id)
+    try {
+      await api.purchases.requisitions.create({
+        departamento: "Salón",
+        solicitante_id: user?.id,
+        solicitante_nombre: user?.nombre || "Encargado de Salón",
+        prioridad: repoUrgencia === "alta" ? "alta" : "normal",
+        motivo: `Quiebre de stock detectado en salón (stock actual: ${item.stock_actual ?? 0}, punto de pedido: ${item.punto_pedido ?? 0})`,
+        items: [{
+          product_id: item.producto_id,
+          cantidad_solicitada: cant,
+          precio_estimado: item.costo_unitario_estimado || undefined,
+        }],
+      })
+
+      if (item.suggestion_id) {
+        try {
+          await api.replenishment.suggestions.review(item.suggestion_id, { accion: "aprobar" })
+        } catch {
+          // No bloquea la requisición ya creada si esto falla
+        }
+      }
+
+      soundAlerts.playRestockChime()
+      setReposiciones(prev => prev.map(r => r.id === item.id ? { ...r, estado: "requisitada" } : r))
+      toast.success("Requisición Enviada a Compras", `${cant} un. de ${item.producto_nombre} — ya está visible en Gestión de Compras.`)
+    } catch (err: any) {
+      toast.error("No se pudo generar la requisición", err?.message || "Intentá de nuevo en unos segundos.")
+    } finally {
+      setGenerandoRequisicion(null)
     }
-
-    soundAlerts.playRestockChime()
-    const updated = [nuevaRepo, ...reposiciones]
-    saveReposiciones(updated)
-    toast.success("Solicitud Enviada a Depósito", `Pedido de ${cant} un. de ${prod.nombre} enviado.`)
     setRepoQty("")
     setRepoProd(null)
   }
@@ -1180,6 +1268,19 @@ export default function SalonOperacionesPwaPage() {
                   Catálogo: 11.628 ítems conectados
                 </div>
               </div>
+
+              {!cameraActive && cameraPermission !== "unknown" && (
+                <div className={`flex items-center gap-1.5 px-1 text-[10px] font-bold ${
+                  cameraPermission === "granted" ? "text-emerald-400" : cameraPermission === "denied" ? "text-rose-400" : "text-slate-500"
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    cameraPermission === "granted" ? "bg-emerald-400" : cameraPermission === "denied" ? "bg-rose-400" : "bg-slate-500"
+                  }`} />
+                  {cameraPermission === "granted" && "Permiso de cámara ya concedido -- listo para escanear"}
+                  {cameraPermission === "denied" && "Permiso de cámara denegado -- habilitalo en el navegador/dispositivo"}
+                  {cameraPermission === "prompt" && "El navegador va a pedir permiso de cámara al activarla"}
+                </div>
+              )}
             </div>
 
             {/* ── VISOR HOLOGRÁFICO DE CÁMARA (GLASSMORPHIC VIEWPORT) ── */}
@@ -2015,50 +2116,66 @@ export default function SalonOperacionesPwaPage() {
           </div>
         )}
 
-        {/* ══════════════════════ TAB 4: REPOSICIÓN & QUIEBRES ══════════════════════ */}
+        {/* ══════════════════════ TAB 4: QUIEBRE DE STOCK & REQUISICIONES ══════════════════════ */}
         {tab === "reposicion" && (
           <div className="space-y-5 animate-fade-in">
             <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
-              <div className="flex items-center gap-2.5 border-b border-white/10 pb-3">
-                <div className="w-9 h-9 rounded-2xl bg-indigo-600/30 border border-indigo-500/40 text-indigo-400 flex items-center justify-center font-black shadow-lg shadow-indigo-600/20">
-                  <Boxes className="w-4 h-4" />
-                </div>
-                <div>
-                  <h2 className="font-black text-sm text-white" style={displayFont}>
-                    Solicitud de Reposición a Trastienda
-                  </h2>
-                  <div className="text-[11px] text-slate-400">
-                    Avisa al personal de depósito para bajar mercadería urgente a góndola.
+              <div className="flex items-center justify-between gap-2.5 border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-indigo-600/30 border border-indigo-500/40 text-indigo-400 flex items-center justify-center font-black shadow-lg shadow-indigo-600/20">
+                    <Boxes className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h2 className="font-black text-sm text-white" style={displayFont}>
+                      Quiebre de Stock — Requisición de Compra
+                    </h2>
+                    <div className="text-[11px] text-slate-400">
+                      Calculado en vivo (stock real vs. punto de pedido). Al generar la requisición, aparece directamente en Gestión de Compras.
+                    </div>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => loadSugerenciasReposicion()}
+                  disabled={loadingReposiciones}
+                  className="shrink-0 p-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-slate-300 hover:bg-white/[0.1] disabled:opacity-40 cursor-pointer"
+                  title="Recalcular quiebres"
+                >
+                  <RefreshCcw className={`w-4 h-4 ${loadingReposiciones ? "animate-spin" : ""}`} />
+                </button>
               </div>
 
               <form onSubmit={handleConfirmReposicion} className="space-y-3">
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                    Producto con Quiebre o Faltante en Góndola:
+                    Producto con Quiebre Inminente:
                   </label>
                   <select
-                    value={repoProd?.id || scannedProduct?.id || ""}
+                    value={repoProd?.id || ""}
                     onChange={(e) => {
+                      const item = reposiciones.find(r => r.producto_id === e.target.value)
                       const found = products.find(p => p.id === e.target.value)
-                      setRepoProd(found || null)
+                      setRepoProd(found || (item ? ({ id: item.producto_id, nombre: item.producto_nombre } as Product) : null))
+                      setRepoQty(item ? String(item.cantidad) : "")
                     }}
                     className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-bold text-white outline-none focus:border-amber-400"
                   >
-                    <option value="">-- Seleccionar producto --</option>
-                    {products.slice(0, 100).map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.nombre}
+                    <option value="">-- Seleccionar producto en quiebre --</option>
+                    {reposiciones.filter(r => r.estado === "pendiente").map((r) => (
+                      <option key={r.id} value={r.producto_id}>
+                        {r.producto_nombre} (stock: {r.stock_actual ?? 0})
                       </option>
                     ))}
                   </select>
+                  {reposiciones.filter(r => r.estado === "pendiente").length === 0 && !loadingReposiciones && (
+                    <div className="text-[10px] text-emerald-400 mt-1.5">Sin quiebres críticos detectados por ahora.</div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                      Cantidad a Bajar:
+                      Cantidad a Requisicionar:
                     </label>
                     <input
                       type="number"
@@ -2072,37 +2189,42 @@ export default function SalonOperacionesPwaPage() {
 
                   <div>
                     <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                      Nivel de Urgencia:
+                      Prioridad de Compra:
                     </label>
                     <select
                       value={repoUrgencia}
                       onChange={(e) => setRepoUrgencia(e.target.value as any)}
                       className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-3 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
                     >
-                      <option value="alta">⚡ Urgente (Góndola Vacía)</option>
-                      <option value="normal">Normal (Baja Rotación)</option>
+                      <option value="alta">⚡ Alta (quiebre activo)</option>
+                      <option value="normal">Normal (preventivo)</option>
                     </select>
                   </div>
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 cursor-pointer active:scale-95 transition-all"
+                  disabled={!!generandoRequisicion}
+                  className="w-full py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 cursor-pointer active:scale-95 transition-all disabled:opacity-50"
                 >
                   <Boxes className="w-4 h-4" />
-                  Enviar Pedido al Depósito
+                  {generandoRequisicion ? "Generando..." : "Generar Requisición de Compra"}
                 </button>
               </form>
             </div>
 
-            {/* Lista de Quiebres en Proceso */}
+            {/* Lista de Quiebres Detectados */}
             <div className="space-y-3">
               <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
-                Pedidos en Camino desde Depósito ({reposiciones.length})
+                Productos con Quiebre Detectado ({reposiciones.length})
               </h3>
-              {reposiciones.length === 0 ? (
+              {loadingReposiciones ? (
                 <div className="p-6 rounded-3xl bg-white/[0.03] border border-white/5 text-center text-xs text-slate-500">
-                  No hay pedidos de reposición pendientes.
+                  Calculando quiebres de stock...
+                </div>
+              ) : reposiciones.length === 0 ? (
+                <div className="p-6 rounded-3xl bg-white/[0.03] border border-white/5 text-center text-xs text-slate-500">
+                  Sin productos en quiebre por ahora.
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -2120,15 +2242,17 @@ export default function SalonOperacionesPwaPage() {
                           </div>
                         </div>
                         <div className="text-[10px] text-slate-400 mt-1">
-                          {r.sector} • Solicitado {r.hora}
+                          Stock actual: {r.stock_actual ?? 0} • Punto de pedido: {r.punto_pedido ?? 0}
                         </div>
                       </div>
                       <div className="text-right shrink-0">
                         <div className="font-black text-sm text-indigo-400" style={monoFont}>
                           {r.cantidad} un.
                         </div>
-                        <span className={`text-[9px] font-bold uppercase ${r.estado === "en_camino" ? "text-amber-400" : "text-slate-500"}`}>
-                          {r.estado.replace("_", " ")}
+                        <span className={`text-[9px] font-bold uppercase ${
+                          r.estado === "requisitada" ? "text-emerald-400" : "text-amber-400"
+                        }`}>
+                          {r.estado === "requisitada" ? "En Compras" : "Pendiente"}
                         </span>
                       </div>
                     </div>
