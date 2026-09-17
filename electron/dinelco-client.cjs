@@ -112,8 +112,10 @@ function buildCommand(tipo, params) {
   switch (tipo) {
     case 'venta_inicio': // RBIN -- OP: 01 venta, 02 adelanto RED DE PAGOS, 03 adelanto DINELCO
       return `RBIN|${params.op || '01'}|${monto}`
-    case 'venta_confirmar': // ENDOP -- CTAS: 0 contado, >1 cuotas
-      return `ENDOP|${params.cuotas || 0}|${monto}`
+    case 'venta_confirmar': { // ENDOP -- CTAS(2N): campo numerico de 2 digitos (manual pag. 10, item 3)
+      const ctas = String(params.cuotas || 0).padStart(2, '0')
+      return `ENDOP|${ctas}|${monto}`
+    }
     case 'cancelar':
       return 'CANCEL'
     case 'qr': // PAGOQR -- OP: 01 venta, 02/03 adelantos
