@@ -8,7 +8,7 @@ import {
   LogOut, Menu, X, Moon, Sun, Monitor, Search, Store, ChevronDown, Building, Scan, QrCode, BookOpen, PiggyBank,
   PieChart, DollarSign, TrendingUp, Bot, Clock, Award, Globe, Repeat, Wrench,
   Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid, Carrot, ChefHat, Radio, Plus, Sparkles, Tag,
-  Ticket, ArrowLeftRight, ClipboardCheck
+  Ticket, ArrowLeftRight, ClipboardCheck, RefreshCw
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
@@ -108,6 +108,7 @@ const navGroups: NavGroup[] = [
       { icon: Truck, label: "Recepción de Mercadería (Muelle)", path: "/deposito", permission: "purchases:receive" },
       { icon: Tags, label: "Etiquetas", path: "/etiquetas" },
       { icon: TrendingUp, label: "Forecast & Reposición", path: "/demand-forecast" },
+      { icon: RefreshCw, label: "Reglas de Reposición Automática", path: "/auto-replenish" },
       { icon: Truck, label: "Recepción Directa DSD", path: "/dsd" },
       { icon: Briefcase, label: "Contratos & Rebates", path: "/contratos-proveedores" },
       { icon: Globe, label: "Portal Proveedores", path: "/portal/proveedores" },

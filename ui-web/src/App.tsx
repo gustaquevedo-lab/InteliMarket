@@ -101,6 +101,7 @@ const RendimientoPage = lazy(() => import("./pages/rendimiento/RendimientoPage")
 const InventoryAdvancedPage = lazy(() => import("./pages/inventory/InventoryAdvancedPage"))
 const IntegratedFinancePage = lazy(() => import("./pages/integrated-finance/IntegratedFinancePage"))
 const DemandForecastPage = lazy(() => import("./pages/demand-forecast/DemandForecastPage"))
+const AutoReplenishPage = lazy(() => import("./pages/inventory/AutoReplenishPage"))
 const IntelligentRoutingPage = lazy(() => import("./pages/intelligent-routing/IntelligentRoutingPage"))
 const OportunidadesPage = lazy(() => import("./pages/comerciales/OportunidadesPage"))
 const ColdChainPage = lazy(() => import("./pages/cold-chain/ColdChainPage"))
@@ -360,7 +361,7 @@ function AppRoutes() {
         <Route path="integrated-finance" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="integrated_finance"><IntegratedFinancePage /></FeatureRoute></Suspense>} />
         <Route path="smart-pricing" element={<Navigate to="/price-lists" replace />} />
         <Route path="demand-forecast" element={<Suspense fallback={<PageLoader />}><DemandForecastPage /></Suspense>} />
-        <Route path="auto-replenish" element={<Navigate to="/demand-forecast" replace />} />
+        <Route path="auto-replenish" element={<Suspense fallback={<PageLoader />}><AutoReplenishPage /></Suspense>} />
         <Route path="intelligent-routing" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="intelligent_routing"><IntelligentRoutingPage /></FeatureRoute></Suspense>} />
         <Route path="oportunidades" element={<Suspense fallback={<PageLoader />}><OportunidadesPage /></Suspense>} />
         <Route path="cold-chain" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="cold_chain"><ColdChainPage /></FeatureRoute></Suspense>} />
