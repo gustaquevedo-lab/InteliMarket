@@ -529,6 +529,14 @@ export default function POSPage() {
   const [pausaMotivo, setPausaMotivo] = useState("Salida a almuerzo / relevo de gaveta")
   const [submittingPausa, setSubmittingPausa] = useState(false)
   const [activeUserSessionInfo, setActiveUserSessionInfo] = useState<any>(null)
+  // "pendiente": todavia no volvio la respuesta de activeUser(). "sin_turno":
+  // el backend confirmo que no hay turno en ninguna caja -- seguro abrir
+  // offline si hace falta. "sin_confirmar": la consulta fallo y esta
+  // maquina no tenia nada guardado -- podria haber un turno real en otra
+  // caja que no se detecto por la misma falla; la apertura offline exige
+  // una confirmacion explicita en ese caso, no abre en modo local solo.
+  const [activeUserCheckOk, setActiveUserCheckOk] = useState<"pendiente" | "sin_turno" | "sin_confirmar">("pendiente")
+  const [confirmoPrimerTurnoDelDia, setConfirmoPrimerTurnoDelDia] = useState(false)
   const [showReanudarModal, setShowReanudarModal] = useState(false)
   const [submittingReanudar, setSubmittingReanudar] = useState(false)
 
@@ -3180,12 +3188,28 @@ export default function POSPage() {
     // Con timeout corto: si falla, se abre con una sesion PROVISORIA local
     // (UUID propio) y se reconcilia con la real apenas vuelva la conexion
     // (ver reconciliarSesionProvisoria mas abajo).
+    //
+    // El guard de activeUserCheckOk va ACA, no antes de intentar create()
+    // -- si el servidor esta sano, create() va a funcionar sin importar si
+    // activeUser() ya resolvio o no, y no tiene sentido frenar el camino
+    // normal por una duda que ni siquiera aplica. Solo importa si create()
+    // TAMBIEN falla: ahi si, sin confirmacion explicita, no se abre en modo
+    // local (podria duplicar un turno real que ya esta abierto en otra
+    // caja y que no se detecto por la misma falla de red).
     let sessionId: string
     let sessionPendienteSync = false
     try {
       const session = await withTimeout(api.caja.sessions.create(aperturaPayload), 1500)
       sessionId = session.id
     } catch (err: any) {
+      if (activeUserCheckOk !== "sin_turno" && !confirmoPrimerTurnoDelDia) {
+        setSubmittingApertura(false)
+        toast.error(
+          "No se pudo abrir la caja",
+          "No se pudo confirmar si ya tenés un turno abierto en otra caja -- marcá la casilla de confirmación e intentá de nuevo."
+        )
+        return
+      }
       sessionId = generarUUIDLocal()
       sessionPendienteSync = true
       console.warn("No se pudo abrir la sesión en el servidor, abriendo en modo local:", err)
@@ -3272,6 +3296,11 @@ export default function POSPage() {
   }, [serverOnline])
 
   // ── DETECCIÓN AUTOMÁTICA DE TURNO ACTIVO / PAUSADO (NÓMADA & MODELO A) ──
+  // activeUserCheckOk distingue "confirmado que NO hay turno en otra caja"
+  // de "no se pudo confirmar" -- esto ultimo es lo que la apertura offline
+  // (mas abajo) necesita saber ANTES de decidir si abre en modo local sin
+  // preguntar, porque si esta cajera ya abrio turno en otra caja hoy y esa
+  // sesion no se detecto por la misma falla de red, abrir otra la duplica.
   useEffect(() => {
     if (!user?.id) return
     let isCancelled = false
@@ -3279,6 +3308,7 @@ export default function POSPage() {
       .then((active) => {
         if (isCancelled) return
         if (!active) {
+          setActiveUserCheckOk("sin_turno")
           // Si el backend confirma que NO hay sesión activa en base de datos para este usuario,
           // limpiar inmediatamente cualquier residuo local de turnos anteriores
           localStorage.removeItem(userCajaKey)
@@ -3315,6 +3345,7 @@ export default function POSPage() {
       .catch((err) => {
         // Fallback offline: si el servidor central se reinicia, restaurar turno desde almacenamiento local
         const cached = localStorage.getItem("current_cash_session")
+        let restaurado = false
         if (cached) {
           try {
             const sess = JSON.parse(cached)
@@ -3326,9 +3357,15 @@ export default function POSPage() {
               setShowAperturaModal(false)
               setActiveUserSessionInfo(sess)
               console.info("[POS] Servidor offline: turno restaurado desde almacenamiento local:", sess.id)
+              restaurado = true
             }
           } catch {}
         }
+        // Si no habia nada en ESTA maquina, no significa que no haya turno
+        // en OTRA caja -- el localStorage nunca lo sabria, es por-maquina.
+        // Queda "sin_confirmar": la apertura offline va a pedir un chequeo
+        // explicito antes de abrir en modo local para no duplicar turno.
+        if (!restaurado) setActiveUserCheckOk("sin_confirmar")
       })
     return () => { isCancelled = true }
   }, [user?.id])
@@ -8843,9 +8880,26 @@ export default function POSPage() {
                 </div>
               </div>
 
+              {activeUserCheckOk === "sin_confirmar" && (
+                <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-3 space-y-2">
+                  <p className="text-[11px] text-amber-700 dark:text-amber-300 font-bold">
+                    ⚠ No se pudo confirmar si ya tenés un turno abierto en otra caja (falla de conexión). Abrir uno nuevo sin verificar puede duplicar tu turno.
+                  </p>
+                  <label className="flex items-start gap-2 text-[11px] text-slate-700 dark:text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={confirmoPrimerTurnoDelDia}
+                      onChange={(e) => setConfirmoPrimerTurnoDelDia(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>Confirmo que este es mi primer turno de hoy -- no tengo caja abierta en ninguna otra terminal.</span>
+                  </label>
+                </div>
+              )}
+
               <button
                 type="submit"
-                className="w-full bg-brand-orange hover:brightness-95 text-[#1C1710] font-black py-3 rounded-xl shadow-lg shadow-orange-500/30 transition-all text-sm flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full bg-brand-orange hover:brightness-95 disabled:opacity-40 disabled:cursor-not-allowed text-[#1C1710] font-black py-3 rounded-xl shadow-lg shadow-orange-500/30 transition-all text-sm flex items-center justify-center gap-2 cursor-pointer"
               >
                 <CheckCircle className="w-4 h-4" />
                 <span>Confirmar Apertura e Iniciar Cobros</span>
