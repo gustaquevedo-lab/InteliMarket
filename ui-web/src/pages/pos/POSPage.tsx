@@ -16,6 +16,7 @@ import { api, withTimeout, type Product, type Customer, type Sale, type Warehous
 import { useAuth } from "../../context/AuthContext"
 import { useTheme } from "../../context/ThemeContext"
 import { useToast } from "../../context/ToastContext"
+import { useOffline } from "../../context/OfflineContext"
 import { formatPYG } from "../../utils/format"
 import { DEFAULT_RECEIPT_CONFIG } from "../../constants/receiptDefaults"
 import { loadCachedPOSData, persistPOSCatalog } from "../../utils/posOfflineSync"
@@ -426,6 +427,7 @@ export default function POSPage() {
   const { user, logout } = useAuth()
   const toast = useToast()
   const { dark, toggle: toggleTheme } = useTheme()
+  const { isOnline: serverOnline, pendingSalesCount } = useOffline()
 
   // ── TOKENS DE TEMA REUTILIZABLES PARA TODOS LOS MODALES ────────────────────
   // Antes cada modal tenía el fondo oscuro fijo (bg-slate-900/950) sin
@@ -6975,14 +6977,17 @@ export default function POSPage() {
       let saleCreatePromise: Promise<any> | null = null
       if (tpl.usar_numero_interno_venta) {
         try {
-          const created = await api.sales.create(saleBasePayload as any)
+          // withTimeout: si el servidor esta caido (no solo lento), esto
+          // fallaba sin limite de tiempo -- colgaba la pantalla de cobro
+          // varios segundos o mas antes de caer al camino offline de abajo.
+          // 1.5s (igual que el resto de la app) fuerza el fallback rapido.
+          const created = await withTimeout(api.sales.create(saleBasePayload as any), 1500)
           numeroComprobante = created.numero || saleNumber
           numeroInterno = (created as any).numero_interno || null
           ventaYaCreadaSinRecibo = true
           createdSaleId = created.id
         } catch (apiErr: any) {
-          console.error("No se pudo registrar la venta para obtener el número interno:", apiErr)
-          toast.error("No se obtuvo el número real de venta", apiErr?.message || "El ticket sale con un número provisorio -- avisá a soporte.")
+          console.error("No se pudo registrar la venta para obtener el número interno, se reintenta en modo offline:", apiErr)
         }
       }
 
@@ -7893,6 +7898,28 @@ export default function POSPage() {
                 {terminalAssignment?.caja_nombre || PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre.split('·')[0] || puntoEmision}
               </div>
             </div>
+
+            {/* Indicador real de conexion con el servidor -- antes no habia
+                ninguna señal de que la caja estaba operando en modo local,
+                lo que confundia a la cajera cuando algo (ej. Extra Club)
+                fallaba sin explicacion. Se basa en el heartbeat real de
+                OfflineContext, no en navigator.onLine. */}
+            {!serverOnline && (
+              <span
+                className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-amber-500/15 text-amber-500 border border-amber-500/40 shrink-0 animate-pulse"
+                title="No se pudo confirmar conexión con el servidor -- vendiendo en modo local, se sincroniza sola cuando vuelva la conexión."
+              >
+                ⚠ SIN CONEXIÓN
+              </span>
+            )}
+            {pendingSalesCount > 0 && (
+              <span
+                className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-blue-500/15 text-blue-500 border border-blue-500/40 shrink-0"
+                title="Ventas guardadas localmente, pendientes de sincronizar con el servidor."
+              >
+                {pendingSalesCount} pend.
+              </span>
+            )}
 
             {isSupervisorUser && (
               <button

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react"
 import { offlineDB, type PendingSale, type OfflineCartItem, type CachedProduct, type CachedCustomer, type CachedReceipt } from "../utils/offlineDB"
 import { syncFullCatalog, getCachedCatalog, syncPendingSales, syncPendingCupones, scheduleSyncRetry, cancelSyncRetry, saveOfflineReceipt, getOfflineReceipt, generateOfflineReceipt } from "../utils/syncManager"
 import { syncSupervisorPins } from "../utils/localAuth"
@@ -23,6 +23,27 @@ interface OfflineContextType {
 
 const OfflineContext = createContext<OfflineContextType | null>(null)
 
+// navigator.onLine solo detecta cable/wifi desconectado -- NO detecta el
+// caso mas comun en la practica (API caida o colgada con la red local
+// intacta, ej. uvicorn crasheado o la DB bloqueada). Por eso isOnline se
+// decide con un heartbeat real contra el propio backend, no con esa
+// propiedad del navegador.
+const HEARTBEAT_INTERVAL_MS = 15000
+const HEARTBEAT_TIMEOUT_MS = 4000
+const FAILS_TO_GO_OFFLINE = 2
+
+async function checkServerReachable(): Promise<boolean> {
+  try {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), HEARTBEAT_TIMEOUT_MS)
+    const res = await fetch("/api/health", { signal: ctrl.signal, cache: "no-store" })
+    clearTimeout(t)
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 export function OfflineProvider({ children }: { children: ReactNode }) {
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [pendingSales, setPendingSales] = useState<PendingSale[]>([])
@@ -30,15 +51,42 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   const [cachedProducts, setCachedProducts] = useState<CachedProduct[]>([])
   const [cachedCustomers, setCachedCustomers] = useState<CachedCustomer[]>([])
   const [lastSync, setLastSync] = useState<string | null>(null)
+  const consecutiveFailsRef = useRef(0)
 
   useEffect(() => {
-    const onOnline = () => setIsOnline(true)
-    const onOffline = () => setIsOnline(false)
-    window.addEventListener("online", onOnline)
-    window.addEventListener("offline", onOffline)
+    let cancelled = false
+    const tick = async () => {
+      const ok = await checkServerReachable()
+      if (cancelled) return
+      if (ok) {
+        consecutiveFailsRef.current = 0
+        setIsOnline(true)
+      } else {
+        consecutiveFailsRef.current += 1
+        // No basta un solo fallo (podria ser una request puntual lenta) --
+        // se piden FAILS_TO_GO_OFFLINE seguidos antes de declarar offline,
+        // para no parpadear entre modos por un timeout aislado.
+        if (consecutiveFailsRef.current >= FAILS_TO_GO_OFFLINE) setIsOnline(false)
+      }
+    }
+    tick()
+    const interval = setInterval(tick, HEARTBEAT_INTERVAL_MS)
+    // El evento 'offline' del navegador (cable/wifi caido) es una señal
+    // valida e inmediata -- se respeta sin esperar al heartbeat. El evento
+    // 'online', en cambio, solo dispara un chequeo real: que el sistema
+    // operativo vea red de nuevo no significa que el servidor responda.
+    const onBrowserOffline = () => {
+      consecutiveFailsRef.current = FAILS_TO_GO_OFFLINE
+      setIsOnline(false)
+    }
+    const onBrowserOnline = () => { tick() }
+    window.addEventListener("online", onBrowserOnline)
+    window.addEventListener("offline", onBrowserOffline)
     return () => {
-      window.removeEventListener("online", onOnline)
-      window.removeEventListener("offline", onOffline)
+      cancelled = true
+      clearInterval(interval)
+      window.removeEventListener("online", onBrowserOnline)
+      window.removeEventListener("offline", onBrowserOffline)
     }
   }, [])
 
