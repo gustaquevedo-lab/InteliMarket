@@ -49,7 +49,10 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         offlineDB.cart.getAll(),
         getCachedCatalog(),
       ])
-      setPendingSales(sales)
+      // Filtra registros null/corruptos de IndexedDB -- un solo registro asi
+      // (visto en Caja 3, 17-sep) rompia el render de TODA la app, incluido
+      // /login, porque este Provider envuelve el arbol entero.
+      setPendingSales(sales.filter((s): s is PendingSale => !!s))
       setOfflineCart(cart)
       setCachedProducts(catalog.products)
       setCachedCustomers(catalog.customers)
@@ -151,7 +154,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
 
   return (
     <OfflineContext.Provider value={{
-      isOnline, lastSync, pendingSalesCount: pendingSales.filter(s => s.status === "pending").length,
+      isOnline, lastSync, pendingSalesCount: pendingSales.filter(s => s && s.status === "pending").length,
       pendingSales, offlineCart, cachedProducts, cachedCustomers,
       saveCartOffline, addPendingSale,
       syncPendingSales: doSyncPendingSales,
