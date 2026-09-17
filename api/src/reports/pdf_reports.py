@@ -428,10 +428,94 @@ def generate_inventory_valuation_pdf(company: dict, data: dict, fecha_corte: dat
     return buffer.getvalue()
 
 
-def generate_sales_by_supplier_pdf(company: dict, items: list[dict], fecha_desde: date | None = None, fecha_hasta: date | None = None, generated_by: str = "") -> bytes:
+def generate_sales_by_supplier_pdf(
+    company: dict,
+    items: list[dict],
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+    generated_by: str = "",
+    supplier_info: dict | None = None,
+    product_items: list[dict] | None = None,
+) -> bytes:
     from reportlab.lib.colors import HexColor
     buffer = io.BytesIO()
     periodo_str = f"{fecha_desde.strftime('%d/%m/%Y') if fecha_desde else 'Inicio'} al {fecha_hasta.strftime('%d/%m/%Y') if fecha_hasta else 'Hoy'}"
+
+    # Caso 1: Reporte filtrado por un proveedor específico (con detalle de productos)
+    if supplier_info and product_items is not None:
+        prov_nombre = supplier_info.get("proveedor", "Proveedor")
+        prov_ruc = supplier_info.get("ruc", "—")
+        doc, styles = _base_doc(buffer, f"Ventas - {prov_nombre}", company, generated_by)
+        elements = _company_header(
+            company, styles, f"Ventas por Proveedor: {prov_nombre}",
+            f"RUC: {prov_ruc} — Período evaluado: {periodo_str}",
+            generated_by,
+        )
+
+        if not product_items:
+            elements.append(Paragraph("Sin ventas registradas de este proveedor para el período seleccionado.", styles["Small"]))
+            _build(doc, elements)
+            return buffer.getvalue()
+
+        total_ventas = sum(it.get("total_ventas", 0) for it in product_items)
+        total_costo = sum(it.get("costo_total", 0) for it in product_items)
+        total_margen = total_ventas - total_costo
+        total_unidades = sum(it.get("unidades_vendidas", 0) for it in product_items)
+        margen_global_pct = round((total_margen / max(total_ventas, 1)) * 100, 1)
+
+        elements.append(Paragraph("<b>1. Resumen Consolidado del Proveedor</b>", styles["SectionTitle"]))
+        resumen_data = [
+            ("Ventas Totales Registradas", _fmt_gs(total_ventas), False),
+            ("Costo de Mercadería Vendida (CMV)", _fmt_gs(total_costo), False),
+            ("Margen Bruto Comercial", f"{_fmt_gs(total_margen)} ({margen_global_pct}%)", True),
+            ("Total Artículos / SKUs Vendidos", str(len(product_items)), False),
+            ("Total Unidades Despachadas", f"{total_unidades:,.0f}", False),
+        ]
+        elements.append(_totals_table(resumen_data))
+        elements.append(Spacer(1, 4 * mm))
+
+        elements.append(Paragraph("<b>2. Detalle de Artículos / Productos Vendidos</b>", styles["SectionTitle"]))
+        t_data = [["#", "SKU", "Código Barra", "Descripción del Producto", "Unidades", "Venta Total (Gs.)", "Costo (Gs.)", "Margen (Gs.)", "Margen %"]]
+        for idx, it in enumerate(product_items[:120], 1):
+            t_data.append([
+                str(idx),
+                str(it.get("sku", "—"))[:12],
+                str(it.get("codigo_barra", "—"))[:14],
+                it.get("producto", "")[:35],
+                f"{it.get('unidades_vendidas', 0):,.0f}",
+                _fmt_gs(it.get("total_ventas", 0)),
+                _fmt_gs(it.get("costo_total", 0)),
+                _fmt_gs(it.get("utilidad_bruta", 0)),
+                f"{it.get('margen_pct', 0):.1f}%",
+            ])
+
+        col_widths = [8 * mm, 16 * mm, 24 * mm, 52 * mm, 18 * mm, 26 * mm, 24 * mm, 24 * mm, 14 * mm]
+        t = Table(t_data, colWidths=col_widths)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+            ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+            ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+            ("FONTSIZE", (0, 0), (-1, -1), 6.5),
+            ("ALIGN", (4, 0), (-1, -1), "RIGHT"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, GRAY_LIGHT]),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
+        ]))
+        elements.append(t)
+        elements.append(Spacer(1, 4 * mm))
+
+        elements.append(Paragraph(
+            "<b>Nota:</b> Información generada en base a las ventas efectivas registradas en el POS de Extra Supermercado. "
+            "Horario oficial de Paraguay (America/Asuncion).",
+            styles["Small"],
+        ))
+
+        _build(doc, elements)
+        return buffer.getvalue()
+
+    # Caso 2: Reporte general de todos los proveedores (Ranking)
     doc, styles = _base_doc(buffer, "Ventas por Proveedor", company, generated_by)
     elements = _company_header(
         company, styles, "Informe de Ventas por Proveedor",

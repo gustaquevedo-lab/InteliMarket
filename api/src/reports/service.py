@@ -235,10 +235,18 @@ async def get_sales_by_supplier(
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
     limit: int = 100,
+    supplier_id: Optional[str] = None,
 ) -> list:
     params = {"limit": limit, "company_id": company_id}
     where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
     where += _build_tz_filter(fecha_desde, fecha_hasta, params, "v.fecha")
+
+    if supplier_id and supplier_id != "todos":
+        if supplier_id == "sin_proveedor":
+            where += " AND p.supplier_id IS NULL"
+        else:
+            where += " AND sup.id = :supplier_id"
+            params["supplier_id"] = supplier_id
 
     query = f"""
         SELECT
@@ -274,6 +282,68 @@ async def get_sales_by_supplier(
             "proveedor": r["proveedor"],
             "ruc": r["ruc"],
             "skus_vendidos": int(r["skus_vendidos"] or 0),
+            "unidades_vendidas": float(r["unidades_vendidas"] or 0),
+            "total_ventas": monto,
+            "costo_total": costo,
+            "utilidad_bruta": utilidad,
+            "margen_pct": margen_pct,
+            "participacion_pct": participacion_pct,
+        })
+    return items
+
+
+async def get_sales_by_supplier_products(
+    db: AsyncSession,
+    company_id: str,
+    supplier_id: str,
+    fecha_desde: Optional[date] = None,
+    fecha_hasta: Optional[date] = None,
+    limit: int = 200,
+) -> list[dict]:
+    params = {"limit": limit, "company_id": company_id}
+    where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
+    where += _build_tz_filter(fecha_desde, fecha_hasta, params, "v.fecha")
+
+    if supplier_id == "sin_proveedor":
+        where += " AND p.supplier_id IS NULL"
+    else:
+        where += " AND sup.id = :supplier_id"
+        params["supplier_id"] = supplier_id
+
+    query = f"""
+        SELECT
+            p.id::text as product_id,
+            p.nombre as producto,
+            COALESCE(p.sku, '—') as sku,
+            COALESCE(p.codigo_barra, '—') as codigo_barra,
+            SUM(vi.cantidad) as unidades_vendidas,
+            SUM(vi.total) as total_ventas,
+            SUM(vi.cantidad * COALESCE(vi.costo_unitario, p.costo_promedio, p.ultimo_costo, 0)) as costo_total
+        FROM sales v
+        JOIN sale_items vi ON vi.sale_id = v.id
+        JOIN products p ON p.id = vi.product_id
+        LEFT JOIN suppliers sup ON sup.id = p.supplier_id
+        WHERE {where}
+        GROUP BY p.id, p.nombre, p.sku, p.codigo_barra
+        ORDER BY total_ventas DESC
+        LIMIT :limit
+    """
+    results = (await _exec(db, query, params)).all()
+    total_general = float(sum(r["total_ventas"] or 0 for r in results)) or 1.0
+
+    items = []
+    for r in results:
+        monto = float(r["total_ventas"] or 0)
+        costo = float(r["costo_total"] or 0)
+        utilidad = monto - costo
+        margen_pct = round((utilidad / max(monto, 1.0)) * 100, 1)
+        participacion_pct = round((monto / total_general) * 100, 1)
+
+        items.append({
+            "product_id": r["product_id"],
+            "producto": r["producto"],
+            "sku": r["sku"],
+            "codigo_barra": r["codigo_barra"],
             "unidades_vendidas": float(r["unidades_vendidas"] or 0),
             "total_ventas": monto,
             "costo_total": costo,

@@ -3,7 +3,7 @@ import {
   BarChart3, TrendingUp, DollarSign, ShoppingCart, Percent,
   FileSpreadsheet, FileText, RefreshCcw, Loader2, Filter, Layers, CreditCard,
   Calendar, CheckCircle2, AlertTriangle, ArrowUpRight, ArrowDownRight, UserCheck,
-  ShieldCheck, HelpCircle, ChevronRight, Download, Building2, Search
+  ShieldCheck, HelpCircle, ChevronRight, Download, Building2, Search, X, ArrowLeft, PackageCheck
 } from "lucide-react"
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -27,6 +27,10 @@ export default function ReportsPage() {
   // Proveedores
   const [suppliersData, setSuppliersData] = useState<any[]>([])
   const [supplierSearch, setSupplierSearch] = useState("")
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string>("")
+  const [supplierProducts, setSupplierProducts] = useState<any[]>([])
+  const [loadingSupplierProducts, setLoadingSupplierProducts] = useState(false)
+  const [productSearch, setProductSearch] = useState("")
 
   // Selector de fechas con zona horaria America/Asuncion
   const todayStr = useMemo(() => new Date().toISOString().split("T")[0], [])
@@ -123,6 +127,35 @@ export default function ReportsPage() {
     fetchReportData()
   }, [fetchReportData])
 
+  // Carga de productos para proveedor seleccionado
+  const fetchSupplierProducts = useCallback(async (supId: string) => {
+    if (!supId || supId === "todos") {
+      setSupplierProducts([])
+      return
+    }
+    setLoadingSupplierProducts(true)
+    try {
+      const res = await api.reports.salesBySupplierProducts({
+        supplier_id: supId,
+        fecha_desde: fechaDesde || undefined,
+        fecha_hasta: fechaHasta || undefined,
+      })
+      setSupplierProducts(res || [])
+    } catch (err: any) {
+      console.error("Error al cargar productos del proveedor:", err)
+    } finally {
+      setLoadingSupplierProducts(false)
+    }
+  }, [fechaDesde, fechaHasta])
+
+  useEffect(() => {
+    if (selectedSupplierId && selectedSupplierId !== "todos") {
+      fetchSupplierProducts(selectedSupplierId)
+    } else {
+      setSupplierProducts([])
+    }
+  }, [selectedSupplierId, fetchSupplierProducts])
+
   // Exportar PDF
   const handleExportPdf = async () => {
     setDownloadingPdf(true)
@@ -131,8 +164,14 @@ export default function ReportsPage() {
         await api.reports.downloadSalesBySupplierPdf({
           fecha_desde: fechaDesde || undefined,
           fecha_hasta: fechaHasta || undefined,
+          supplier_id: selectedSupplierId || undefined,
         })
-        toast.success("PDF Descargado", "Informe de Ventas por Proveedor generado con membrete fiscal")
+        toast.success(
+          "PDF Descargado",
+          selectedSupplierId
+            ? "Informe filtrado por proveedor generado con membrete fiscal"
+            : "Informe de Ventas por Proveedor generado con membrete fiscal"
+        )
       } else {
         await api.reports.downloadSalesExecutivePdf({
           fecha_desde: fechaDesde || undefined,
@@ -155,8 +194,14 @@ export default function ReportsPage() {
         await api.reports.downloadSalesBySupplierXlsx({
           fecha_desde: fechaDesde || undefined,
           fecha_hasta: fechaHasta || undefined,
+          supplier_id: selectedSupplierId || undefined,
         })
-        toast.success("Excel Descargado", "Planilla de Ventas por Proveedor descargada")
+        toast.success(
+          "Excel Descargado",
+          selectedSupplierId
+            ? "Planilla filtrada de productos del proveedor descargada"
+            : "Planilla de Ventas por Proveedor descargada"
+        )
       } else {
         await api.reports.downloadSalesExecutiveXlsx({
           fecha_desde: fechaDesde || undefined,
@@ -244,6 +289,39 @@ export default function ReportsPage() {
       count: suppliersData.length,
     }
   }, [suppliersData])
+
+  const selectedSupplierObj = useMemo(() => {
+    if (!selectedSupplierId || selectedSupplierId === "todos") return null
+    return suppliersData.find((s: any) => s.supplier_id === selectedSupplierId) || null
+  }, [suppliersData, selectedSupplierId])
+
+  const filteredSupplierProducts = useMemo(() => {
+    if (!productSearch.trim()) return supplierProducts
+    const q = productSearch.toLowerCase()
+    return supplierProducts.filter((p: any) =>
+      (p.producto && p.producto.toLowerCase().includes(q)) ||
+      (p.sku && p.sku.toLowerCase().includes(q)) ||
+      (p.codigo_barra && p.codigo_barra.toLowerCase().includes(q))
+    )
+  }, [supplierProducts, productSearch])
+
+  const activeSupplierStats = useMemo(() => {
+    if (selectedSupplierObj) {
+      return {
+        totalVentas: selectedSupplierObj.total_ventas || 0,
+        totalCosto: selectedSupplierObj.costo_total || 0,
+        totalUtilidad: selectedSupplierObj.utilidad_bruta || 0,
+        totalUnidades: selectedSupplierObj.unidades_vendidas || 0,
+        margenPct: selectedSupplierObj.margen_pct || 0,
+        count: selectedSupplierObj.skus_vendidos || 0,
+        isSingle: true,
+      }
+    }
+    return {
+      ...supplierStats,
+      isSingle: false,
+    }
+  }, [selectedSupplierObj, supplierStats])
 
   return (
     <div className="space-y-6 animate-fade-in-up pb-16">
@@ -727,22 +805,77 @@ export default function ReportsPage() {
       {/* ── CONTENIDO TAB: VENTAS POR PROVEEDOR ── */}
       {activeTab === "proveedores" && (
         <div className="space-y-6">
-          {/* Top 4 KPI cards de proveedores */}
+          {/* Barra de Selección y Filtro de Proveedor */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300">
+                <Building2 className="w-4 h-4 text-emerald-600" />
+                <span>Seleccionar Proveedor:</span>
+              </div>
+              <select
+                value={selectedSupplierId}
+                onChange={(e) => {
+                  setSelectedSupplierId(e.target.value)
+                  setProductSearch("")
+                }}
+                className="text-xs font-bold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 max-w-xs md:max-w-md"
+              >
+                <option value="">🏢 Todos los Proveedores (Consolidado General)</option>
+                {suppliersData.map((s: any) => (
+                  <option key={s.supplier_id} value={s.supplier_id}>
+                    {s.proveedor} {s.ruc && s.ruc !== "—" ? `(${s.ruc})` : ""} — {formatPYG(s.total_ventas)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedSupplierObj ? (
+              <div className="flex items-center gap-2.5">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                  <PackageCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  Filtrando: <strong>{selectedSupplierObj.proveedor}</strong>
+                </span>
+                <button
+                  onClick={() => {
+                    setSelectedSupplierId("")
+                    setProductSearch("")
+                  }}
+                  className="flex items-center gap-1 px-3 py-1 text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-xl hover:bg-slate-200 transition cursor-pointer"
+                  title="Quitar filtro y ver ranking consolidado"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  Ver todos
+                </button>
+              </div>
+            ) : (
+              <span className="text-xs text-slate-400 font-mono">
+                {suppliersData.length} proveedores con ventas registradas
+              </span>
+            )}
+          </div>
+
+          {/* Top 4 KPI cards adaptadas al filtro */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
               <div className="h-1 w-full bg-gradient-to-r from-emerald-500 to-teal-500 absolute top-0 left-0" />
               <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Venta Proveedores</span>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  {selectedSupplierObj ? "Venta del Proveedor" : "Total Venta Proveedores"}
+                </span>
                 <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600">
                   <DollarSign className="w-4 h-4" />
                 </div>
               </div>
               <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
-                {formatPYG(supplierStats.totalVentas)}
+                {formatPYG(activeSupplierStats.totalVentas)}
               </p>
               <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <span>{supplierStats.count} Proveedores</span>
-                <span className="text-emerald-600 font-bold font-mono">100% Facturación</span>
+                <span>{selectedSupplierObj ? `${activeSupplierStats.count} SKUs vendidos` : `${activeSupplierStats.count} Proveedores`}</span>
+                <span className="text-emerald-600 font-bold font-mono">
+                  {selectedSupplierObj && supplierStats.totalVentas > 0
+                    ? `${((activeSupplierStats.totalVentas / supplierStats.totalVentas) * 100).toFixed(1)}% del salón`
+                    : "100% Facturación"}
+                </span>
               </div>
             </div>
 
@@ -755,12 +888,12 @@ export default function ReportsPage() {
                 </div>
               </div>
               <p className="text-2xl font-black font-mono text-blue-600 dark:text-blue-400">
-                {formatPYG(supplierStats.totalCosto)}
+                {formatPYG(activeSupplierStats.totalCosto)}
               </p>
               <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <span>Costo de Reposición</span>
                 <span className="text-blue-600 font-bold font-mono">
-                  {supplierStats.totalVentas > 0 ? ((supplierStats.totalCosto / supplierStats.totalVentas) * 100).toFixed(1) : 0}% de venta
+                  {activeSupplierStats.totalVentas > 0 ? ((activeSupplierStats.totalCosto / activeSupplierStats.totalVentas) * 100).toFixed(1) : 0}% de venta
                 </span>
               </div>
             </div>
@@ -774,24 +907,26 @@ export default function ReportsPage() {
                 </div>
               </div>
               <p className="text-2xl font-black font-mono text-amber-600 dark:text-amber-400">
-                {formatPYG(supplierStats.totalUtilidad)}
+                {formatPYG(activeSupplierStats.totalUtilidad)}
               </p>
               <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <span>Margen Ponderado</span>
-                <span className="text-amber-600 font-bold font-mono">{supplierStats.margenPct.toFixed(2)}%</span>
+                <span>Margen Comercial</span>
+                <span className="text-amber-600 font-bold font-mono">{activeSupplierStats.margenPct.toFixed(2)}%</span>
               </div>
             </div>
 
             <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
               <div className="h-1 w-full bg-gradient-to-r from-purple-500 to-pink-500 absolute top-0 left-0" />
               <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Volumen Despachado</span>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  {selectedSupplierObj ? "Unidades del Proveedor" : "Volumen Despachado"}
+                </span>
                 <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/50 text-purple-600">
                   <TrendingUp className="w-4 h-4" />
                 </div>
               </div>
               <p className="text-2xl font-black font-mono text-purple-600 dark:text-purple-400">
-                {supplierStats.totalUnidades.toLocaleString("es-PY")}
+                {activeSupplierStats.totalUnidades.toLocaleString("es-PY")}
               </p>
               <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <span>Unidades / Kilos</span>
@@ -800,159 +935,304 @@ export default function ReportsPage() {
             </div>
           </div>
 
-          {/* Gráfico Top 10 Proveedores */}
-          {top10SuppliersChart.length > 0 && (
-            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+          {/* VISTA A: Proveedor Seleccionado Individual -> Detalle de Artículos */}
+          {selectedSupplierObj ? (
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden space-y-4 p-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
                 <div>
-                  <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    Top 10 Proveedores por Facturación
-                  </h3>
-                  <p className="text-xs text-slate-400">Proveedores de mayor impacto en la venta del período</p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setSelectedSupplierId("")
+                        setProductSearch("")
+                      }}
+                      className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer p-1 rounded-lg"
+                      title="Volver al ranking"
+                    >
+                      <ArrowLeft className="w-5 h-5" />
+                    </button>
+                    <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                      <Building2 className="w-5 h-5 text-emerald-600" />
+                      Artículos Vendidos: {selectedSupplierObj.proveedor}
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5 ml-7">
+                    RUC: <strong>{selectedSupplierObj.ruc || "—"}</strong> · Desglose por artículo, costo de reposición y margen comercial
+                  </p>
                 </div>
-              </div>
 
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={top10SuppliersChart} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                    <XAxis type="number" tickFormatter={(v) => `${(v / 1000000).toFixed(0)}M`} />
-                    <YAxis dataKey="name" type="category" width={160} tick={{ fontSize: 11 }} />
-                    <Tooltip
-                      formatter={(value: any, name: string) => [
-                        formatPYG(Number(value)),
-                        name === "total_ventas" ? "Facturación" : "Margen Bruto",
-                      ]}
-                      labelFormatter={(_: any, payload: any) => payload?.[0]?.payload?.fullName || ""}
+                {/* Filtro de búsqueda de productos */}
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={productSearch}
+                      onChange={(e) => setProductSearch(e.target.value)}
+                      placeholder="Buscar por artículo, SKU o código..."
+                      className="pl-9 pr-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 w-64"
                     />
-                    <Bar dataKey="total_ventas" fill="#10b981" radius={[0, 6, 6, 0]} name="Facturación Total" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          )}
-
-          {/* Tabla detallada de ventas por proveedor */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden space-y-4 p-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
-              <div>
-                <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <Building2 className="w-5 h-5 text-emerald-600" />
-                  Ranking Detallado de Ventas por Proveedor
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Auditoría completa de facturación bruta, costo de reposición, margen comercial y unidades por distribuidor
-                </p>
-              </div>
-
-              {/* Filtro de búsqueda */}
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={supplierSearch}
-                    onChange={(e) => setSupplierSearch(e.target.value)}
-                    placeholder="Buscar proveedor o RUC..."
-                    className="pl-9 pr-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 w-56 sm:w-64"
-                  />
+                  </div>
+                  <span className="text-[11px] font-mono text-slate-400 whitespace-nowrap">
+                    {filteredSupplierProducts.length} de {supplierProducts.length}
+                  </span>
                 </div>
-                <span className="text-[11px] font-mono text-slate-400 whitespace-nowrap">
-                  {filteredSuppliers.length} de {suppliersData.length}
-                </span>
               </div>
-            </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-bold text-[10px]">
-                  <tr>
-                    <th className="py-3 px-3 w-12 text-center">#</th>
-                    <th className="py-3 px-3">Proveedor / Razón Social</th>
-                    <th className="py-3 px-3">RUC</th>
-                    <th className="py-3 px-3 text-right">SKUs</th>
-                    <th className="py-3 px-3 text-right">Unidades</th>
-                    <th className="py-3 px-3 text-right">Total Ventas (Gs.)</th>
-                    <th className="py-3 px-3 text-right">Costo Total (Gs.)</th>
-                    <th className="py-3 px-3 text-right">Margen Bruto (Gs.)</th>
-                    <th className="py-3 px-3 text-right">Margen %</th>
-                    <th className="py-3 px-3 text-right">% Part.</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {filteredSuppliers.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} className="py-12 text-center text-slate-400">
-                        <Building2 className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                        No se encontraron ventas de proveedores para el período seleccionado.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredSuppliers.map((s: any, idx: number) => {
-                      const isTop3 = idx < 3 && !supplierSearch
-                      return (
-                        <tr key={s.supplier_id || idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
-                          <td className="py-3 px-3 text-center">
-                            <span
-                              className={`inline-flex items-center justify-center w-6 h-6 rounded-full font-black text-[10px] ${
-                                isTop3
-                                  ? idx === 0
-                                    ? "bg-amber-400/20 text-amber-600 border border-amber-400/40"
-                                    : idx === 1
-                                    ? "bg-slate-300/30 text-slate-600 border border-slate-400/40"
-                                    : "bg-amber-700/20 text-amber-800 border border-amber-700/40"
-                                  : "text-slate-400 font-mono"
-                              }`}
-                            >
-                              {idx + 1}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3">
-                            <div className="font-bold text-slate-900 dark:text-slate-100">{s.proveedor}</div>
-                          </td>
-                          <td className="py-3 px-3 font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                            {s.ruc || "—"}
-                          </td>
-                          <td className="py-3 px-3 text-right font-mono text-slate-600 dark:text-slate-300">
-                            {s.skus_vendidos}
-                          </td>
-                          <td className="py-3 px-3 text-right font-mono text-slate-600 dark:text-slate-300">
-                            {Number(s.unidades_vendidas || 0).toLocaleString("es-PY")}
-                          </td>
-                          <td className="py-3 px-3 text-right font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
-                            {formatPYG(s.total_ventas)}
-                          </td>
-                          <td className="py-3 px-3 text-right font-mono text-slate-500 dark:text-slate-400">
-                            {formatPYG(s.costo_total)}
-                          </td>
-                          <td className="py-3 px-3 text-right font-mono font-bold text-amber-600 dark:text-amber-400">
-                            {formatPYG(s.utilidad_bruta)}
-                          </td>
-                          <td className="py-3 px-3 text-right">
-                            <span
-                              className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
-                                s.margen_pct >= 25
-                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
-                                  : s.margen_pct >= 15
-                                  ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-                                  : "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
-                              }`}
-                            >
-                              {Number(s.margen_pct || 0).toFixed(2)}%
-                            </span>
-                          </td>
-                          <td className="py-3 px-3 text-right font-mono text-slate-500 font-bold">
-                            {Number(s.participacion_pct || 0).toFixed(2)}%
+              {loadingSupplierProducts ? (
+                <div className="py-16 text-center text-slate-400">
+                  <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2 text-emerald-500" />
+                  Cargando desglose de productos del proveedor...
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-bold text-[10px]">
+                      <tr>
+                        <th className="py-3 px-3 w-10 text-center">#</th>
+                        <th className="py-3 px-3">SKU</th>
+                        <th className="py-3 px-3">Código de Barra</th>
+                        <th className="py-3 px-3">Descripción del Producto</th>
+                        <th className="py-3 px-3 text-right">Unidades</th>
+                        <th className="py-3 px-3 text-right">Total Ventas (Gs.)</th>
+                        <th className="py-3 px-3 text-right">Costo Total (Gs.)</th>
+                        <th className="py-3 px-3 text-right">Margen Bruto (Gs.)</th>
+                        <th className="py-3 px-3 text-right">Margen %</th>
+                        <th className="py-3 px-3 text-right">% Part.</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {filteredSupplierProducts.length === 0 ? (
+                        <tr>
+                          <td colSpan={10} className="py-12 text-center text-slate-400">
+                            <PackageCheck className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                            No se registraron ventas de artículos para este proveedor en el período seleccionado.
                           </td>
                         </tr>
-                      )
-                    })
-                  )}
-                </tbody>
-              </table>
+                      ) : (
+                        filteredSupplierProducts.map((p: any, idx: number) => (
+                          <tr key={p.product_id || idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
+                            <td className="py-2.5 px-3 text-center text-slate-400 font-mono text-[11px]">{idx + 1}</td>
+                            <td className="py-2.5 px-3 font-mono text-slate-700 dark:text-slate-300 font-bold">{p.sku}</td>
+                            <td className="py-2.5 px-3 font-mono text-slate-500 text-[11px]">{p.codigo_barra || "—"}</td>
+                            <td className="py-2.5 px-3">
+                              <span className="font-bold text-slate-900 dark:text-slate-100">{p.producto}</span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-700 dark:text-slate-300">
+                              {Number(p.unidades_vendidas || 0).toLocaleString("es-PY")}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
+                              {formatPYG(p.total_ventas)}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-500 dark:text-slate-400">
+                              {formatPYG(p.costo_total)}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono font-bold text-amber-600 dark:text-amber-400">
+                              {formatPYG(p.utilidad_bruta)}
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              <span
+                                className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                                  p.margen_pct >= 25
+                                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                    : p.margen_pct >= 15
+                                    ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+                                    : "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                                }`}
+                              >
+                                {Number(p.margen_pct || 0).toFixed(1)}%
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-500 font-bold">
+                              {Number(p.participacion_pct || 0).toFixed(1)}%
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-          </div>
+          ) : (
+            /* VISTA B: Consolidado General de Todos los Proveedores */
+            <>
+              {/* Gráfico Top 10 Proveedores */}
+              {top10SuppliersChart.length > 0 && (
+                <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <div>
+                      <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                        Top 10 Proveedores por Facturación
+                      </h3>
+                      <p className="text-xs text-slate-400">Proveedores de mayor impacto en la venta del período</p>
+                    </div>
+                  </div>
+
+                  <div className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={top10SuppliersChart} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                        <XAxis type="number" tickFormatter={(v) => `${(v / 1000000).toFixed(0)}M`} />
+                        <YAxis dataKey="name" type="category" width={160} tick={{ fontSize: 11 }} />
+                        <Tooltip
+                          formatter={(value: any, name: string) => [
+                            formatPYG(Number(value)),
+                            name === "total_ventas" ? "Facturación" : "Margen Bruto",
+                          ]}
+                          labelFormatter={(_: any, payload: any) => payload?.[0]?.payload?.fullName || ""}
+                        />
+                        <Bar dataKey="total_ventas" fill="#10b981" radius={[0, 6, 6, 0]} name="Facturación Total" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+
+              {/* Tabla detallada de ventas por proveedor */}
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden space-y-4 p-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+                  <div>
+                    <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                      <Building2 className="w-5 h-5 text-emerald-600" />
+                      Ranking Detallado de Ventas por Proveedor
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Hacé clic en cualquier proveedor o en "Ver Artículos" para auditar los productos vendidos
+                    </p>
+                  </div>
+
+                  {/* Filtro de búsqueda */}
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={supplierSearch}
+                        onChange={(e) => setSupplierSearch(e.target.value)}
+                        placeholder="Buscar proveedor o RUC..."
+                        className="pl-9 pr-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 w-56 sm:w-64"
+                      />
+                    </div>
+                    <span className="text-[11px] font-mono text-slate-400 whitespace-nowrap">
+                      {filteredSuppliers.length} de {suppliersData.length}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-bold text-[10px]">
+                      <tr>
+                        <th className="py-3 px-3 w-12 text-center">#</th>
+                        <th className="py-3 px-3">Proveedor / Razón Social</th>
+                        <th className="py-3 px-3">RUC</th>
+                        <th className="py-3 px-3 text-right">SKUs</th>
+                        <th className="py-3 px-3 text-right">Unidades</th>
+                        <th className="py-3 px-3 text-right">Total Ventas (Gs.)</th>
+                        <th className="py-3 px-3 text-right">Costo Total (Gs.)</th>
+                        <th className="py-3 px-3 text-right">Margen Bruto (Gs.)</th>
+                        <th className="py-3 px-3 text-right">Margen %</th>
+                        <th className="py-3 px-3 text-right">% Part.</th>
+                        <th className="py-3 px-3 text-center">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {filteredSuppliers.length === 0 ? (
+                        <tr>
+                          <td colSpan={11} className="py-12 text-center text-slate-400">
+                            <Building2 className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                            No se encontraron ventas de proveedores para el período seleccionado.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredSuppliers.map((s: any, idx: number) => {
+                          const isTop3 = idx < 3 && !supplierSearch
+                          return (
+                            <tr key={s.supplier_id || idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
+                              <td className="py-3 px-3 text-center">
+                                <span
+                                  className={`inline-flex items-center justify-center w-6 h-6 rounded-full font-black text-[10px] ${
+                                    isTop3
+                                      ? idx === 0
+                                        ? "bg-amber-400/20 text-amber-600 border border-amber-400/40"
+                                        : idx === 1
+                                        ? "bg-slate-300/30 text-slate-600 border border-slate-400/40"
+                                        : "bg-amber-700/20 text-amber-800 border border-amber-700/40"
+                                      : "text-slate-400 font-mono"
+                                  }`}
+                                >
+                                  {idx + 1}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3">
+                                <button
+                                  onClick={() => {
+                                    setSelectedSupplierId(s.supplier_id)
+                                    setProductSearch("")
+                                  }}
+                                  className="text-left font-bold text-slate-900 dark:text-slate-100 hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer"
+                                >
+                                  {s.proveedor}
+                                </button>
+                              </td>
+                              <td className="py-3 px-3 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                                {s.ruc || "—"}
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono text-slate-600 dark:text-slate-300">
+                                {s.skus_vendidos}
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono text-slate-600 dark:text-slate-300">
+                                {Number(s.unidades_vendidas || 0).toLocaleString("es-PY")}
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
+                                {formatPYG(s.total_ventas)}
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono text-slate-500 dark:text-slate-400">
+                                {formatPYG(s.costo_total)}
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono font-bold text-amber-600 dark:text-amber-400">
+                                {formatPYG(s.utilidad_bruta)}
+                              </td>
+                              <td className="py-3 px-3 text-right">
+                                <span
+                                  className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                                    s.margen_pct >= 25
+                                      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                      : s.margen_pct >= 15
+                                      ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+                                      : "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                                  }`}
+                                >
+                                  {Number(s.margen_pct || 0).toFixed(2)}%
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono text-slate-500 font-bold">
+                                {Number(s.participacion_pct || 0).toFixed(2)}%
+                              </td>
+                              <td className="py-3 px-3 text-center">
+                                <button
+                                  onClick={() => {
+                                    setSelectedSupplierId(s.supplier_id)
+                                    setProductSearch("")
+                                  }}
+                                  className="px-2.5 py-1 text-[10px] font-extrabold rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-300 transition cursor-pointer"
+                                  title="Ver artículos vendidos de este proveedor"
+                                >
+                                  Ver Artículos →
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 

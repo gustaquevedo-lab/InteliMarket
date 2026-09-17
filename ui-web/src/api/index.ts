@@ -2031,7 +2031,7 @@ export const api = {
     salesChartComparison: (params?: { fecha_desde?: string; fecha_hasta?: string; agrupar_por?: string }) => client.get<{ series: any[]; totales: any }>("/api/reports/sales/chart-comparison", params),
     salesByCategory: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/sales/by-category", params),
     salesByProduct: (params?: { fecha_desde?: string; fecha_hasta?: string; limit?: number }) => client.get<{ producto: string; sku: string; unidad_medida: string; cantidad: number; monto: number; costo: number; margen: number }[]>("/api/reports/sales/by-product", params),
-    salesBySupplier: (params?: { fecha_desde?: string; fecha_hasta?: string; limit?: number }) =>
+    salesBySupplier: (params?: { fecha_desde?: string; fecha_hasta?: string; limit?: number; supplier_id?: string }) =>
       client.get<{
         supplier_id: string;
         proveedor: string;
@@ -2044,10 +2044,23 @@ export const api = {
         margen_pct: number;
         participacion_pct: number;
       }[]>("/api/reports/sales/by-supplier", params),
-    downloadSalesBySupplierPdf: (params?: { fecha_desde?: string; fecha_hasta?: string }) =>
-      downloadAuthenticated("/api/reports/export/sales-by-supplier.pdf", params, `ventas_por_proveedor_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.pdf`),
-    downloadSalesBySupplierXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string }) =>
-      downloadAuthenticated("/api/reports/export/sales-by-supplier.xlsx", params, `ventas_por_proveedor_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.xlsx`),
+    salesBySupplierProducts: (params: { supplier_id: string; fecha_desde?: string; fecha_hasta?: string; limit?: number }) =>
+      client.get<{
+        product_id: string;
+        producto: string;
+        sku: string;
+        codigo_barra: string;
+        unidades_vendidas: number;
+        total_ventas: number;
+        costo_total: number;
+        utilidad_bruta: number;
+        margen_pct: number;
+        participacion_pct: number;
+      }[]>("/api/reports/sales/by-supplier/products", params),
+    downloadSalesBySupplierPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; supplier_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-by-supplier.pdf", params, `ventas_proveedor_${params?.supplier_id || "general"}_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.pdf`),
+    downloadSalesBySupplierXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string; supplier_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-by-supplier.xlsx", params, `ventas_proveedor_${params?.supplier_id || "general"}_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.xlsx`),
     salesByPaymentMethod: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/sales/by-payment-method", params),
     expensesByCategory: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ categoria: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/expenses/by-category", params),
     getDashboardAllKPIs: async (params?: { fecha_desde?: string; fecha_hasta?: string }) => {

@@ -526,38 +526,78 @@ def export_inventory_valuation_xlsx(data: dict, fecha_corte: Optional[date] = No
     return buf.getvalue()
 
 
-def export_sales_by_supplier(data: list, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> bytes:
+def export_sales_by_supplier(
+    data: list,
+    fecha_desde: Optional[date] = None,
+    fecha_hasta: Optional[date] = None,
+    supplier_info: Optional[dict] = None,
+    product_items: Optional[list] = None,
+) -> bytes:
     wb = Workbook()
     ws = wb.active
-    ws.title = "Ventas por Proveedor"
-    _write_title(ws, "Informe de Ventas y Margen por Proveedor", fecha_desde, fecha_hasta)
 
-    headers = [
-        "Ranking",
-        "Proveedor",
-        "RUC",
-        "SKUs Vendidos",
-        "Unidades Vendidas",
-        "Ventas Totales (Gs.)",
-        "Costo de Venta (Gs.)",
-        "Margen Bruto (Gs.)",
-        "Margen (%)",
-        "Participación (%)",
-    ]
-    rows = []
-    for idx, item in enumerate(data, 1):
-        rows.append((
-            idx,
-            item.get("proveedor", ""),
-            item.get("ruc", "—"),
-            item.get("skus_vendidos", 0),
-            round(item.get("unidades_vendidas", 0), 2),
-            item.get("total_ventas", 0),
-            item.get("costo_total", 0),
-            item.get("utilidad_bruta", 0),
-            f"{item.get('margen_pct', 0):.1f}%",
-            f"{item.get('participacion_pct', 0):.1f}%",
-        ))
+    if supplier_info and product_items is not None:
+        ws.title = "Artículos Proveedor"
+        prov_nombre = supplier_info.get("proveedor", "Proveedor")
+        prov_ruc = supplier_info.get("ruc", "—")
+        _write_title(ws, f"Ventas de Productos — {prov_nombre} (RUC: {prov_ruc})", fecha_desde, fecha_hasta)
+
+        headers = [
+            "#",
+            "SKU",
+            "Código de Barras",
+            "Descripción del Producto",
+            "Unidades Vendidas",
+            "Ventas Totales (Gs.)",
+            "Costo Total (Gs.)",
+            "Margen Bruto (Gs.)",
+            "Margen (%)",
+            "Participación (%)",
+        ]
+        rows = []
+        for idx, item in enumerate(product_items, 1):
+            rows.append((
+                idx,
+                item.get("sku", "—"),
+                item.get("codigo_barra", "—"),
+                item.get("producto", ""),
+                round(item.get("unidades_vendidas", 0), 2),
+                item.get("total_ventas", 0),
+                item.get("costo_total", 0),
+                item.get("utilidad_bruta", 0),
+                f"{item.get('margen_pct', 0):.1f}%",
+                f"{item.get('participacion_pct', 0):.1f}%",
+            ))
+    else:
+        ws.title = "Ventas por Proveedor"
+        _write_title(ws, "Informe de Ventas y Margen por Proveedor", fecha_desde, fecha_hasta)
+
+        headers = [
+            "Ranking",
+            "Proveedor",
+            "RUC",
+            "SKUs Vendidos",
+            "Unidades Vendidas",
+            "Ventas Totales (Gs.)",
+            "Costo de Venta (Gs.)",
+            "Margen Bruto (Gs.)",
+            "Margen (%)",
+            "Participación (%)",
+        ]
+        rows = []
+        for idx, item in enumerate(data, 1):
+            rows.append((
+                idx,
+                item.get("proveedor", ""),
+                item.get("ruc", "—"),
+                item.get("skus_vendidos", 0),
+                round(item.get("unidades_vendidas", 0), 2),
+                item.get("total_ventas", 0),
+                item.get("costo_total", 0),
+                item.get("utilidad_bruta", 0),
+                f"{item.get('margen_pct', 0):.1f}%",
+                f"{item.get('participacion_pct', 0):.1f}%",
+            ))
 
     _write_data(ws, headers, rows)
     _auto_width(ws)

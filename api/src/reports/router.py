@@ -92,8 +92,27 @@ async def sales_by_product(fecha_desde: date | None = Query(None), fecha_hasta: 
 
 
 @router.get("/sales/by-supplier")
-async def sales_by_supplier(fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), limit: int = Query(100, le=500), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
-    return await service.get_sales_by_supplier(db, user["company_id"], fecha_desde, fecha_hasta, limit)
+async def sales_by_supplier(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    limit: int = Query(100, le=500),
+    supplier_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    return await service.get_sales_by_supplier(db, user["company_id"], fecha_desde, fecha_hasta, limit, supplier_id)
+
+
+@router.get("/sales/by-supplier/products")
+async def sales_by_supplier_products(
+    supplier_id: str = Query(...),
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    limit: int = Query(200, le=500),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    return await service.get_sales_by_supplier_products(db, user["company_id"], supplier_id, fecha_desde, fecha_hasta, limit)
 
 
 @router.get("/sales/by-client")
@@ -197,12 +216,24 @@ async def export_sales_by_supplier_xlsx(
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
     limit: int = Query(200, le=1000),
+    supplier_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth)
 ):
-    data = await service.get_sales_by_supplier(db, user["company_id"], fecha_desde, fecha_hasta, limit)
-    xlsx = export_service.export_sales_by_supplier(data, fecha_desde, fecha_hasta)
-    return _excel_response(xlsx, f"ventas_por_proveedor_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.xlsx")
+    company_id = user["company_id"]
+    if supplier_id and supplier_id != "todos":
+        sup_data = await service.get_sales_by_supplier(db, company_id, fecha_desde, fecha_hasta, limit=1, supplier_id=supplier_id)
+        supplier_info = sup_data[0] if sup_data else {"proveedor": "Proveedor", "ruc": "—"}
+        product_items = await service.get_sales_by_supplier_products(db, company_id, supplier_id, fecha_desde, fecha_hasta, limit=limit)
+        xlsx = export_service.export_sales_by_supplier(sup_data, fecha_desde, fecha_hasta, supplier_info=supplier_info, product_items=product_items)
+        safe_name = "".join(c for c in supplier_info.get("proveedor", "proveedor") if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+        filename = f"ventas_proveedor_{safe_name}_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.xlsx"
+    else:
+        data = await service.get_sales_by_supplier(db, company_id, fecha_desde, fecha_hasta, limit)
+        xlsx = export_service.export_sales_by_supplier(data, fecha_desde, fecha_hasta)
+        filename = f"ventas_por_proveedor_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.xlsx"
+
+    return _excel_response(xlsx, filename)
 
 
 @router.get("/export/sales-by-supplier.pdf")
@@ -210,15 +241,30 @@ async def export_sales_by_supplier_pdf(
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
     limit: int = Query(200, le=1000),
+    supplier_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth)
 ):
     company_id = user["company_id"]
-    data = await service.get_sales_by_supplier(db, company_id, fecha_desde, fecha_hasta, limit)
     company = await _get_company_info(db, company_id)
     generated_by = user.get("user_nombre") or user.get("user_email") or "Auditoría Interna"
-    pdf_bytes = pdf_reports.generate_sales_by_supplier_pdf(company, data, fecha_desde, fecha_hasta, generated_by)
-    return _pdf_response(pdf_bytes, f"ventas_por_proveedor_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.pdf")
+
+    if supplier_id and supplier_id != "todos":
+        sup_data = await service.get_sales_by_supplier(db, company_id, fecha_desde, fecha_hasta, limit=1, supplier_id=supplier_id)
+        supplier_info = sup_data[0] if sup_data else {"proveedor": "Proveedor", "ruc": "—"}
+        product_items = await service.get_sales_by_supplier_products(db, company_id, supplier_id, fecha_desde, fecha_hasta, limit=limit)
+        pdf_bytes = pdf_reports.generate_sales_by_supplier_pdf(
+            company, sup_data, fecha_desde, fecha_hasta, generated_by,
+            supplier_info=supplier_info, product_items=product_items
+        )
+        safe_name = "".join(c for c in supplier_info.get("proveedor", "proveedor") if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+        filename = f"ventas_proveedor_{safe_name}_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.pdf"
+    else:
+        data = await service.get_sales_by_supplier(db, company_id, fecha_desde, fecha_hasta, limit)
+        pdf_bytes = pdf_reports.generate_sales_by_supplier_pdf(company, data, fecha_desde, fecha_hasta, generated_by)
+        filename = f"ventas_por_proveedor_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.pdf"
+
+    return _pdf_response(pdf_bytes, filename)
 
 
 @router.get("/export/sales-by-client")
