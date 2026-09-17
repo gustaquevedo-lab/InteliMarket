@@ -369,7 +369,7 @@ export default function AutoReplenishPage() {
                       <td className="p-3 font-semibold text-gray-900 dark:text-white">{s.producto_nombre || s.producto_id}</td>
                       <td className="p-3 font-medium text-gray-600 dark:text-gray-300">{s.proveedor_nombre || "—"}</td>
                       <td className="p-3 text-right font-mono font-bold">{s.stock_actual}</td>
-                      <td className="p-3 text-right font-mono text-gray-500">{s.demanda_diaria_avg?.toFixed(1) ?? "—"} /d</td>
+                      <td className="p-3 text-right font-mono text-gray-500">{s.demanda_diaria_avg != null ? Number(s.demanda_diaria_avg).toFixed(1) : "—"} /d</td>
                       <td className="p-3 text-right font-mono font-bold text-primary text-sm bg-primary/5">{s.cantidad_sugerida}</td>
                       <td className="p-3 text-right font-mono font-bold">{s.costo_total_estimado ? formatPYG(s.costo_total_estimado) : "—"}</td>
                       <td className="p-3">
