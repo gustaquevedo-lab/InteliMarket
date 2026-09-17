@@ -18,6 +18,33 @@ from api.src.inventory.models import Stock, Warehouse
 # RULES
 # ---------------------------------------------------------------------------
 
+async def _enrich_rules(rules: list, db: AsyncSession) -> list:
+    """Mismo problema que _enrich_suggestions: ReplenishmentRuleResponse
+    declara producto_nombre/proveedor_preferente_nombre pero ninguno es
+    columna real de ReplenishmentRule -- sin esto la UI de reglas (y
+    cualquier otro consumidor) siempre veía el producto vacío."""
+    if not rules:
+        return rules
+    from api.src.purchases.models import Supplier
+
+    prod_ids = {r.producto_id for r in rules if r.producto_id}
+    sup_ids = {r.proveedor_preferente_id for r in rules if r.proveedor_preferente_id}
+
+    productos = {}
+    if prod_ids:
+        res = await db.execute(select(Product.id, Product.nombre).where(Product.id.in_(prod_ids)))
+        productos = {row.id: row.nombre for row in res.all()}
+    proveedores = {}
+    if sup_ids:
+        res = await db.execute(select(Supplier.id, Supplier.razon_social).where(Supplier.id.in_(sup_ids)))
+        proveedores = {row.id: row.razon_social for row in res.all()}
+
+    for r in rules:
+        r.producto_nombre = productos.get(r.producto_id)
+        r.proveedor_preferente_nombre = proveedores.get(r.proveedor_preferente_id) if r.proveedor_preferente_id else None
+    return rules
+
+
 async def list_replenishment_rules(company_id: UUID, db: AsyncSession, activa: Optional[bool] = None, producto_id: Optional[UUID] = None):
     q = select(ReplenishmentRule).where(ReplenishmentRule.company_id == company_id)
     if activa is not None:
@@ -26,7 +53,7 @@ async def list_replenishment_rules(company_id: UUID, db: AsyncSession, activa: O
         q = q.where(ReplenishmentRule.producto_id == producto_id)
     q = q.order_by(ReplenishmentRule.created_at.desc())
     result = await db.execute(q)
-    return result.scalars().all()
+    return await _enrich_rules(list(result.scalars().all()), db)
 
 
 async def get_replenishment_rule(rule_id: UUID, db: AsyncSession):
@@ -34,7 +61,7 @@ async def get_replenishment_rule(rule_id: UUID, db: AsyncSession):
     r = result.scalar_one_or_none()
     if not r:
         raise HTTPException(404, "Replenishment rule not found")
-    return r
+    return (await _enrich_rules([r], db))[0]
 
 
 async def create_replenishment_rule(company_id: UUID, data, db: AsyncSession):
@@ -42,7 +69,7 @@ async def create_replenishment_rule(company_id: UUID, data, db: AsyncSession):
     db.add(r)
     await db.commit()
     await db.refresh(r)
-    return r
+    return (await _enrich_rules([r], db))[0]
 
 
 async def update_replenishment_rule(rule_id: UUID, data, db: AsyncSession):
@@ -51,7 +78,7 @@ async def update_replenishment_rule(rule_id: UUID, data, db: AsyncSession):
         setattr(r, k, v)
     await db.commit()
     await db.refresh(r)
-    return r
+    return (await _enrich_rules([r], db))[0]
 
 
 # ---------------------------------------------------------------------------
