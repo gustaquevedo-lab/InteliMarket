@@ -2781,9 +2781,12 @@ FINANCE_TREASURY_MODULES = [
     "bank_balances",
     "cash_sessions",
     "cash_register_movements",
+    "cash_register_arqueo",
     "cash_deposit_gaps",
     "expense_categories",
     "petty_cash_expenses",
+    "payroll_movements",
+    "exchange_rates",
 ]
 
 # Módulos activos en sincronizaciones periódicas automáticas (1. Catálogo/Precios, 2. Stock e Inventario, 3. Compras y Proveedores)
