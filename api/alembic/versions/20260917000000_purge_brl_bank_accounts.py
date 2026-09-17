@@ -19,7 +19,20 @@ depends_on = None
 def upgrade() -> None:
     # En Paraguay no existen cuentas bancarias en BRL (Reales).
     # Las divisas BRL se operan exclusivamente en efectivo físico en caja/bóveda.
-    # Eliminamos cualquier cuenta bancaria registrada erróneamente en BRL y sus transacciones huérfanas si las hubiera.
+    # Desvinculamos mappings de canales de pago y mapeos de legacy, y eliminamos transacciones huérfanas y cuentas BRL.
+    op.execute("""
+        UPDATE payment_method_bank_mappings 
+        SET bank_account_id = NULL 
+        WHERE bank_account_id IN (
+            SELECT id FROM bank_accounts WHERE moneda = 'BRL'
+        );
+    """)
+    op.execute("""
+        DELETE FROM nemuha_record_map 
+        WHERE target_id IN (
+            SELECT id FROM bank_accounts WHERE moneda = 'BRL'
+        );
+    """)
     op.execute("""
         DELETE FROM bank_transactions 
         WHERE bank_account_id IN (
