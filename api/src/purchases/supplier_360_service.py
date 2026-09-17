@@ -551,6 +551,7 @@ def _generar_informe_gerencial_narrativo(
     rz = supplier_info.get("razon_social", "El Proveedor")
     ruc = supplier_info.get("ruc", "S/RUC")
     plazo = supplier_info.get("plazo_pago_dias", 30)
+    today = date.today()
 
     # 1. Resumen Ejecutivo
     resumen = (
