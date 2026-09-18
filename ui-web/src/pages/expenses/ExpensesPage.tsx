@@ -142,6 +142,11 @@ export default function ExpensesPage() {
   const [downloadingReceiptId, setDownloadingReceiptId] = useState<string | null>(null)
   const [downloadingConsolidatedPdf, setDownloadingConsolidatedPdf] = useState(false)
 
+  // Autocomplete proveedores en modal de gasto
+  const [suppliersList, setSuppliersList] = useState<any[]>([])
+  const [supplierSearch, setSupplierSearch] = useState("")
+  const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false)
+  const [loadingSuppliers, setLoadingSuppliers] = useState(false)
   const toast = useToast()
   const { user } = useAuth()
 
@@ -2463,8 +2468,8 @@ export default function ExpensesPage() {
 
       {/* MODAL: REGISTRAR GASTO */}
       {showForm && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-5 animate-in fade-in zoom-in-95 my-8">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-5 animate-in fade-in zoom-in-95 my-8 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
               <div>
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -2618,24 +2623,93 @@ export default function ExpensesPage() {
                       <option value="recibo_dinero">Recibo de Dinero</option>
                     </select>
                   </div>
+                  <div className="col-span-2">
+                    <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">Proveedor / Beneficiario</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Buscar proveedor por nombre o RUC..."
+                        className="input-field w-full text-xs"
+                        value={supplierSearch || form.proveedor}
+                        onFocus={async () => {
+                          if (suppliersList.length === 0) {
+                            setLoadingSuppliers(true)
+                            try {
+                              const list = await api.purchases.listSuppliers()
+                              setSuppliersList(list)
+                            } catch {}
+                            setLoadingSuppliers(false)
+                          }
+                          setSupplierDropdownOpen(true)
+                        }}
+                        onChange={async e => {
+                          const q = e.target.value
+                          setSupplierSearch(q)
+                          setForm({ ...form, proveedor: q, ruc: "" })
+                          setSupplierDropdownOpen(true)
+                          if (q.length >= 2) {
+                            setLoadingSuppliers(true)
+                            try {
+                              const list = await api.purchases.listSuppliers({ search: q })
+                              setSuppliersList(list)
+                            } catch {}
+                            setLoadingSuppliers(false)
+                          }
+                        }}
+                        onBlur={() => setTimeout(() => setSupplierDropdownOpen(false), 200)}
+                      />
+                      {supplierDropdownOpen && (
+                        <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-52 overflow-y-auto">
+                          {loadingSuppliers && (
+                            <div className="p-3 text-xs text-slate-400 flex items-center gap-2">
+                              <Loader2 className="w-3 h-3 animate-spin" /> Buscando...
+                            </div>
+                          )}
+                          {!loadingSuppliers && suppliersList.length === 0 && (
+                            <div className="p-3 text-xs text-slate-400">Sin resultados</div>
+                          )}
+                          {suppliersList
+                            .filter(s => {
+                              const q = (supplierSearch || "").toLowerCase()
+                              if (!q) return true
+                              return (
+                                (s.razon_social || "").toLowerCase().includes(q) ||
+                                (s.nombre_fantasia || "").toLowerCase().includes(q) ||
+                                (s.ruc || "").includes(q)
+                              )
+                            })
+                            .slice(0, 20)
+                            .map(s => (
+                              <button
+                                key={s.id}
+                                type="button"
+                                className="w-full text-left px-3 py-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 text-xs border-b border-slate-100 dark:border-slate-800 last:border-0"
+                                onMouseDown={() => {
+                                  const nombre = s.razon_social || s.nombre_fantasia || ""
+                                  setForm({ ...form, proveedor: nombre, ruc: s.ruc || "" })
+                                  setSupplierSearch("")
+                                  setSupplierDropdownOpen(false)
+                                }}
+                              >
+                                <span className="font-semibold text-gray-800 dark:text-gray-200">{s.razon_social || s.nombre_fantasia}</span>
+                                {s.nombre_fantasia && s.razon_social && (
+                                  <span className="ml-1 text-slate-400">({s.nombre_fantasia})</span>
+                                )}
+                                {s.ruc && <span className="ml-2 font-mono text-indigo-500 text-[10px]">RUC: {s.ruc}</span>}
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                   <div>
-                    <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">RUC Proveedor (con DV)</label>
+                    <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">RUC (se completa al seleccionar)</label>
                     <input
                       type="text"
                       placeholder="ej: 80012345-6"
                       className="input-field w-full text-xs font-mono"
                       value={form.ruc}
                       onChange={e => setForm({ ...form, ruc: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">Proveedor / Beneficiario</label>
-                    <input
-                      type="text"
-                      placeholder="ej: Plásticos del Este S.A."
-                      className="input-field w-full text-xs"
-                      value={form.proveedor}
-                      onChange={e => setForm({ ...form, proveedor: e.target.value })}
                     />
                   </div>
                 </div>
