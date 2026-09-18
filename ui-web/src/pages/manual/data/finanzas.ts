@@ -604,7 +604,7 @@ export const finanzasCategory: ManualCategory = {
     },
     {
       id: "cuentas-pagar",
-      label: "Cuentas por Pagar (AP)",
+      label: "Pagos a Proveedores (AP)",
       path: "/payments",
       icon: ReceiptText,
       tagline: "Facturas de proveedores, calendario de pagos, retenciones fiscales y lotes SIPAP",

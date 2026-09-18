@@ -32,6 +32,7 @@ interface NavItem {
   // cualquiera de los dos.
   anyPermission?: string[]
   superadminOnly?: boolean
+  keywords?: string[]
 }
 
 interface NavGroup {
@@ -124,7 +125,7 @@ const navGroups: NavGroup[] = [
       { icon: DollarSign, label: "Cuentas por Cobrar", path: "/accounts-receivable" },
       // DESACTIVADO 2026-09-04: el modulo hoy es una maqueta -- 0 datos reales, el frontend rellena con clientes inventados si la API real da vacio (que es siempre). No lo usa este tenant. Ver auditoria de sidebar.
       // { icon: ShieldCheck, label: "Scoring de Crédito", path: "/credit-scoring" },
-      { icon: CreditCard, label: "Cuentas por Pagar (AP)", path: "/payments" },
+      { icon: CreditCard, label: "Pagos a Proveedores (AP)", path: "/payments", keywords: ["cuentas por pagar", "facturas proveedores", "op", "ordenes de pago", "vales", "frutihorti", "lote brasil"] },
       { icon: ReceiptText, label: "Gastos Operativos", path: "/gastos" },
       { icon: DollarSign, label: "PyG Diario por Depto.", path: "/pyg-diario" },
       { icon: Building, label: "Gestión Financiera", path: "/financiero" },
@@ -246,7 +247,8 @@ export default function Layout() {
   const allNavItems = navGroups.flatMap(g => g.items)
   const searchResults = searchQuery.trim().length > 0
     ? allNavItems.filter(item =>
-        item.label.toLowerCase().includes(searchQuery.toLowerCase()) &&
+        (item.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+         item.keywords?.some(k => k.toLowerCase().includes(searchQuery.toLowerCase()))) &&
         (!item.feature || hasFeature(item.feature)) &&
         (!item.permission || hasPermission(item.permission)) &&
         (!item.anyPermission || hasAnyPermission(...item.anyPermission)) &&
