@@ -357,6 +357,7 @@ class ReplenishmentSuggestionResponse(BaseModel):
     stock_pendiente_recibir: Decimal
     demanda_diaria_avg: Optional[Decimal] = None
     demanda_pronosticada: Optional[Decimal] = None
+    punto_pedido: Optional[Decimal] = None
     cantidad_sugerida: Decimal
     costo_unitario_estimado: Optional[Decimal] = None
     costo_total_estimado: Optional[Decimal] = None
