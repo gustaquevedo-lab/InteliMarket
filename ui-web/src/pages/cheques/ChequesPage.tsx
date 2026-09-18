@@ -147,6 +147,10 @@ export default function ChequesPage() {
       if (tab === "emitidos" && c.tipo !== "emitido" && !c.bank_account_id) return false
 
       return matchesSearch && matchesBanco && matchesEstado && matchesTipo
+    }).sort((a, b) => {
+      const dateA = new Date(a.fecha_emision || a.fecha_pago || a.created_at || 0).getTime()
+      const dateB = new Date(b.fecha_emision || b.fecha_pago || b.created_at || 0).getTime()
+      return dateB - dateA
     })
   }, [cheques, search, filterBanco, filterEstado, filterTipo, tab, supplierMap])
 

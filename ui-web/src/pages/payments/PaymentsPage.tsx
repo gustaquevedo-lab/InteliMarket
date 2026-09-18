@@ -82,7 +82,14 @@ export default function PaymentsPage() {
       ])
 
       if (invRes.status === "fulfilled" && Array.isArray(invRes.value)) setInvoices(invRes.value)
-      if (runsRes.status === "fulfilled" && Array.isArray(runsRes.value)) setPaymentRuns(runsRes.value)
+      if (runsRes.status === "fulfilled" && Array.isArray(runsRes.value)) {
+        const sortedRuns = [...runsRes.value].sort((a: any, b: any) => {
+          const dateA = new Date(a.fecha_programada || a.created_at || 0).getTime()
+          const dateB = new Date(b.fecha_programada || b.created_at || 0).getTime()
+          return dateB - dateA
+        })
+        setPaymentRuns(sortedRuns)
+      }
       if (supRes.status === "fulfilled" && Array.isArray(supRes.value)) setSuppliers(supRes.value)
       if (bnkRes.status === "fulfilled" && Array.isArray(bnkRes.value)) setBankAccounts(bnkRes.value)
       if (ordersRes.status === "fulfilled" && ordersRes.value?.items) setPaymentOrders(ordersRes.value.items)
@@ -217,6 +224,10 @@ export default function PaymentsPage() {
         (filterVencimiento === "urgente_7d" && dias <= 0 && Math.abs(dias) <= 7)
 
       return matchesSearch && matchesSupplier && matchesVencimiento
+    }).sort((a, b) => {
+      const dateA = new Date(a.fecha_emision || a.created_at || 0).getTime()
+      const dateB = new Date(b.fecha_emision || b.created_at || 0).getTime()
+      return dateB - dateA
     })
   }, [invoices, search, filterSupplier, filterVencimiento, supplierMap])
 
@@ -234,6 +245,10 @@ export default function PaymentsPage() {
         (o.formas_pago_resumen || "").toLowerCase().includes(filterOrderFormaPago.toLowerCase())
 
       return matchesSearch && matchesEstado && matchesSupplier && matchesFormaPago
+    }).sort((a, b) => {
+      const dateA = new Date(a.fecha_emision || a.created_at || 0).getTime()
+      const dateB = new Date(b.fecha_emision || b.created_at || 0).getTime()
+      return dateB - dateA
     })
   }, [paymentOrders, searchOrders, filterOrderEstado, filterOrderSupplier, filterOrderFormaPago])
 
@@ -353,7 +368,7 @@ export default function PaymentsPage() {
   }
 
   return (
-    <div className="space-y-6 pb-20 animate-fade-in max-w-7xl mx-auto px-2 sm:px-4">
+    <div className="space-y-6 pb-20 animate-fade-in min-w-0">
       {/* 🌟 HERO INSTITUCIONAL EXTRA SUPERMERCADO */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-rose-950/40 border border-slate-800/80 p-6 sm:p-8 shadow-2xl backdrop-blur-xl">
         <div className="absolute top-0 right-0 w-96 h-96 bg-rose-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />

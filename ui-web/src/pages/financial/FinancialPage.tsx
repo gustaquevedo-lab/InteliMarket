@@ -193,7 +193,10 @@ export default function FinancialPage() {
       if (dashData.status === "fulfilled") setDashboard(dashData.value)
       if (invData.status === "fulfilled") setInvoices(invData.value)
       if (agingData.status === "fulfilled") setAging((agingData.value as any)?.por_supplier || [])
-      if (runsData.status === "fulfilled") setPaymentRuns(runsData.value)
+      if (runsData.status === "fulfilled") {
+        const sortedRuns = Array.isArray(runsData.value) ? [...runsData.value].sort((a: any, b: any) => new Date(b.fecha_programada || b.created_at || 0).getTime() - new Date(a.fecha_programada || a.created_at || 0).getTime()) : []
+        setPaymentRuns(sortedRuns)
+      }
       if (cfData.status === "fulfilled") setCashFlow(cfData.value)
       if (budData.status === "fulfilled") setBudgets(budData.value)
       if (cnData.status === "fulfilled") setCreditNotes(cnData.value)
@@ -376,6 +379,10 @@ export default function FinancialPage() {
       }
 
       return matchSearch && matchEstado && matchSupplier && matchCorte
+    }).sort((a, b) => {
+      const dateA = new Date(a.fecha_emision || a.created_at || 0).getTime()
+      const dateB = new Date(b.fecha_emision || b.created_at || 0).getTime()
+      return dateB - dateA
     })
   }, [invoices, search, filterEstado, filterSupplier, filterFechaCorte])
 
@@ -427,6 +434,10 @@ export default function FinancialPage() {
       const matchImpacto = ncFilterImpacto === "todos" || cn.impacto_contable === ncFilterImpacto
 
       return matchSearch && matchSupplier && matchMotivo && matchImpacto
+    }).sort((a, b) => {
+      const dateA = new Date(a.fecha || a.created_at || 0).getTime()
+      const dateB = new Date(b.fecha || b.created_at || 0).getTime()
+      return dateB - dateA
     })
   }, [creditNotes, ncSearch, ncFilterSupplier, ncFilterMotivo, ncFilterImpacto])
 

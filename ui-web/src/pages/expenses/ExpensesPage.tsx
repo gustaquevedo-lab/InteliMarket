@@ -161,7 +161,8 @@ export default function ExpensesPage() {
         fund_id: filterRendicionFund || undefined,
         estado: filterRendicionEstado || undefined,
       })
-      setRendiciones(data)
+      const sortedRends = Array.isArray(data) ? [...data].sort((a: any, b: any) => new Date(b.fecha_presentacion || b.created_at || 0).getTime() - new Date(a.fecha_presentacion || a.created_at || 0).getTime()) : []
+      setRendiciones(sortedRends)
     } catch (err: any) {
       toast.error("Error al cargar rendiciones", err.message)
     } finally {
@@ -185,10 +186,10 @@ export default function ExpensesPage() {
       setCategories(c)
       setCostCenters(cc)
       setFunds(f)
-      setPendingCounts(pc)
+      setPendingCounts(Array.isArray(pc) ? [...pc].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()) : [])
       setBankAccounts(bAccs.filter((b: any) => b.activo))
       setCashRegisters(cRegs)
-      setRendiciones(rends)
+      setRendiciones(Array.isArray(rends) ? [...rends].sort((a: any, b: any) => new Date(b.fecha_presentacion || b.created_at || 0).getTime() - new Date(a.fecha_presentacion || a.created_at || 0).getTime()) : [])
       if (ac) {
         setApprovalThreshold(ac.umbral_aprobacion)
         setApprovalThresholdForm(String(ac.umbral_aprobacion))
@@ -670,7 +671,7 @@ export default function ExpensesPage() {
     const matchFund = !filterFund || e.fund_id === filterFund
     const matchSector = !filterSector || e.cost_center_id === filterSector
     return matchSearch && matchFund && matchSector
-  })
+  }).sort((a, b) => new Date(b.fecha_gasto || b.created_at || 0).getTime() - new Date(a.fecha_gasto || a.created_at || 0).getTime())
 
   const maxTendencia = dashboard ? Math.max(...dashboard.tendencia_mensual.map(t => t.total), 1) : 1
   const maxSector = dashboard ? Math.max(...dashboard.por_sector.map(s => s.total), 1) : 1

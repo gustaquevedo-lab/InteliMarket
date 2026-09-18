@@ -321,7 +321,8 @@ export default function AccountsReceivablePage() {
     setRemissionsLoading(true)
     try {
       const data = await api.accountsReceivable.listCorporateRemissions()
-      setRemissions(data || [])
+      const sorted = Array.isArray(data) ? [...data].sort((a: any, b: any) => new Date(b.fecha || b.created_at || 0).getTime() - new Date(a.fecha || a.created_at || 0).getTime()) : []
+      setRemissions(sorted)
     } catch {
       toast.error("Error", "No se pudieron cargar las remisiones corporativas")
     } finally {
@@ -339,6 +340,9 @@ export default function AccountsReceivablePage() {
     setEmpresaPendingLoading(true)
     try {
       const data = await api.accountsReceivable.corporateAgreementPendingDocs(empresaNombre)
+      if (data && Array.isArray(data.documentos)) {
+        data.documentos.sort((a: any, b: any) => new Date(b.fecha_emision || b.created_at || 0).getTime() - new Date(a.fecha_emision || a.created_at || 0).getTime())
+      }
       setEmpresaPending(data)
       setTimeout(() => {
         const el = document.getElementById("nomina-drilldown-panel")
@@ -875,6 +879,10 @@ export default function AccountsReceivablePage() {
       d.customer_ruc?.toLowerCase().includes(q) ||
       (qClean.length > 0 && rucClean.includes(qClean))
     )
+  }).sort((a, b) => {
+    const dateA = new Date(a.fecha_emision || a.created_at || 0).getTime()
+    const dateB = new Date(b.fecha_emision || b.created_at || 0).getTime()
+    return dateB - dateA
   })
 
   const getScoreBadge = (score: number) => {

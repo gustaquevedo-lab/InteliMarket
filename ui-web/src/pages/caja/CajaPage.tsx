@@ -737,7 +737,12 @@ export default function CajaPage() {
       ])
       if (regsData.status === "fulfilled") setRegisters(regsData.value)
       if (sessionsData.status === "fulfilled") setSessions(sessionsData.value)
-      if (handoffsData.status === "fulfilled") setHandoffs(handoffsData.value)
+      if (handoffsData.status === "fulfilled") {
+        const sortedHandoffs = [...(handoffsData.value || [])].sort((a, b) =>
+          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+        )
+        setHandoffs(sortedHandoffs)
+      }
       if (regsData.status === "rejected") toast.error("Error de conexión", "Conectá el backend para ver datos reales")
     } catch {
       toast.error("Error", "No se pudieron cargar los datos de caja")
@@ -806,8 +811,18 @@ export default function CajaPage() {
       ])
       if (st.status === "fulfilled") setDonationStats(st.value)
       if (rk.status === "fulfilled") setDonationRanking(rk.value || [])
-      if (lq.status === "fulfilled") setDonationLiquidations(lq.value || [])
-      if (rc.status === "fulfilled") setDonationRecent(rc.value || [])
+      if (lq.status === "fulfilled") {
+        const sortedLq = [...(lq.value || [])].sort((a, b) =>
+          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+        )
+        setDonationLiquidations(sortedLq)
+      }
+      if (rc.status === "fulfilled") {
+        const sortedRc = [...(rc.value || [])].sort((a, b) =>
+          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+        )
+        setDonationRecent(sortedRc)
+      }
     } catch (e) {
       console.error("Error cargando datos de donaciones:", e)
     } finally {
@@ -1035,7 +1050,11 @@ export default function CajaPage() {
   const filteredSessions = sessions.filter(s =>
     !LEGACY_SESSION_IDS.has(s.id) &&
     (!search || (s.cajero_nombre || "").toLowerCase().includes(search.toLowerCase()) || (s.estado || "").toLowerCase().includes(search.toLowerCase()))
-  )
+  ).sort((a, b) => {
+    const dateA = new Date(a.fecha_apertura || 0).getTime()
+    const dateB = new Date(b.fecha_apertura || 0).getTime()
+    return dateB - dateA
+  })
 
   const cajerosDisponibles = Array.from(
     new Set(
@@ -1091,6 +1110,10 @@ export default function CajaPage() {
       : (s.estado || "").toLowerCase() === historialEstadoFilter.toLowerCase()
 
     return matchesSearch && matchesCajero && matchesFechaDesde && matchesFechaHasta && matchesEstado
+  }).sort((a, b) => {
+    const dateA = new Date(a.fecha_cierre || a.fecha_apertura || 0).getTime()
+    const dateB = new Date(b.fecha_cierre || b.fecha_apertura || 0).getTime()
+    return dateB - dateA
   })
 
   // Totales en vivo
@@ -3434,7 +3457,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     const filtered = shortageRequests.filter((r) => {
                       if (shortageFilterEstado === "TODOS") return true
                       return r.estado === shortageFilterEstado
-                    })
+                    }).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
 
                     if (shortagesLoading) {
                       return (
@@ -6302,6 +6325,10 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                       (s.forma_pago_resumen || "").toLowerCase().includes(searchLower)
 
                     return matchesStatus && matchesText
+                  }).sort((a: any, b: any) => {
+                    const dateA = new Date(a.created_at || a.fecha || 0).getTime()
+                    const dateB = new Date(b.created_at || b.fecha || 0).getTime()
+                    return dateB - dateA
                   })
 
                   return (

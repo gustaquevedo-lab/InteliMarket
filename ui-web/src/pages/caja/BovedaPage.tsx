@@ -101,15 +101,15 @@ export default function BovedaPage() {
         api.caja.treasuryRemittances.list(),
       ])
       setBanks(bankList)
-      setDeposits(deps)
+      setDeposits([...(deps || [])].sort((a: any, b: any) => new Date(b.fecha || b.created_at || 0).getTime() - new Date(a.fecha || a.created_at || 0).getTime()))
       setPendientes(recs.filter(r => r.tipo === "deposito_pendiente"))
       setApAging(ap as any)
       setArAging(ar as any)
-      setMovements(movs)
+      setMovements([...(movs || [])].sort((a: any, b: any) => new Date(b.fecha || b.created_at || 0).getTime() - new Date(a.fecha || a.created_at || 0).getTime()))
       setVault(vaultData)
-      setVaultEntries(entriesData || [])
-      setDepositApprovals(approvals)
-      setRemittances(remList || [])
+      setVaultEntries([...(entriesData || [])].sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()))
+      setDepositApprovals([...(approvals || [])].sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()))
+      setRemittances([...(remList || [])].sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()))
     } catch {
       setBanks([])
       setDeposits([])
@@ -383,7 +383,7 @@ export default function BovedaPage() {
     (m.usuario || "").toLowerCase().includes(searchMovements.toLowerCase()) ||
     (m.observaciones || "").toLowerCase().includes(searchMovements.toLowerCase()) ||
     (m.fecha || "").includes(searchMovements)
-  )
+  ).sort((a, b) => new Date(b.fecha || 0).getTime() - new Date(a.fecha || 0).getTime())
 
   if (loading) {
     return (

@@ -222,7 +222,7 @@ export default function BancosPage() {
         } as any),
       ])
       setChequesDashboard(dash)
-      setCheques(list)
+      setCheques(Array.isArray(list) ? [...list].sort((a: any, b: any) => new Date(b.fecha_emision || b.fecha_pago || b.created_at || 0).getTime() - new Date(a.fecha_emision || a.fecha_pago || a.created_at || 0).getTime()) : [])
     } catch (e: any) {
       toast.error("Error", "No se pudo cargar la cartera de cheques")
     } finally {
@@ -627,7 +627,7 @@ export default function BancosPage() {
       if (!desc.includes(q) && !ref.includes(q)) return false
     }
     return true
-  })
+  }).sort((a, b) => new Date(b.fecha || b.created_at || 0).getTime() - new Date(a.fecha || a.created_at || 0).getTime())
 
   const totalLiquidezPyg = useMemo(() => {
     return banks.reduce((acc, b) => acc + (b.moneda === "PYG" ? Number(b.saldo_actual || 0) : Number(b.saldo_actual || 0) * 7550), 0)
@@ -1387,7 +1387,7 @@ export default function BancosPage() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {bankTxns.filter(t => !t.conciliado).map(t => (
+                    {bankTxns.filter(t => !t.conciliado).sort((a, b) => new Date(b.fecha || b.created_at || 0).getTime() - new Date(a.fecha || a.created_at || 0).getTime()).map(t => (
                       <div key={t.id} className="p-4 rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-slate-800/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
