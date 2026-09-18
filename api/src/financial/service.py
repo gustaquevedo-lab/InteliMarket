@@ -3057,15 +3057,28 @@ async def _execute_disbursements_internal(
                     remaining = Decimal("0")
 
             # Registrar movimiento de caja/bóveda
-            db.add(CashRegisterMovement(
-                company_id=cid,
-                tipo="retiro",
-                monto_pyg=m_pyg,
-                monto_usd=Decimal("0"),
-                monto_brl=Decimal("0"),
-                concepto=f"Pago Proveedor {order.numero_orden} - {supplier.razon_social}",
-                autorizado_por=uuid.UUID(user_id) if user_id else None,
-            ))
+            from api.src.caja.models import CashRegister
+            reg_res = await db.execute(
+                select(CashRegister).where(CashRegister.company_id == cid, CashRegister.es_boveda == True).limit(1)
+            )
+            main_reg = reg_res.scalar_one_or_none()
+            if not main_reg:
+                reg_res = await db.execute(
+                    select(CashRegister).where(CashRegister.company_id == cid).limit(1)
+                )
+                main_reg = reg_res.scalar_one_or_none()
+
+            if main_reg:
+                db.add(CashRegisterMovement(
+                    company_id=cid,
+                    register_id=main_reg.id,
+                    tipo="retiro",
+                    monto=m_pyg,
+                    moneda="PYG",
+                    fecha=datetime.now(TZ_ASUNCION),
+                    usuario=user_nombre or "Tesorería",
+                    observaciones=f"Pago Proveedor {order.numero_orden} - {supplier.razon_social}",
+                ))
 
         # ── B. EFECTIVO FONDO FIJO (CAJA CHICA) ──────────────────────────────
         elif fp == "fondo_fijo":
@@ -3807,15 +3820,28 @@ async def create_multi_supplier_payment_batch(
                 e.observaciones = f"Egreso por Lote Multi-Proveedor ({len(payload.items)} prov.)"
                 remaining = Decimal("0")
 
-        db.add(CashRegisterMovement(
-            company_id=cid,
-            tipo="retiro",
-            monto_pyg=total_desembolso_declarado,
-            monto_usd=Decimal("0"),
-            monto_brl=Decimal("0"),
-            concepto=f"Egreso Bóveda Lote Multi-Proveedor ({len(payload.items)} prov.)",
-            autorizado_por=uuid.UUID(user_id) if user_id else None,
-        ))
+        from api.src.caja.models import CashRegister
+        reg_res = await db.execute(
+            select(CashRegister).where(CashRegister.company_id == cid, CashRegister.es_boveda == True).limit(1)
+        )
+        main_reg = reg_res.scalar_one_or_none()
+        if not main_reg:
+            reg_res = await db.execute(
+                select(CashRegister).where(CashRegister.company_id == cid).limit(1)
+            )
+            main_reg = reg_res.scalar_one_or_none()
+
+        if main_reg:
+            db.add(CashRegisterMovement(
+                company_id=cid,
+                register_id=main_reg.id,
+                tipo="retiro",
+                monto=total_desembolso_declarado,
+                moneda="PYG",
+                fecha=datetime.now(TZ_ASUNCION),
+                usuario=user_nombre or "Tesorería",
+                observaciones=f"Egreso Bóveda Lote Multi-Proveedor ({len(payload.items)} prov.)",
+            ))
 
     # 3. Iterar cada proveedor y generar su OP individual
     created_orders = []

@@ -623,15 +623,28 @@ async def disburse_expense(
                     remaining = Decimal("0")
 
             # Movimiento de caja/bóveda
-            db.add(CashRegisterMovement(
-                company_id=cid,
-                tipo="retiro",
-                monto_pyg=m_pyg,
-                monto_usd=Decimal("0"),
-                monto_brl=Decimal("0"),
-                concepto=f"Pago Gasto {exp.numero_factura or ''} - {exp.proveedor or exp.descripcion}",
-                autorizado_por=uuid.UUID(user_id) if user_id else None,
-            ))
+            from api.src.caja.models import CashRegister
+            reg_res = await db.execute(
+                select(CashRegister).where(CashRegister.company_id == cid, CashRegister.es_boveda == True).limit(1)
+            )
+            main_reg = reg_res.scalar_one_or_none()
+            if not main_reg:
+                reg_res = await db.execute(
+                    select(CashRegister).where(CashRegister.company_id == cid).limit(1)
+                )
+                main_reg = reg_res.scalar_one_or_none()
+
+            if main_reg:
+                db.add(CashRegisterMovement(
+                    company_id=cid,
+                    register_id=main_reg.id,
+                    tipo="retiro",
+                    monto=m_pyg,
+                    moneda="PYG",
+                    fecha=datetime.now(TZ_ASUNCION),
+                    usuario=user_nombre or "Tesorería",
+                    observaciones=f"Pago Gasto {exp.numero_factura or ''} - {exp.proveedor or exp.descripcion}",
+                ))
 
             db.add(ExpenseDisbursement(
                 company_id=cid,
@@ -831,6 +844,7 @@ async def disburse_expense(
 
     await db.commit()
     await db.refresh(exp)
+    exp.disbursements = await list_expense_disbursements(db, str(exp.id))
     return exp
 
 
