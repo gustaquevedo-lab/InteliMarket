@@ -360,7 +360,7 @@ export default function ExpensesPage() {
       setForm({
         monto: "",
         descripcion: "",
-        fund_id: funds[0]?.id || "",
+        fund_id: "",
         category_id: "",
         cost_center_id: "",
         proveedor: "",
@@ -723,7 +723,7 @@ export default function ExpensesPage() {
           <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
             <button
               onClick={() => {
-                setForm((f: any) => ({ ...f, fund_id: funds[0]?.id || "" }))
+                setForm((f: any) => ({ ...f, fund_id: "" }))
                 setShowForm(true)
               }}
               className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-rose-500/25"
@@ -2460,41 +2460,35 @@ export default function ExpensesPage() {
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-5 animate-in fade-in zoom-in-95 my-8">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <ReceiptIcon className="w-5 h-5 text-indigo-600" /> Registrar Comprobante de Gasto / Inversión
-              </h3>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <ReceiptIcon className="w-5 h-5 text-indigo-600" /> Registrar Comprobante de Gasto / Inversión
+                </h3>
+                <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-[10px] font-bold">
+                  📋 Paso 1 de 3 — Carga de Comprobante (quedará en estado Pendiente)
+                </span>
+              </div>
               <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-gray-600">
                 <XCircle className="w-5 h-5" />
               </button>
             </div>
 
+            {/* Banner flujo 3 pasos */}
+            <div className="flex items-center gap-1.5 p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
+              <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-white font-bold">1</span>
+              <span>Registrar comprobante</span>
+              <span className="text-indigo-400 mx-1">→</span>
+              <span className="px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-500 font-bold">2</span>
+              <span className="text-slate-400">Aprobar</span>
+              <span className="text-indigo-400 mx-1">→</span>
+              <span className="px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-500 font-bold">3</span>
+              <span className="text-slate-400">Liquidar y asignar forma de pago</span>
+            </div>
+
             <form onSubmit={handleCreateExpense} className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Caja Chica / Fondo Fijo *</label>
-                  <select
-                    className="input-field w-full text-xs"
-                    value={form.fund_id}
-                    onChange={e => {
-                      const selFund = funds.find(f => f.id === e.target.value)
-                      setForm({
-                        ...form,
-                        fund_id: e.target.value,
-                        cost_center_id: selFund?.cost_center_id || form.cost_center_id
-                      })
-                    }}
-                  >
-                    <option value="">Sin Fondo Fijo (Gasto Directo General)</option>
-                    {funds.map(f => (
-                      <option key={f.id} value={f.id}>
-                        {f.nombre} (Disp: {formatPYG(f.saldo_actual)})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Monto Total a Pagar (PYG) *</label>
+                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Monto Total (PYG) *</label>
                   <input
                     type="number"
                     step="any"
@@ -2508,10 +2502,20 @@ export default function ExpensesPage() {
                     }}
                   />
                 </div>
+
+                <div>
+                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Fecha de Emisión</label>
+                  <input
+                    type="date"
+                    className="input-field w-full text-xs font-mono"
+                    value={form.fecha_gasto}
+                    onChange={e => setForm({ ...form, fecha_gasto: e.target.value })}
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Descripción / Concepto *</label>
+                <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Descripción / Justificación del Gasto *</label>
                 <input
                   type="text"
                   required
@@ -2652,15 +2656,7 @@ export default function ExpensesPage() {
                       onChange={e => setForm({ ...form, numero_factura: e.target.value })}
                     />
                   </div>
-                  <div>
-                    <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">Fecha Emisión</label>
-                    <input
-                      type="date"
-                      className="input-field w-full text-xs font-mono"
-                      value={form.fecha_gasto}
-                      onChange={e => setForm({ ...form, fecha_gasto: e.target.value })}
-                    />
-                  </div>
+
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">

@@ -437,12 +437,8 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         fund = await _resolve_fund_for_branch(db, company_id, data.branch_id)
 
     monto = Decimal(str(data.monto))
-    if fund:
-        if Decimal(str(fund.saldo_actual)) < monto:
-            raise ValueError(
-                f"El fondo '{fund.nombre}' no tiene saldo suficiente "
-                f"(disponible: {fund.saldo_actual:,.0f}, gasto: {monto:,.0f})"
-            )
+    # Nota: NO se verifica saldo del fondo aquí. El gasto se crea en estado 'pendiente'.
+    # El saldo se controla en el momento de liquidación/pago (disburse_expense).
 
     # 1. Control Antifraude de Duplicados (RUC + Timbrado + Factura)
     if data.ruc and data.timbrado and data.numero_factura:
