@@ -93,10 +93,13 @@ async def perform_3way_match(
     total_discrepancia_monto = Decimal("0")
     total_facturado = Decimal("0")
     total_recibido_val = Decimal("0")
+    inv_product_keys = set()
     
     # Evaluar ítems de la factura
     for inv_item in invoice.items:
         prod_key = str(inv_item.product_id) if inv_item.product_id else None
+        if prod_key:
+            inv_product_keys.add(prod_key)
         
         cant_facturada = Decimal(str(inv_item.cantidad))
         precio_facturado = Decimal(str(inv_item.precio_unitario))
@@ -112,39 +115,67 @@ async def perform_3way_match(
         # Datos de orden de compra
         po_item = po_items_map.get(prod_key) if prod_key else None
         cant_ordenada = Decimal(str(po_item.cantidad)) if po_item else None
-        precio_orden = Decimal(str(po_item.precio_unitario)) if po_item else precio_facturado
-
-        total_recibido_val += cant_recibida * precio_orden
-
-        # Chequeo de faltante físico o rechazo
-        diff_cant = cant_facturada - cant_recibida
-        diff_precio = precio_facturado - precio_orden
+        precio_orden = Decimal(str(po_item.precio_unitario)) if po_item else None
 
         linea_estado = "conforme"
         motivos_linea = []
         diferencia_linea_monto = Decimal("0")
 
-        if not receipt:
-            linea_estado = "sin_recepcion"
-            motivos_linea.append("Sin ingreso físico registrado en muelle")
+        # Regla 1: Ítem no ordenado en el Pedido (No autorizado)
+        if po and po_item is None:
+            linea_estado = "item_no_pedido"
             diferencia_linea_monto = subtotal_item_facturado
+            motivos_linea.append(f"Ítem no pactado en Pedido N° {po.numero} (No autorizado)")
+            precio_orden = Decimal("0")
+            cant_ordenada = Decimal("0")
+            diff_cant = cant_facturada
+            diff_precio = precio_facturado
         else:
-            # 1. Discrepancia por cantidad (facturaron más de lo recibido conforme)
-            if diff_cant > Decimal("0.001"):
-                linea_estado = "discrepancia_cantidad"
-                monto_dif_cant = diff_cant * precio_facturado
-                diferencia_linea_monto += monto_dif_cant
-                if cant_rechazada > 0:
-                    motivos_linea.append(f"Rechazo en muelle: {cant_rechazada} u. ({motivo_rechazo or 'daño/vencimiento'})")
-                else:
-                    motivos_linea.append(f"Faltante físico: se facturaron {cant_facturada} u. pero solo se recibieron {cant_recibida} u.")
+            p_ord = precio_orden if precio_orden is not None else precio_facturado
+            total_recibido_val += cant_recibida * p_ord
+            diff_precio = precio_facturado - p_ord
+            diff_cant = cant_facturada - (cant_recibida if receipt else (cant_ordenada or Decimal("0")))
 
-            # 2. Discrepancia por precio (facturaron a mayor precio que el pactado)
-            if diff_precio > TOLERANCIA_PRECIO_GS:
-                linea_estado = "discrepancia_precio" if linea_estado == "conforme" else "discrepancia_mixta"
-                monto_dif_precio = diff_precio * cant_recibida
-                diferencia_linea_monto += monto_dif_precio
-                motivos_linea.append(f"Sobreprecio: {precio_facturado:,.0f} Gs facturado vs {precio_orden:,.0f} Gs pactado en OC")
+            if receipt:
+                # Discrepancia física muelle
+                diff_cant_rec = cant_facturada - cant_recibida
+                if diff_cant_rec > Decimal("0.001"):
+                    linea_estado = "discrepancia_cantidad"
+                    monto_dif_cant = diff_cant_rec * precio_facturado
+                    diferencia_linea_monto += monto_dif_cant
+                    if cant_rechazada > 0:
+                        motivos_linea.append(f"Rechazo en muelle: {cant_rechazada} u. ({motivo_rechazo or 'daño/vencimiento'})")
+                    else:
+                        motivos_linea.append(f"Faltante físico: facturadas {cant_facturada} u. vs recibidas {cant_recibida} u.")
+
+                # Sobreprecio contra pedido
+                if diff_precio > TOLERANCIA_PRECIO_GS:
+                    linea_estado = "discrepancia_precio" if linea_estado == "conforme" else "discrepancia_mixta"
+                    base_cant = cant_recibida if cant_recibida > 0 else cant_facturada
+                    monto_dif_precio = diff_precio * base_cant
+                    diferencia_linea_monto += monto_dif_precio
+                    motivos_linea.append(f"Sobreprecio: Facturado {precio_facturado:,.0f} Gs vs {p_ord:,.0f} Gs pactado en Pedido (+{diff_precio:,.0f} Gs/u)")
+            elif po:
+                # Sin muelle aún: 2-Way Match estricto Factura vs Pedido
+                # Chequeo sobreprecio
+                if diff_precio > TOLERANCIA_PRECIO_GS:
+                    linea_estado = "discrepancia_precio"
+                    monto_dif_precio = diff_precio * cant_facturada
+                    diferencia_linea_monto += monto_dif_precio
+                    motivos_linea.append(f"Sobreprecio: Facturado {precio_facturado:,.0f} Gs vs {p_ord:,.0f} Gs pactado en Pedido (+{diff_precio:,.0f} Gs/u)")
+
+                # Chequeo exceso de cantidad ordenada
+                if cant_ordenada is not None and cant_facturada > cant_ordenada + Decimal("0.001"):
+                    linea_estado = "discrepancia_cantidad" if linea_estado == "conforme" else "discrepancia_mixta"
+                    exceso_cant = cant_facturada - cant_ordenada
+                    monto_exceso = exceso_cant * p_ord
+                    diferencia_linea_monto += monto_exceso
+                    motivos_linea.append(f"Exceso sobre Pedido: Facturado {cant_facturada} u. vs {cant_ordenada} u. en Pedido (+{exceso_cant} u.)")
+            else:
+                # Sin orden ni muelle
+                linea_estado = "sin_orden"
+                motivos_linea.append("Sin Pedido ni Recepción asociada")
+                diferencia_linea_monto = subtotal_item_facturado
 
         total_discrepancia_monto += diferencia_linea_monto
 
@@ -156,7 +187,7 @@ async def perform_3way_match(
             "cantidad_recibida": float(cant_recibida),
             "cantidad_rechazada": float(cant_rechazada),
             "cantidad_facturada": float(cant_facturada),
-            "precio_orden": float(precio_orden),
+            "precio_orden": float(precio_orden) if precio_orden is not None else None,
             "precio_facturado": float(precio_facturado),
             "diferencia_cantidad": float(diff_cant),
             "diferencia_precio": float(diff_precio),
@@ -165,22 +196,39 @@ async def perform_3way_match(
             "motivos": "; ".join(motivos_linea) if motivos_linea else "Conforme 100%"
         })
 
-    # 5. Determinar estado general del 3-Way Match
+    # Verificar ítems del Pedido no facturados (faltantes en factura)
+    items_faltantes_po: list[dict[str, Any]] = []
+    if po:
+        for poi in po.items:
+            pkey = str(poi.product_id)
+            if pkey not in inv_product_keys:
+                items_faltantes_po.append({
+                    "product_id": pkey,
+                    "descripcion": poi.descripcion,
+                    "cantidad_ordenada": float(poi.cantidad),
+                    "precio_orden": float(poi.precio_unitario),
+                    "total_orden": float(poi.total)
+                })
+
+        # Chequeo de diferencia global entre Total Facturado y Total Pedido
+        po_total = Decimal(str(po.total or 0))
+        diff_po_total = abs(total_facturado - po_total)
+        if diff_po_total > TOLERANCIA_PRECIO_GS and total_discrepancia_monto < diff_po_total:
+            # Diferencia neta no cubierta por ítems individuales (ej. recargos no previstos o fletes)
+            diferencia_no_explicada = diff_po_total - total_discrepancia_monto
+            total_discrepancia_monto += diferencia_no_explicada
+
+    # 5. Determinar estado general del Matching
     nc_request_obj: Optional[SupplierNcRequest] = None
     
-    if not receipt:
-        estado_match = "pendiente_recepcion"
-        invoice.bloqueada_para_pago = True
-        invoice.estado = "en_revision"
-        invoice.motivo_bloqueo = "Bloqueada para Tesorería: Pendiente de recepción física en muelle."
-    elif total_discrepancia_monto > TOLERANCIA_PRECIO_GS:
+    if total_discrepancia_monto > TOLERANCIA_PRECIO_GS:
         estado_match = "discrepancia_detectada"
         invoice.bloqueada_para_pago = True
         invoice.estado = "retenida_discrepancia"
         invoice.monto_retenido_nc = total_discrepancia_monto
         invoice.requiere_nc = True
         invoice.motivo_bloqueo = (
-            f"BLOQUEADA PARA PAGO: Discrepancia detectada de {total_discrepancia_monto:,.0f} Gs. "
+            f"BLOQUEADA PARA PAGO: Discrepancia detectada de {total_discrepancia_monto:,.0f} Gs. con el Pedido. "
             f"Sin entrega de la Nota de Crédito correspondiente, no se liberará el pago."
         )
 
@@ -193,13 +241,11 @@ async def perform_3way_match(
         nc_request_obj = nc_res.scalar_one_or_none()
 
         if not nc_request_obj:
-            # Generar número correlativo de solicitud
             count_q = select(func.count(SupplierNcRequest.id)).where(SupplierNcRequest.company_id == invoice.company_id)
             c_res = await db.execute(count_q)
             seq = (c_res.scalar() or 0) + 1
             num_snc = f"SNC-{seq:05d}"
 
-            # Consolidar motivos
             motivos_resumen = [line["motivos"] for line in discrepancias_lines if line["diferencia_monto"] > 0]
             detalle_motivos = " | ".join(motivos_resumen)[:1000]
 
@@ -210,23 +256,37 @@ async def perform_3way_match(
                 receipt_id=receipt.id if receipt else None,
                 purchase_order_id=po.id if po else None,
                 numero_solicitud=num_snc,
-                tipo_motivo="diferencia_recepcion_vs_factura",
+                tipo_motivo="diferencia_pedido_vs_factura" if not receipt else "diferencia_recepcion_vs_factura",
                 monto_reclamado=total_discrepancia_monto,
                 estado="pendiente_entrega",
-                observaciones=f"Generado automáticamente por 3-Way Match. Motivos: {detalle_motivos}",
+                observaciones=f"Generado automáticamente por Order Matching. Motivos: {detalle_motivos}",
                 created_by=uuid.UUID(user_id) if user_id else None
             )
             db.add(nc_request_obj)
         else:
-            # Actualizar monto reclamado si cambió la conciliación
             nc_request_obj.monto_reclamado = total_discrepancia_monto
-    else:
+    elif po and not receipt:
+        # Match 100% exacto con el Pedido, pero pendiente de ingreso físico en muelle
+        estado_match = "conforme_pendiente_recepcion"
+        invoice.bloqueada_para_pago = True
+        invoice.estado = "en_revision"
+        invoice.monto_retenido_nc = Decimal("0")
+        invoice.requiere_nc = False
+        invoice.motivo_bloqueo = "Valores y precios exactos con el Pedido. Pendiente de recepción física en muelle para autorizar pago."
+    elif receipt:
+        # Match 100% triple conciliado
         estado_match = "conciliado_100"
         invoice.bloqueada_para_pago = False
         invoice.estado = "aprobada"
         invoice.monto_retenido_nc = Decimal("0")
         invoice.motivo_bloqueo = None
         invoice.requiere_nc = False
+    else:
+        # Sin orden ni recepción
+        estado_match = "sin_orden_ni_recepcion"
+        invoice.bloqueada_para_pago = True
+        invoice.estado = "en_revision"
+        invoice.motivo_bloqueo = "Factura sin Orden de Compra ni Recepción física asociada."
 
     await db.commit()
 
@@ -237,7 +297,19 @@ async def perform_3way_match(
         "estado": nc_request_obj.estado,
     } if nc_request_obj else None
 
-    mensaje = "Conciliación exitosa (Match 100%). Factura habilitada para Tesorería." if estado_match == "conciliado_100" else f"Discrepancia de {total_discrepancia_monto:,.0f} Gs. detectada. Solicitud de NC emitida."
+    po_total_num = float(po.total) if (po and po.total is not None) else None
+    diff_po_val = float(total_facturado - Decimal(str(po.total or 0))) if po else 0.0
+
+    if estado_match == "conciliado_100":
+        mensaje = "Conciliación 3-Way exitosa (Match 100%). Factura y mercadería conformes, habilitada para Tesorería."
+    elif estado_match == "conforme_pendiente_recepcion":
+        mensaje = "¡Match Exacto con el Pedido (100% Conforme)! Precios y montos coinciden exactamente. Pendiente de ingreso en muelle para liberar pago."
+    elif estado_match == "discrepancia_detectada":
+        mensaje = f"Discrepancia detectada de {total_discrepancia_monto:,.0f} Gs. respecto al Pedido. Factura retenida y Solicitud de NC emitida."
+    else:
+        mensaje = "Factura registrada. Pendiente de vincular a Pedido y Recepción en muelle."
+
+    match_perfecto_flag = estado_match in ["conciliado_100", "conforme_pendiente_recepcion"]
 
     return {
         "invoice_id": str(invoice.id),
@@ -246,10 +318,13 @@ async def perform_3way_match(
         "cdc": invoice.cdc,
         "purchase_order_id": str(po.id) if po else None,
         "purchase_order_numero": po.numero if po else None,
+        "purchase_order_total": po_total_num,
+        "diferencia_pedido_monto": diff_po_val,
         "receipt_id": str(receipt.id) if receipt else None,
         "receipt_numero": receipt.numero if receipt else None,
         "estado_match": estado_match,
-        "estado_matching": "match_perfecto" if estado_match == "conciliado_100" else "discrepancia_detectada",
+        "estado_matching": "match_perfecto" if match_perfecto_flag else "discrepancia_detectada",
+        "match_pedido_exacto": abs(Decimal(str(diff_po_val))) <= TOLERANCIA_PRECIO_GS if po else False,
         "mensaje": mensaje,
         "bloqueada_para_pago": invoice.bloqueada_para_pago,
         "motivo_bloqueo": invoice.motivo_bloqueo,
@@ -264,6 +339,7 @@ async def perform_3way_match(
         "nc_request_generada": solicitud_nc_dict,
         "items": discrepancias_lines,
         "discrepancias": discrepancias_lines,
+        "items_faltantes_po": items_faltantes_po,
     }
 
 

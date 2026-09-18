@@ -11,7 +11,8 @@ import {
   Volume2, ShieldCheck, Sparkles, Scale,
   ChevronRight, ArrowRight, CheckCircle2,
   LogIn, UserCheck, Camera, CameraOff,
-  Flashlight, Zap, Package, Compass, History, ShieldAlert
+  Flashlight, Zap, Package, Compass, History, ShieldAlert,
+  Calculator, Calendar, DollarSign, FileText, CheckCircle
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -195,39 +196,77 @@ export default function SalonOperacionesPwaPage() {
   const barcodeBuffer = useRef("")
   const lastKeyTime = useRef(0)
 
-  // ── ESTADOS DE PRODUCCIÓN & TRANSFORMACIÓN REAL ──
-  const [lotesProduccion, setLotesProduccion] = useState<LoteProduccion[]>(() => {
-    try {
-      const saved = localStorage.getItem("extra_salon_lotes_prod")
-      return saved ? JSON.parse(saved) : []
-    } catch {
-      return []
-    }
-  })
+  // ── ESTADOS DE PRODUCCIÓN REAL CONECTADOS AL BACKEND ──
+  // 1. CARNICERÍA & DESPOSTE
+  const [butcheryTemplates, setButcheryTemplates] = useState<any[]>([])
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("")
+  const [despostePesoEntrada, setDespostePesoEntrada] = useState<number>(240)
+  const [desposteCostoTotal, setDesposteCostoTotal] = useState<number>(5500000)
+  const [desposteVencimiento, setDesposteVencimiento] = useState<string>("")
+  const [desposteNotas, setDesposteNotas] = useState<string>("")
+  const [ejecutandoDesposte, setEjecutandoDesposte] = useState(false)
+  const [resultadoDesposte, setResultadoDesposte] = useState<any>(null)
+  const [butcheryOrders, setButcheryOrders] = useState<any[]>([])
+  const [loadingCarniceria, setLoadingCarniceria] = useState(false)
 
-  const saveLotesProduccion = (newList: LoteProduccion[]) => {
-    setLotesProduccion(newList)
-    try {
-      localStorage.setItem("extra_salon_lotes_prod", JSON.stringify(newList))
-    } catch {}
-  }
+  // 2. PANADERÍA & ROTISERÍA
+  const [panSubSector, setPanSubSector] = useState<"panaderia" | "rotiseria" | "calculadora">("panaderia")
+  const [bakeryRecipes, setBakeryRecipes] = useState<any[]>([])
+  const [bakeryPlanes, setBakeryPlanes] = useState<any[]>([])
+  const [bakeryOrders, setBakeryOrders] = useState<any[]>([])
+  const [selectedBakeryRecipeId, setSelectedBakeryRecipeId] = useState<string>("")
+  const [bakeryProdQty, setBakeryProdQty] = useState<string>("50")
+  const [bakeryProdVenc, setBakeryProdVenc] = useState<string>("")
+  const [bakeryProdNotas, setBakeryProdNotas] = useState<string>("")
+  const [registrandoBakery, setRegistrandoBakery] = useState(false)
 
-  // Formulario de Carnicería
-  const [carneReceta, setCarneReceta] = useState("Chorizo Parrillero Casero Extra")
-  const [carneKgTrimmings, setCarneKgTrimmings] = useState("30")
-  const [carneKgTocino, setCarneKgTocino] = useState("10")
+  const [rotiseriaRecipes, setRotiseriaRecipes] = useState<any[]>([])
+  const [rotiseriaPlanes, setRotiseriaPlanes] = useState<any[]>([])
+  const [rotiseriaDash, setRotiseriaDash] = useState<any>(null)
+  const [selectedRotiRecipeId, setSelectedRotiRecipeId] = useState<string>("")
+  const [rotiPlanDesc, setRotiPlanDesc] = useState<string>("")
+  const [rotiPlanTemp, setRotiPlanTemp] = useState<string>("75")
+  const [rotiPlanTiempo, setRotiPlanTiempo] = useState<string>("60")
+  const [guardandoRotiPlan, setGuardandoRotiPlan] = useState(false)
+  const [completandoRotiId, setCompletandoRotiId] = useState<string | null>(null)
+  const [rotiTempFinal, setRotiTempFinal] = useState<string>("78")
+  const [rotiQtyFinal, setRotiQtyFinal] = useState<string>("15")
+  const [aplicandoAutoMarkdownRoti, setAplicandoAutoMarkdownRoti] = useState(false)
+  const [loadingPanaderia, setLoadingPanaderia] = useState(false)
 
-  // Formulario de Panadería
-  const [panModo, setPanModo] = useState<"amasado" | "sobrante">("sobrante")
-  const [panKgHarina, setPanKgHarina] = useState("50")
-  const [panTipoAmasado, setPanTipoAmasado] = useState("Pan Francés Tradicional")
-  const [panKgSobrante, setPanKgSobrante] = useState("25")
-  const [panDestinoSobrante, setPanDestinoSobrante] = useState("Pan Rallado Artesanal Extra")
+  // Calculadora Panadero Rápida
+  const [harinaKg, setHarinaKg] = useState<number>(25)
+  const [hidratPct, setHidratPct] = useState<number>(60)
+  const [salPct, setSalPct] = useState<number>(2)
+  const [levPct, setLevPct] = useState<number>(1.5)
+  const [grasaPct, setGrasaPct] = useState<number>(3)
 
-  // Formulario de Verdulería
-  const [verduraInsumo, setVerduraInsumo] = useState("Zapallo Kabutiá")
-  const [verduraKgBrutos, setVerduraKgBrutos] = useState("40")
-  const [verduraBandejasDestino, setVerduraBandejasDestino] = useState("Bandejas Zapallo en Cubos 500g")
+  // 3. VERDULERÍA & HORTIFRUTI FRESCOS
+  const [verduraSubSector, setVerduraSubSector] = useState<"frescura" | "lotes" | "markdown">("frescura")
+  const [produceDash, setProduceDash] = useState<any>(null)
+  const [receiveBatches, setReceiveBatches] = useState<any[]>([])
+  const [freshnessAudits, setFreshnessAudits] = useState<any[]>([])
+  const [loadingVerduleria, setLoadingVerduleria] = useState(false)
+
+  // Formulario Auditoría de Frescura
+  const [auditProdId, setAuditProdId] = useState<string>("")
+  const [auditBatchId, setAuditBatchId] = useState<string>("")
+  const [auditCalidad, setAuditCalidad] = useState<"bueno" | "regular" | "malo">("bueno")
+  const [auditFirmeza, setAuditFirmeza] = useState<number>(5)
+  const [auditColor, setAuditColor] = useState<number>(5)
+  const [auditAspecto, setAuditAspecto] = useState<number>(5)
+  const [auditNotas, setAuditNotas] = useState<string>("")
+  const [guardandoAuditoria, setGuardandoAuditoria] = useState(false)
+
+  // Formulario Recepción Rápida Hortifruti
+  const [recepProdId, setRecepProdId] = useState<string>("")
+  const [recepCant, setRecepCant] = useState<string>("")
+  const [recepPrecioUni, setRecepPrecioUni] = useState<string>("")
+  const [recepCalidad, setRecepCalidad] = useState<string>("A")
+  const [recepVencimiento, setRecepVencimiento] = useState<string>("")
+  const [recepNota, setRecepNota] = useState<string>("")
+  const [guardandoRecepcion, setGuardandoRecepcion] = useState(false)
+  const [aplicandoMarkdownProduce, setAplicandoMarkdownProduce] = useState(false)
 
   // ── ESTADOS DE MERMAS OFICIALES ──
   const [mermasList, setMermasList] = useState<MermaItem[]>([])
@@ -252,29 +291,19 @@ export default function SalonOperacionesPwaPage() {
   const [repoQty, setRepoQty] = useState("")
   const [repoUrgencia, setRepoUrgencia] = useState<"alta" | "normal">("alta")
 
-  // ── ESTADOS DE TEMPERATURAS & HACCP ──
-  const [temperaturas, setTemperaturas] = useState<TemperaturaItem[]>(() => {
-    try {
-      const saved = localStorage.getItem("extra_salon_temperaturas")
-      return saved ? JSON.parse(saved) : []
-    } catch {
-      return []
-    }
-  })
-
-  const saveTemperaturas = (newList: TemperaturaItem[]) => {
-    setTemperaturas(newList)
-    try {
-      localStorage.setItem("extra_salon_temperaturas", JSON.stringify(newList))
-    } catch {}
-  }
-
-  const [tempEquipo, setTempEquipo] = useState("Cámara de Reses (Carnicería)")
-  const [tempValor, setTempValor] = useState("")
-
-  // ── DESPOSTE DE CARNES ──
-  const [despostePesoEntrada, setDespostePesoEntrada] = useState<number>(240)
-  const [desposteCostoTotal, setDesposteCostoTotal] = useState<number>(5500000)
+  // ── ESTADOS DE HACCP REAL CONECTADOS AL BACKEND ──
+  const [haccpDash, setHaccpDash] = useState<any>(null)
+  const [haccpPlanes, setHaccpPlanes] = useState<any[]>([])
+  const [selectedHaccpPlanId, setSelectedHaccpPlanId] = useState<string>("")
+  const [haccpCriticalPoints, setHaccpCriticalPoints] = useState<any[]>([])
+  const [selectedCpId, setSelectedCpId] = useState<string>("")
+  const [haccpTempValor, setHaccpTempValor] = useState<string>("")
+  const [haccpTempObs, setHaccpTempObs] = useState<string>("")
+  const [guardandoMonitoreo, setGuardandoMonitoreo] = useState(false)
+  const [haccpAcciones, setHaccpAcciones] = useState<any[]>([])
+  const [resolviendoAccionId, setResolviendoAccionId] = useState<string | null>(null)
+  const [haccpRecentLogs, setHaccpRecentLogs] = useState<any[]>([])
+  const [loadingHaccp, setLoadingHaccp] = useState(false)
 
   // ── LOGIN RÁPIDO PWA ──
   const { login } = useAuth()
@@ -384,34 +413,142 @@ export default function SalonOperacionesPwaPage() {
     }
   }, [])
 
-  // ── CARGAR LOTES DE PRODUCCIÓN REALES ──
-  const loadLotesProduccion = useCallback(async () => {
+  // ── CARGA DE DATOS REALES DE CARNICERÍA ──
+  const loadCarniceriaData = useCallback(async () => {
+    setLoadingCarniceria(true)
     try {
-      const res = await api.supermer.batches.list()
-      if (Array.isArray(res) && res.length > 0) {
-        const mapped: LoteProduccion[] = res.slice(0, 20).map((b: any) => ({
-          id: String(b.id),
-          sector: (b.sector || (b.producto_nombre?.toLowerCase().includes("chorizo") ? "Carnicería" : "Panadería")) as any,
-          receta_nombre: b.receta_nombre || b.producto_nombre || "Elaboración de Salón",
-          insumo_origen: b.insumo_origen || "Materia Prima Fraccionada",
-          cantidad_insumo: Number(b.cantidad_insumo || b.cantidad || 0),
-          producto_obtenido: b.producto_nombre || "Elaborado Extra",
-          cantidad_obtenida: Number(b.cantidad || 0),
-          unidad: b.unidad || "Kg",
-          costo_unitario: Number(b.costo_unitario || 0),
-          lote_codigo: b.lote_codigo || b.codigo || `LOT-${b.id}`,
-          hora: new Date(b.created_at || Date.now()).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
-        }))
-        setLotesProduccion(prev => {
-          const ids = new Set(prev.map(p => p.id))
-          const fresh = mapped.filter(m => !ids.has(m.id))
-          return [...fresh, ...prev]
-        })
+      const [tmplRes, ordsRes] = await Promise.allSettled([
+        api.supermer.butchery.templates.list(),
+        api.supermer.butchery.orders(),
+      ])
+      if (tmplRes.status === "fulfilled" && Array.isArray(tmplRes.value)) {
+        setButcheryTemplates(tmplRes.value)
+        if (tmplRes.value.length > 0 && !selectedTemplateId) {
+          setSelectedTemplateId(tmplRes.value[0].id)
+        }
+      }
+      if (ordsRes.status === "fulfilled" && Array.isArray(ordsRes.value)) {
+        setButcheryOrders(ordsRes.value)
       }
     } catch (err) {
-      console.warn("No se pudieron cargar lotes de producción:", err)
+      console.warn("Error al cargar carnicería:", err)
+    } finally {
+      setLoadingCarniceria(false)
+    }
+  }, [selectedTemplateId])
+
+  // ── CARGA DE DATOS REALES DE PANADERÍA & ROTISERÍA ──
+  const loadPanaderiaData = useCallback(async () => {
+    setLoadingPanaderia(true)
+    try {
+      const [bRec, bPl, bOrd, rRec, rPl, rDash] = await Promise.allSettled([
+        api.supermer.recipes.list({ area: "panaderia" }),
+        api.supermer.bakery.plans(),
+        api.supermer.orders.list({ area: "panaderia" }),
+        api.rotiseria.recipes.list(),
+        api.rotiseria.plans.list(),
+        api.rotiseria.dashboard(),
+      ])
+      if (bRec.status === "fulfilled" && Array.isArray(bRec.value)) {
+        setBakeryRecipes(bRec.value)
+        if (bRec.value.length > 0 && !selectedBakeryRecipeId) {
+          setSelectedBakeryRecipeId(bRec.value[0].id)
+        }
+      }
+      if (bPl.status === "fulfilled" && Array.isArray(bPl.value)) setBakeryPlanes(bPl.value)
+      if (bOrd.status === "fulfilled" && Array.isArray(bOrd.value)) setBakeryOrders(bOrd.value)
+      if (rRec.status === "fulfilled" && Array.isArray(rRec.value)) {
+        setRotiseriaRecipes(rRec.value)
+        if (rRec.value.length > 0 && !selectedRotiRecipeId) {
+          setSelectedRotiRecipeId(rRec.value[0].id)
+        }
+      }
+      if (rPl.status === "fulfilled" && Array.isArray(rPl.value)) setRotiseriaPlanes(rPl.value)
+      if (rDash.status === "fulfilled") setRotiseriaDash(rDash.value)
+    } catch (err) {
+      console.warn("Error al cargar panadería/rotisería:", err)
+    } finally {
+      setLoadingPanaderia(false)
+    }
+  }, [selectedBakeryRecipeId, selectedRotiRecipeId])
+
+  // ── CARGA DE DATOS REALES DE VERDULERÍA & FRESCOS ──
+  const loadVerduleriaData = useCallback(async () => {
+    setLoadingVerduleria(true)
+    try {
+      const [dashRes, recRes, audRes] = await Promise.allSettled([
+        api.supermer.produce.dashboard(),
+        api.supermer.produce.receiveBatches.list(),
+        api.supermer.produce.freshness.list(),
+      ])
+      if (dashRes.status === "fulfilled") setProduceDash(dashRes.value)
+      if (recRes.status === "fulfilled" && Array.isArray(recRes.value)) setReceiveBatches(recRes.value)
+      if (audRes.status === "fulfilled" && Array.isArray(audRes.value)) setFreshnessAudits(audRes.value)
+    } catch (err) {
+      console.warn("Error al cargar verdulería:", err)
+    } finally {
+      setLoadingVerduleria(false)
     }
   }, [])
+
+  // ── CARGA DE DATOS REALES DE HACCP ──
+  const loadHaccpData = useCallback(async () => {
+    setLoadingHaccp(true)
+    try {
+      const [dashRes, plansRes, actRes] = await Promise.allSettled([
+        api.haccp.dashboard(),
+        api.haccp.plans.list(),
+        api.haccp.correctiveActions.list({ resuelto: false }),
+      ])
+      if (dashRes.status === "fulfilled") setHaccpDash(dashRes.value)
+      if (actRes.status === "fulfilled" && Array.isArray(actRes.value)) setHaccpAcciones(actRes.value)
+      if (plansRes.status === "fulfilled" && Array.isArray(plansRes.value)) {
+        setHaccpPlanes(plansRes.value)
+        const targetPlanId = selectedHaccpPlanId || (plansRes.value.length > 0 ? plansRes.value[0].id : null)
+        if (targetPlanId) {
+          if (!selectedHaccpPlanId) setSelectedHaccpPlanId(targetPlanId)
+          try {
+            const cps = await api.haccp.criticalPoints.list(targetPlanId)
+            if (Array.isArray(cps)) {
+              setHaccpCriticalPoints(cps)
+              if (cps.length > 0 && !selectedCpId) {
+                setSelectedCpId(cps[0].id)
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch (err) {
+      console.warn("Error al cargar HACCP:", err)
+    } finally {
+      setLoadingHaccp(false)
+    }
+  }, [selectedHaccpPlanId, selectedCpId])
+
+  // Efecto para recargar puntos críticos al cambiar de plan HACCP
+  useEffect(() => {
+    if (!selectedHaccpPlanId) return
+    api.haccp.criticalPoints.list(selectedHaccpPlanId)
+      .then((cps) => {
+        if (Array.isArray(cps)) {
+          setHaccpCriticalPoints(cps)
+          if (cps.length > 0) setSelectedCpId(cps[0].id)
+          else setSelectedCpId("")
+        }
+      })
+      .catch(() => setHaccpCriticalPoints([]))
+  }, [selectedHaccpPlanId])
+
+  // Carga reactiva según el tab activo
+  useEffect(() => {
+    if (tab === "produccion") {
+      if (produccionSector === "carniceria") loadCarniceriaData()
+      else if (produccionSector === "panaderia") loadPanaderiaData()
+      else if (produccionSector === "verduleria") loadVerduleriaData()
+    } else if (tab === "haccp") {
+      loadHaccpData()
+    }
+  }, [tab, produccionSector, loadCarniceriaData, loadPanaderiaData, loadVerduleriaData, loadHaccpData])
 
   useEffect(() => {
     if (hasFetchedRef.current) return
@@ -419,8 +556,8 @@ export default function SalonOperacionesPwaPage() {
     loadCatalog()
     loadMermas()
     loadSugerenciasReposicion()
-    loadLotesProduccion()
-  }, [loadCatalog, loadMermas, loadSugerenciasReposicion, loadLotesProduccion])
+    loadCarniceriaData()
+  }, [loadCatalog, loadMermas, loadSugerenciasReposicion, loadCarniceriaData])
 
   // ── DETECTAR PERMISO DE CÁMARA YA OTORGADO (sin pedirlo) ──
   // Antes de esto la UI siempre pedía "activar cámara" aunque el navegador ya
@@ -861,181 +998,357 @@ export default function SalonOperacionesPwaPage() {
     setRepoProd(null)
   }
 
-  // ── ACCIÓN: REGISTRAR TEMPERATURA HACCP ──
-  const handleConfirmTemperatura = (e: React.FormEvent) => {
-    e.preventDefault()
-    const val = parseFloat(tempValor.replace(/,/g, "."))
-    if (isNaN(val)) {
-      toast.warning("Valor Requerido", "Ingrese la temperatura leída en el termómetro.")
-      return
+  // ── TEMPLATE Y CORTES DINÁMICOS DE CARNICERÍA ──
+  const desposteTemplateActivo = useMemo(() => {
+    return butcheryTemplates.find(t => t.id === selectedTemplateId) || butcheryTemplates[0] || null
+  }, [butcheryTemplates, selectedTemplateId])
+
+  const desposteCortesEstimados = useMemo(() => {
+    const cuts = desposteTemplateActivo?.cuts || []
+    const peso = Number(despostePesoEntrada) || 0
+    const costo = Number(desposteCostoTotal) || 0
+    const costoKg = peso > 0 ? costo / peso : 0
+
+    if (cuts.length === 0) {
+      // Si el template aún no tiene cortes configurados en el backend, usar desglose estándar de novillo paraguayo
+      const standardCuts = [
+        { nombre: "Tapa Cuadril (Picaña)", rendimiento_porcentual: 2.2, precio_venta_sugerido: 72000 },
+        { nombre: "Costilla de Primera", rendimiento_porcentual: 18.5, precio_venta_sugerido: 42000 },
+        { nombre: "Vacío Parrillero", rendimiento_porcentual: 6.8, precio_venta_sugerido: 46000 },
+        { nombre: "Lomo Especial", rendimiento_porcentual: 3.5, precio_venta_sugerido: 65000 },
+        { nombre: "Bola de Lomo / Carnaza Negra", rendimiento_porcentual: 14.0, precio_venta_sugerido: 47000 },
+        { nombre: "Carnaza de Segunda / Aguja", rendimiento_porcentual: 16.5, precio_venta_sugerido: 34000 },
+        { nombre: "Recortes / Trimmings", rendimiento_porcentual: 8.0, precio_venta_sugerido: 26000 },
+        { nombre: "Huesos / Grasa / Descarte", rendimiento_porcentual: 30.5, precio_venta_sugerido: 6000 },
+      ]
+      return standardCuts.map(c => ({
+        ...c,
+        kg_estimado: (peso * c.rendimiento_porcentual) / 100,
+        costo_asignado: costoKg * ((peso * c.rendimiento_porcentual) / 100),
+        valor_venta: ((peso * c.rendimiento_porcentual) / 100) * c.precio_venta_sugerido,
+      }))
     }
 
-    const esRotiseria = tempEquipo.includes("Rotisería")
-    const min = esRotiseria ? 65 : tempEquipo.includes("Congelados") ? -22 : 0
-    const max = esRotiseria ? 85 : tempEquipo.includes("Congelados") ? -16 : 4
-    const esOptimo = val >= min && val <= max
-
-    const nuevaTemp: TemperaturaItem = {
-      id: `temp-${Date.now()}`,
-      equipo: tempEquipo,
-      sector: esRotiseria ? "Rotisería" : tempEquipo.includes("Carnicería") ? "Carnicería" : "Lácteos",
-      temperatura: val,
-      rango_min: min,
-      rango_max: max,
-      estado: esOptimo ? "optimo" : "critico",
-      hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }),
-      responsable: user?.nombre || "Encargado de Salón",
-    }
-
-    const updated = [nuevaTemp, ...temperaturas]
-    saveTemperaturas(updated)
-
-    if (esOptimo) {
-      soundAlerts.playScanSuccess()
-      toast.success("Control HACCP Guardado", `${tempEquipo}: ${val}°C (Dentro de rango seguro).`)
-    } else {
-      soundAlerts.playHaccpWarning()
-      toast.error("¡ALERTA DE TEMPERATURA!", `${tempEquipo}: ${val}°C fuera de rango crítico (${min}°C a ${max}°C).`)
-    }
-    setTempValor("")
-  }
-
-  // ── ACCIÓN: REGISTRAR PRODUCCIÓN DE CARNICERÍA ──
-  const handleConfirmProduccionCarne = (e: React.FormEvent) => {
-    e.preventDefault()
-    const trimmings = parseFloat(carneKgTrimmings) || 0
-    const tocino = parseFloat(carneKgTocino) || 0
-    if (trimmings <= 0) {
-      toast.warning("Faltan insumos", "Ingrese los Kilos de recortes/trimmings.")
-      return
-    }
-
-    const kgObtenidos = (trimmings + tocino) * 0.97
-    const loteCod = `EMB-${Date.now().toString().slice(-4)}`
-    const nuevoLote: LoteProduccion = {
-      id: `lp-${Date.now()}`,
-      sector: "Carnicería",
-      receta_nombre: carneReceta,
-      insumo_origen: `${trimmings}kg Trimmings + ${tocino}kg Tocino`,
-      cantidad_insumo: trimmings + tocino,
-      producto_obtenido: carneReceta,
-      cantidad_obtenida: Math.round(kgObtenidos * 10) / 10,
-      unidad: "Kg",
-      costo_unitario: 23500,
-      lote_codigo: loteCod,
-      hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
-    }
-
-    soundAlerts.playScanSuccess()
-    const updated = [nuevoLote, ...lotesProduccion]
-    saveLotesProduccion(updated)
-    toast.success("Producción Registrada", `${kgObtenidos.toFixed(1)} Kg de ${carneReceta} con lote ${loteCod}.`)
-  }
-
-  // ── ACCIÓN: REGISTRAR PRODUCCIÓN DE PANADERÍA ──
-  const handleConfirmProduccionPan = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (panModo === "sobrante") {
-      const sobrante = parseFloat(panKgSobrante) || 0
-      if (sobrante <= 0) {
-        toast.warning("Faltan datos", "Ingrese los Kilos de pan sobrante a moler.")
-        return
+    return cuts.map((c: any) => {
+      const pct = Number(c.rendimiento_porcentual || 0)
+      const kg = (peso * pct) / 100
+      const pVenta = Number(c.precio_venta_sugerido || c.precio_venta || 0)
+      return {
+        ...c,
+        kg_estimado: kg,
+        costo_asignado: costoKg * kg,
+        valor_venta: kg * pVenta,
       }
-      const obtenido = sobrante * 0.96
-      const loteCod = `RES-${Date.now().toString().slice(-4)}`
-      const nuevoLote: LoteProduccion = {
-        id: `lp-${Date.now()}`,
-        sector: "Panadería",
-        receta_nombre: "Transformación Residuo Cero (Pan Seco ➔ Pan Rallado)",
-        insumo_origen: `${sobrante}kg Pan Francés de Ayer`,
-        cantidad_insumo: sobrante,
-        producto_obtenido: panDestinoSobrante,
-        cantidad_obtenida: Math.round(obtenido * 10) / 10,
-        unidad: "Kg",
-        costo_unitario: 5800,
-        lote_codigo: loteCod,
-        hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
-      }
-      soundAlerts.playScanSuccess()
-      const updated = [nuevoLote, ...lotesProduccion]
-      saveLotesProduccion(updated)
-      toast.success("Residuo Cero Registrado", `Convertidos ${sobrante}kg de pan en ${obtenido.toFixed(1)}kg de Pan Rallado.`)
-    } else {
-      const harina = parseFloat(panKgHarina) || 0
-      const obtenido = harina * 1.35
-      const loteCod = `PAN-${Date.now().toString().slice(-4)}`
-      const nuevoLote: LoteProduccion = {
-        id: `lp-${Date.now()}`,
-        sector: "Panadería",
-        receta_nombre: `Amasado Diario: ${panTipoAmasado}`,
-        insumo_origen: `${harina}kg Harina 000 + Insumos`,
-        cantidad_insumo: harina,
-        producto_obtenido: panTipoAmasado,
-        cantidad_obtenida: Math.round(obtenido * 10) / 10,
-        unidad: "Kg",
-        costo_unitario: 8200,
-        lote_codigo: loteCod,
-        hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
-      }
-      soundAlerts.playScanSuccess()
-      const updated = [nuevoLote, ...lotesProduccion]
-      saveLotesProduccion(updated)
-      toast.success("Horneada Registrada", `Producidos ${obtenido.toFixed(1)}kg de ${panTipoAmasado}.`)
-    }
-  }
+    })
+  }, [desposteTemplateActivo, despostePesoEntrada, desposteCostoTotal])
 
-  // ── ACCIÓN: REGISTRAR PRODUCCIÓN DE VERDULERÍA ──
-  const handleConfirmProduccionVerdura = (e: React.FormEvent) => {
-    e.preventDefault()
-    const brutos = parseFloat(verduraKgBrutos) || 0
-    if (brutos <= 0) {
-      toast.warning("Faltan datos", "Ingrese los Kilos brutos fraccionados.")
-      return
-    }
-    const bandejas = Math.floor((brutos * 0.85) / 0.5)
-    const loteCod = `FC-${Date.now().toString().slice(-4)}`
-    const nuevoLote: LoteProduccion = {
-      id: `lp-${Date.now()}`,
-      sector: "Verdulería",
-      receta_nombre: `Fresh Cut: ${verduraBandejasDestino}`,
-      insumo_origen: `${brutos}kg ${verduraInsumo} a granel`,
-      cantidad_insumo: brutos,
-      producto_obtenido: verduraBandejasDestino,
-      cantidad_obtenida: bandejas,
-      unidad: "Bandejas",
-      costo_unitario: 4300,
-      lote_codigo: loteCod,
-      hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
-    }
-    soundAlerts.playScanSuccess()
-    const updated = [nuevoLote, ...lotesProduccion]
-    saveLotesProduccion(updated)
-    toast.success("Fraccionamiento Terminado", `Empacadas ${bandejas} bandejas listas para venta refrigerada.`)
-  }
-
-  // Cálculos de Desposte en Gancho
   const desposteCalculo = useMemo(() => {
     const peso = Number(despostePesoEntrada) || 1
     const costo = Number(desposteCostoTotal) || 0
     const costoKgGancho = costo / peso
-
-    const cortes = [
-      { nombre: "Tapa Cuadril (Picaña)", pct: 2.2, kg: peso * 0.022, precio_venta_kg: 72000 },
-      { nombre: "Costilla de Primera", pct: 18.5, kg: peso * 0.185, precio_venta_kg: 42000 },
-      { nombre: "Vacío Parrillero", pct: 6.8, kg: peso * 0.068, precio_venta_kg: 46000 },
-      { nombre: "Lomo Especial", pct: 3.5, kg: peso * 0.035, precio_venta_kg: 65000 },
-      { nombre: "Bola de Lomo / Carnaza Negra", pct: 14.0, kg: peso * 0.140, precio_venta_kg: 47000 },
-      { nombre: "Carnaza de Segunda / Aguja", pct: 16.5, kg: peso * 0.165, precio_venta_kg: 34000 },
-      { nombre: "Recortes para Chorizos / Trimmings", pct: 8.0, kg: peso * 0.080, precio_venta_kg: 26000 },
-      { nombre: "Huesos / Grasa / Merma Desposte", pct: 30.5, kg: peso * 0.305, precio_venta_kg: 6000 },
-    ]
-
-    const valorizadoTotal = cortes.reduce((acc, c) => acc + c.kg * c.precio_venta_kg, 0)
+    const valorizadoTotal = desposteCortesEstimados.reduce((acc: number, c: { valor_venta?: number }) => acc + (c.valor_venta || 0), 0)
     const margenBruto = valorizadoTotal - costo
     const margenPct = valorizadoTotal > 0 ? (margenBruto / valorizadoTotal) * 100 : 0
+    return { costoKgGancho, valorizadoTotal, margenBruto, margenPct }
+  }, [despostePesoEntrada, desposteCostoTotal, desposteCortesEstimados])
 
-    return { costoKgGancho, cortes, valorizadoTotal, margenBruto, margenPct }
-  }, [despostePesoEntrada, desposteCostoTotal])
+  // ── ACCIÓN: EJECUTAR DESPOSTE OFICIAL EN CARNICERÍA ──
+  const handleEjecutarDesposte = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedTemplateId && butcheryTemplates.length === 0) {
+      toast.warning("Sin Plantillas", "No se encontraron plantillas de corte activas.")
+      return
+    }
+    const templateId = selectedTemplateId || butcheryTemplates[0]?.id
+    if (!templateId) {
+      toast.warning("Seleccione Plantilla", "Elegí una plantilla de corte.")
+      return
+    }
+    if (!despostePesoEntrada || despostePesoEntrada <= 0) {
+      toast.warning("Peso Requerido", "Ingresá el peso en gancho recibido.")
+      return
+    }
+    if (!desposteCostoTotal || desposteCostoTotal <= 0) {
+      toast.warning("Costo Requerido", "Ingresá el costo total de compra.")
+      return
+    }
+
+    setEjecutandoDesposte(true)
+    try {
+      const res = await api.supermer.butchery.desposte({
+        template_id: templateId,
+        peso_entrada_kg: despostePesoEntrada,
+        costo_total_gs: desposteCostoTotal,
+        fecha_vencimiento: desposteVencimiento || undefined,
+        notas: desposteNotas ? `[PWA Salón] ${desposteNotas}` : "[PWA Salón] Desposte de gancho",
+      })
+
+      soundAlerts.playScanSuccess()
+      if (navigator.vibrate) navigator.vibrate([60, 80])
+      setResultadoDesposte(res)
+      toast.success("✅ Desposte Registrado", `Se generaron ${res?.cortes?.length || 0} cortes ingresados a stock oficial.`)
+      setDesposteNotas("")
+      loadCarniceriaData()
+    } catch (err: any) {
+      toast.error("Error al ejecutar desposte", err?.message || "No se pudo conectar con el servidor.")
+    } finally {
+      setEjecutandoDesposte(false)
+    }
+  }
+
+  // ── ACCIÓN: REGISTRAR HORNEADA REAL EN PANADERÍA ──
+  const handleRegistrarBakeryOrder = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedBakeryRecipeId) {
+      toast.warning("Seleccione Receta", "Elegí la fórmula de panadería a elaborar.")
+      return
+    }
+    const cant = parseFloat(bakeryProdQty)
+    if (!cant || cant <= 0) {
+      toast.warning("Cantidad Requerida", "Ingresá la cantidad o kilos a producir.")
+      return
+    }
+
+    setRegistrandoBakery(true)
+    try {
+      await api.supermer.orders.create({
+        receta_id: selectedBakeryRecipeId,
+        area: "panaderia",
+        cantidad_objetivo: cant,
+        estado: "completada",
+        fecha_vencimiento: bakeryProdVenc || undefined,
+        notas: bakeryProdNotas ? `[PWA Panadería] ${bakeryProdNotas}` : "[PWA Panadería] Horneada en salón",
+      })
+
+      soundAlerts.playScanSuccess()
+      if (navigator.vibrate) navigator.vibrate([50, 70])
+      toast.success("Horneada Registrada", `${cant} unidades ingresadas a inventario de Panadería.`)
+      setBakeryProdNotas("")
+      loadPanaderiaData()
+    } catch (err: any) {
+      toast.error("Error al registrar horneada", err?.message || "Verificá la conexión.")
+    } finally {
+      setRegistrandoBakery(false)
+    }
+  }
+
+  // ── ACCIÓN: CREAR PLAN DE COCCIÓN ROTISERÍA ──
+  const handleCrearRotiPlan = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const desc = rotiPlanDesc.trim()
+    if (!desc && !selectedRotiRecipeId) {
+      toast.warning("Datos Requeridos", "Indicá una receta o descripción del preparado caliente.")
+      return
+    }
+
+    setGuardandoRotiPlan(true)
+    try {
+      const rec = rotiseriaRecipes.find(r => r.id === selectedRotiRecipeId)
+      await api.rotiseria.plans.create({
+        nombre: desc || rec?.nombre || "Hornada de Rotisería",
+        descripcion: desc || rec?.nombre || "Cocción en rotisería",
+        receta_id: selectedRotiRecipeId || undefined,
+        temperatura_objetivo: parseFloat(rotiPlanTemp || "75"),
+        tiempo_coccion_min: parseInt(rotiPlanTiempo || "60"),
+        fecha: new Date().toISOString().split("T")[0],
+      })
+
+      soundAlerts.playScanSuccess()
+      toast.success("Plan de Rotisería Creado", "Cocción registrada para monitoreo térmico.")
+      setRotiPlanDesc("")
+      loadPanaderiaData()
+    } catch (err: any) {
+      toast.error("Error al crear plan", err?.message || "Error al conectar.")
+    } finally {
+      setGuardandoRotiPlan(false)
+    }
+  }
+
+  // ── ACCIÓN: COMPLETAR COCCIÓN EN ROTISERÍA ──
+  const handleCompletarRotiPlan = async (planId: string) => {
+    try {
+      await api.rotiseria.plans.complete(planId, {
+        temperatura_final: parseFloat(rotiTempFinal || "78"),
+        cantidad_obtenida: parseFloat(rotiQtyFinal || "10"),
+        estado: "completado",
+      })
+      soundAlerts.playScanSuccess()
+      toast.success("Cocción Completada", "Hornada lista y control térmico guardado.")
+      setCompletandoRotiId(null)
+      loadPanaderiaData()
+    } catch (err: any) {
+      toast.error("Error al completar", err?.message || "Error en el servidor.")
+    }
+  }
+
+  // ── ACCIÓN: AUTO-MARKDOWN ROTISERÍA ──
+  const handleAutoMarkdownRoti = async () => {
+    setAplicandoAutoMarkdownRoti(true)
+    try {
+      await api.rotiseria.autoMarkdown()
+      soundAlerts.playScanSuccess()
+      toast.success("Markdowns Rotisería Aplicados", "Rebajas aplicadas para productos calientes de rotación rápida.")
+      loadPanaderiaData()
+    } catch (err: any) {
+      toast.error("Error", err?.message || "No se pudo aplicar markdown.")
+    } finally {
+      setAplicandoAutoMarkdownRoti(false)
+    }
+  }
+
+  // ── ACCIÓN: REGISTRAR AUDITORÍA DE FRESCURA EN VERDULERÍA ──
+  const handleGuardarAuditoriaFrescura = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const prodId = auditProdId || scannedProduct?.id
+    if (!prodId) {
+      toast.warning("Seleccione Producto", "Elegí el producto hortícola a auditar.")
+      return
+    }
+
+    setGuardandoAuditoria(true)
+    try {
+      await api.supermer.produce.freshness.create({
+        producto_id: prodId,
+        batch_id: auditBatchId || undefined,
+        calidad_actual: auditCalidad,
+        firmeza: auditFirmeza,
+        color: auditColor,
+        aspecto_general: auditAspecto,
+        notas: auditNotas ? `[PWA Góndola] ${auditNotas}` : "[PWA Góndola] Control de frescura en salón",
+      })
+
+      soundAlerts.playScanSuccess()
+      if (navigator.vibrate) navigator.vibrate([50, 50, 50])
+      if (auditCalidad === "regular" || auditCalidad === "malo") {
+        toast.warning("Auditoría Registrada", `Calidad ${auditCalidad.toUpperCase()}: el sistema generó un Markdown automático para sell-out.`)
+      } else {
+        toast.success("Auditoría Registrada", "Lote conforme en óptimas condiciones de madurez.")
+      }
+      setAuditNotas("")
+      loadVerduleriaData()
+    } catch (err: any) {
+      toast.error("Error al auditar", err?.message || "Error al conectar.")
+    } finally {
+      setGuardandoAuditoria(false)
+    }
+  }
+
+  // ── ACCIÓN: REGISTRAR RECEPCIÓN RÁPIDA DE HORTIFRUTI ──
+  const handleGuardarRecepcionProduce = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const prodId = recepProdId || scannedProduct?.id
+    if (!prodId) {
+      toast.warning("Seleccione Producto", "Elegí el producto recibido.")
+      return
+    }
+    const cant = parseFloat(recepCant)
+    if (!cant || cant <= 0) {
+      toast.warning("Cantidad Requerida", "Ingresá los kilos o cajas recibidas.")
+      return
+    }
+    const precio = parseFloat(recepPrecioUni || "0")
+
+    setGuardandoRecepcion(true)
+    try {
+      await api.supermer.produce.receiveBatches.create({
+        producto_id: prodId,
+        cantidad_recibida: cant,
+        cantidad_aceptada: cant,
+        precio_unitario: precio,
+        calidad: recepCalidad,
+        fecha_recepcion: new Date().toISOString().split("T")[0],
+        fecha_vencimiento_estimada: recepVencimiento || undefined,
+        nota_calidad: recepNota ? `[PWA Muelle] ${recepNota}` : "[PWA Muelle] Recepción hortifruti",
+      })
+
+      soundAlerts.playScanSuccess()
+      toast.success("Lote Hortifruti Registrado", `${cant} ingresados con clasificación ${recepCalidad}.`)
+      setRecepCant("")
+      setRecepPrecioUni("")
+      setRecepNota("")
+      loadVerduleriaData()
+    } catch (err: any) {
+      toast.error("Error al registrar lote", err?.message || "Error en el servidor.")
+    } finally {
+      setGuardandoRecepcion(false)
+    }
+  }
+
+  // ── ACCIÓN: MARKDOWN AUTOMÁTICO DE VERDULERÍA ──
+  const handleAutoMarkdownProduce = async () => {
+    setAplicandoMarkdownProduce(true)
+    try {
+      await api.supermer.produce.markdownByBatch()
+      soundAlerts.playScanSuccess()
+      toast.success("Liquidación Aplicada", "Descuentos calculados por proximidad de maduración en lotes de verdulería.")
+      loadVerduleriaData()
+    } catch (err: any) {
+      toast.error("Error", err?.message || "Error al liquidar lotes.")
+    } finally {
+      setAplicandoMarkdownProduce(false)
+    }
+  }
+
+  // ── ACCIÓN: REGISTRAR MONITOREO TÉRMICO HACCP REAL ──
+  const handleGuardarMonitoreoHaccp = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedCpId) {
+      toast.warning("Seleccione Punto Crítico", "Elegí la cámara o equipo a auditar.")
+      return
+    }
+    const val = parseFloat(haccpTempValor.replace(/,/g, "."))
+    if (isNaN(val)) {
+      toast.warning("Temperatura Requerida", "Ingresá el valor numérico leído en el termómetro.")
+      return
+    }
+
+    const cp = haccpCriticalPoints.find(p => p.id === selectedCpId)
+    const limInf = cp?.limite_inferior != null ? Number(cp.limite_inferior) : null
+    const limSup = cp?.limite_superior != null ? Number(cp.limite_superior) : null
+    const esConforme = (limInf == null || val >= limInf) && (limSup == null || val <= limSup)
+
+    setGuardandoMonitoreo(true)
+    try {
+      await api.haccp.monitoringLogs.create(selectedCpId, {
+        valor: val,
+        fuente: "manual",
+        observaciones: haccpTempObs ? `[PWA Salón] ${haccpTempObs}` : `[PWA Salón] Registro de ${user?.nombre || "Encargado"}`,
+      })
+
+      if (esConforme) {
+        soundAlerts.playScanSuccess()
+        if (navigator.vibrate) navigator.vibrate([40, 60])
+        toast.success("Control HACCP Guardado", `${cp?.nombre || "Equipo"}: ${val}°C (Dentro de rango seguro).`)
+      } else {
+        soundAlerts.playHaccpWarning()
+        if (navigator.vibrate) navigator.vibrate([150, 100, 150])
+        toast.error("¡DESVIACIÓN BROMATOLÓGICA!", `${cp?.nombre || "Equipo"}: ${val}°C fuera de rango [${limInf}°C a ${limSup}°C]. Se generó una Acción Correctiva oficial.`)
+      }
+
+      setHaccpTempValor("")
+      setHaccpTempObs("")
+      loadHaccpData()
+    } catch (err: any) {
+      toast.error("Error al registrar medición", err?.message || "Verificá la conexión.")
+    } finally {
+      setGuardandoMonitoreo(false)
+    }
+  }
+
+  // ── ACCIÓN: RESOLVER ACCIÓN CORRECTIVA HACCP ──
+  const handleResolverAccionHaccp = async (caId: string) => {
+    setResolviendoAccionId(caId)
+    try {
+      await api.haccp.correctiveActions.resolve(caId)
+      soundAlerts.playScanSuccess()
+      toast.success("Acción Correctiva Resuelta", "Desviación subsanada en el libro digital HACCP.")
+      loadHaccpData()
+    } catch (err: any) {
+      toast.error("Error al resolver", err?.message || "No se pudo actualizar la acción.")
+    } finally {
+      setResolviendoAccionId(null)
+    }
+  }
 
   // Total de Mermas del Día
   const totalMermasHoy = useMemo(() => {
@@ -1159,7 +1472,7 @@ export default function SalonOperacionesPwaPage() {
           <div className="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-white/5">
             <div className="rounded-2xl p-2 text-center bg-white/[0.03] border border-white/5 backdrop-blur-sm">
               <div className="font-black text-sm text-slate-200" style={monoFont}>
-                {lotesProduccion.length}
+                {butcheryOrders.length + bakeryOrders.length + rotiseriaPlanes.length}
               </div>
               <div className="text-[9px] uppercase font-bold text-slate-500 tracking-wider truncate">
                 Lotes Prod.
@@ -1562,23 +1875,23 @@ export default function SalonOperacionesPwaPage() {
           </div>
         )}
 
-        {/* ══════════════════════ TAB 2: PRODUCCIÓN & TRANSFORMACIÓN REAL EN SECTORES ══════════════════════ */}
+        {/* ══════════════════════ TAB 2: PRODUCCIÓN REAL EN SECTORES ══════════════════════ */}
         {tab === "produccion" && (
           <div className="space-y-5 animate-fade-in">
             
             {/* Selector de Sector Productivo Glass */}
             <div className="backdrop-blur-2xl bg-slate-900/65 border border-white/10 p-2 rounded-3xl grid grid-cols-3 gap-2">
               {[
-                { id: "carniceria", label: "🥩 Carnicería", sub: "Desposte & Embutidos" },
-                { id: "panaderia", label: "🥖 Panadería", sub: "Amasado & Residuo Cero" },
-                { id: "verduleria", label: "🥕 Verdulería", sub: "Fresh Cut & Conveniencia" },
+                { id: "carniceria", label: "🥩 Carnicería", sub: "Desposte Gancho" },
+                { id: "panaderia", label: "🥖 Pan & Rotisería", sub: "Horneada & Cocción" },
+                { id: "verduleria", label: "🥕 Verdulería", sub: "Frescos & Lotes" },
               ].map((s) => (
                 <button
                   key={s.id}
                   onClick={() => setProduccionSector(s.id as ProduccionSector)}
                   className={`p-3 rounded-2xl text-left transition-all cursor-pointer ${
                     produccionSector === s.id
-                      ? "bg-amber-500 text-slate-950 font-black shadow-lg shadow-amber-500/20"
+                      ? "bg-amber-500 text-slate-950 font-black shadow-lg shadow-amber-500/20 scale-[1.02]"
                       : "bg-white/[0.03] hover:bg-white/[0.06] text-slate-300 border border-white/5"
                   }`}
                 >
@@ -1588,372 +1901,986 @@ export default function SalonOperacionesPwaPage() {
               ))}
             </div>
 
-            {/* ── SUB-SECTOR 1: CARNICERÍA (DESPOSTE & EMBUTIDOS) ── */}
+            {/* ── SUB-SECTOR 1: CARNICERÍA (DESPOSTE DE GANCHO & CORTES REALES) ── */}
             {produccionSector === "carniceria" && (
               <div className="space-y-4 animate-fade-in">
                 
-                {/* Desposte de Res */}
-                <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                {/* Desposte de Res Oficial */}
+                <div className="backdrop-blur-2xl bg-slate-900/70 border border-red-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
                   <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                    <div>
-                      <h2 className="font-black text-sm text-white" style={displayFont}>
-                        Desposte de Media Res (Cuarteo Gancho)
-                      </h2>
-                      <div className="text-[11px] text-slate-400">
-                        Deconstrucción de media res a cortes nobles, recortes y hueso.
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-2xl bg-red-600/30 border border-red-500/40 text-red-400 flex items-center justify-center font-black">
+                        <Beef className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h2 className="font-black text-sm text-white" style={displayFont}>
+                          Desposte por Rendimiento Oficial
+                        </h2>
+                        <div className="text-[11px] text-slate-400">
+                          Deconstrucción de res contra plantilla de despiece con costeo por corte.
+                        </div>
                       </div>
                     </div>
                     <button
-                      onClick={() => window.open("/tv/carniceria", "_blank")}
-                      className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-[11px] font-black flex items-center gap-1 shadow-lg shadow-red-600/20 cursor-pointer"
+                      type="button"
+                      onClick={() => loadCarniceriaData()}
+                      disabled={loadingCarniceria}
+                      className="p-2 rounded-xl bg-white/5 text-slate-400 hover:text-white border border-white/10 cursor-pointer"
+                      title="Actualizar plantillas y órdenes"
                     >
-                      <Monitor className="w-3.5 h-3.5" />
-                      <span>TV 55"</span>
+                      <RefreshCcw className={`w-3.5 h-3.5 ${loadingCarniceria ? "animate-spin text-red-400" : ""}`} />
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <form onSubmit={handleEjecutarDesposte} className="space-y-3">
                     <div>
                       <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                        Peso en Gancho (Kg):
-                      </label>
-                      <input
-                        type="number"
-                        value={despostePesoEntrada}
-                        onChange={(e) => setDespostePesoEntrada(Number(e.target.value) || 0)}
-                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-amber-400"
-                        style={monoFont}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                        Costo Total Compra (₲):
-                      </label>
-                      <input
-                        type="text"
-                        value={desposteCostoTotal}
-                        onChange={(e) => setDesposteCostoTotal(Number(e.target.value.replace(/\D/g, "")) || 0)}
-                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-amber-400"
-                        style={monoFont}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-white/[0.03] border border-white/5 text-center">
-                    <div>
-                      <div className="text-[9px] uppercase font-bold text-slate-500">Costo / Kg Gancho</div>
-                      <div className="font-black text-sm text-slate-200" style={monoFont}>
-                        {formatPYG(desposteCalculo.costoKgGancho)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[9px] uppercase font-bold text-slate-500">Valorizado Venta</div>
-                      <div className="font-black text-sm text-emerald-400" style={monoFont}>
-                        {formatPYG(desposteCalculo.valorizadoTotal)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[9px] uppercase font-bold text-slate-500">Margen Bruto</div>
-                      <div className="font-black text-sm text-amber-400" style={monoFont}>
-                        {desposteCalculo.margenPct.toFixed(1)}%
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Elaboración de Embutidos */}
-                <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
-                  <h2 className="font-black text-sm text-white" style={displayFont}>
-                    Elaboración de Embutidos & Chacinados
-                  </h2>
-                  <form onSubmit={handleConfirmProduccionCarne} className="space-y-3">
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                        Receta a Elaborar:
+                        Plantilla de Cortes (Especie / Categoría):
                       </label>
                       <select
-                        value={carneReceta}
-                        onChange={(e) => setCarneReceta(e.target.value)}
-                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
+                        value={selectedTemplateId}
+                        onChange={(e) => setSelectedTemplateId(e.target.value)}
+                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-red-400"
                       >
-                        <option value="Chorizo Parrillero Casero Extra">Chorizo Parrillero Casero Extra (BOM: Trimmings + Tocino)</option>
-                        <option value="Chorizo Toscano con Hierbas">Chorizo Toscano con Hierbas</option>
-                        <option value="Morcilla Criolla Tradicional">Morcilla Criolla Tradicional</option>
-                        <option value="Milanesas de Bola de Lomo Rebozadas">Milanesas Rebozadas (con Pan Rallado Panadería)</option>
+                        {butcheryTemplates.length === 0 ? (
+                          <option value="">-- Cargando plantillas de carnicería... --</option>
+                        ) : (
+                          butcheryTemplates.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.nombre} ({t.especie || "Vacuno"}) • {t.cuts?.length || 0} cortes
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                          Kg Recortes / Trimmings:
+                          Peso en Gancho (Kg):
                         </label>
                         <input
                           type="number"
-                          value={carneKgTrimmings}
-                          onChange={(e) => setCarneKgTrimmings(e.target.value)}
-                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-black text-white outline-none focus:border-amber-400"
+                          step="0.1"
+                          value={despostePesoEntrada}
+                          onChange={(e) => setDespostePesoEntrada(Number(e.target.value) || 0)}
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-red-400"
                           style={monoFont}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                          Costo Total Compra (₲):
+                        </label>
+                        <input
+                          type="text"
+                          value={desposteCostoTotal ? desposteCostoTotal.toLocaleString("es-PY") : ""}
+                          onChange={(e) => setDesposteCostoTotal(Number(e.target.value.replace(/\D/g, "")) || 0)}
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-red-400"
+                          style={monoFont}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                          Fecha Vencimiento Cortes:
+                        </label>
+                        <input
+                          type="date"
+                          value={desposteVencimiento}
+                          onChange={(e) => setDesposteVencimiento(e.target.value)}
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-2.5 text-xs text-white outline-none focus:border-red-400"
                         />
                       </div>
                       <div>
                         <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                          Kg Tocino / Grasa:
+                          Nro. Tropa / SENACSA / Notas:
                         </label>
                         <input
-                          type="number"
-                          value={carneKgTocino}
-                          onChange={(e) => setCarneKgTocino(e.target.value)}
-                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-black text-white outline-none focus:border-amber-400"
-                          style={monoFont}
+                          type="text"
+                          value={desposteNotas}
+                          onChange={(e) => setDesposteNotas(e.target.value)}
+                          placeholder="Ej: Tropa 402 - Frigomerc"
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-2.5 text-xs text-white outline-none focus:border-red-400"
                         />
                       </div>
+                    </div>
+
+                    {/* Barra de KPIs en Vivo del Desposte */}
+                    <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-white/[0.03] border border-white/5 text-center">
+                      <div>
+                        <div className="text-[9px] uppercase font-bold text-slate-500">Costo / Kg Gancho</div>
+                        <div className="font-black text-xs sm:text-sm text-slate-200" style={monoFont}>
+                          {formatPYG(desposteCalculo.costoKgGancho)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] uppercase font-bold text-slate-500">Valorizado Venta</div>
+                        <div className="font-black text-xs sm:text-sm text-emerald-400" style={monoFont}>
+                          {formatPYG(desposteCalculo.valorizadoTotal)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] uppercase font-bold text-slate-500">Margen Bruto</div>
+                        <div className="font-black text-xs sm:text-sm text-amber-400" style={monoFont}>
+                          {desposteCalculo.margenPct.toFixed(1)}%
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Desglose de Rendimiento Estimado por Corte */}
+                    <div className="p-3 rounded-2xl bg-slate-950/60 border border-white/10 space-y-1.5 max-h-48 overflow-y-auto">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+                        <span>Cortes Estimados ({desposteCortesEstimados.length})</span>
+                        <span className="text-red-400 font-mono">100% Gancho</span>
+                      </div>
+                      {desposteCortesEstimados.map((c: any, idx: number) => (
+                        <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-white/5 last:border-0 font-medium">
+                          <span className="text-slate-300 truncate max-w-[170px]">{c.nombre || c.corte_nombre}</span>
+                          <div className="flex items-center gap-3 font-mono">
+                            <span className="text-slate-400 text-[11px]">{Number(c.kg_estimado || 0).toFixed(1)} kg</span>
+                            <span className="text-emerald-400 text-[11px]">{formatPYG(c.valor_venta || 0)}</span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
 
                     <button
                       type="submit"
-                      className="w-full py-3.5 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-red-600/25 cursor-pointer active:scale-95 transition-all"
+                      disabled={ejecutandoDesposte}
+                      className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-red-600/25 cursor-pointer active:scale-95 transition-all disabled:opacity-50"
                     >
-                      <Beef className="w-4 h-4" />
-                      Registrar Lote de Elaborados en Carnicería
+                      {ejecutandoDesposte ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Scale className="w-4 h-4" />
+                      )}
+                      <span>Ejecutar Desposte Oficial en Sistema</span>
                     </button>
                   </form>
                 </div>
+
+                {/* Historial de Órdenes de Carnicería Reales */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
+                      Órdenes de Carnicería Registradas ({butcheryOrders.length})
+                    </h3>
+                    <span className="text-[10px] text-red-400 font-mono">Stock Automático</span>
+                  </div>
+                  {butcheryOrders.length === 0 ? (
+                    <div className="p-6 rounded-3xl bg-white/[0.03] border border-white/5 text-center text-xs text-slate-500">
+                      No hay órdenes de carnicería registradas en el turno de hoy.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {butcheryOrders.slice(0, 10).map((o: any) => (
+                        <div key={o.id} className="p-3.5 rounded-2xl backdrop-blur-md bg-slate-900/60 border border-white/10 flex items-center justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30">
+                                {o.estado || "completada"}
+                              </span>
+                              <div className="font-bold text-xs text-white truncate">
+                                {o.receta_nombre || o.notas || "Desposte de Gancho"}
+                              </div>
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-1">
+                              {o.created_at ? new Date(o.created_at).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }) : "Turno actual"} • {o.responsable_nombre || user?.nombre || "Encargado"}
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="font-black text-sm text-white" style={monoFont}>
+                              {Number(o.cantidad_objetivo || o.producto_obtenido || 0).toFixed(1)} Kg
+                            </div>
+                            <span className="text-[9px] text-emerald-400 font-bold uppercase">En Gaveta/Balanza</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
               </div>
             )}
 
-            {/* ── SUB-SECTOR 2: PANADERÍA ── */}
+            {/* ── SUB-SECTOR 2: PANADERÍA & ROTISERÍA REAL ── */}
             {produccionSector === "panaderia" && (
               <div className="space-y-4 animate-fade-in">
-                <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
-                  <div className="flex items-center gap-2 border-b border-white/10 pb-3">
+                
+                {/* Selector de Modo Panadería */}
+                <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-white/[0.04] border border-white/10">
+                  {[
+                    { id: "panaderia", label: "🥖 Horneada Diaria" },
+                    { id: "rotiseria", label: "🍗 Rotisería Caliente" },
+                    { id: "calculadora", label: "⚖️ % Panadero" },
+                  ].map((sub) => (
                     <button
-                      onClick={() => setPanModo("sobrante")}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer ${
-                        panModo === "sobrante" ? "bg-amber-500 text-slate-950 shadow-sm" : "bg-white/[0.05] text-slate-400"
+                      key={sub.id}
+                      onClick={() => setPanSubSector(sub.id as any)}
+                      className={`flex-1 py-2 rounded-xl text-xs font-black transition cursor-pointer text-center ${
+                        panSubSector === sub.id
+                          ? "bg-amber-500 text-slate-950 shadow-sm"
+                          : "text-slate-400 hover:text-white"
                       }`}
                     >
-                      ♻️ Residuo Cero (Pan Rallado)
+                      {sub.label}
                     </button>
-                    <button
-                      onClick={() => setPanModo("amasado")}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer ${
-                        panModo === "amasado" ? "bg-amber-500 text-slate-950 shadow-sm" : "bg-white/[0.05] text-slate-400"
-                      }`}
-                    >
-                      🥖 Horneada Diaria (Amasado)
-                    </button>
-                  </div>
-
-                  <form onSubmit={handleConfirmProduccionPan} className="space-y-3">
-                    {panModo === "sobrante" ? (
-                      <>
-                        <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-300">
-                          <strong>Upcycling / Residuo Cero:</strong> Convierte el pan no vendido en Pan Rallado embolsado para evitar merma y ganar margen.
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                              Kg Pan Francés Seco:
-                            </label>
-                            <input
-                              type="number"
-                              value={panKgSobrante}
-                              onChange={(e) => setPanKgSobrante(e.target.value)}
-                              className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-black text-white outline-none focus:border-amber-400"
-                              style={monoFont}
-                            />
-                          </div>
-
-                          <div>
-                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                              Destino de Transformación:
-                            </label>
-                            <select
-                              value={panDestinoSobrante}
-                              onChange={(e) => setPanDestinoSobrante(e.target.value)}
-                              className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-3 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
-                            >
-                              <option value="Pan Rallado Artesanal Extra">Pan Rallado Artesanal Extra (Bolsas 1Kg)</option>
-                              <option value="Tostadas Saborizadas con Orégano">Tostadas Saborizadas con Orégano</option>
-                              <option value="Budín de Pan Artesanal Rotisería">Budín de Pan Artesanal (Rotisería)</option>
-                            </select>
-                          </div>
-                        </div>
-
-                        <button
-                          type="submit"
-                          className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95 transition-all"
-                        >
-                          <ChefHat className="w-4 h-4" />
-                          Transformar en Pan Rallado (Residuo Cero)
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                              Kg Harina Amasada:
-                            </label>
-                            <input
-                              type="number"
-                              value={panKgHarina}
-                              onChange={(e) => setPanKgHarina(e.target.value)}
-                              className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-black text-white outline-none focus:border-amber-400"
-                              style={monoFont}
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                              Variedad Horneada:
-                            </label>
-                            <select
-                              value={panTipoAmasado}
-                              onChange={(e) => setPanTipoAmasado(e.target.value)}
-                              className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-3 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
-                            >
-                              <option value="Pan Francés Tradicional">Pan Francés Tradicional</option>
-                              <option value="Pan Felipe">Pan Felipe</option>
-                              <option value="Galletas Cuarteleras">Galletas Cuarteleras</option>
-                              <option value="Chipa Almidón">Chipa Almidón</option>
-                              <option value="Facturas / Medialunas">Facturas / Medialunas</option>
-                            </select>
-                          </div>
-                        </div>
-
-                        <button
-                          type="submit"
-                          className="w-full py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95 transition-all"
-                        >
-                          <ChefHat className="w-4 h-4" />
-                          Registrar Horneada y Descontar Harina
-                        </button>
-                      </>
-                    )}
-                  </form>
+                  ))}
                 </div>
-              </div>
-            )}
 
-            {/* ── SUB-SECTOR 3: VERDULERÍA ── */}
-            {produccionSector === "verduleria" && (
-              <div className="space-y-4 animate-fade-in">
-                <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
-                  <div className="border-b border-white/10 pb-3">
-                    <h2 className="font-black text-sm text-white" style={displayFont}>
-                      Fraccionamiento Fresh Cut (Valor Agregado)
-                    </h2>
-                    <div className="text-[11px] text-slate-400">
-                      Convierte verduras a granel en bandejas peladas de conveniencia (margen 50%+).
+                {/* MODO 1: HORNEADA DE PANADERÍA */}
+                {panSubSector === "panaderia" && (
+                  <div className="backdrop-blur-2xl bg-slate-900/70 border border-amber-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-2xl bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center font-black">
+                          <ChefHat className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h2 className="font-black text-sm text-white" style={displayFont}>
+                            Registro de Horneada Oficial
+                          </h2>
+                          <div className="text-[11px] text-slate-400">
+                            Ingreso directo a stock de piezas terminadas contra fórmulas activas.
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => loadPanaderiaData()}
+                        disabled={loadingPanaderia}
+                        className="p-2 rounded-xl bg-white/5 text-slate-400 hover:text-white border border-white/10 cursor-pointer"
+                      >
+                        <RefreshCcw className={`w-3.5 h-3.5 ${loadingPanaderia ? "animate-spin text-amber-400" : ""}`} />
+                      </button>
                     </div>
-                  </div>
 
-                  <form onSubmit={handleConfirmProduccionVerdura} className="space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
+                    <form onSubmit={handleRegistrarBakeryOrder} className="space-y-3">
                       <div>
                         <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                          Verdura Insumo (Granel):
+                          Receta de Panadería:
                         </label>
                         <select
-                          value={verduraInsumo}
-                          onChange={(e) => setVerduraInsumo(e.target.value)}
-                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-3 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
+                          value={selectedBakeryRecipeId}
+                          onChange={(e) => setSelectedBakeryRecipeId(e.target.value)}
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
                         >
-                          <option value="Zapallo Kabutiá">Zapallo Kabutiá</option>
-                          <option value="Mandioca Seleccionada">Mandioca Seleccionada</option>
-                          <option value="Repollo / Zanahoria / Choclo">Mix Sopa de Verduras</option>
-                          <option value="Frutas de Estación">Ensalada de Frutas</option>
+                          {bakeryRecipes.length === 0 ? (
+                            <option value="">-- Sin recetas cargadas en el sistema --</option>
+                          ) : (
+                            bakeryRecipes.map((r) => (
+                              <option key={r.id} value={r.id}>
+                                {r.nombre} • Rendimiento: {r.rendimiento_piezas || 0} pzas • Costo: {formatPYG(r.costo_unitario || 0)}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                            Piezas / Kg Producidos:
+                          </label>
+                          <input
+                            type="number"
+                            value={bakeryProdQty}
+                            onChange={(e) => setBakeryProdQty(e.target.value)}
+                            className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-amber-400"
+                            style={monoFont}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                            Fecha Vencimiento:
+                          </label>
+                          <input
+                            type="date"
+                            value={bakeryProdVenc}
+                            onChange={(e) => setBakeryProdVenc(e.target.value)}
+                            className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs text-white outline-none focus:border-amber-400"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                          Observación / Turno de Cocción:
+                        </label>
+                        <input
+                          type="text"
+                          value={bakeryProdNotas}
+                          onChange={(e) => setBakeryProdNotas(e.target.value)}
+                          placeholder="Ej: Turno Mañana 06:30 - Horno 1"
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-2.5 text-xs text-white outline-none focus:border-amber-400"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={registrandoBakery || bakeryRecipes.length === 0}
+                        className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95 transition-all disabled:opacity-50"
+                      >
+                        {registrandoBakery ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChefHat className="w-4 h-4" />}
+                        <span>Registrar Horneada y Aumentar Stock</span>
+                      </button>
+                    </form>
+
+                    {/* Planes de Horneado Programados */}
+                    {bakeryPlanes.length > 0 && (
+                      <div className="pt-2 border-t border-white/10 space-y-2">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                          Planes Semanales Programados ({bakeryPlanes.length})
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {bakeryPlanes.slice(0, 4).map((p: any) => (
+                            <div key={p.id} className="p-2.5 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between text-xs">
+                              <span className="font-bold text-slate-200">{p.nombre}</span>
+                              <span className="text-[10px] text-amber-400 font-mono">Día: {p.dia_semana}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* MODO 2: ROTISERÍA CALIENTE */}
+                {panSubSector === "rotiseria" && (
+                  <div className="backdrop-blur-2xl bg-slate-900/70 border border-orange-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-2xl bg-orange-500/20 border border-orange-500/30 text-orange-400 flex items-center justify-center font-black">
+                          <Flame className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h2 className="font-black text-sm text-white" style={displayFont}>
+                            Cocción & Rotisería Caliente
+                          </h2>
+                          <div className="text-[11px] text-slate-400">
+                            Planes de cocción con temperatura HACCP y liquidación de productos listos.
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleAutoMarkdownRoti}
+                        disabled={aplicandoAutoMarkdownRoti}
+                        className="px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/30 hover:bg-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                        title="Aplicar descuentos a productos próximos a vencer"
+                      >
+                        <Tag className="w-3.5 h-3.5" />
+                        <span>Markdown Auto</span>
+                      </button>
+                    </div>
+
+                    {/* KPIs de Rotisería */}
+                    <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-white/[0.03] border border-white/5 text-center">
+                      <div>
+                        <div className="text-[9px] uppercase font-bold text-slate-500">Ventas Hoy</div>
+                        <div className="font-black text-xs sm:text-sm text-emerald-400" style={monoFont}>
+                          {formatPYG(rotiseriaDash?.ventas_hoy_gs || 0)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] uppercase font-bold text-slate-500">Hornadas Hoy</div>
+                        <div className="font-black text-xs sm:text-sm text-amber-400" style={monoFont}>
+                          {rotiseriaDash?.planes_hoy || rotiseriaPlanes.length}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] uppercase font-bold text-slate-500">Merma %</div>
+                        <div className="font-black text-xs sm:text-sm text-rose-400" style={monoFont}>
+                          {(rotiseriaDash?.merma_pct || 0).toFixed(1)}%
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Formulario Nuevo Plan de Rotisería */}
+                    <form onSubmit={handleCrearRotiPlan} className="space-y-3">
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                          Preparado o Receta:
+                        </label>
+                        <select
+                          value={selectedRotiRecipeId}
+                          onChange={(e) => {
+                            setSelectedRotiRecipeId(e.target.value)
+                            const rec = rotiseriaRecipes.find(r => r.id === e.target.value)
+                            if (rec) setRotiPlanDesc(rec.nombre)
+                          }}
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-orange-400"
+                        >
+                          <option value="">-- Seleccionar o escribir descripción manual --</option>
+                          {rotiseriaRecipes.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.nombre} • Costo: {formatPYG(r.costo_estimado || 0)}
+                            </option>
+                          ))}
                         </select>
                       </div>
 
                       <div>
                         <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                          Kg Brutos Insumidos:
+                          Descripción / Lote de Horneado:
                         </label>
                         <input
-                          type="number"
-                          value={verduraKgBrutos}
-                          onChange={(e) => setVerduraKgBrutos(e.target.value)}
-                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-black text-white outline-none focus:border-amber-400"
-                          style={monoFont}
+                          type="text"
+                          value={rotiPlanDesc}
+                          onChange={(e) => setRotiPlanDesc(e.target.value)}
+                          placeholder="Ej: Pollos al Spiedo - Tanda Mediodía"
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-2.5 text-xs text-white outline-none focus:border-orange-400"
                         />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                            Temp. Objetivo (°C):
+                          </label>
+                          <input
+                            type="number"
+                            value={rotiPlanTemp}
+                            onChange={(e) => setRotiPlanTemp(e.target.value)}
+                            className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-black text-white outline-none focus:border-orange-400"
+                            style={monoFont}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                            Tiempo Cocción (Min):
+                          </label>
+                          <input
+                            type="number"
+                            value={rotiPlanTiempo}
+                            onChange={(e) => setRotiPlanTiempo(e.target.value)}
+                            className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-black text-white outline-none focus:border-orange-400"
+                            style={monoFont}
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={guardandoRotiPlan}
+                        className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-orange-600 to-amber-500 hover:brightness-110 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-orange-600/20 cursor-pointer active:scale-95 transition-all"
+                      >
+                        {guardandoRotiPlan ? <Loader2 className="w-4 h-4 animate-spin" /> : <Flame className="w-4 h-4" />}
+                        <span>Iniciar Hornada de Rotisería</span>
+                      </button>
+                    </form>
+
+                    {/* Lista de Hornadas Activas */}
+                    <div className="space-y-2 pt-2 border-t border-white/10">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Hornadas del Día ({rotiseriaPlanes.length})
+                      </div>
+                      {rotiseriaPlanes.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-slate-500">Sin planes de rotisería hoy.</div>
+                      ) : (
+                        <div className="space-y-2">
+                          {rotiseriaPlanes.slice(0, 6).map((p: any) => (
+                            <div key={p.id} className="p-3 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-between gap-2">
+                              <div>
+                                <div className="font-bold text-xs text-white">{p.descripcion || p.nombre}</div>
+                                <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                  Meta: {p.temperatura_objetivo}°C • {p.tiempo_coccion_min} min
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                {p.estado === "completado" ? (
+                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                    Listo
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => setCompletandoRotiId(p.id)}
+                                    className="px-2.5 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black cursor-pointer shadow-sm"
+                                  >
+                                    Completar
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* MODO 3: CALCULADORA PANADERO RÁPIDA */}
+                {panSubSector === "calculadora" && (
+                  <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                    <div className="flex items-center gap-2 border-b border-white/10 pb-3">
+                      <div className="w-9 h-9 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black">
+                        <Calculator className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h2 className="font-black text-sm text-white" style={displayFont}>
+                          Calculadora de % Panadero
+                        </h2>
+                        <div className="text-[11px] text-slate-400">
+                          Dosificación automática de agua, sal, levadura y grasa sobre kilos de harina.
+                        </div>
                       </div>
                     </div>
 
                     <div>
                       <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                        Producto Final Empacado:
+                        Kilos de Harina Base (100%):
                       </label>
-                      <select
-                        value={verduraBandejasDestino}
-                        onChange={(e) => setVerduraBandejasDestino(e.target.value)}
-                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-3 py-3 text-xs font-bold text-white outline-none focus:border-amber-400"
-                      >
-                        <option value="Bandejas Zapallo en Cubos 500g">Bandejas Zapallo en Cubos 500g</option>
-                        <option value="Bolsas Mandioca Pelada Envasada 1Kg">Bolsas Mandioca Pelada Envasada 1Kg</option>
-                        <option value="Bandejas Sopa de Verduras Picadas">Bandejas Sopa de Verduras Picadas</option>
-                        <option value="Potes Ensalada de Frutas 350g">Potes Ensalada de Frutas 350g</option>
-                      </select>
+                      <input
+                        type="number"
+                        value={harinaKg}
+                        onChange={(e) => setHarinaKg(Number(e.target.value) || 0)}
+                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-lg font-black text-amber-400 outline-none focus:border-amber-400"
+                        style={monoFont}
+                      />
                     </div>
 
-                    <button
-                      type="submit"
-                      className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 cursor-pointer active:scale-95 transition-all"
-                    >
-                      <Carrot className="w-4 h-4" />
-                      Registrar Bandejeado en Batea Refrigerada
-                    </button>
-                  </form>
-                </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
+                        <span className="text-[10px] text-slate-400 font-bold block">💧 Hidratación ({hidratPct}%)</span>
+                        <input
+                          type="number"
+                          value={hidratPct}
+                          onChange={(e) => setHidratPct(Number(e.target.value) || 0)}
+                          className="w-full bg-slate-950/70 border border-white/10 rounded-xl px-2 py-1 text-xs font-mono text-white"
+                        />
+                        <div className="font-black text-sm text-blue-400 font-mono">
+                          {((harinaKg * hidratPct) / 100).toFixed(2)} L
+                        </div>
+                      </div>
+
+                      <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
+                        <span className="text-[10px] text-slate-400 font-bold block">🧂 Sal ({salPct}%)</span>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={salPct}
+                          onChange={(e) => setSalPct(Number(e.target.value) || 0)}
+                          className="w-full bg-slate-950/70 border border-white/10 rounded-xl px-2 py-1 text-xs font-mono text-white"
+                        />
+                        <div className="font-black text-sm text-slate-200 font-mono">
+                          {((harinaKg * salPct) / 100).toFixed(2)} Kg
+                        </div>
+                      </div>
+
+                      <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
+                        <span className="text-[10px] text-slate-400 font-bold block">🍞 Levadura ({levPct}%)</span>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={levPct}
+                          onChange={(e) => setLevPct(Number(e.target.value) || 0)}
+                          className="w-full bg-slate-950/70 border border-white/10 rounded-xl px-2 py-1 text-xs font-mono text-white"
+                        />
+                        <div className="font-black text-sm text-amber-300 font-mono">
+                          {((harinaKg * levPct) / 100).toFixed(2)} Kg
+                        </div>
+                      </div>
+
+                      <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
+                        <span className="text-[10px] text-slate-400 font-bold block">🧈 Grasa ({grasaPct}%)</span>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={grasaPct}
+                          onChange={(e) => setGrasaPct(Number(e.target.value) || 0)}
+                          className="w-full bg-slate-950/70 border border-white/10 rounded-xl px-2 py-1 text-xs font-mono text-white"
+                        />
+                        <div className="font-black text-sm text-orange-400 font-mono">
+                          {((harinaKg * grasaPct) / 100).toFixed(2)} Kg
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between">
+                      <span className="font-bold text-xs text-amber-300">Peso Total de Masa Resultante:</span>
+                      <span className="font-black text-base text-amber-400 font-mono">
+                        {(harinaKg * (1 + (hidratPct + salPct + levPct + grasaPct) / 100)).toFixed(2)} Kg
+                      </span>
+                    </div>
+                  </div>
+                )}
+
               </div>
             )}
 
-            {/* Historial de Lotes Producidos */}
-            <div className="space-y-3">
-              <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
-                Lotes Producidos Hoy ({lotesProduccion.length})
-              </h3>
-              {lotesProduccion.length === 0 ? (
-                <div className="p-6 rounded-3xl bg-white/[0.03] border border-white/5 text-center text-xs text-slate-500">
-                  Aún no se registraron lotes de producción en el turno.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {lotesProduccion.map((lp) => (
-                    <div key={lp.id} className="p-3.5 rounded-2xl backdrop-blur-md bg-slate-900/60 border border-white/10 flex items-center justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
-                            lp.sector === "Carnicería" ? "bg-red-500/20 text-red-400 border border-red-500/30" :
-                            lp.sector === "Panadería" ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" :
-                            "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                          }`}>
-                            {lp.sector}
-                          </span>
-                          <div className="font-bold text-xs text-white truncate">
-                            {lp.producto_obtenido}
-                          </div>
-                        </div>
-                        <div className="text-[10px] text-slate-400 mt-1">
-                          Insumo: {lp.insumo_origen} • Lote: <strong className="text-slate-200 font-mono">{lp.lote_codigo}</strong> • {lp.hora}
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className="font-black text-sm text-white" style={monoFont}>
-                          {lp.cantidad_obtenida} {lp.unidad}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-mono">
-                          {formatPYG(lp.costo_unitario)}/{lp.unidad === "Bandejas" ? "un" : "kg"}
-                        </div>
-                      </div>
-                    </div>
+            {/* ── SUB-SECTOR 3: VERDULERÍA & HORTIFRUTI FRESCOS REAL ── */}
+            {produccionSector === "verduleria" && (
+              <div className="space-y-4 animate-fade-in">
+                
+                {/* Selector de Sub-Modo Verdulería */}
+                <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-white/[0.04] border border-white/10">
+                  {[
+                    { id: "frescura", label: "🌿 Auditoría Frescura" },
+                    { id: "lotes", label: "📦 Lotes Recibidos" },
+                    { id: "markdown", label: "🏷️ Liquidación Auto" },
+                  ].map((sub) => (
+                    <button
+                      key={sub.id}
+                      onClick={() => setVerduraSubSector(sub.id as any)}
+                      className={`flex-1 py-2 rounded-xl text-xs font-black transition cursor-pointer text-center ${
+                        verduraSubSector === sub.id
+                          ? "bg-emerald-500 text-slate-950 shadow-sm"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      {sub.label}
+                    </button>
                   ))}
                 </div>
-              )}
-            </div>
+
+                {/* MODO 1: AUDITORÍA DE FRESCURA EN GÓNDOLA */}
+                {verduraSubSector === "frescura" && (
+                  <div className="backdrop-blur-2xl bg-slate-900/70 border border-emerald-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-2xl bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 flex items-center justify-center font-black">
+                          <Sparkles className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h2 className="font-black text-sm text-white" style={displayFont}>
+                            Auditoría Sensorial de Frescura
+                          </h2>
+                          <div className="text-[11px] text-slate-400">
+                            Scoring de maduración en góndola. Dispara markdown automático si es regular o malo.
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => loadVerduleriaData()}
+                        disabled={loadingVerduleria}
+                        className="p-2 rounded-xl bg-white/5 text-slate-400 hover:text-white border border-white/10 cursor-pointer"
+                      >
+                        <RefreshCcw className={`w-3.5 h-3.5 ${loadingVerduleria ? "animate-spin text-emerald-400" : ""}`} />
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleGuardarAuditoriaFrescura} className="space-y-3">
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                          Producto Hortícola a Auditar:
+                        </label>
+                        <select
+                          value={auditProdId || scannedProduct?.id || ""}
+                          onChange={(e) => setAuditProdId(e.target.value)}
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-emerald-400"
+                        >
+                          <option value="">-- Seleccionar fruta o verdura --</option>
+                          {products.slice(0, 100).map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.nombre} ({p.codigo_barra || p.sku || "Sin código"})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Calidad Sensorial Táctil */}
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1.5">
+                          Estado de Calidad:
+                        </label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { id: "bueno", label: "Óptimo", sub: "100% Comercial", color: "bg-emerald-500/20 border-emerald-500 text-emerald-300" },
+                            { id: "regular", label: "Maduro", sub: "-20% Markdown", color: "bg-amber-500/20 border-amber-500 text-amber-300" },
+                            { id: "malo", label: "Crítico", sub: "-50% Sell-Out", color: "bg-rose-500/20 border-rose-500 text-rose-300" },
+                          ].map((g) => (
+                            <button
+                              key={g.id}
+                              type="button"
+                              onClick={() => setAuditCalidad(g.id as any)}
+                              className={`p-2.5 rounded-2xl border text-center transition cursor-pointer ${
+                                auditCalidad === g.id
+                                  ? `${g.color} ring-2 ring-white/20 font-black scale-[1.02]`
+                                  : "bg-white/[0.02] border-white/10 text-slate-400 hover:text-white"
+                              }`}
+                            >
+                              <div className="font-bold text-xs">{g.label}</div>
+                              <div className="text-[9px] opacity-80">{g.sub}</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Escala de Puntuación Sensorial 1 a 5 */}
+                      <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-white/[0.02] border border-white/5">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 block mb-1">Firmeza (1-5)</label>
+                          <div className="flex items-center gap-1">
+                            {[1, 2, 3, 4, 5].map((num) => (
+                              <button
+                                key={num}
+                                type="button"
+                                onClick={() => setAuditFirmeza(num)}
+                                className={`flex-1 py-1 rounded-lg text-xs font-mono font-bold ${
+                                  auditFirmeza === num ? "bg-emerald-500 text-slate-950 font-black" : "bg-white/5 text-slate-400"
+                                }`}
+                              >
+                                {num}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 block mb-1">Color (1-5)</label>
+                          <div className="flex items-center gap-1">
+                            {[1, 2, 3, 4, 5].map((num) => (
+                              <button
+                                key={num}
+                                type="button"
+                                onClick={() => setAuditColor(num)}
+                                className={`flex-1 py-1 rounded-lg text-xs font-mono font-bold ${
+                                  auditColor === num ? "bg-emerald-500 text-slate-950 font-black" : "bg-white/5 text-slate-400"
+                                }`}
+                              >
+                                {num}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 block mb-1">Aspecto (1-5)</label>
+                          <div className="flex items-center gap-1">
+                            {[1, 2, 3, 4, 5].map((num) => (
+                              <button
+                                key={num}
+                                type="button"
+                                onClick={() => setAuditAspecto(num)}
+                                className={`flex-1 py-1 rounded-lg text-xs font-mono font-bold ${
+                                  auditAspecto === num ? "bg-emerald-500 text-slate-950 font-black" : "bg-white/5 text-slate-400"
+                                }`}
+                              >
+                                {num}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                          Observación de Frescura en Góndola:
+                        </label>
+                        <input
+                          type="text"
+                          value={auditNotas}
+                          onChange={(e) => setAuditNotas(e.target.value)}
+                          placeholder="Ej: Batea refrigerada centro, inicio de deshidratación leve..."
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-2.5 text-xs text-white outline-none focus:border-emerald-400"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={guardandoAuditoria}
+                        className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:brightness-110 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 cursor-pointer active:scale-95 transition-all disabled:opacity-50"
+                      >
+                        {guardandoAuditoria ? <Loader2 className="w-4 h-4 animate-spin" /> : <Carrot className="w-4 h-4" />}
+                        <span>Guardar Auditoría de Frescura</span>
+                      </button>
+                    </form>
+
+                    {/* Historial de Auditorías Recientes */}
+                    <div className="space-y-2 pt-2 border-t border-white/10">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Auditorías Recientes ({freshnessAudits.length})
+                      </div>
+                      {freshnessAudits.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-slate-500">Sin auditorías cargadas hoy.</div>
+                      ) : (
+                        <div className="space-y-2">
+                          {freshnessAudits.slice(0, 5).map((a: any) => (
+                            <div key={a.id} className="p-3 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-between gap-2">
+                              <div>
+                                <div className="font-bold text-xs text-white truncate max-w-[200px]">
+                                  {a.producto_nombre || a.producto_id}
+                                </div>
+                                <div className="text-[10px] text-slate-400 mt-0.5">
+                                  Firmeza: {a.firmeza}/5 • Color: {a.color}/5 • {a.notas || "Sin nota"}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                                  a.calidad_actual === "bueno" ? "bg-emerald-500/20 text-emerald-400" :
+                                  a.calidad_actual === "regular" ? "bg-amber-500/20 text-amber-400" : "bg-rose-500/20 text-rose-400"
+                                }`}>
+                                  {a.calidad_actual}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* MODO 2: LOTES RECIBIDOS EN VERDULERÍA */}
+                {verduraSubSector === "lotes" && (
+                  <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                    <div className="border-b border-white/10 pb-3">
+                      <h2 className="font-black text-sm text-white" style={displayFont}>
+                        Recepción de Lote Hortifruti
+                      </h2>
+                      <div className="text-[11px] text-slate-400">
+                        Ingreso de cajones y pesaje de frutas/verduras con clasificación de calidad A/B/C.
+                      </div>
+                    </div>
+
+                    <form onSubmit={handleGuardarRecepcionProduce} className="space-y-3">
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                          Producto Hortícola:
+                        </label>
+                        <select
+                          value={recepProdId || scannedProduct?.id || ""}
+                          onChange={(e) => setRecepProdId(e.target.value)}
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-emerald-400"
+                        >
+                          <option value="">-- Seleccionar producto recibido --</option>
+                          {products.slice(0, 100).map((p) => (
+                            <option key={p.id} value={p.id}>{p.nombre}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                            Cantidad (Kg o Cajas):
+                          </label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={recepCant}
+                            onChange={(e) => setRecepCant(e.target.value)}
+                            placeholder="Ej: 50"
+                            className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-emerald-400"
+                            style={monoFont}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                            Precio Unitario (₲):
+                          </label>
+                          <input
+                            type="text"
+                            value={recepPrecioUni}
+                            onChange={(e) => setRecepPrecioUni(e.target.value.replace(/\D/g, ""))}
+                            placeholder="Ej: 8500"
+                            className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-emerald-400"
+                            style={monoFont}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                            Clasificación Calidad:
+                          </label>
+                          <select
+                            value={recepCalidad}
+                            onChange={(e) => setRecepCalidad(e.target.value)}
+                            className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-3 py-2.5 text-xs font-bold text-white outline-none focus:border-emerald-400"
+                          >
+                            <option value="A">Clase A (Premium)</option>
+                            <option value="B">Clase B (Comercial)</option>
+                            <option value="C">Clase C (Económica / Oferta)</option>
+                            <option value="D">Clase D (Para Proceso)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                            Vencimiento Estimado:
+                          </label>
+                          <input
+                            type="date"
+                            value={recepVencimiento}
+                            onChange={(e) => setRecepVencimiento(e.target.value)}
+                            className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-3 py-2.5 text-xs text-white outline-none focus:border-emerald-400"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={guardandoRecepcion}
+                        className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 cursor-pointer active:scale-95 transition-all"
+                      >
+                        {guardandoRecepcion ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />}
+                        <span>Ingresar Lote de Hortifruti</span>
+                      </button>
+                    </form>
+
+                    {/* Lista de Lotes Recibidos */}
+                    <div className="space-y-2 pt-2 border-t border-white/10">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Lotes Activos ({receiveBatches.length})
+                      </div>
+                      {receiveBatches.slice(0, 5).map((b: any) => (
+                        <div key={b.id} className="p-3 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-between text-xs">
+                          <div>
+                            <span className="font-bold text-white">{b.producto_nombre || b.producto_id}</span>
+                            <div className="text-[10px] text-slate-400 font-mono">Calidad: {b.calidad} • {b.fecha_recepcion}</div>
+                          </div>
+                          <span className="font-mono font-black text-emerald-400">{b.cantidad_aceptada || b.cantidad_recibida} kg</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* MODO 3: LIQUIDACIÓN INTELIGENTE DE VERDULERÍA */}
+                {verduraSubSector === "markdown" && (
+                  <div className="backdrop-blur-2xl bg-slate-900/70 border border-amber-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                    <div className="border-b border-white/10 pb-3">
+                      <h2 className="font-black text-sm text-white" style={displayFont}>
+                        Liquidación Sell-Out por Proximidad de Madurez
+                      </h2>
+                      <div className="text-[11px] text-slate-400">
+                        Aplica automáticamente rebajas calculadas sobre lotes hortícolas según días restantes de vida útil.
+                      </div>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 space-y-2">
+                      <div className="font-bold flex items-center gap-1.5">
+                        <AlertTriangle className="w-4 h-4 text-amber-400" />
+                        <span>Regla de Sell-Out Preventivo Extra:</span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        Evita mermas de descarte aplicando descuentos escalonados (-20% a 2 días de vencer, -50% a 1 día de maduración crítica).
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleAutoMarkdownProduce}
+                      disabled={aplicandoMarkdownProduce}
+                      className="w-full py-4 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 cursor-pointer active:scale-95 transition-all"
+                    >
+                      {aplicandoMarkdownProduce ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Tag className="w-4 h-4" />
+                      )}
+                      <span>Ejecutar Liquidación Automática de Lotes</span>
+                    </button>
+                  </div>
+                )}
+
+              </div>
+            )}
 
           </div>
         )}
@@ -2263,104 +3190,216 @@ export default function SalonOperacionesPwaPage() {
           </div>
         )}
 
-        {/* ══════════════════════ TAB 5: TEMPERATURAS & INOCUIDAD HACCP ══════════════════════ */}
+        {/* ══════════════════════ TAB 5: INOCUIDAD & CONTROL HACCP REAL ══════════════════════ */}
         {tab === "haccp" && (
           <div className="space-y-5 animate-fade-in">
-            <div className="backdrop-blur-2xl bg-slate-900/70 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
-              <div className="flex items-center gap-2.5 border-b border-white/10 pb-3">
-                <div className="w-9 h-9 rounded-2xl bg-teal-600/30 border border-teal-500/40 text-teal-400 flex items-center justify-center font-black shadow-lg shadow-teal-600/20">
-                  <Thermometer className="w-4 h-4" />
+            
+            {/* Cabecera & KPIs de Inocuidad HACCP */}
+            <div className="backdrop-blur-2xl bg-slate-900/70 border border-teal-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-teal-600/30 border border-teal-500/40 text-teal-400 flex items-center justify-center font-black shadow-lg shadow-teal-600/20">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h2 className="font-black text-sm text-white" style={displayFont}>
+                      Inocuidad & Control HACCP Oficial
+                    </h2>
+                    <div className="text-[11px] text-slate-400">
+                      Puntos Críticos de Control (PCC), cadena de frío y libro digital de acciones correctivas.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => loadHaccpData()}
+                  disabled={loadingHaccp}
+                  className="p-2 rounded-xl bg-white/5 text-slate-400 hover:text-white border border-white/10 cursor-pointer"
+                  title="Recargar planes y mediciones HACCP"
+                >
+                  <RefreshCcw className={`w-3.5 h-3.5 ${loadingHaccp ? "animate-spin text-teal-400" : ""}`} />
+                </button>
+              </div>
+
+              {/* Barra de KPIs Bromatológicos en Vivo */}
+              <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-white/[0.03] border border-white/5 text-center">
+                <div>
+                  <div className="text-[9px] uppercase font-bold text-slate-500">Conformidad %</div>
+                  <div className={`font-black text-sm sm:text-base ${
+                    (Number(haccpDash?.conformidad_pct) || 100) >= 90 ? "text-emerald-400" :
+                    (Number(haccpDash?.conformidad_pct) || 100) >= 70 ? "text-amber-400" : "text-rose-400"
+                  }`} style={monoFont}>
+                    {haccpDash?.conformidad_pct != null ? `${Number(haccpDash.conformidad_pct).toFixed(1)}%` : "100%"}
+                  </div>
                 </div>
                 <div>
-                  <h2 className="font-black text-sm text-white" style={displayFont}>
-                    Control de Temperaturas & Cadena de Frío
-                  </h2>
-                  <div className="text-[11px] text-slate-400">
-                    Registro de puntos críticos bromatológicos del salón y cámaras.
+                  <div className="text-[9px] uppercase font-bold text-slate-500">Mediciones Hoy</div>
+                  <div className="font-black text-sm sm:text-base text-teal-300" style={monoFont}>
+                    {haccpDash?.monitoreos_hoy ?? 0}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] uppercase font-bold text-slate-500">Acciones Abiertas</div>
+                  <div className={`font-black text-sm sm:text-base ${haccpAcciones.length > 0 ? "text-rose-400 animate-pulse" : "text-slate-300"}`} style={monoFont}>
+                    {haccpAcciones.length}
                   </div>
                 </div>
               </div>
 
-              <form onSubmit={handleConfirmTemperatura} className="space-y-3">
+              {/* Formulario Registro Monitoreo PCC */}
+              <form onSubmit={handleGuardarMonitoreoHaccp} className="space-y-3 pt-1">
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                    Cámara o Equipo a Medir:
+                    Plan HACCP / Sector:
                   </label>
                   <select
-                    value={tempEquipo}
-                    onChange={(e) => setTempEquipo(e.target.value)}
-                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-sm font-bold text-white outline-none focus:border-amber-400"
+                    value={selectedHaccpPlanId}
+                    onChange={(e) => setSelectedHaccpPlanId(e.target.value)}
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-teal-400"
                   >
-                    <option value="Cámara de Reses (Carnicería)">Cámara de Reses (Carnicería) [0°C a 4°C]</option>
-                    <option value="Batea Exhibidora de Cortes">Batea Exhibidora de Cortes [0°C a 4°C]</option>
-                    <option value="Heladera Mural de Lácteos">Heladera Mural de Lácteos [1°C a 5°C]</option>
-                    <option value="Cámara de Congelados">Cámara de Congelados [-22°C a -16°C]</option>
-                    <option value="Vitrina Caliente de Rotisería">Vitrina Caliente de Rotisería [65°C a 85°C]</option>
+                    {haccpPlanes.length === 0 ? (
+                      <option value="">-- Sin planes HACCP cargados en el sistema --</option>
+                    ) : (
+                      haccpPlanes.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.nombre} ({p.area || "Salón"})
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
 
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                    Temperatura Leída (°C):
+                    Punto Crítico de Control (PCC) a Medir:
+                  </label>
+                  <select
+                    value={selectedCpId}
+                    onChange={(e) => setSelectedCpId(e.target.value)}
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-teal-400"
+                  >
+                    {haccpCriticalPoints.length === 0 ? (
+                      <option value="">-- Sin puntos críticos definidos en este plan --</option>
+                    ) : (
+                      haccpCriticalPoints.map((cp) => (
+                        <option key={cp.id} value={cp.id}>
+                          {cp.nombre} [{cp.limite_inferior ?? "-"}°C a {cp.limite_superior ?? "-"}°C]
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
+                {/* Badge con Rango Térmico Seguro del PCC Activo */}
+                {(() => {
+                  const cp = haccpCriticalPoints.find(p => p.id === selectedCpId)
+                  if (!cp) return null
+                  return (
+                    <div className="p-3 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-xs flex items-center justify-between text-teal-300 font-mono">
+                      <span>Rango Seguro Normativo:</span>
+                      <strong className="text-white text-sm">
+                        {cp.limite_inferior ?? "-"}°C a {cp.limite_superior ?? "-"}°C ({cp.unidad || "°C"})
+                      </strong>
+                    </div>
+                  )
+                })()}
+
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                    Temperatura Leída en Sonda (°C):
                   </label>
                   <input
                     type="text"
-                    value={tempValor}
-                    onChange={(e) => setTempValor(e.target.value.replace(/[^0-9.,-]/g, ""))}
+                    value={haccpTempValor}
+                    onChange={(e) => setHaccpTempValor(e.target.value.replace(/[^0-9.,-]/g, ""))}
                     placeholder="Ej: 2.5"
-                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-amber-400"
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-lg font-black text-white outline-none focus:border-teal-400"
                     style={monoFont}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                    Observación / Calibración de Termómetro:
+                  </label>
+                  <input
+                    type="text"
+                    value={haccpTempObs}
+                    onChange={(e) => setHaccpTempObs(e.target.value)}
+                    placeholder="Ej: Termómetro digital infrarrojo calibrado en turno..."
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-2.5 text-xs text-white outline-none focus:border-teal-400"
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-teal-600/25 cursor-pointer active:scale-95 transition-all"
+                  disabled={guardandoMonitoreo || !selectedCpId}
+                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-600 to-cyan-500 hover:brightness-110 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-teal-600/25 cursor-pointer active:scale-95 transition-all disabled:opacity-50"
                 >
-                  <Thermometer className="w-4 h-4" />
-                  Guardar Medición HACCP Oficial
+                  {guardandoMonitoreo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Thermometer className="w-4 h-4" />}
+                  <span>Guardar Medición HACCP Oficial</span>
                 </button>
               </form>
             </div>
 
-            {/* Historial de Temperaturas */}
+            {/* Panel de Acciones Correctivas Pendientes */}
             <div className="space-y-3">
-              <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
-                Mediciones Registradas Hoy ({temperaturas.length})
-              </h3>
-              {temperaturas.length === 0 ? (
-                <div className="p-6 rounded-3xl bg-white/[0.03] border border-white/5 text-center text-xs text-slate-500">
-                  No hay mediciones registradas en el turno de hoy.
+              <div className="flex items-center justify-between">
+                <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
+                  Acciones Correctivas Pendientes ({haccpAcciones.length})
+                </h3>
+                {haccpAcciones.length > 0 && (
+                  <span className="text-[10px] text-rose-400 font-bold animate-pulse">Atención Inmediata</span>
+                )}
+              </div>
+
+              {haccpAcciones.length === 0 ? (
+                <div className="p-6 rounded-3xl bg-emerald-500/10 border border-emerald-500/20 text-center text-xs text-emerald-300 flex items-center justify-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Sin desviaciones bromatológicas activas. Todas las cámaras conformes.</span>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {temperaturas.map((t) => (
-                    <div key={t.id} className="p-3.5 rounded-2xl backdrop-blur-md bg-slate-900/60 border border-white/10 flex items-center justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
-                            t.estado === "optimo" ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-rose-500/20 text-rose-400 border border-rose-500/30 animate-pulse"
-                          }`}>
-                            {t.estado === "optimo" ? "Óptimo" : "Crítico"}
-                          </span>
-                          <div className="font-bold text-xs text-white truncate">
-                            {t.equipo}
+                  {haccpAcciones.map((ca: any) => (
+                    <div key={ca.id} className="p-4 rounded-2xl backdrop-blur-md bg-slate-900/80 border border-rose-500/30 space-y-2.5 shadow-lg shadow-rose-500/5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                              Desviación
+                            </span>
+                            <div className="font-bold text-xs text-white truncate">
+                              {ca.descripcion || "Desviación de temperatura"}
+                            </div>
+                          </div>
+                          <div className="text-[11px] text-slate-300 mt-1">
+                            Acción requerida: <strong className="text-amber-300">{ca.accion_tomada || "Revisar compresor y calibración"}</strong>
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-0.5 font-mono">
+                            Registrado: {ca.created_at ? new Date(ca.created_at).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }) : "Turno actual"}
                           </div>
                         </div>
-                        <div className="text-[10px] text-slate-400 mt-1">
-                          Rango seguro: {t.rango_min}°C a {t.rango_max}°C • {t.hora}
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className={`font-black text-lg ${t.estado === "optimo" ? "text-emerald-400" : "text-rose-400"}`} style={monoFont}>
-                          {t.temperatura > 0 ? `+${t.temperatura}` : t.temperatura}°C
-                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleResolverAccionHaccp(ca.id)}
+                          disabled={resolviendoAccionId === ca.id}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shrink-0 cursor-pointer shadow-sm active:scale-95 transition-all flex items-center gap-1 disabled:opacity-50"
+                        >
+                          {resolviendoAccionId === ca.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Check className="w-3.5 h-3.5" />
+                          )}
+                          <span>Resolver</span>
+                        </button>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
+
           </div>
         )}
 
@@ -2372,10 +3411,10 @@ export default function SalonOperacionesPwaPage() {
           <div className="grid grid-cols-5 gap-1">
             {[
               { id: "gondola", label: "Góndola", icon: Tag, badge: labelQueue.length },
-              { id: "produccion", label: "Producción", icon: ChefHat, badge: lotesProduccion.length },
+              { id: "produccion", label: "Producción", icon: ChefHat, badge: butcheryOrders.length + bakeryOrders.length + freshnessAudits.length },
               { id: "mermas", label: "Mermas", icon: Trash2, badge: mermasList.length },
               { id: "reposicion", label: "Quiebres", icon: Boxes, badge: reposiciones.filter(r => r.estado === "pendiente").length },
-              { id: "haccp", label: "HACCP", icon: Thermometer },
+              { id: "haccp", label: "HACCP", icon: Thermometer, badge: haccpAcciones.length },
             ].map((sec) => {
               const Icon = sec.icon
               const active = tab === sec.id

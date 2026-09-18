@@ -7,7 +7,7 @@ Zona horaria estricta: America/Asuncion.
 from io import BytesIO
 from datetime import datetime, date
 from decimal import Decimal
-import pytz
+from zoneinfo import ZoneInfo
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -23,7 +23,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 import os
 
-ASUNCION_TZ = pytz.timezone("America/Asuncion")
+ASUNCION_TZ = ZoneInfo("America/Asuncion")
 
 PRIMARY_COLOR = HexColor("#0F172A")    # Slate 900
 BRAND_ACCENT = HexColor("#16A34A")     # Emerald 600
