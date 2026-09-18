@@ -1,3 +1,4 @@
+from io import BytesIO
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
@@ -7,7 +8,7 @@ from datetime import date, timedelta
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
-from api.src.petty_cash import service, pdf_reports
+from api.src.petty_cash import service, pdf_reports, expense_pdf
 from api.src.petty_cash.schemas import (
     ExpenseCategoryCreate, ExpenseCategoryResponse,
     ExpenseCreate, ExpenseUpdate, ExpenseResponse, ExpenseSummary,
@@ -18,6 +19,7 @@ from api.src.petty_cash.schemas import (
     FundCountCreate, FundCountConfirm, PettyCashFundCountResponse,
     PettyCashRendicionCreate, PettyCashRendicionAuditRequest, PettyCashRendicionReplenishRequest,
     PettyCashRendicionResponse, PettyCashRendicionDetailResponse,
+    ExpenseDisburseRequest, ExpenseDisbursementResponse,
 )
 
 async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
@@ -498,6 +500,75 @@ async def upload_comprobante(
     return ComprobanteUploadResponse(url=url, filename=file.filename or "comprobante")
 
 
+@router.get("/export/report.pdf")
+async def export_expenses_report_pdf(
+    desde: Optional[date] = None,
+    hasta: Optional[date] = None,
+    estado: Optional[str] = None,
+    fund_id: Optional[str] = None,
+    category_id: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Genera el Reporte Analítico Consolidado de Gastos en PDF con filtros."""
+    expenses = await service.list_expenses(
+        db=db,
+        company_id=user["company_id"],
+        branch_id=branch_id,
+        fund_id=fund_id,
+        category_id=category_id,
+        estado=estado,
+        desde=desde,
+        hasta=hasta,
+        limit=500,
+    )
+    company = await _get_company_info(db, user["company_id"])
+
+    # Mapear nombres de centros de costo y categorías
+    cc_res = (await db.execute(text("SELECT id, nombre FROM cost_centers WHERE company_id = :cid"), {"cid": user["company_id"]})).fetchall()
+    cc_map = {str(r.id): r.nombre for r in cc_res}
+    cat_res = (await db.execute(text("SELECT id, nombre FROM expense_categories WHERE company_id = :cid"), {"cid": user["company_id"]})).fetchall()
+    cat_map = {str(r.id): r.nombre for r in cat_res}
+
+    exp_list = []
+    for e in expenses:
+        exp_list.append({
+            "id": str(e.id),
+            "fecha_gasto": str(e.fecha_gasto) if e.fecha_gasto else None,
+            "tipo_comprobante": e.tipo_comprobante,
+            "numero_factura": e.numero_factura,
+            "proveedor": e.proveedor,
+            "ruc": e.ruc,
+            "cost_center_nombre": cc_map.get(str(e.cost_center_id), ""),
+            "forma_pago_resumen": e.forma_pago_resumen,
+            "tipo_pago": e.tipo_pago,
+            "estado": e.estado,
+            "monto": float(e.monto or 0),
+            "iva_10": float(e.iva_10 or 0),
+        })
+
+    filters = {
+        "desde": str(desde) if desde else None,
+        "hasta": str(hasta) if hasta else None,
+        "estado": estado,
+        "cost_center_nombre": None,
+        "category_nombre": cat_map.get(category_id) if category_id else None,
+    }
+
+    pdf_bytes = expense_pdf.generate_expenses_analytical_report_pdf(
+        company=company,
+        expenses=exp_list,
+        filters=filters,
+        generated_by=user.get("nombre") or "Tesorería",
+    )
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=reporte_gastos_{date.today().isoformat()}.pdf"}
+    )
+
+
 @router.get("/{expense_id}", response_model=ExpenseResponse)
 async def get_expense(
     expense_id: str,
@@ -508,6 +579,95 @@ async def get_expense(
     if not result:
         raise HTTPException(status_code=404, detail="Gasto no encontrado")
     return result
+
+
+@router.post("/{expense_id}/disburse", response_model=ExpenseResponse)
+async def disburse_expense(
+    expense_id: str,
+    data: ExpenseDisburseRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Paso 3: Liquidar y desembolsar medios de pago para un gasto (Bóveda, Fondo Fijo, Banco, Cheque)."""
+    user_nombre = user.get("nombre") or user.get("username") or "Tesorería"
+    return await service.disburse_expense(
+        db=db,
+        company_id=user["company_id"],
+        expense_id=expense_id,
+        data=data,
+        user_id=user["id"],
+        user_nombre=user_nombre,
+    )
+
+
+@router.get("/{expense_id}/disbursements", response_model=list[ExpenseDisbursementResponse])
+async def get_expense_disbursements(
+    expense_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_expense_disbursements(db, expense_id)
+
+
+@router.get("/{expense_id}/pdf")
+async def get_expense_receipt_pdf(
+    expense_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Genera el Recibo Oficial / Orden de Pago de Gasto en PDF con membrete y firmas."""
+    exp = await service.get_expense(db, expense_id)
+    if not exp or str(exp.company_id) != user["company_id"]:
+        raise HTTPException(status_code=404, detail="Gasto no encontrado.")
+
+    disbursements = await service.list_expense_disbursements(db, expense_id)
+    company = await _get_company_info(db, user["company_id"])
+
+    exp_dict = {
+        "id": str(exp.id),
+        "monto": float(exp.monto or 0),
+        "estado": exp.estado,
+        "descripcion": exp.descripcion,
+        "proveedor": exp.proveedor,
+        "ruc": exp.ruc,
+        "timbrado": exp.timbrado,
+        "numero_factura": exp.numero_factura,
+        "tipo_comprobante": exp.tipo_comprobante,
+        "fecha_gasto": str(exp.fecha_gasto) if exp.fecha_gasto else None,
+        "fecha_pago": str(exp.fecha_pago) if exp.fecha_pago else None,
+        "forma_pago_resumen": exp.forma_pago_resumen,
+        "gravado_10": float(exp.gravado_10 or 0),
+        "iva_10": float(exp.iva_10 or 0),
+        "gravado_5": float(exp.gravado_5 or 0),
+        "iva_5": float(exp.iva_5 or 0),
+        "exentas": float(exp.exentas or 0),
+    }
+    if exp.cost_center_id:
+        cc = (await db.execute(text("SELECT nombre FROM cost_centers WHERE id = :id"), {"id": str(exp.cost_center_id)})).scalar()
+        exp_dict["cost_center_nombre"] = cc
+
+    disb_list = []
+    for d in disbursements:
+        disb_list.append({
+            "medio_pago": d.medio_pago,
+            "monto": float(d.monto or 0),
+            "numero_comprobante": d.numero_comprobante,
+            "fecha_efectiva": str(d.fecha_efectiva) if d.fecha_efectiva else None,
+            "detalles": d.detalles or {},
+        })
+
+    pdf_bytes = expense_pdf.generate_expense_receipt_pdf(
+        company=company,
+        expense=exp_dict,
+        disbursements=disb_list,
+        generated_by=user.get("nombre") or "Tesorería",
+    )
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=recibo_gasto_{str(exp.id)[:8]}.pdf"}
+    )
+
 
 
 @router.post("", response_model=ExpenseResponse, status_code=status.HTTP_201_CREATED)

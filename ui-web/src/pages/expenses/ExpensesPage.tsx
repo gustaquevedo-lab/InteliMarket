@@ -17,6 +17,7 @@ import { formatPYG, getTodayAsuncion } from "../../utils/format"
 import { useAuth } from "../../context/AuthContext"
 import { RendicionCreateModal } from "./RendicionCreateModal"
 import { RendicionAuditModal } from "./RendicionAuditModal"
+import { ExpensePaymentModal } from "./ExpensePaymentModal"
 
 type Tab = "dashboard" | "fondos" | "rendiciones" | "list" | "arqueos" | "sectores" | "categories" | "reportes"
 type ReportSubTab = "sector" | "fondos" | "fiscal" | "rendicion"
@@ -137,6 +138,9 @@ export default function ExpensesPage() {
   const [loadingReport, setLoadingReport] = useState(false)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [rendicionFundId, setRendicionFundId] = useState("")
+  const [paymentModalExpense, setPaymentModalExpense] = useState<Expense | null>(null)
+  const [downloadingReceiptId, setDownloadingReceiptId] = useState<string | null>(null)
+  const [downloadingConsolidatedPdf, setDownloadingConsolidatedPdf] = useState(false)
 
   const toast = useToast()
   const { user } = useAuth()
@@ -484,6 +488,36 @@ export default function ExpensesPage() {
       fetchAll()
     } catch (e: any) {
       toast.error("Error al anular", e.message)
+    }
+  }
+
+  const handleDownloadReceiptPdf = async (expenseId: string) => {
+    setDownloadingReceiptId(expenseId)
+    try {
+      await api.expenses.downloadPdf(expenseId)
+      toast.success("Recibo Descargado", "Se generó el comprobante oficial en PDF.")
+    } catch (e: any) {
+      toast.error("Error al descargar recibo", e.message)
+    } finally {
+      setDownloadingReceiptId(null)
+    }
+  }
+
+  const handleDownloadConsolidatedPdf = async () => {
+    setDownloadingConsolidatedPdf(true)
+    try {
+      await api.expenses.downloadReportPdf({
+        desde: repFechaDesde || undefined,
+        hasta: repFechaHasta || undefined,
+        estado: filterEstado || undefined,
+        fund_id: filterFund || undefined,
+        category_id: filterCategory || undefined,
+      })
+      toast.success("Reporte Descargado", "Se descargó el consolidado analítico de gastos en PDF.")
+    } catch (e: any) {
+      toast.error("Error al exportar reporte", e.message)
+    } finally {
+      setDownloadingConsolidatedPdf(false)
     }
   }
 
@@ -1384,7 +1418,7 @@ export default function ExpensesPage() {
             <div className="space-y-4">
               {/* Barra de Filtros */}
               <div className="card p-4 bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/60">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-center">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <input
@@ -1403,7 +1437,8 @@ export default function ExpensesPage() {
                     >
                       <option value="">Todos los Estados</option>
                       <option value="pendiente">Pendientes de Aprobación</option>
-                      <option value="aprobado">Aprobados</option>
+                      <option value="aprobado">Aprobados (Listos para Pagar)</option>
+                      <option value="pagado">Pagados / Liquidados</option>
                       <option value="rechazado">Rechazados</option>
                     </select>
                   </div>
@@ -1432,6 +1467,23 @@ export default function ExpensesPage() {
                         <option key={cc.id} value={cc.id}>{cc.nombre}</option>
                       ))}
                     </select>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleDownloadConsolidatedPdf}
+                      disabled={downloadingConsolidatedPdf}
+                      className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                      title="Descargar Reporte Consolidado Analítico de Gastos en PDF"
+                    >
+                      {downloadingConsolidatedPdf ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                      ) : (
+                        <Download className="w-3.5 h-3.5 text-emerald-400" />
+                      )}
+                      <span>Reporte PDF</span>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1491,14 +1543,21 @@ export default function ExpensesPage() {
                           </td>
                           <td className="p-3.5">
                             <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
-                              e.estado === "aprobado"
+                              e.estado === "pagado"
                                 ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200"
+                                : e.estado === "aprobado"
+                                ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200"
                                 : e.estado === "rechazado"
                                 ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200"
                                 : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
                             }`}>
-                              {e.estado === "aprobado" ? "Aprobado" : e.estado === "rechazado" ? "Rechazado" : "Pendiente"}
+                              {e.estado === "pagado" ? "Pagado" : e.estado === "aprobado" ? "Aprobado" : e.estado === "rechazado" ? "Rechazado" : "Pendiente"}
                             </span>
+                            {e.forma_pago_resumen && (
+                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5 truncate max-w-[130px]" title={e.forma_pago_resumen}>
+                                {e.forma_pago_resumen}
+                              </p>
+                            )}
                             {e.estado === "rechazado" && e.rechazado_motivo && (
                               <p className="text-[10px] text-red-500 mt-1 max-w-[140px] italic">
                                 {e.rechazado_motivo}
@@ -1507,11 +1566,12 @@ export default function ExpensesPage() {
                           </td>
                           <td className="p-3.5 text-right whitespace-nowrap">
                             <div className="flex items-center justify-end gap-1.5">
+                              {/* 1. Si está pendiente: Botones de Aprobar y Rechazar */}
                               {e.estado === "pendiente" && (
                                 <>
                                   <button
                                     onClick={() => handleApprove(e.id)}
-                                    title="Aprobar gasto"
+                                    title="Aprobar comprobante de gasto"
                                     className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors"
                                   >
                                     <CheckCircle2 className="w-4 h-4" />
@@ -1525,6 +1585,36 @@ export default function ExpensesPage() {
                                   </button>
                                 </>
                               )}
+
+                              {/* 2. Si está aprobado: Botón destacado Pagar / Liquidar */}
+                              {e.estado === "aprobado" && (
+                                <button
+                                  onClick={() => setPaymentModalExpense(e)}
+                                  title="Liquidar gasto y asignar medios de pago"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all"
+                                >
+                                  <Wallet className="w-3.5 h-3.5" />
+                                  Pagar
+                                </button>
+                              )}
+
+                              {/* 3. Si está pagado o aprobado: Botón de Recibo PDF */}
+                              {(e.estado === "pagado" || e.estado === "aprobado") && (
+                                <button
+                                  onClick={() => handleDownloadReceiptPdf(e.id)}
+                                  disabled={downloadingReceiptId === e.id}
+                                  title="Descargar Recibo Oficial / Orden de Pago PDF"
+                                  className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                                >
+                                  {downloadingReceiptId === e.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                                  ) : (
+                                    <Printer className="w-4 h-4" />
+                                  )}
+                                </button>
+                              )}
+
+                              {/* 4. Anular gasto */}
                               <button
                                 onClick={() => handleVoid(e.id)}
                                 title="Anular gasto"
@@ -3342,6 +3432,19 @@ export default function ExpensesPage() {
         bankAccounts={bankAccounts}
         cashRegisters={cashRegisters}
       />
+
+      {/* MODAL: LIQUIDACIÓN Y PAGO MULTIMEDIO DE GASTO OPERATIVO */}
+      {paymentModalExpense && (
+        <ExpensePaymentModal
+          isOpen={!!paymentModalExpense}
+          expense={paymentModalExpense}
+          onClose={() => setPaymentModalExpense(null)}
+          onSuccess={() => {
+            setPaymentModalExpense(null)
+            fetchAll()
+          }}
+        />
+      )}
     </div>
   )
 }

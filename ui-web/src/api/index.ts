@@ -1132,6 +1132,11 @@ export interface Expense {
   anulado_motivo?: string;
   estado?: string;
   notas?: string;
+  fecha_pago?: string;
+  pagado_por?: string;
+  pagado_at?: string;
+  forma_pago_resumen?: string;
+  disbursements?: any[];
   created_at?: string;
 }
 export interface PettyCashFund {
@@ -2303,11 +2308,21 @@ export const api = {
       client.post<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-inbox-config`, { ...data, company_id: companyId || COMPANY_ID }),
     syncInbox: (params?: { max_emails?: number; only_unseen?: boolean }, companyId?: string) =>
       client.post<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-inbox/sync?max_emails=${params?.max_emails || 30}&only_unseen=${params?.only_unseen ?? false}`),
-    uploadInvoiceXml: (file: File, userId?: string, companyId?: string) => {
+    uploadInvoiceXml: (file: File, userId?: string, companyId?: string, purchaseOrderId?: string) => {
       const formData = new FormData()
       formData.append("file", file)
       if (userId) formData.append("user_id", userId)
+      if (purchaseOrderId) formData.append("purchase_order_id", purchaseOrderId)
       return requestMultipart<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-inbox/upload-xml`, formData)
+    },
+    associateInvoiceToPO: (invoiceId: string, purchaseOrderId: string, userId?: string) =>
+      client.post<any>(`/v1/purchases/invoices/${invoiceId}/associate-po`, { purchase_order_id: purchaseOrderId, user_id: userId }),
+    receiveInvoiceForOrder: (orderId: string, data: { file?: File; invoice_id?: string; user_id?: string }, companyId?: string) => {
+      const formData = new FormData()
+      if (data.file) formData.append("file", data.file)
+      if (data.invoice_id) formData.append("invoice_id", data.invoice_id)
+      if (data.user_id) formData.append("user_id", data.user_id)
+      return requestMultipart<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-orders/${orderId}/receive-invoice`, formData)
     },
     reconcile3WayMatch: (invoiceId: string, userId?: string) =>
       client.post<any>("/v1/purchases/matching/reconcile", { invoice_id: invoiceId, user_id: userId }),
@@ -3190,6 +3205,11 @@ export const api = {
     approve: (id: string) => client.post<Expense>(`/v1/expenses/${id}/approve`),
     reject: (id: string, motivo: string) => client.post<Expense>(`/v1/expenses/${id}/reject`, { motivo }),
     void: (id: string, motivo: string) => client.post<Expense>(`/v1/expenses/${id}/void`, { motivo }),
+    disburse: (id: string, data: { fecha_pago?: string; disbursements: any[]; notas?: string }) => client.post<Expense>(`/v1/expenses/${id}/disburse`, data),
+    getDisbursements: (id: string) => client.get<any[]>(`/v1/expenses/${id}/disbursements`),
+    downloadPdf: (id: string) => downloadAuthenticated(`/v1/expenses/${id}/pdf`, {}, `recibo_gasto_${id.slice(0, 8)}.pdf`),
+    downloadReportPdf: (params?: { desde?: string; hasta?: string; estado?: string; fund_id?: string; category_id?: string; branch_id?: string }) =>
+      downloadAuthenticated("/v1/expenses/export/report.pdf", params, `reporte_gastos_${new Date().toISOString().slice(0, 10)}.pdf`),
     uploadComprobante: (file: File) => {
       const fd = new FormData()
       fd.append("file", file)
@@ -3315,6 +3335,12 @@ export const api = {
         fd.append("file", file); fd.append("mes", String(mes)); fd.append("anio", String(anio)); fd.append("company_id", COMPANY_ID)
         return requestMultipart<{ sheet_matched: string; total_detectadas: number; nuevas: number; duplicadas: number; saldo_actual: number }>(`/v1/financial/banks/${id}/import-file`, fd)
       },
+      createTransaction: (bankId: string, data: any) =>
+        client.post<BankTransaction>(`/v1/financial/banks/${bankId}/transactions`, { company_id: COMPANY_ID, ...data }),
+      createTransfer: (data: any) =>
+        client.post<{ success: boolean; origen_tx_id: string; destino_tx_id: string; comision_tx_id?: string; origen_saldo_nuevo: number; destino_saldo_nuevo: number; mensaje: string }>("/v1/financial/banks/transfer", { company_id: COMPANY_ID, ...data }),
+      deleteTransaction: (id: string) =>
+        client.delete<{ success: boolean; mensaje: string }>(`/v1/financial/banks/transactions/${id}?company_id=${COMPANY_ID}`),
     },
     balanceCorrections: {
       list: (estado: string = "pendiente") => client.get<BankBalanceCorrection[]>("/v1/financial/banks/balance-corrections", { company_id: COMPANY_ID, estado } as any),

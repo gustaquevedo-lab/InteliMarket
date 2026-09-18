@@ -5,17 +5,19 @@ from pathlib import Path
 import json
 import uuid
 
+from fastapi import HTTPException
 from sqlalchemy import select, text, func as sa_func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.petty_cash.models import (
     Expense, ExpenseCategory, CostCenter, PettyCashFund, PettyCashFundMovement,
-    PettyCashFundCount, PettyCashRendicion,
+    PettyCashFundCount, PettyCashRendicion, ExpenseDisbursement,
 )
 from api.src.petty_cash.schemas import (
     ExpenseCreate, ExpenseUpdate, ExpenseSummary, CostCenterCreate, PettyCashFundCreate, PettyCashFundUpdate,
     ExpenseApprovalConfig, FundCountCreate, FundCountConfirm,
     PettyCashRendicionCreate, PettyCashRendicionAuditRequest, PettyCashRendicionReplenishRequest,
+    ExpenseDisburseRequest, ExpenseDisbursementLineCreate,
 )
 
 TZ_ASUNCION = ZoneInfo("America/Asuncion")
@@ -488,9 +490,6 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         auditoria_estado = "observado"
         auditoria_motivo = f"Supera el límite autorizado de Gs. {fund.monto_maximo_por_gasto:,.0f} por comprobante de caja chica."
 
-    approval_config = await get_approval_config(db, company_id)
-    auto_aprobado = monto <= Decimal(str(approval_config.umbral_aprobacion)) and auditoria_estado != "observado"
-
     cost_center_id = None
     if data.cost_center_id:
         cost_center_id = uuid.UUID(data.cost_center_id)
@@ -524,29 +523,334 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         auditoria_estado=auditoria_estado,
         auditoria_motivo=auditoria_motivo,
         registrado_por=uuid.UUID(user_id),
-        estado="aprobado" if auto_aprobado else "pendiente",
+        estado="pendiente",  # Se carga siempre en pendiente para luego ser aprobado y pagado
         notas=data.notas,
     )
     db.add(exp)
-    await db.flush()
+    await db.commit()
+    await db.refresh(exp)
+    return exp
 
-    if fund:
-        saldo_anterior = Decimal(str(fund.saldo_actual))
-        fund.saldo_actual = saldo_anterior - monto
-        db.add(PettyCashFundMovement(
-            fund_id=fund.id, tipo="gasto", monto=monto, saldo_anterior=saldo_anterior, saldo_nuevo=fund.saldo_actual,
-            referencia_type="expense", referencia_id=exp.id, observaciones=data.descripcion,
-            created_by=uuid.UUID(user_id),
-        ))
+
+async def disburse_expense(
+    db: AsyncSession,
+    company_id: str,
+    expense_id: str,
+    data: ExpenseDisburseRequest,
+    user_id: str,
+    user_nombre: str | None = None
+) -> Expense:
+    cid = uuid.UUID(company_id)
+    exp = await get_expense(db, expense_id)
+    if not exp or str(exp.company_id) != company_id:
+        raise HTTPException(status_code=404, detail="Comprobante de gasto no encontrado.")
+
+    if exp.anulado:
+        raise HTTPException(status_code=400, detail="El comprobante de gasto está anulado.")
+    if exp.estado == "pagado":
+        raise HTTPException(status_code=400, detail="El comprobante de gasto ya se encuentra pagado.")
+    if exp.estado not in ("aprobado", "pendiente"):
+        raise HTTPException(status_code=400, detail=f"No se puede pagar un gasto en estado '{exp.estado}'.")
+
+    if not data.disbursements:
+        raise HTTPException(status_code=400, detail="Debe especificar al menos una forma de pago para liquidar el gasto.")
+
+    monto_exp = Decimal(str(exp.monto))
+    total_disb = sum(Decimal(str(d.monto)) for d in data.disbursements)
+    if total_disb != monto_exp:
+        raise HTTPException(
+            status_code=400,
+            detail=f"La suma de los medios de pago (₲ {total_disb:,.0f}) no coincide exactamente con el monto del gasto (₲ {monto_exp:,.0f})."
+        )
+
+    resumen_medios = []
+    fecha_efectiva_pago = data.fecha_pago or date.today()
+
+    for d in data.disbursements:
+        m_pyg = Decimal(str(d.monto))
+        if m_pyg <= Decimal("0"):
+            continue
+        fp = (d.medio_pago or "").lower().strip()
+
+        # ── A. EFECTIVO BÓVEDA CENTRAL ───────────────────────────────────────
+        if fp in ("boveda", "efectivo_boveda"):
+            from api.src.caja.models import VaultEntry, CashRegisterMovement
+            q_vault = select(sa_func.coalesce(sa_func.sum(VaultEntry.monto_pyg), Decimal("0"))).where(
+                VaultEntry.company_id == cid,
+                VaultEntry.estado == "en_boveda"
+            )
+            saldo_vault = (await db.execute(q_vault)).scalar() or Decimal("0")
+            if saldo_vault < m_pyg:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Saldo insuficiente en Bóveda Central. Disponible: ₲ {saldo_vault:,.0f} | Requerido: ₲ {m_pyg:,.0f}"
+                )
+
+            # Consumir entradas FIFO de bóveda
+            entries_res = await db.execute(
+                select(VaultEntry).where(
+                    VaultEntry.company_id == cid,
+                    VaultEntry.estado == "en_boveda"
+                ).order_by(VaultEntry.created_at.asc())
+            )
+            entries = entries_res.scalars().all()
+
+            remaining = m_pyg
+            now_dt = datetime.now(TZ_ASUNCION)
+            for e in entries:
+                if remaining <= Decimal("0"):
+                    break
+                e_monto = Decimal(str(e.monto_pyg or 0))
+                if e_monto <= remaining:
+                    e.estado = "egreso_gasto"
+                    e.fecha_deposito = now_dt
+                    e.observaciones = f"Egreso por Pago Gasto {exp.numero_factura or exp.id} - {exp.proveedor or exp.descripcion}"
+                    remaining -= e_monto
+                else:
+                    remanente_monto = e_monto - remaining
+                    db.add(VaultEntry(
+                        company_id=cid,
+                        branch_id=e.branch_id,
+                        origen="remanente",
+                        handoff_id=e.handoff_id,
+                        monto_pyg=remanente_monto,
+                        monto_usd=Decimal("0"),
+                        monto_brl=Decimal("0"),
+                        estado="en_boveda",
+                        registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
+                        observaciones=f"Remanente en bóveda tras pago de gasto {exp.numero_factura or exp.id}",
+                    ))
+                    e.monto_pyg = remaining
+                    e.estado = "egreso_gasto"
+                    e.fecha_deposito = now_dt
+                    e.observaciones = f"Egreso por Pago Gasto {exp.numero_factura or exp.id}"
+                    remaining = Decimal("0")
+
+            # Movimiento de caja/bóveda
+            db.add(CashRegisterMovement(
+                company_id=cid,
+                tipo="retiro",
+                monto_pyg=m_pyg,
+                monto_usd=Decimal("0"),
+                monto_brl=Decimal("0"),
+                concepto=f"Pago Gasto {exp.numero_factura or ''} - {exp.proveedor or exp.descripcion}",
+                autorizado_por=uuid.UUID(user_id) if user_id else None,
+            ))
+
+            db.add(ExpenseDisbursement(
+                company_id=cid,
+                expense_id=exp.id,
+                medio_pago="boveda",
+                monto=m_pyg,
+                moneda="PYG",
+                numero_comprobante=d.numero_comprobante,
+                fecha_efectiva=d.fecha_efectiva or fecha_efectiva_pago,
+                created_by=uuid.UUID(user_id) if user_id else None,
+            ))
+            resumen_medios.append("BOVEDA")
+
+        # ── B. EFECTIVO FONDO FIJO (CAJA CHICA) ──────────────────────────────
+        elif fp in ("fondo_fijo", "caja_chica"):
+            target_fund_id = d.petty_cash_fund_id or (str(exp.fund_id) if exp.fund_id else None)
+            if not target_fund_id:
+                f_res = await db.execute(
+                    select(PettyCashFund).where(PettyCashFund.company_id == cid, PettyCashFund.activo == True).limit(1)
+                )
+                fund_obj = f_res.scalar_one_or_none()
+            else:
+                fund_obj = await get_fund(db, target_fund_id)
+
+            if not fund_obj:
+                raise HTTPException(status_code=400, detail="Fondo Fijo (Caja Chica) no encontrado o inactivo.")
+
+            if Decimal(str(fund_obj.saldo_actual)) < m_pyg:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Saldo insuficiente en Fondo Fijo '{fund_obj.nombre}'. Disponible: ₲ {fund_obj.saldo_actual:,.0f} | Solicitado: ₲ {m_pyg:,.0f}"
+                )
+
+            s_ant = Decimal(str(fund_obj.saldo_actual))
+            fund_obj.saldo_actual = s_ant - m_pyg
+            s_nuevo = fund_obj.saldo_actual
+
+            db.add(PettyCashFundMovement(
+                fund_id=fund_obj.id,
+                tipo="gasto",
+                monto=m_pyg,
+                saldo_anterior=s_ant,
+                saldo_nuevo=s_nuevo,
+                referencia_type="expense",
+                referencia_id=exp.id,
+                observaciones=f"Pago Gasto: {exp.descripcion} ({exp.proveedor or 'S/P'})",
+                created_by=uuid.UUID(user_id) if user_id else None,
+            ))
+
+            db.add(ExpenseDisbursement(
+                company_id=cid,
+                expense_id=exp.id,
+                medio_pago="fondo_fijo",
+                monto=m_pyg,
+                moneda="PYG",
+                petty_cash_fund_id=fund_obj.id,
+                numero_comprobante=d.numero_comprobante,
+                fecha_efectiva=d.fecha_efectiva or fecha_efectiva_pago,
+                created_by=uuid.UUID(user_id) if user_id else None,
+            ))
+            resumen_medios.append(f"FONDO FIJO ({fund_obj.nombre})")
+
+        # ── C. BANCO - TRANSFERENCIA SIPAP ───────────────────────────────────
+        elif fp in ("transferencia", "banco_transferencia", "sipap"):
+            if not d.bank_account_id:
+                raise HTTPException(status_code=400, detail="Debe seleccionar la cuenta bancaria para la transferencia.")
+
+            from api.src.financial.models import BankAccount, BankTransaction
+            b_res = await db.execute(
+                select(BankAccount).where(BankAccount.id == uuid.UUID(d.bank_account_id), BankAccount.company_id == cid)
+            )
+            bank_acc = b_res.scalar_one_or_none()
+            if not bank_acc:
+                raise HTTPException(status_code=400, detail="Cuenta bancaria no encontrada.")
+
+            if Decimal(str(bank_acc.saldo_actual)) < m_pyg:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Saldo insuficiente en cuenta '{bank_acc.banco} - {bank_acc.numero_cuenta}'. Disponible: ₲ {bank_acc.saldo_actual:,.0f} | Solicitado: ₲ {m_pyg:,.0f}"
+                )
+
+            bank_acc.saldo_actual = Decimal(str(bank_acc.saldo_actual)) - m_pyg
+
+            bt = BankTransaction(
+                company_id=cid,
+                bank_account_id=bank_acc.id,
+                fecha=d.fecha_efectiva or fecha_efectiva_pago,
+                tipo="debito",
+                monto=m_pyg,
+                moneda="PYG",
+                descripcion=f"Pago Gasto: {exp.descripcion} - {exp.proveedor or ''}",
+                referencia=d.numero_comprobante,
+                contraparte=exp.proveedor or "Gasto Operativo",
+                conciliado=True,
+                fecha_conciliacion=datetime.now(timezone.utc),
+                categoria="gastos_operativos",
+            )
+            db.add(bt)
+
+            db.add(ExpenseDisbursement(
+                company_id=cid,
+                expense_id=exp.id,
+                medio_pago="transferencia",
+                monto=m_pyg,
+                moneda="PYG",
+                bank_account_id=bank_acc.id,
+                numero_comprobante=d.numero_comprobante,
+                fecha_efectiva=d.fecha_efectiva or fecha_efectiva_pago,
+                created_by=uuid.UUID(user_id) if user_id else None,
+            ))
+            resumen_medios.append(f"TRANSFERENCIA ({bank_acc.banco})")
+
+        # ── D. BANCO - CHEQUE EMITIDO (AL DÍA O DIFERIDO) ────────────────────
+        elif fp == "cheque":
+            if not d.numero_cheque:
+                raise HTTPException(status_code=400, detail="Debe ingresar el número de cheque.")
+
+            from api.src.financial.models import Cheque, ChequeHistorial
+            fecha_em = d.fecha_cheque_emision or fecha_efectiva_pago
+            fecha_venc = d.fecha_cheque_vencimiento or fecha_em
+            es_dif = bool(d.es_cheque_diferido or (fecha_venc > fecha_em))
+
+            cheque = Cheque(
+                company_id=cid,
+                numero=d.numero_cheque,
+                numero_confiable=True,
+                banco_emisor=d.banco_cheque or "Banco",
+                bank_account_id=uuid.UUID(d.bank_account_id) if d.bank_account_id else None,
+                beneficiario=d.titular_cheque or exp.proveedor or "AL PORTADOR",
+                tipo_cheque="emitido",
+                monto=m_pyg,
+                moneda="PYG",
+                fecha_emision=fecha_em,
+                fecha_entrega=fecha_efectiva_pago,
+                fecha_pago=fecha_venc,
+                diferido=es_dif,
+                estado="pendiente",
+                concepto=f"Pago Gasto {exp.numero_factura or exp.id}",
+                notas=f"Gasto: {exp.descripcion} - Ref: {d.numero_comprobante or ''}",
+                created_by=uuid.UUID(user_id) if user_id else None,
+            )
+            db.add(cheque)
+            await db.flush()
+
+            db.add(ChequeHistorial(
+                cheque_id=cheque.id,
+                estado_anterior=None,
+                estado_nuevo="pendiente",
+                user_id=uuid.UUID(user_id) if user_id else None,
+                user_nombre=user_nombre or "Tesorería",
+                notas=f"Emitido en Pago de Gasto: {exp.descripcion}",
+            ))
+
+            db.add(ExpenseDisbursement(
+                company_id=cid,
+                expense_id=exp.id,
+                medio_pago="cheque",
+                monto=m_pyg,
+                moneda="PYG",
+                bank_account_id=uuid.UUID(d.bank_account_id) if d.bank_account_id else None,
+                cheque_id=cheque.id,
+                numero_comprobante=d.numero_cheque,
+                fecha_efectiva=fecha_em,
+                detalles={
+                    "banco_cheque": d.banco_cheque,
+                    "numero_cheque": d.numero_cheque,
+                    "fecha_vencimiento": str(fecha_venc),
+                    "es_diferido": es_dif,
+                    "titular_cheque": d.titular_cheque or exp.proveedor,
+                },
+                created_by=uuid.UUID(user_id) if user_id else None,
+            ))
+            resumen_medios.append(f"CHEQUE N° {d.numero_cheque}")
+
+        # ── E. OTRO MEDIO ────────────────────────────────────────────────────
+        else:
+            db.add(ExpenseDisbursement(
+                company_id=cid,
+                expense_id=exp.id,
+                medio_pago=fp or "otro",
+                monto=m_pyg,
+                moneda="PYG",
+                numero_comprobante=d.numero_comprobante,
+                fecha_efectiva=d.fecha_efectiva or fecha_efectiva_pago,
+                created_by=uuid.UUID(user_id) if user_id else None,
+            ))
+            resumen_medios.append((fp or "OTRO").upper())
+
+    # Marcar Gasto como Pagado
+    exp.estado = "pagado"
+    exp.fecha_pago = fecha_efectiva_pago
+    exp.pagado_por = uuid.UUID(user_id) if user_id else None
+    exp.pagado_at = datetime.now(timezone.utc)
+    exp.forma_pago_resumen = ", ".join(resumen_medios) if resumen_medios else "PAGADO"
+    if data.notas:
+        exp.notas = (exp.notas or "") + ("\n" if exp.notas else "") + data.notas
 
     await db.commit()
     await db.refresh(exp)
     return exp
 
 
+async def list_expense_disbursements(db: AsyncSession, expense_id: str) -> list[ExpenseDisbursement]:
+    q = select(ExpenseDisbursement).where(ExpenseDisbursement.expense_id == uuid.UUID(expense_id)).order_by(ExpenseDisbursement.created_at.asc())
+    res = await db.execute(q)
+    return list(res.scalars().all())
+
+
+
 async def get_expense(db: AsyncSession, expense_id: str) -> Expense | None:
     result = await db.execute(select(Expense).where(Expense.id == uuid.UUID(expense_id)))
-    return result.scalar_one_or_none()
+    exp = result.scalar_one_or_none()
+    if exp:
+        exp.disbursements = await list_expense_disbursements(db, str(exp.id))
+    return exp
 
 
 async def list_expenses(
@@ -578,7 +882,18 @@ async def list_expenses(
         query = query.where(Expense.fecha_gasto <= hasta)
     query = query.order_by(Expense.fecha_gasto.desc(), Expense.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
-    return list(result.scalars().all())
+    expenses = list(result.scalars().all())
+    if expenses:
+        exp_ids = [e.id for e in expenses]
+        disb_q = select(ExpenseDisbursement).where(ExpenseDisbursement.expense_id.in_(exp_ids)).order_by(ExpenseDisbursement.created_at.asc())
+        disb_res = (await db.execute(disb_q)).scalars().all()
+        disb_map = {}
+        for d in disb_res:
+            disb_map.setdefault(d.expense_id, []).append(d)
+        for e in expenses:
+            e.disbursements = disb_map.get(e.id, [])
+    return expenses
+
 
 
 async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate) -> Expense | None:

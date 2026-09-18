@@ -250,7 +250,54 @@ class ExpenseResponse(BaseModel):
     anulado_motivo: Optional[str] = None
     estado: str = "pendiente"
     notas: Optional[str] = None
+    # Liquidación / Pago
+    fecha_pago: Optional[date] = None
+    pagado_por: Optional[UUID] = None
+    pagado_at: Optional[datetime] = None
+    forma_pago_resumen: Optional[str] = None
+    disbursements: Optional[list["ExpenseDisbursementResponse"]] = None
     created_at: Optional[datetime] = None
+
+
+class ExpenseDisbursementLineCreate(BaseModel):
+    medio_pago: str  # boveda | fondo_fijo | transferencia | cheque | otro
+    monto: Decimal
+    bank_account_id: Optional[str] = None
+    petty_cash_fund_id: Optional[str] = None
+    numero_comprobante: Optional[str] = None
+    fecha_efectiva: Optional[date] = None
+    banco_cheque: Optional[str] = None
+    numero_cheque: Optional[str] = None
+    fecha_cheque_emision: Optional[date] = None
+    fecha_cheque_vencimiento: Optional[date] = None
+    titular_cheque: Optional[str] = None
+    es_cheque_diferido: Optional[bool] = False
+    detalles: Optional[dict] = None
+
+
+class ExpenseDisburseRequest(BaseModel):
+    fecha_pago: Optional[date] = None
+    disbursements: list[ExpenseDisbursementLineCreate]
+    notas: Optional[str] = None
+
+
+class ExpenseDisbursementResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    company_id: UUID
+    expense_id: UUID
+    medio_pago: str
+    monto: float
+    moneda: str = "PYG"
+    bank_account_id: Optional[UUID] = None
+    petty_cash_fund_id: Optional[UUID] = None
+    cheque_id: Optional[UUID] = None
+    numero_comprobante: Optional[str] = None
+    fecha_efectiva: date
+    detalles: Optional[dict] = None
+    created_at: Optional[datetime] = None
+
 
 
 # ── Modelos de Rendición de Cuentas y Reposición Formal ──────────

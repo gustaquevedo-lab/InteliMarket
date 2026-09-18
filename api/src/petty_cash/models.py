@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Text, Date, ForeignKey, Integer
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from api.src.db import Base
 
@@ -204,11 +204,39 @@ class Expense(Base):
     rechazado_por = Column(UUID(as_uuid=True))
     rechazado_at = Column(DateTime(timezone=True))
     rechazado_motivo = Column(Text)
-    estado = Column(String(20), server_default="pendiente")  # pendiente | aprobado | rechazado
+    estado = Column(String(20), server_default="pendiente")  # pendiente | aprobado | pagado | rechazado
     anulado = Column(Boolean, nullable=False, server_default="false")
     anulado_por = Column(UUID(as_uuid=True))
     anulado_at = Column(DateTime(timezone=True))
     anulado_motivo = Column(Text)
     notas = Column(Text)
+
+    # Liquidación / Pago Multimedio
+    fecha_pago = Column(Date)
+    pagado_por = Column(UUID(as_uuid=True))
+    pagado_at = Column(DateTime(timezone=True))
+    forma_pago_resumen = Column(String(100))
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ExpenseDisbursement(Base):
+    """Línea de desembolso / medio de pago asignado a un gasto (bóveda, fondo fijo, banco, cheque, etc.)"""
+    __tablename__ = "expense_disbursements"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    expense_id = Column(UUID(as_uuid=True), ForeignKey("expenses.id", ondelete="CASCADE"), nullable=False, index=True)
+    medio_pago = Column(String(30), nullable=False)  # boveda | fondo_fijo | transferencia | cheque | otro
+    monto = Column(Numeric(15, 2), nullable=False)
+    moneda = Column(String(3), nullable=False, default="PYG")
+    bank_account_id = Column(UUID(as_uuid=True), ForeignKey("bank_accounts.id", ondelete="SET NULL"))
+    petty_cash_fund_id = Column(UUID(as_uuid=True), ForeignKey("petty_cash_funds.id", ondelete="SET NULL"))
+    cheque_id = Column(UUID(as_uuid=True), ForeignKey("cheques.id", ondelete="SET NULL"))
+    numero_comprobante = Column(String(100))
+    fecha_efectiva = Column(Date, nullable=False, server_default=func.current_date())
+    detalles = Column(JSONB)
+    created_by = Column(UUID(as_uuid=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 
