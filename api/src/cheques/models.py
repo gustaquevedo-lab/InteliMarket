@@ -4,6 +4,9 @@ from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from api.src.db import Base
 
+# Asegurar registro de tablas foráneas para el resolver de SQLAlchemy
+import api.src.financial.models  # noqa: F401
+
 
 class Cheque(Base):
     """Registro estructurado de cheques emitidos a proveedores. Antes de esto,

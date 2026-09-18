@@ -3,6 +3,11 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from api.src.db import Base
 
+# Asegurar registro de tablas foráneas para el resolver de SQLAlchemy
+import api.src.fixed_assets.models  # noqa: F401
+import api.src.financial.models     # noqa: F401
+import api.src.cheques.models       # noqa: F401
+
 
 class ExpenseCategory(Base):
     """Cost centers for expense tracking"""
