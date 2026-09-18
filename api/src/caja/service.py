@@ -1,6 +1,6 @@
 """Caja (Cash Register) service"""
 
-from sqlalchemy import select, func, text, or_, and_
+from sqlalchemy import select, func, text, or_, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timezone, date, timedelta, time
@@ -512,7 +512,43 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
             await db.refresh(user_sess)
             return user_sess
 
-    # 2. Si no tiene turno previo de hoy, crear una sesión INDEPENDIENTE y limpia para este cajero
+        # 2. BLINDAJE ANTI-DUPLICACIÓN: Si el usuario cerró un turno HOY (fecha local Asunción),
+        # pero la entrega a Tesorería sigue PENDIENTE (no se confirmó el dinero en bóveda):
+        # Reabrir la sesión de la jornada y aplicar rotación nómada. Esto evita duplicar
+        # fondos de apertura (₲ 500.000 / R$ 300) y fragmentar el arqueo en múltiples cajas.
+        hoy_asuncion = datetime.now(TZ_ASUNCION).date()
+        recent_closed_session = await db.execute(
+            select(CashSession)
+            .join(CashHandoff, CashHandoff.session_id == CashSession.id)
+            .where(CashSession.user_id == user_id)
+            .where(CashSession.estado == "cerrada")
+            .where(CashHandoff.estado == "pendiente")
+            .order_by(CashSession.fecha_apertura.desc())
+            .limit(1)
+        )
+        closed_sess = recent_closed_session.scalar_one_or_none()
+        if closed_sess:
+            sess_fecha_py = _to_asuncion_tz(closed_sess.fecha_apertura)
+            if sess_fecha_py and sess_fecha_py.date() == hoy_asuncion:
+                # Reabrir la sesión de hoy
+                closed_sess.estado = "abierta"
+                closed_sess.fecha_cierre = None
+                closed_sess.monto_cierre = None
+                hora_py = datetime.now(TZ_ASUNCION).strftime("%Y-%m-%d %H:%M:%S")
+                nota_reapertura = f"[{hora_py}] 🔄 Reanudación de jornada del día (evita fragmentación de arqueo)"
+                if register_id and closed_sess.register_id != register_id:
+                    nota_reapertura += f" y rotación nómada a Caja {register_id}"
+                    closed_sess.register_id = register_id
+                closed_sess.observaciones = f"{closed_sess.observaciones}\n{nota_reapertura}" if closed_sess.observaciones else nota_reapertura
+                
+                # Eliminar el handoff y cash_count provisorios creados en el cierre prematuro
+                await db.execute(delete(CashHandoff).where(CashHandoff.session_id == closed_sess.id))
+                await db.execute(delete(CashCount).where(CashCount.session_id == closed_sess.id))
+                await db.flush()
+                await db.refresh(closed_sess)
+                return closed_sess
+
+    # 3. Si no tiene turno previo de hoy, crear una sesión INDEPENDIENTE y limpia para este cajero
     user_res = await db.execute(select(User).where(User.id == user_id)) if user_id else None
     user_obj = user_res.scalar_one_or_none() if user_res else None
     user_rol = (user_obj.rol if user_obj else "").lower()
