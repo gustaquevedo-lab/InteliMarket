@@ -355,8 +355,10 @@ export default function ExpensesPage() {
         comprobante_url
       })
 
-      toast.success("Gasto Registrado", "El movimiento fue imputado correctamente.")
+      toast.success("Comprobante Registrado", "El gasto quedó en estado Pendiente de Aprobación. Aprobalo para luego asignar la forma de pago.")
       setShowForm(false)
+      setTab("list")
+      setFilterEstado("pendiente")
       setForm({
         monto: "",
         descripcion: "",
@@ -768,7 +770,10 @@ export default function ExpensesPage() {
             </p>
           </div>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+          <button
+            onClick={() => { setTab("list"); setFilterEstado("pendiente") }}
+            className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-amber-500/40 hover:border-amber-400 hover:bg-amber-950/20 transition-all text-left w-full cursor-pointer"
+          >
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Por Autorizar</span>
               <AlertTriangle className="w-4 h-4 text-amber-400" />
@@ -779,7 +784,8 @@ export default function ExpensesPage() {
             <p className="text-[11px] text-amber-400 font-bold font-mono">
               {gastosPendientes.length} comprobante(s) en espera
             </p>
-          </div>
+            <p className="text-[10px] text-amber-500/70 mt-1">▶ Click para ver y aprobar</p>
+          </button>
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
