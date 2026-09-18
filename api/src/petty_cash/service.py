@@ -749,7 +749,7 @@ async def disburse_expense(
             if not d.numero_cheque:
                 raise HTTPException(status_code=400, detail="Debe ingresar el número de cheque.")
 
-            from api.src.financial.models import Cheque, ChequeHistorial
+            from api.src.cheques.models import Cheque, ChequeHistorial
             fecha_em = d.fecha_cheque_emision or fecha_efectiva_pago
             fecha_venc = d.fecha_cheque_vencimiento or fecha_em
             es_dif = bool(d.es_cheque_diferido or (fecha_venc > fecha_em))
