@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import date, datetime
 from decimal import Decimal
@@ -33,6 +33,13 @@ class ChequeCreate(BaseModel):
     invoice_payment_id: Optional[UUID] = None
     concepto: Optional[str] = None
     notas: Optional[str] = None
+
+    @field_validator("fecha_entrega", "fecha_pago", mode="before")
+    @classmethod
+    def parse_optional_date(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
 
 
 class ChequeEstadoUpdate(BaseModel):

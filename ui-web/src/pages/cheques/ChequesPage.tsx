@@ -189,6 +189,9 @@ export default function ChequesPage() {
         monto: parseFloat(form.monto),
         supplier_id: form.supplier_id || undefined,
         bank_account_id: form.bank_account_id || undefined,
+        fecha_entrega: form.fecha_entrega ? form.fecha_entrega : undefined,
+        fecha_pago: form.fecha_pago ? form.fecha_pago : undefined,
+        concepto: form.observaciones || undefined,
         estado: form.tipo === "emitido" ? "entregado" : "en_cartera",
       })
       toast.success("Cheque Registrado", `El cheque N° ${form.numero} fue guardado en cartera.`)
