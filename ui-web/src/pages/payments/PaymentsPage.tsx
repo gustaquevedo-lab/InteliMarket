@@ -2,13 +2,14 @@ import Supplier360Modal from "../purchases/Supplier360Modal"
 import SupplierPaymentOrderModal from "./SupplierPaymentOrderModal"
 import SupplierPaymentOrderDetailModal from "./SupplierPaymentOrderDetailModal"
 import MultiSupplierPaymentModal from "./MultiSupplierPaymentModal"
+import LiquidacionValesModal from "./LiquidacionValesModal"
 import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   CreditCard, Search, Plus, Filter, Download, Eye, CheckCircle2,
   XCircle, AlertTriangle, Clock, Calendar, RefreshCw, Loader2,
   Building2, User, FileText, ArrowUpRight, DollarSign, Layers,
   Check, X, FileSpreadsheet, ShieldAlert, Sparkles, Info, ArrowRight,
-  TrendingDown, CheckSquare, Square, Wallet, Printer, FileCheck, Globe
+  TrendingDown, CheckSquare, Square, Wallet, Printer, FileCheck, Globe, Apple
 } from "lucide-react"
 import { api, SupplierPaymentOrder } from "../../api"
 import { useAuth } from "../../context/AuthContext"
@@ -66,6 +67,8 @@ export default function PaymentsPage() {
 
   const [detailOrder, setDetailOrder] = useState<SupplierPaymentOrder | null>(null)
   const [showMultiSupplierModal, setShowMultiSupplierModal] = useState(false)
+  const [showValesModal, setShowValesModal] = useState(false)
+  const [valesModalSupplierId, setValesModalSupplierId] = useState<string | null>(null)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -427,7 +430,20 @@ export default function PaymentsPage() {
               title="Pago agrupado multi-proveedor o compras en R$ contra un único instrumento financiero"
             >
               <Globe className="w-4 h-4 text-emerald-300" />
-              <span>Lote Brasil / Multi-Proveedor</span>
+              <span>Lote Brasil</span>
+            </button>
+
+            {/* BOTÓN LIQUIDACIÓN DE VALES / FRUTIHORTI EN VENTANILLA */}
+            <button
+              onClick={() => {
+                setValesModalSupplierId(null)
+                setShowValesModal(true)
+              }}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-teal-700 via-emerald-700 to-green-700 hover:from-teal-600 hover:to-green-600 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-md shadow-emerald-950/25 border border-emerald-500/30"
+              title="Liquidación de notas de entrega y control interno diarias (Frutihorti / Verdulería / Panadería) con factura legal y pago en ventanilla"
+            >
+              <Apple className="w-4 h-4 text-emerald-300" />
+              <span>Liquidar Vales / Frutihorti</span>
             </button>
 
             {/* BOTONES MULTIFACTURA DINÁMICOS */}
@@ -1050,6 +1066,23 @@ export default function PaymentsPage() {
           onSuccess={() => {
             setShowMultiSupplierModal(false)
             setSelectedInvoices([])
+            loadData()
+            setTab("ordenes_pago")
+          }}
+        />
+      )}
+
+      {showValesModal && (
+        <LiquidacionValesModal
+          suppliers={suppliers}
+          initialSupplierId={valesModalSupplierId}
+          onClose={() => {
+            setShowValesModal(false)
+            setValesModalSupplierId(null)
+          }}
+          onSuccess={() => {
+            setShowValesModal(false)
+            setValesModalSupplierId(null)
             loadData()
             setTab("ordenes_pago")
           }}

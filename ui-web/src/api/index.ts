@@ -3279,6 +3279,12 @@ export const api = {
       createMultiSupplierBatch: (data: any) =>
         client.post<any>(`/v1/financial/payment-orders/batch-multi-supplier?company_id=${COMPANY_ID}`, data),
     },
+    receptions: {
+      unbilled: (params?: { supplier_id?: string }) =>
+        client.get<any[]>("/v1/financial/receptions/unbilled", { company_id: COMPANY_ID, ...params } as any),
+      settleAndPay: (data: any) =>
+        client.post<any>(`/v1/financial/receptions/settle-and-pay?company_id=${COMPANY_ID}`, data),
+    },
     aging: () => client.get<any[]>("/v1/financial/aging", { company_id: COMPANY_ID } as any),
     apDashboard: () => client.get<APDashboard>("/v1/financial/dashboard", { company_id: COMPANY_ID } as any),
     paymentQueue: () => client.get<any>("/v1/financial/ap/payment-queue", { company_id: COMPANY_ID } as any),

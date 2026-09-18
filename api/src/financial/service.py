@@ -30,9 +30,11 @@ from api.src.financial.schemas import (
     CashFlowAlertConfig,
     SupplierCreditNoteCreate, SupplierCreditNoteApply,
     SupplierPaymentOrderCreate, SupplierPaymentOrderDisburse,
+    PaymentOrderDisbursementCreate,
     MultiSupplierPaymentBatchCreate,
+    SettleValesAndPayRequest,
 )
-from api.src.purchases.models import Supplier
+from api.src.purchases.models import Supplier, PurchaseReceipt
 from api.src.caja.models import VaultEntry, CashRegisterMovement
 from api.src.petty_cash.models import PettyCashFund, PettyCashFundMovement
 from api.src.cheques.models import Cheque, ChequeHistorial
@@ -3927,5 +3929,230 @@ async def create_multi_supplier_payment_batch(
         "numero_cheque": cheque_obj.numero if cheque_obj else None,
         "orders": created_orders,
     }
+
+
+async def list_unbilled_purchase_receipts(
+    db: AsyncSession,
+    company_id: str,
+    supplier_id: str | None = None
+) -> list[dict]:
+    """Lista las recepciones / notas de control interno de depósito que aún no han sido facturadas legalmente."""
+    cid = uuid.UUID(company_id)
+
+    # Subconsulta de recepciones ya asociadas a una factura
+    invoiced_subq = (
+        select(SupplierInvoice.receipt_id)
+        .where(SupplierInvoice.company_id == cid, SupplierInvoice.receipt_id.isnot(None))
+        .subquery()
+    )
+
+    stmt = (
+        select(PurchaseReceipt, Supplier.razon_social, Supplier.ruc)
+        .outerjoin(Supplier, Supplier.id == PurchaseReceipt.supplier_id)
+        .where(
+            PurchaseReceipt.company_id == cid,
+            PurchaseReceipt.estado != "facturado",
+            PurchaseReceipt.estado != "cancelado",
+            PurchaseReceipt.id.notin_(select(invoiced_subq))
+        )
+    )
+    if supplier_id:
+        stmt = stmt.where(PurchaseReceipt.supplier_id == uuid.UUID(supplier_id))
+
+    stmt = stmt.order_by(PurchaseReceipt.fecha.desc())
+    rows = (await db.execute(stmt)).all()
+
+    results = []
+    for r, sup_nombre, sup_ruc in rows:
+        results.append({
+            "id": str(r.id),
+            "numero": r.numero,
+            "proveedor_ref": r.proveedor_ref or "S/N",
+            "supplier_id": str(r.supplier_id) if r.supplier_id else None,
+            "supplier_nombre": sup_nombre or "Proveedor No Asignado",
+            "supplier_ruc": sup_ruc or "-",
+            "fecha": r.fecha.isoformat() if r.fecha else None,
+            "total": float(r.total or 0),
+            "observaciones": r.observaciones or "",
+            "estado": r.estado,
+        })
+    return results
+
+
+async def settle_vales_and_pay(
+    db: AsyncSession,
+    company_id: str,
+    payload: SettleValesAndPayRequest,
+    user_id: str | None = None,
+    user_nombre: str | None = None
+) -> dict:
+    """Flujo de liquidación en ventanilla para frutihorti / entregas diarias por nota de control interno:
+    1. Registra la Factura Legal emitida en el acto de cobro.
+    2. Vincula y marca las Notas de Recepción / Vales como facturados.
+    3. Emite la Orden de Pago (OP) y liquida en el acto con Bóveda, Fondo Fijo, Cheque o Transferencia.
+    """
+    cid = uuid.UUID(company_id)
+    sup_res = await db.execute(select(Supplier).where(Supplier.id == payload.supplier_id, Supplier.company_id == cid))
+    supplier = sup_res.scalar_one_or_none()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado.")
+
+    monto_factura = Decimal(str(payload.monto_total_factura))
+    if monto_factura <= Decimal("0"):
+        raise HTTPException(status_code=400, detail="El monto de la factura debe ser mayor a 0.")
+
+    # 1. Verificar si la factura ya existe para este proveedor
+    inv_check = await db.execute(
+        select(SupplierInvoice).where(
+            SupplierInvoice.company_id == cid,
+            SupplierInvoice.supplier_id == supplier.id,
+            SupplierInvoice.numero_factura == payload.numero_factura.strip()
+        )
+    )
+    if inv_check.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ya existe una factura registrada con el número '{payload.numero_factura}' para este proveedor."
+        )
+
+    # 2. Cargar y marcar las recepciones
+    vales_refs = []
+    total_vales = Decimal("0")
+    primary_receipt_id = None
+
+    if payload.receipt_ids:
+        rc_res = await db.execute(
+            select(PurchaseReceipt).where(
+                PurchaseReceipt.id.in_(payload.receipt_ids),
+                PurchaseReceipt.company_id == cid
+            )
+        )
+        receipts = list(rc_res.scalars().all())
+        for rc in receipts:
+            rc.estado = "facturado"
+            ref_str = rc.proveedor_ref or rc.numero
+            vales_refs.append(ref_str)
+            total_vales += Decimal(str(rc.total or 0))
+            rc.observaciones = f"Facturado con Factura {payload.numero_factura} el {payload.fecha_factura}. {rc.observaciones or ''}".strip()
+        if receipts:
+            primary_receipt_id = receipts[0].id
+
+    for v in payload.vales_adicionales:
+        vales_refs.append(v.numero_vale or v.descripcion)
+        total_vales += Decimal(str(v.monto or 0))
+
+    # 3. Crear Factura Legal
+    vales_summary = ", ".join(vales_refs) if vales_refs else "Entregas varias"
+    invoice = SupplierInvoice(
+        company_id=cid,
+        supplier_id=supplier.id,
+        numero_factura=payload.numero_factura.strip(),
+        timbrado=payload.timbrado,
+        cdc=payload.cdc,
+        fecha_emision=payload.fecha_factura,
+        fecha_recepcion=payload.fecha_factura,
+        fecha_vencimiento=payload.fecha_factura,
+        total=monto_factura,
+        saldo_pendiente=Decimal("0"),
+        moneda="PYG",
+        tipo_cambio=Decimal("1"),
+        receipt_id=primary_receipt_id,
+        condicion=payload.condicion or "contado",
+        tipo_comprobante="factura",
+        estado="pagada",
+        concepto=f"Liquidación Frutihorti / Vales: {vales_summary}"[:300],
+        created_by=uuid.UUID(user_id) if user_id else None,
+    )
+    db.add(invoice)
+    await db.flush()
+
+    # 4. Crear Orden de Pago (OP)
+    num_orden = await _generate_order_number(db, cid)
+    op = SupplierPaymentOrder(
+        company_id=cid,
+        supplier_id=supplier.id,
+        numero_orden=num_orden,
+        fecha_emision=_today(),
+        fecha_pago=payload.fecha_factura or _today(),
+        estado="pagado",
+        moneda="PYG",
+        monto_total=monto_factura,
+        monto_retenido=Decimal("0"),
+        monto_neto=monto_factura,
+        observaciones=f"[Liquidación Vales / Frutihorti] Factura {invoice.numero_factura} — Vales: {vales_summary}. {payload.observaciones or ''}".strip(),
+        recibo_proveedor=payload.recibo_proveedor,
+        created_by=uuid.UUID(user_id) if user_id else None,
+    )
+    db.add(op)
+    await db.flush()
+
+    # 5. Allocation & Pago Factura
+    db.add(SupplierPaymentOrderAllocation(
+        payment_order_id=op.id,
+        invoice_id=invoice.id,
+        monto_aplicado=monto_factura,
+        monto_retencion=Decimal("0"),
+        saldo_anterior=monto_factura,
+    ))
+
+    db.add(SupplierInvoicePayment(
+        invoice_id=invoice.id,
+        payment_method="orden_de_pago",
+        monto=monto_factura,
+        moneda="PYG",
+        fecha_pago=payload.fecha_factura or _today(),
+        referencia=f"{op.numero_orden} (Liquidación Vales)",
+        estado="conciliado",
+    ))
+
+    # 6. Desembolso
+    disb_create = PaymentOrderDisbursementCreate(
+        forma_pago=payload.forma_pago,
+        monto=monto_factura,
+        moneda="PYG",
+        tipo_cambio=Decimal("1"),
+        bank_account_id=payload.bank_account_id,
+        referencia_transferencia=payload.referencia_transferencia,
+        petty_cash_fund_id=payload.petty_cash_fund_id,
+        cheque_id=payload.cheque_id,
+        numero_cheque=payload.numero_cheque,
+        banco_cheque=payload.banco_cheque,
+        titular_cheque=payload.titular_cheque or supplier.razon_social,
+        fecha_cheque_emision=payload.fecha_cheque_emision or _today(),
+        fecha_cheque_vencimiento=payload.fecha_cheque_vencimiento or payload.fecha_cheque_emision or _today(),
+        es_cheque_diferido=payload.es_cheque_diferido,
+        monto_total_cheque=payload.monto_total_cheque,
+        observaciones=f"Liquidación Vales Factura {invoice.numero_factura}",
+    )
+
+    disburse_payload = SupplierPaymentOrderDisburse(
+        fecha_pago=payload.fecha_factura or _today(),
+        recibo_proveedor=payload.recibo_proveedor,
+        observaciones=f"Liquidación Vales Factura {invoice.numero_factura}",
+        disbursements=[disb_create],
+    )
+
+    await _execute_disbursements_internal(
+        db=db,
+        order=op,
+        supplier=supplier,
+        payload=disburse_payload,
+        user_id=user_id,
+        user_nombre=user_nombre
+    )
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "message": f"Se liquidaron exitosamente las notas de entrega contra la Factura {invoice.numero_factura} y se emitió la Orden de Pago {op.numero_orden}.",
+        "order_id": str(op.id),
+        "numero_orden": op.numero_orden,
+        "invoice_id": str(invoice.id),
+        "numero_factura": invoice.numero_factura,
+        "monto_total": float(monto_factura),
+        "total_vales_liquidados": len(vales_refs),
+    }
+
 
 

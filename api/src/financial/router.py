@@ -28,6 +28,7 @@ from api.src.financial.schemas import (
     SupplierCreditNoteCreate, SupplierCreditNoteApply,
     SupplierPaymentOrderCreate, SupplierPaymentOrderDisburse,
     MultiSupplierPaymentBatchCreate,
+    SettleValesAndPayRequest,
 )
 from api.src.financial import service
 
@@ -818,6 +819,26 @@ async def create_multi_supplier_payment_batch(
     return await service.create_multi_supplier_payment_batch(
         db, company_id, body, user_id, user_nombre
     )
+
+
+@router.get("/receptions/unbilled")
+async def list_unbilled_receptions(
+    company_id: str = Query(),
+    supplier_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.list_unbilled_purchase_receipts(db, company_id, supplier_id)
+
+
+@router.post("/receptions/settle-and-pay", status_code=status.HTTP_201_CREATED)
+async def settle_vales_and_pay(
+    body: SettleValesAndPayRequest,
+    company_id: str = Query(),
+    user_id: str | None = Query(None),
+    user_nombre: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.settle_vales_and_pay(db, company_id, body, user_id, user_nombre)
 
 
 @router.get("/payment-orders/{order_id}")

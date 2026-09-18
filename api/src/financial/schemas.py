@@ -579,6 +579,43 @@ class MultiSupplierPaymentBatchCreate(BaseModel):
     items: list[MultiSupplierBatchItem]
 
 
+class QuickValeItem(BaseModel):
+    descripcion: str
+    monto: Decimal
+    numero_vale: Optional[str] = None
+    fecha: Optional[date] = None
+
+
+class SettleValesAndPayRequest(BaseModel):
+    supplier_id: UUID
+    receipt_ids: list[UUID] = []  # IDs de PurchaseReceipt seleccionadas
+    vales_adicionales: list[QuickValeItem] = []  # Vales manuales complementarios
+    # Datos Factura Legal:
+    numero_factura: str
+    timbrado: Optional[str] = None
+    cdc: Optional[str] = None
+    fecha_factura: date
+    condicion: str = "contado"
+    monto_total_factura: Decimal
+    # Desembolso / Pago Inmediato en Ventanilla:
+    forma_pago: str  # "boveda", "fondo_fijo", "cheque", "transferencia"
+    bank_account_id: Optional[UUID] = None
+    petty_cash_fund_id: Optional[UUID] = None
+    referencia_transferencia: Optional[str] = None
+    # Cheque fields (si forma_pago == "cheque"):
+    cheque_id: Optional[UUID] = None
+    numero_cheque: Optional[str] = None
+    banco_cheque: Optional[str] = None
+    titular_cheque: Optional[str] = None
+    fecha_cheque_emision: Optional[date] = None
+    fecha_cheque_vencimiento: Optional[date] = None
+    es_cheque_diferido: bool = False
+    monto_total_cheque: Optional[Decimal] = None
+    observaciones: Optional[str] = None
+    recibo_proveedor: Optional[str] = None
+
+
+
 class PaymentOrderAllocationResponse(BaseModel):
     id: UUID
     invoice_id: UUID
