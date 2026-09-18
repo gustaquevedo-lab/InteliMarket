@@ -195,6 +195,18 @@ class BankTransactionCreate(BaseModel):
     referencia: Optional[str] = None
     contraparte: Optional[str] = None
     categoria: str = "otros"
+    comision_adicional: Optional[Decimal] = Field(default=None, ge=0)
+
+
+class BankTransferCreate(BaseModel):
+    origen_account_id: UUID
+    destino_account_id: UUID
+    monto: Decimal = Field(gt=0)
+    fecha: date
+    moneda: str = "PYG"
+    referencia: Optional[str] = None
+    descripcion: Optional[str] = None
+    comision: Optional[Decimal] = Field(default=Decimal("0"), ge=0)
 
 
 class BankTransactionImport(BaseModel):

@@ -196,7 +196,8 @@ async def ingest_parsed_dte(
     xml_raw: Optional[str] = None,
     origen: str = "manual",
     origen_info: Optional[str] = None,
-    user_id: Optional[str] = None
+    user_id: Optional[str] = None,
+    purchase_order_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Ingesta y persiste un DTE ya parseado en la base de datos como Factura de Proveedor."""
     company_uuid = uuid.UUID(company_id)
@@ -257,23 +258,31 @@ async def ingest_parsed_dte(
     mapped_items = await map_sifen_items_to_catalog(db, company_id, raw_items)
 
     # 4. Buscar Orden de Compra candidata para pre-asociar
-    # Busca órdenes abiertas de este proveedor
     po_candidata: Optional[PurchaseOrder] = None
-    po_q = select(PurchaseOrder).where(
-        PurchaseOrder.company_id == company_uuid,
-        PurchaseOrder.supplier_id == supplier.id,
-        PurchaseOrder.estado.in_(["confirmado", "enviada", "parcial"])
-    ).order_by(PurchaseOrder.created_at.desc())
-    po_res = await db.execute(po_q)
-    pos = po_res.scalars().all()
-    
-    # Intentar match por monto similar o primer orden abierta
-    for po in pos:
-        if abs((po.total or 0) - dte_data["total"]) < Decimal("5000"):  # Diferencia de menos de 5.000 Gs
-            po_candidata = po
-            break
-    if not po_candidata and pos:
-        po_candidata = pos[0]
+    if purchase_order_id:
+        po_q = select(PurchaseOrder).where(
+            PurchaseOrder.id == uuid.UUID(purchase_order_id),
+            PurchaseOrder.company_id == company_uuid
+        )
+        po_res = await db.execute(po_q)
+        po_candidata = po_res.scalar_one_or_none()
+
+    if not po_candidata:
+        po_q = select(PurchaseOrder).where(
+            PurchaseOrder.company_id == company_uuid,
+            PurchaseOrder.supplier_id == supplier.id,
+            PurchaseOrder.estado.in_(["confirmado", "enviada", "parcial"])
+        ).order_by(PurchaseOrder.created_at.desc())
+        po_res = await db.execute(po_q)
+        pos = po_res.scalars().all()
+        
+        # Intentar match por monto similar o primer orden abierta
+        for po in pos:
+            if abs((po.total or 0) - dte_data["total"]) < Decimal("5000"):  # Diferencia de menos de 5.000 Gs
+                po_candidata = po
+                break
+        if not po_candidata and pos:
+            po_candidata = pos[0]
 
     # 5. Crear la Factura de Proveedor
     total = dte_data.get("total", Decimal("0"))
@@ -302,7 +311,7 @@ async def ingest_parsed_dte(
         xml_sifen_url=xml_raw[:1000] if xml_raw else None,
         purchase_order_id=po_candidata.id if po_candidata else None,
         created_by=uuid.UUID(user_id) if user_id else None,
-        bloqueada_para_pago=False,
+        bloqueada_para_pago=True if po_candidata else False,
     )
     db.add(invoice)
     await db.flush()
@@ -327,6 +336,15 @@ async def ingest_parsed_dte(
 
     await db.flush()
 
+    # 7. Ejecutar matching de inmediato contra el pedido si está asociado
+    matching_info = None
+    if po_candidata:
+        from api.src.purchases.matching_service import perform_3way_match
+        try:
+            matching_info = await perform_3way_match(db, str(invoice.id), user_id)
+        except Exception as e:
+            logger.warning(f"Error al ejecutar matching automático en ingesta de factura {invoice.id}: {e}")
+
     return {
         "created": True,
         "id": str(invoice.id),
@@ -340,4 +358,5 @@ async def ingest_parsed_dte(
         "items_mapeados": sum(1 for it in mapped_items if it.get("mapeado")),
         "purchase_order_id": str(po_candidata.id) if po_candidata else None,
         "purchase_order_numero": po_candidata.numero if po_candidata else None,
+        "matching": matching_info,
     }

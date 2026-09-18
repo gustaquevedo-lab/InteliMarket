@@ -1085,6 +1085,7 @@ class UploadXmlResponse(BaseModel):
     purchase_order_id: Optional[str] = None
     purchase_order_numero: Optional[str] = None
     mensaje: Optional[str] = None
+    matching: Optional[dict] = None
     error: Optional[str] = None
 
 
@@ -1092,6 +1093,11 @@ class UploadXmlResponse(BaseModel):
 
 class Perform3WayMatchRequest(BaseModel):
     invoice_id: UUID
+    user_id: Optional[UUID] = None
+
+
+class AssociatePurchaseOrderRequest(BaseModel):
+    purchase_order_id: UUID
     user_id: Optional[UUID] = None
 
 
@@ -1103,7 +1109,7 @@ class MatchItemLine(BaseModel):
     cantidad_recibida: float
     cantidad_rechazada: float = 0
     cantidad_facturada: float
-    precio_orden: float
+    precio_orden: Optional[float] = None
     precio_facturado: float
     diferencia_cantidad: float
     diferencia_precio: float
@@ -1119,17 +1125,28 @@ class Perform3WayMatchResponse(BaseModel):
     cdc: Optional[str] = None
     purchase_order_id: Optional[str] = None
     purchase_order_numero: Optional[str] = None
+    purchase_order_total: Optional[float] = None
+    diferencia_pedido_monto: Optional[float] = None
     receipt_id: Optional[str] = None
     receipt_numero: Optional[str] = None
-    estado_match: str  # conciliado_100, discrepancia_detectada, pendiente_recepcion
+    estado_match: str  # conciliado_100, discrepancia_detectada, conforme_pendiente_recepcion, sin_orden_ni_recepcion
+    estado_matching: Optional[str] = None
+    match_pedido_exacto: Optional[bool] = None
+    mensaje: Optional[str] = None
     bloqueada_para_pago: bool
     motivo_bloqueo: Optional[str] = None
     total_facturado: float
+    total_factura: Optional[float] = None
     total_recibido_val: float
+    total_calculado_recepcion: Optional[float] = None
     total_discrepancia_monto: float
+    diferencia_total: Optional[float] = None
     monto_neto_a_pagar: float
     solicitud_nc: Optional[dict] = None
+    nc_request_generada: Optional[dict] = None
     items: list[dict]
+    discrepancias: Optional[list[dict]] = None
+    items_faltantes_po: Optional[list[dict]] = None
 
 
 # ── SOLICITUDES Y RESOLUCIÓN DE NOTAS DE CRÉDITO ──────────────────────────────

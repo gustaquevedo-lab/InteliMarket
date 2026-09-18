@@ -16,7 +16,7 @@ from api.src.financial.schemas import (
     SupplierInvoiceCreate, SupplierInvoiceResponse, SupplierInvoiceWithPayments,
     SupplierInvoicePaymentCreate, SupplierInvoicePaymentResponse,
     BankAccountCreate, BankAccountUpdate, BankAccountResponse,
-    BankTransactionCreate, BankTransactionImport, BankTransactionResponse,
+    BankTransactionCreate, BankTransferCreate, BankTransactionImport, BankTransactionResponse,
     ReconcileRequest,
     BulkReconcileRequest,
     BalanceCorrectionCreate, BalanceCorrectionDecision, BankBalanceCorrectionResponse,
@@ -322,6 +322,53 @@ async def import_bank_statement(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.import_bank_statement(db, company_id, account_id, body.transactions)
+
+
+@router.post("/banks/{account_id}/transactions", response_model=BankTransactionResponse, status_code=status.HTTP_201_CREATED)
+async def create_bank_transaction(
+    account_id: str,
+    body: BankTransactionCreate,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await service.create_bank_transaction(db, company_id, account_id, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error al registrar movimiento bancario: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/banks/transfer", status_code=status.HTTP_201_CREATED)
+async def create_bank_transfer(
+    body: BankTransferCreate,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await service.create_bank_transfer(db, company_id, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error al registrar transferencia bancaria: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/banks/transactions/{transaction_id}")
+async def delete_bank_transaction(
+    transaction_id: str,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        success = await service.delete_bank_transaction(db, company_id, transaction_id)
+        return {"success": success, "mensaje": "Movimiento bancario eliminado y saldo revertido."}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error al eliminar movimiento bancario: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Carga real de extractos bancarios (Bancos Fase 6) ──────────────────────────

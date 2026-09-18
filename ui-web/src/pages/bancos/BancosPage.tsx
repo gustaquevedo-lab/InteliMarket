@@ -6,7 +6,8 @@ import {
   Plus, Loader2, Landmark, CheckCircle, XCircle, Upload, Wand2, AlertTriangle,
   Settings2, ShieldCheck, ShieldAlert, FileDown, Search, ArrowUpRight,
   ArrowDownRight, FileSpreadsheet, Receipt, RefreshCw, Calendar, Clock,
-  DollarSign, Check, X, FileText, Filter, Eye, ChevronRight, Pencil, Trash2
+  DollarSign, Check, X, FileText, Filter, Eye, ChevronRight, Pencil, Trash2,
+  ArrowLeftRight, ArrowRight, Building2
 } from "lucide-react"
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts"
 import { useAuth } from "../../context/AuthContext"
@@ -16,14 +17,20 @@ type AutoCandidate = { txId: string; descripcion: string; monto: number; fecha?:
 type TabType = "posicion" | "movimientos" | "conciliacion" | "cheques" | "auditoria"
 
 const BANK_CATEGORIA_LABELS: Record<string, { label: string; className: string }> = {
-  liquidacion_tarjeta: { label: "Liquidación tarjeta", className: "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800" },
-  pago_cheque: { label: "Pago con cheque", className: "bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 border border-purple-200 dark:border-purple-800" },
+  comision_bancaria: { label: "Comisión bancaria", className: "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300 border border-rose-200 dark:border-rose-800" },
+  gasto_bancario: { label: "Gasto / Impuesto bancario", className: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-800" },
+  transferencia_enviada: { label: "Transferencia enviada", className: "bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300 border border-violet-200 dark:border-violet-800" },
   pago_proveedor: { label: "Pago a proveedor", className: "bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300 border border-orange-200 dark:border-orange-800" },
-  deposito_efectivo: { label: "Depósito efectivo", className: "bg-teal-50 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300 border border-teal-200 dark:border-teal-800" },
-  deposito_caja: { label: "Depósito de caja", className: "bg-teal-50 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300 border border-teal-200 dark:border-teal-800" },
-  transferencia_recibida: { label: "Transferencia recibida", className: "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800" },
-  transferencia_interna: { label: "Transferencia interna", className: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700" },
+  pago_servicio: { label: "Pago de servicios", className: "bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800" },
+  pago_prestamo: { label: "Pago de préstamo", className: "bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-900/30 dark:text-fuchsia-300 border border-fuchsia-200 dark:border-fuchsia-800" },
+  pago_cheque: { label: "Pago con cheque", className: "bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 border border-purple-200 dark:border-purple-800" },
   retiro: { label: "Retiro", className: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-800" },
+  transferencia_recibida: { label: "Transferencia recibida", className: "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800" },
+  deposito_caja: { label: "Depósito de caja", className: "bg-teal-50 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300 border border-teal-200 dark:border-teal-800" },
+  deposito_efectivo: { label: "Depósito efectivo", className: "bg-teal-50 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300 border border-teal-200 dark:border-teal-800" },
+  liquidacion_tarjeta: { label: "Liquidación tarjeta", className: "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800" },
+  interes_ganado: { label: "Interés ganado", className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800" },
+  transferencia_interna: { label: "Transferencia interna", className: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700" },
   ingreso_caja: { label: "Ingreso de caja", className: "bg-teal-50 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300 border border-teal-200 dark:border-teal-800" },
   otros: { label: "Otros", className: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-200 dark:border-gray-700" },
 }
@@ -88,6 +95,50 @@ export default function BancosPage() {
   const [umbralModal, setUmbralModal] = useState<{ id: string; valor: string } | null>(null)
   const [corrections, setCorrections] = useState<any[]>([])
   const [correctionModal, setCorrectionModal] = useState<{ id: string; saldo_propuesto: string; motivo: string } | null>(null)
+
+  // Modal de Movimientos Bancarios (Directo y Transferencia)
+  const [showTxModal, setShowTxModal] = useState(false)
+  const [txMode, setTxMode] = useState<"directo" | "transferencia">("directo")
+  const [submittingTx, setSubmittingTx] = useState(false)
+  const [txForm, setTxForm] = useState({
+    bank_account_id: "",
+    tipo: "debito" as "debito" | "credito",
+    categoria: "comision_bancaria",
+    monto: "",
+    fecha: getTodayAsuncion(),
+    referencia: "",
+    contraparte: "",
+    descripcion: "",
+    tiene_comision: false,
+    comision_adicional: "5500",
+  })
+  const [transferForm, setTransferForm] = useState({
+    origen_account_id: "",
+    destino_account_id: "",
+    monto: "",
+    fecha: getTodayAsuncion(),
+    referencia: "",
+    descripcion: "",
+    comision: "",
+  })
+
+  // Modal de Depósito Bancario
+  const [showDepositModal, setShowDepositModal] = useState(false)
+  const [depositMode, setDepositMode] = useState<"boveda" | "externo">("boveda")
+  const [submittingDeposit, setSubmittingDeposit] = useState(false)
+  const [depositForm, setDepositForm] = useState({
+    bank_account_id: "",
+    monto: "",
+    numero_boleta: "",
+    transportadora: "",
+    fecha_deposito: getTodayAsuncion(),
+    observaciones: "",
+    // externo
+    categoria_ext: "deposito_efectivo",
+    referencia_ext: "",
+    contraparte_ext: "",
+    descripcion_ext: "",
+  })
 
   const toast = useToast()
   const { user } = useAuth()
@@ -449,6 +500,120 @@ export default function BancosPage() {
     }
   }
 
+  const openTransactionModal = (defaultBankId?: string) => {
+    const targetBank = defaultBankId || selectedBank || (banks.length > 0 ? banks[0].id : "")
+    setTxForm({
+      bank_account_id: targetBank,
+      tipo: "debito",
+      categoria: "comision_bancaria",
+      monto: "",
+      fecha: getTodayAsuncion(),
+      referencia: "",
+      contraparte: "",
+      descripcion: "",
+      tiene_comision: false,
+      comision_adicional: "5500",
+    })
+    setTransferForm({
+      origen_account_id: targetBank,
+      destino_account_id: banks.find(b => b.id !== targetBank)?.id || "",
+      monto: "",
+      fecha: getTodayAsuncion(),
+      referencia: "",
+      descripcion: "",
+      comision: "",
+    })
+    setTxMode("directo")
+    setShowTxModal(true)
+  }
+
+  const handleSaveBankTransaction = async () => {
+    if (!txForm.bank_account_id) {
+      toast.error("Error", "Debe seleccionar una cuenta bancaria.")
+      return
+    }
+    const montoNum = Number(txForm.monto)
+    if (!montoNum || montoNum <= 0) {
+      toast.error("Error", "Ingrese un monto válido mayor a 0.")
+      return
+    }
+    const comisionNum = txForm.tiene_comision && Number(txForm.comision_adicional) > 0 ? Number(txForm.comision_adicional) : undefined
+
+    setSubmittingTx(true)
+    try {
+      await api.financial.banks.createTransaction(txForm.bank_account_id, {
+        tipo: txForm.tipo,
+        categoria: txForm.categoria,
+        monto: montoNum,
+        fecha: txForm.fecha || getTodayAsuncion(),
+        referencia: txForm.referencia.trim() || undefined,
+        contraparte: txForm.contraparte.trim() || undefined,
+        descripcion: txForm.descripcion.trim() || undefined,
+        comision_adicional: comisionNum,
+      })
+      toast.success("Movimiento registrado", "Se registró el movimiento correctamente y se actualizó el saldo.")
+      setShowTxModal(false)
+      fetchAll()
+      if (selectedBank) loadBankTxns(selectedBank)
+    } catch (e: any) {
+      toast.error("Error al registrar movimiento", e.message || "Ocurrió un error al procesar el movimiento.")
+    } finally {
+      setSubmittingTx(false)
+    }
+  }
+
+  const handleSaveBankTransfer = async () => {
+    if (!transferForm.origen_account_id || !transferForm.destino_account_id) {
+      toast.error("Error", "Debe seleccionar cuenta de origen y destino.")
+      return
+    }
+    if (transferForm.origen_account_id === transferForm.destino_account_id) {
+      toast.error("Error", "La cuenta de origen y destino no pueden ser la misma.")
+      return
+    }
+    const montoNum = Number(transferForm.monto)
+    if (!montoNum || montoNum <= 0) {
+      toast.error("Error", "Ingrese un monto de transferencia mayor a 0.")
+      return
+    }
+    const comisionNum = transferForm.comision ? Number(transferForm.comision) : undefined
+
+    setSubmittingTx(true)
+    try {
+      const res = await api.financial.banks.createTransfer({
+        origen_account_id: transferForm.origen_account_id,
+        destino_account_id: transferForm.destino_account_id,
+        monto: montoNum,
+        fecha: transferForm.fecha || getTodayAsuncion(),
+        referencia: transferForm.referencia.trim() || undefined,
+        descripcion: transferForm.descripcion.trim() || undefined,
+        comision: comisionNum,
+      })
+      toast.success("Transferencia realizada", res.mensaje || "Transferencia interna procesada exitosamente.")
+      setShowTxModal(false)
+      fetchAll()
+      if (selectedBank) loadBankTxns(selectedBank)
+    } catch (e: any) {
+      toast.error("Error en transferencia", e.message || "No se pudo realizar la transferencia entre cuentas.")
+    } finally {
+      setSubmittingTx(false)
+    }
+  }
+
+  const handleDeleteTransaction = async (txId: string, desc: string) => {
+    if (!window.confirm(`¿Desea eliminar este movimiento bancario (${desc || "Sin descripción"})?\n\nEl saldo de la cuenta será revertido automáticamente.`)) {
+      return
+    }
+    try {
+      const res = await api.financial.banks.deleteTransaction(txId)
+      toast.success("Movimiento eliminado", res.mensaje || "El movimiento bancario fue eliminado y el saldo revertido.")
+      fetchAll()
+      if (selectedBank) loadBankTxns(selectedBank)
+    } catch (e: any) {
+      toast.error("Error al eliminar movimiento", e.message || "No se pudo eliminar el movimiento.")
+    }
+  }
+
   // Filtrado de movimientos
   const filteredBankTxns = bankTxns.filter(t => {
     if (txFilterTipo !== "todos" && t.tipo !== txFilterTipo) return false
@@ -542,6 +707,31 @@ export default function BancosPage() {
             >
               <Receipt className="w-4 h-4 text-purple-400" />
               <span>Emitir Cheque</span>
+            </button>
+            <button
+              onClick={() => { setTxMode("directo"); openTransactionModal(selectedBank) }}
+              className="px-4 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 hover:text-white border border-emerald-500/30 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+            >
+              <ArrowUpRight className="w-4 h-4 text-emerald-400" />
+              <span>Movimiento Bancario</span>
+            </button>
+            <button
+              onClick={() => { setTxMode("transferencia"); openTransactionModal(selectedBank) }}
+              className="px-4 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-white border border-amber-500/30 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+            >
+              <ArrowLeftRight className="w-4 h-4 text-amber-400" />
+              <span>Transferencia</span>
+            </button>
+            <button
+              onClick={() => {
+                setDepositForm(f => ({ ...f, bank_account_id: selectedBank || (banks.length > 0 ? banks[0].id : ""), fecha_deposito: getTodayAsuncion() }))
+                setDepositMode("boveda")
+                setShowDepositModal(true)
+              }}
+              className="px-4 py-2.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 hover:text-white border border-sky-500/30 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+            >
+              <Building2 className="w-4 h-4 text-sky-400" />
+              <span>Depósito Bancario</span>
             </button>
             <button
               onClick={() => setShowBankForm(true)}
@@ -1033,6 +1223,12 @@ export default function BancosPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <button
+                      onClick={() => openTransactionModal(selectedBank)}
+                      className="btn-primary bg-emerald-600 hover:bg-emerald-700 text-xs flex items-center gap-1.5 shadow-sm"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Registrar Movimiento
+                    </button>
+                    <button
                       onClick={() => {
                         const hoyStr = getTodayAsuncion()
                         const [year, month] = hoyStr.split("-")
@@ -1110,21 +1306,32 @@ export default function BancosPage() {
                               )}
                             </td>
                             <td className="p-3.5 text-right whitespace-nowrap">
-                              {t.conciliado ? (
-                                <button
-                                  onClick={() => handleUnreconcile(t.id)}
-                                  className="text-xs text-gray-500 hover:text-red-600 font-medium hover:underline"
-                                >
-                                  Desconciliar
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => openReconcileModal(t.id)}
-                                  className="btn-primary py-1 px-3 text-xs"
-                                >
-                                  Conciliar
-                                </button>
-                              )}
+                              <div className="flex items-center justify-end gap-1.5">
+                                {t.conciliado ? (
+                                  <button
+                                    onClick={() => handleUnreconcile(t.id)}
+                                    className="text-xs text-gray-500 hover:text-red-600 font-medium hover:underline"
+                                  >
+                                    Desconciliar
+                                  </button>
+                                ) : (
+                                  <>
+                                    <button
+                                      onClick={() => openReconcileModal(t.id)}
+                                      className="btn-primary py-1 px-3 text-xs"
+                                    >
+                                      Conciliar
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteTransaction(t.id, t.descripcion || t.referencia || "")}
+                                      className="p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded transition-colors"
+                                      title="Eliminar movimiento y revertir saldo"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1857,6 +2064,505 @@ export default function BancosPage() {
         </div>
       )}
 
+      {/* MODAL: REGISTRO DE MOVIMIENTOS BANCARIOS (DIRECTOS Y TRANSFERENCIAS) */}
+      {showTxModal && (() => {
+        const selectedAccount = banks.find(b => b.id === txForm.bank_account_id)
+        const currentSaldo = selectedAccount ? Number(selectedAccount.saldo_actual || 0) : 0
+        const montoOperacion = Number(txForm.monto) || 0
+        const comisionOperacion = (txForm.tipo === "debito" && txForm.tiene_comision && Number(txForm.comision_adicional) > 0) ? Number(txForm.comision_adicional) : 0
+        const delta = txForm.tipo === "credito" ? montoOperacion : -(montoOperacion + comisionOperacion)
+        const saldoProyectado = currentSaldo + delta
+
+        const origenAccount = banks.find(b => b.id === transferForm.origen_account_id)
+        const destinoAccount = banks.find(b => b.id === transferForm.destino_account_id)
+        const montoTrf = Number(transferForm.monto) || 0
+        const comisionTrf = Number(transferForm.comision) || 0
+        const origenSaldoActual = origenAccount ? Number(origenAccount.saldo_actual || 0) : 0
+        const destinoSaldoActual = destinoAccount ? Number(destinoAccount.saldo_actual || 0) : 0
+        const origenSaldoProyectado = origenSaldoActual - (montoTrf + comisionTrf)
+        const destinoSaldoProyectado = destinoSaldoActual + montoTrf
+        const cuentasIguales = transferForm.origen_account_id && transferForm.destino_account_id && transferForm.origen_account_id === transferForm.destino_account_id
+
+        return (
+          <div className="modal-overlay" onClick={() => setShowTxModal(false)}>
+            <div className="modal-content max-w-xl p-0 overflow-hidden shadow-2xl rounded-2xl" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gray-50/70 dark:bg-slate-800/70">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                    <Landmark className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                      Registro de Movimiento Bancario
+                    </h3>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                      Extra Supermercado — Transferencias, comisiones, impuestos o traspasos entre cuentas
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowTxModal(false)}
+                  className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Selector de Modo (Tabs) */}
+              <div className="flex border-b border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-slate-900/30 px-6 pt-2.5 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTxMode("directo")}
+                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold border-b-2 transition-all ${
+                    txMode === "directo"
+                      ? "border-emerald-600 text-emerald-700 dark:text-emerald-400 bg-white dark:bg-slate-800 rounded-t-lg shadow-sm"
+                      : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                  }`}
+                >
+                  <Receipt className="w-3.5 h-3.5" /> Movimiento en Cuenta
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTxMode("transferencia")}
+                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold border-b-2 transition-all ${
+                    txMode === "transferencia"
+                      ? "border-emerald-600 text-emerald-700 dark:text-emerald-400 bg-white dark:bg-slate-800 rounded-t-lg shadow-sm"
+                      : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                  }`}
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5" /> Traspaso entre Cuentas Propias
+                </button>
+              </div>
+
+              {/* Formulario Modo Directo */}
+              {txMode === "directo" ? (
+                <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+                  {/* Selector de Cuenta */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="label-field mb-0">Cuenta Bancaria *</label>
+                      {selectedAccount && (
+                        <span className="text-[11px] font-mono text-gray-500 dark:text-gray-400">
+                          Saldo actual: <strong className="text-gray-900 dark:text-white">{formatGs(currentSaldo)}</strong>
+                        </span>
+                      )}
+                    </div>
+                    <select
+                      className="input-field text-xs"
+                      value={txForm.bank_account_id}
+                      onChange={e => setTxForm({ ...txForm, bank_account_id: e.target.value })}
+                    >
+                      <option value="">Seleccionar cuenta...</option>
+                      {banks.map(b => (
+                        <option key={b.id} value={b.id}>{formatBankLabel(b)}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Tipo de Operación: Botones Interactivos */}
+                  <div>
+                    <label className="label-field mb-1.5">Tipo de Operación *</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newCat = ["transferencia_recibida", "deposito_caja", "deposito_efectivo", "liquidacion_tarjeta", "interes_ganado"].includes(txForm.categoria)
+                            ? "comision_bancaria"
+                            : txForm.categoria
+                          setTxForm({ ...txForm, tipo: "debito", categoria: newCat })
+                        }}
+                        className={`p-3 rounded-xl border flex items-center justify-center gap-2 text-xs font-bold transition-all ${
+                          txForm.tipo === "debito"
+                            ? "border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 shadow-sm ring-1 ring-rose-500"
+                            : "border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-slate-800 text-gray-600 dark:text-gray-400"
+                        }`}
+                      >
+                        <ArrowDownRight className="w-4 h-4 text-rose-600" />
+                        - Egreso / Débito (Salida)
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newCat = ["comision_bancaria", "gasto_bancario", "transferencia_enviada", "pago_proveedor", "pago_servicio", "pago_prestamo", "pago_cheque", "retiro"].includes(txForm.categoria)
+                            ? "transferencia_recibida"
+                            : txForm.categoria
+                          setTxForm({ ...txForm, tipo: "credito", categoria: newCat, tiene_comision: false })
+                        }}
+                        className={`p-3 rounded-xl border flex items-center justify-center gap-2 text-xs font-bold transition-all ${
+                          txForm.tipo === "credito"
+                            ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 shadow-sm ring-1 ring-emerald-500"
+                            : "border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-slate-800 text-gray-600 dark:text-gray-400"
+                        }`}
+                      >
+                        <ArrowUpRight className="w-4 h-4 text-emerald-600" />
+                        + Ingreso / Crédito (Entrada)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Categoría Bancaria según Tipo */}
+                  <div>
+                    <label className="label-field mb-1">Categoría del Movimiento *</label>
+                    <select
+                      className="input-field text-xs"
+                      value={txForm.categoria}
+                      onChange={e => setTxForm({ ...txForm, categoria: e.target.value })}
+                    >
+                      {txForm.tipo === "debito" ? (
+                        <>
+                          <option value="comision_bancaria">Comisión bancaria (SIPAP, mantenimiento, chequeras)</option>
+                          <option value="gasto_bancario">Gastos / Impuestos bancarios (IVA bancario, sellados)</option>
+                          <option value="transferencia_enviada">Transferencia enviada (SIPAP a proveedores / terceros)</option>
+                          <option value="pago_proveedor">Pago a proveedor directo</option>
+                          <option value="pago_servicio">Pago de servicios (ANDE, Essap, Telefonía, Internet)</option>
+                          <option value="pago_prestamo">Pago de cuota / amortización de préstamo</option>
+                          <option value="retiro">Retiro en efectivo / caja de ventanilla</option>
+                          <option value="otros">Otros egresos bancarios</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="transferencia_recibida">Transferencia recibida (SIPAP / clientes)</option>
+                          <option value="deposito_caja">Depósito de recaudación de caja</option>
+                          <option value="deposito_efectivo">Depósito en efectivo en ventanilla / buzón</option>
+                          <option value="liquidacion_tarjeta">Liquidación POS / Tarjetas (Bancard, Dinelco, QR, PIX)</option>
+                          <option value="interes_ganado">Intereses ganados / Rendimientos CDA</option>
+                          <option value="otros">Otros créditos / ingresos</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Monto y Fecha */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="label-field mb-1">Monto de la Operación (Gs.) *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        placeholder="Ej: 5000000"
+                        className="input-field font-mono text-sm font-semibold"
+                        value={txForm.monto}
+                        onChange={e => setTxForm({ ...txForm, monto: e.target.value })}
+                      />
+                      {montoOperacion > 0 && (
+                        <p className="text-[11px] text-gray-500 font-mono mt-1">
+                          {formatGs(montoOperacion)}
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="label-field mb-1">Fecha de Operación *</label>
+                      <input
+                        type="date"
+                        className="input-field text-xs"
+                        value={txForm.fecha}
+                        onChange={e => setTxForm({ ...txForm, fecha: e.target.value })}
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1">Hora local de Asunción</p>
+                    </div>
+                  </div>
+
+                  {/* Referencia y Contraparte */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="label-field mb-1">N° Comprobante / Referencia</label>
+                      <input
+                        type="text"
+                        placeholder="Ej: SIPAP-849201, TRF-0912"
+                        className="input-field font-mono text-xs"
+                        value={txForm.referencia}
+                        onChange={e => setTxForm({ ...txForm, referencia: e.target.value })}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="label-field mb-1">Contraparte / Beneficiario / Ordenante</label>
+                      <input
+                        type="text"
+                        placeholder="Ej: Banco Itaú, Bancard, Proveedor SRL"
+                        className="input-field text-xs"
+                        value={txForm.contraparte}
+                        onChange={e => setTxForm({ ...txForm, contraparte: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Concepto / Detalle */}
+                  <div>
+                    <label className="label-field mb-1">Concepto / Detalle del Movimiento</label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Pago de comisiones bancarias por transferencias interbancarias"
+                      className="input-field text-xs"
+                      value={txForm.descripcion}
+                      onChange={e => setTxForm({ ...txForm, descripcion: e.target.value })}
+                    />
+                  </div>
+
+                  {/* Opción Comisión Bancaria Asociada (Solo para Débitos) */}
+                  {txForm.tipo === "debito" && (
+                    <div className="p-3.5 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50/50 dark:bg-rose-950/20 space-y-2">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-rose-900 dark:text-rose-200">
+                        <input
+                          type="checkbox"
+                          checked={txForm.tiene_comision}
+                          onChange={e => setTxForm({ ...txForm, tiene_comision: e.target.checked })}
+                          className="rounded text-rose-600 focus:ring-rose-500"
+                        />
+                        <span>¿Registrar también comisión bancaria asociada? (ej: SIPAP 5.500 Gs.)</span>
+                      </label>
+                      {txForm.tiene_comision && (
+                        <div className="pt-2 pl-6 flex flex-col sm:flex-row sm:items-center gap-3">
+                          <div className="w-48">
+                            <label className="text-[11px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider block mb-1">Monto Comisión (Gs.)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              className="input-field text-xs font-mono font-bold"
+                              placeholder="5500"
+                              value={txForm.comision_adicional}
+                              onChange={e => setTxForm({ ...txForm, comision_adicional: e.target.value })}
+                            />
+                          </div>
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 sm:mt-4">
+                            Se creará automáticamente un segundo débito por comisión con la misma fecha y referencia.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Previsualización en Tiempo Real del Saldo */}
+                  {selectedAccount && montoOperacion > 0 && (
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-500 dark:text-gray-400">Saldo actual:</span>
+                        <strong className="text-gray-900 dark:text-white font-mono">{formatGs(currentSaldo)}</strong>
+                      </div>
+                      <div className="flex items-center gap-2 font-mono">
+                        <span className={txForm.tipo === "credito" ? "text-emerald-600 font-bold" : "text-rose-600 font-bold"}>
+                          {txForm.tipo === "credito" ? `+ ${formatGs(montoOperacion)}` : `- ${formatGs(montoOperacion + comisionOperacion)}`}
+                        </span>
+                        <ArrowRight className="w-3.5 h-3.5 text-gray-400" />
+                        <span className="text-gray-500 dark:text-gray-400">Saldo resultante:</span>
+                        <strong className={`font-bold ${saldoProyectado >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                          {formatGs(saldoProyectado)}
+                        </strong>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Formulario Modo Transferencia entre Cuentas Propias */
+                <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+                  {/* Selector Origen y Destino */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Origen */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="label-field mb-0 text-rose-700 dark:text-rose-400">Cuenta Origen (Débito -) *</label>
+                      </div>
+                      <select
+                        className="input-field text-xs"
+                        value={transferForm.origen_account_id}
+                        onChange={e => setTransferForm({ ...transferForm, origen_account_id: e.target.value })}
+                      >
+                        <option value="">Seleccionar cuenta de débito...</option>
+                        {banks.map(b => (
+                          <option key={b.id} value={b.id}>{formatBankLabel(b)}</option>
+                        ))}
+                      </select>
+                      {origenAccount && (
+                        <p className="text-[11px] font-mono text-gray-500 dark:text-gray-400 mt-1">
+                          Saldo disp: <strong className="text-gray-900 dark:text-white">{formatGs(origenSaldoActual)}</strong>
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Destino */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="label-field mb-0 text-emerald-700 dark:text-emerald-400">Cuenta Destino (Crédito +) *</label>
+                      </div>
+                      <select
+                        className="input-field text-xs"
+                        value={transferForm.destino_account_id}
+                        onChange={e => setTransferForm({ ...transferForm, destino_account_id: e.target.value })}
+                      >
+                        <option value="">Seleccionar cuenta de crédito...</option>
+                        {banks.map(b => (
+                          <option key={b.id} value={b.id}>{formatBankLabel(b)}</option>
+                        ))}
+                      </select>
+                      {destinoAccount && (
+                        <p className="text-[11px] font-mono text-gray-500 dark:text-gray-400 mt-1">
+                          Saldo actual: <strong className="text-gray-900 dark:text-white">{formatGs(destinoSaldoActual)}</strong>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {cuentasIguales && (
+                    <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                      <span>La cuenta de origen y la cuenta de destino no pueden ser la misma cuenta.</span>
+                    </div>
+                  )}
+
+                  {/* Monto y Fecha */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="label-field mb-1">Monto a Transferir (Gs.) *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        placeholder="Ej: 25000000"
+                        className="input-field font-mono text-sm font-semibold"
+                        value={transferForm.monto}
+                        onChange={e => setTransferForm({ ...transferForm, monto: e.target.value })}
+                      />
+                      {montoTrf > 0 && (
+                        <p className="text-[11px] text-gray-500 font-mono mt-1">
+                          {formatGs(montoTrf)}
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="label-field mb-1">Fecha de la Transferencia *</label>
+                      <input
+                        type="date"
+                        className="input-field text-xs"
+                        value={transferForm.fecha}
+                        onChange={e => setTransferForm({ ...transferForm, fecha: e.target.value })}
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1">Hora local de Asunción</p>
+                    </div>
+                  </div>
+
+                  {/* Comisión y Referencia */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="label-field mb-1">Comisión Bancaria al Origen (Gs.) [Opcional]</label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="Ej: 5500 (SIPAP) o 0"
+                        className="input-field font-mono text-xs"
+                        value={transferForm.comision}
+                        onChange={e => setTransferForm({ ...transferForm, comision: e.target.value })}
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1">Se debita del saldo de la cuenta origen</p>
+                    </div>
+
+                    <div>
+                      <label className="label-field mb-1">N° Comprobante / Referencia SIPAP</label>
+                      <input
+                        type="text"
+                        placeholder="Ej: TRF-INT-004812"
+                        className="input-field font-mono text-xs"
+                        value={transferForm.referencia}
+                        onChange={e => setTransferForm({ ...transferForm, referencia: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Concepto / Motivo */}
+                  <div>
+                    <label className="label-field mb-1">Motivo / Descripción de la Transferencia</label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Cobertura de cuenta corriente para pago de cheques a proveedores"
+                      className="input-field text-xs"
+                      value={transferForm.descripcion}
+                      onChange={e => setTransferForm({ ...transferForm, descripcion: e.target.value })}
+                    />
+                  </div>
+
+                  {/* Previsualización de Ambos Saldos */}
+                  {origenAccount && destinoAccount && montoTrf > 0 && !cuentasIguales && (
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
+                      <div className="font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider text-[10px]">
+                        Impacto Contable Simulado:
+                      </div>
+                      <div className="flex items-center justify-between font-mono">
+                        <span className="text-gray-600 dark:text-gray-300">
+                          {origenAccount.banco} ({origenAccount.numero_cuenta}):
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-rose-600 font-bold">- {formatGs(montoTrf + comisionTrf)}</span>
+                          <ArrowRight className="w-3 h-3 text-gray-400" />
+                          <strong className={origenSaldoProyectado >= 0 ? "text-gray-900 dark:text-white" : "text-rose-600"}>
+                            {formatGs(origenSaldoProyectado)}
+                          </strong>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between font-mono">
+                        <span className="text-gray-600 dark:text-gray-300">
+                          {destinoAccount.banco} ({destinoAccount.numero_cuenta}):
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-emerald-600 font-bold">+ {formatGs(montoTrf)}</span>
+                          <ArrowRight className="w-3 h-3 text-gray-400" />
+                          <strong className="text-emerald-600">
+                            {formatGs(destinoSaldoProyectado)}
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Footer de Acciones */}
+              <div className="p-5 border-t border-gray-100 dark:border-gray-700 flex items-center justify-end gap-3 bg-gray-50/50 dark:bg-slate-850">
+                <button
+                  type="button"
+                  onClick={() => setShowTxModal(false)}
+                  className="btn-ghost text-xs"
+                >
+                  Cancelar
+                </button>
+                {txMode === "directo" ? (
+                  <button
+                    type="button"
+                    onClick={handleSaveBankTransaction}
+                    disabled={submittingTx || !txForm.bank_account_id || !txForm.monto || Number(txForm.monto) <= 0}
+                    className="btn-primary text-xs flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {submittingTx ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                    Confirmar Movimiento
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleSaveBankTransfer}
+                    disabled={
+                      submittingTx ||
+                      !transferForm.origen_account_id ||
+                      !transferForm.destino_account_id ||
+                      cuentasIguales ||
+                      !transferForm.monto ||
+                      Number(transferForm.monto) <= 0
+                    }
+                    className="btn-primary text-xs flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {submittingTx ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowLeftRight className="w-4 h-4" />}
+                    Confirmar Transferencia
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* MODAL: Historial del Cheque */}
       {chequeHistorial && (
         <div className="modal-overlay" onClick={() => setChequeHistorial(null)}>
@@ -1891,6 +2597,268 @@ export default function BancosPage() {
           </div>
         </div>
       )}
+
+      {/* MODAL: Depósito Bancario */}
+      {showDepositModal && (() => {
+        const destAccount = banks.find(b => b.id === depositForm.bank_account_id)
+        const montoNum = Number(depositForm.monto) || 0
+
+        const handleDeposit = async () => {
+          if (!depositForm.bank_account_id || !depositForm.monto || montoNum <= 0) {
+            toast.error("Campos requeridos", "Seleccioná una cuenta e ingresá un monto válido")
+            return
+          }
+          if (depositMode === "boveda" && !depositForm.numero_boleta.trim()) {
+            toast.error("N° de boleta requerido", "Ingresá el número de boleta del depósito")
+            return
+          }
+          setSubmittingDeposit(true)
+          try {
+            if (depositMode === "boveda") {
+              await api.vault.depositAmountToBank({
+                monto_pyg: montoNum,
+                bank_account_id: depositForm.bank_account_id,
+                numero_boleta: depositForm.numero_boleta,
+                transportadora: depositForm.transportadora || undefined,
+                fecha_deposito: depositForm.fecha_deposito || undefined,
+                observaciones: depositForm.observaciones || undefined,
+              })
+              toast.success("Depósito registrado", `Gs. ${montoNum.toLocaleString("es-PY")} depositados desde Bóveda`)
+            } else {
+              await api.financial.banks.createTransaction(depositForm.bank_account_id, {
+                tipo: "credito",
+                categoria: depositForm.categoria_ext,
+                monto: montoNum,
+                fecha: depositForm.fecha_deposito,
+                referencia: depositForm.referencia_ext || undefined,
+                contraparte: depositForm.contraparte_ext || undefined,
+                descripcion: depositForm.descripcion_ext || undefined,
+              })
+              toast.success("Depósito externo registrado", `Gs. ${montoNum.toLocaleString("es-PY")} acreditados en ${destAccount?.banco || "cuenta"}`)
+            }
+            setShowDepositModal(false)
+            fetchAll()
+          } catch (err: any) {
+            toast.error("Error", err?.response?.data?.detail || err?.message || "No se pudo registrar el depósito")
+          } finally {
+            setSubmittingDeposit(false)
+          }
+        }
+
+        return (
+          <div className="modal-overlay" onClick={() => setShowDepositModal(false)}>
+            <div className="modal-content max-w-lg p-0 overflow-hidden shadow-2xl rounded-2xl" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-sky-50/60 dark:bg-sky-950/30">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-sky-500/15 text-sky-600 dark:text-sky-400">
+                    <Building2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900 dark:text-white">Depósito Bancario</h3>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                      Extra Supermercado — Desde bóveda o depósito externo recibido
+                    </p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setShowDepositModal(false)} className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex border-b border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-slate-900/30 px-6 pt-2.5 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDepositMode("boveda")}
+                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold border-b-2 transition-all ${
+                    depositMode === "boveda"
+                      ? "border-sky-600 text-sky-700 dark:text-sky-400 bg-white dark:bg-slate-800 rounded-t-lg shadow-sm"
+                      : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                  }`}
+                >
+                  <Building2 className="w-3.5 h-3.5" /> Desde Bóveda
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDepositMode("externo")}
+                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold border-b-2 transition-all ${
+                    depositMode === "externo"
+                      ? "border-emerald-600 text-emerald-700 dark:text-emerald-400 bg-white dark:bg-slate-800 rounded-t-lg shadow-sm"
+                      : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                  }`}
+                >
+                  <ArrowDownRight className="w-3.5 h-3.5" /> Externo / Recibido
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4 overflow-y-auto max-h-[70vh]">
+                {/* Cuenta destino (común) */}
+                <div>
+                  <label className="form-label">Cuenta destino *</label>
+                  <select
+                    className="form-control text-xs"
+                    value={depositForm.bank_account_id}
+                    onChange={e => setDepositForm(f => ({ ...f, bank_account_id: e.target.value }))}
+                  >
+                    <option value="">— Seleccioná cuenta —</option>
+                    {banks.map(b => (
+                      <option key={b.id} value={b.id}>
+                        {b.alias ? `[${b.alias}] ` : ""}{b.banco} — {b.numero_cuenta} ({b.moneda})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Monto (común) */}
+                <div>
+                  <label className="form-label">Monto (Gs.) *</label>
+                  <input
+                    type="number"
+                    className="form-control text-xs"
+                    placeholder="0"
+                    min={0}
+                    value={depositForm.monto}
+                    onChange={e => setDepositForm(f => ({ ...f, monto: e.target.value }))}
+                  />
+                </div>
+
+                {/* Fecha (común) */}
+                <div>
+                  <label className="form-label">Fecha del depósito *</label>
+                  <input
+                    type="date"
+                    className="form-control text-xs"
+                    value={depositForm.fecha_deposito}
+                    onChange={e => setDepositForm(f => ({ ...f, fecha_deposito: e.target.value }))}
+                  />
+                </div>
+
+                {depositMode === "boveda" ? (
+                  <>
+                    {/* Modo Bóveda */}
+                    <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 text-[11px] text-sky-700 dark:text-sky-300">
+                      💡 El monto será deducido automáticamente de la <strong>Bóveda de Efectivo</strong> y acreditado en la cuenta bancaria seleccionada.
+                    </div>
+                    <div>
+                      <label className="form-label">N° de Boleta de depósito *</label>
+                      <input
+                        type="text"
+                        className="form-control text-xs"
+                        placeholder="Ej: 0012345"
+                        value={depositForm.numero_boleta}
+                        onChange={e => setDepositForm(f => ({ ...f, numero_boleta: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Transportadora / Responsable</label>
+                      <input
+                        type="text"
+                        className="form-control text-xs"
+                        placeholder="Ej: Prosegur, Juan Pérez..."
+                        value={depositForm.transportadora}
+                        onChange={e => setDepositForm(f => ({ ...f, transportadora: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Observaciones</label>
+                      <textarea
+                        className="form-control text-xs h-20"
+                        placeholder="Notas adicionales..."
+                        value={depositForm.observaciones}
+                        onChange={e => setDepositForm(f => ({ ...f, observaciones: e.target.value }))}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Modo Externo */}
+                    <div>
+                      <label className="form-label">Tipo de depósito *</label>
+                      <select
+                        className="form-control text-xs"
+                        value={depositForm.categoria_ext}
+                        onChange={e => setDepositForm(f => ({ ...f, categoria_ext: e.target.value }))}
+                      >
+                        <option value="deposito_efectivo">Depósito en efectivo</option>
+                        <option value="deposito_caja">Depósito de caja</option>
+                        <option value="transferencia_recibida">Transferencia recibida</option>
+                        <option value="liquidacion_tarjeta">Liquidación de tarjeta</option>
+                        <option value="interes_ganado">Interés / Rendimiento</option>
+                        <option value="otros">Otro ingreso</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Referencia / N° boleta</label>
+                      <input
+                        type="text"
+                        className="form-control text-xs"
+                        placeholder="Ej: TRF-001234, Boleta 5678..."
+                        value={depositForm.referencia_ext}
+                        onChange={e => setDepositForm(f => ({ ...f, referencia_ext: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Origen / Remitente</label>
+                      <input
+                        type="text"
+                        className="form-control text-xs"
+                        placeholder="Ej: Cliente XYZ, Banco Itaú..."
+                        value={depositForm.contraparte_ext}
+                        onChange={e => setDepositForm(f => ({ ...f, contraparte_ext: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Descripción</label>
+                      <textarea
+                        className="form-control text-xs h-20"
+                        placeholder="Descripción del depósito..."
+                        value={depositForm.descripcion_ext}
+                        onChange={e => setDepositForm(f => ({ ...f, descripcion_ext: e.target.value }))}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* Preview saldo */}
+                {destAccount && montoNum > 0 && (
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-1">
+                    <p className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">Preview saldo</p>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-500">Saldo actual</span>
+                      <span className="font-mono font-bold text-gray-800 dark:text-gray-200">Gs. {Number(destAccount.saldo_actual || 0).toLocaleString("es-PY")}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-500">+ Depósito</span>
+                      <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">Gs. {montoNum.toLocaleString("es-PY")}</span>
+                    </div>
+                    <div className="border-t border-emerald-200 dark:border-emerald-800 pt-1 flex justify-between text-xs">
+                      <span className="font-bold text-gray-700 dark:text-gray-300">Saldo proyectado</span>
+                      <span className="font-mono font-extrabold text-emerald-700 dark:text-emerald-300">Gs. {(Number(destAccount.saldo_actual || 0) + montoNum).toLocaleString("es-PY")}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-700 flex justify-end gap-3 bg-gray-50/40 dark:bg-slate-900/20">
+                <button type="button" onClick={() => setShowDepositModal(false)} className="btn-outline text-xs">
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeposit}
+                  disabled={submittingDeposit || !depositForm.bank_account_id || montoNum <= 0}
+                  className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-extrabold transition disabled:opacity-50 flex items-center gap-2"
+                >
+                  {submittingDeposit ? <Loader2 className="w-4 h-4 animate-spin" /> : <Building2 className="w-4 h-4" />}
+                  {depositMode === "boveda" ? "Registrar Depósito desde Bóveda" : "Registrar Depósito Externo"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

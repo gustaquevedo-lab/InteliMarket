@@ -22,6 +22,7 @@ from api.src.financial.models import (
 from api.src.financial.schemas import (
     SupplierInvoiceCreate, SupplierInvoicePaymentCreate,
     BankAccountCreate, BankAccountUpdate,
+    BankTransactionCreate, BankTransferCreate,
     CashFlowProjectionUpdate,
     BudgetCreate, BudgetUpdate,
     PaymentRunCreate,
@@ -800,6 +801,170 @@ async def import_bank_statement(db: AsyncSession, company_id: str, bank_account_
     for bt in created:
         await db.refresh(bt)
     return created
+
+
+async def create_bank_transaction(
+    db: AsyncSession,
+    company_id: str,
+    bank_account_id: str,
+    data: BankTransactionCreate
+) -> BankTransaction:
+    """Registra manualmente un movimiento bancario unitario y actualiza el saldo de la cuenta."""
+    account_result = await db.execute(select(BankAccount).where(BankAccount.id == uuid.UUID(bank_account_id)))
+    account = account_result.scalar_one_or_none()
+    if not account:
+        raise ValueError("Cuenta bancaria no encontrada.")
+
+    bt = BankTransaction(
+        company_id=uuid.UUID(company_id),
+        bank_account_id=uuid.UUID(bank_account_id),
+        fecha=data.fecha,
+        tipo=data.tipo,
+        monto=data.monto,
+        moneda=data.moneda or account.moneda,
+        descripcion=data.descripcion,
+        referencia=data.referencia,
+        contraparte=data.contraparte,
+        categoria=data.categoria or "otros",
+    )
+    db.add(bt)
+    account.saldo_actual = (account.saldo_actual or Decimal("0")) + (data.monto if data.tipo == "credito" else -data.monto)
+
+    # Si se especificó una comisión bancaria adicional asociada al movimiento
+    if data.comision_adicional and data.comision_adicional > Decimal("0"):
+        comision_bt = BankTransaction(
+            company_id=uuid.UUID(company_id),
+            bank_account_id=uuid.UUID(bank_account_id),
+            fecha=data.fecha,
+            tipo="debito",
+            monto=data.comision_adicional,
+            moneda=data.moneda or account.moneda,
+            descripcion=f"Comisión bancaria asociada a ref. {data.referencia or ''}".strip(),
+            referencia=f"COM-{data.referencia or ''}".strip("-"),
+            contraparte=account.banco,
+            categoria="comision_bancaria",
+        )
+        db.add(comision_bt)
+        account.saldo_actual = account.saldo_actual - data.comision_adicional
+
+    await db.flush()
+    await db.refresh(bt)
+    return bt
+
+
+async def create_bank_transfer(
+    db: AsyncSession,
+    company_id: str,
+    data: BankTransferCreate
+) -> dict:
+    """Ejecuta una transferencia entre cuentas bancarias propias de la empresa.
+    
+    Genera el débito en la cuenta origen, el crédito en la cuenta destino y,
+    si aplica, el débito por comisión bancaria en la cuenta origen.
+    """
+    if data.origen_account_id == data.destino_account_id:
+        raise ValueError("La cuenta origen y destino no pueden ser la misma.")
+
+    cid = uuid.UUID(company_id)
+    res_origen = await db.execute(select(BankAccount).where(BankAccount.id == data.origen_account_id, BankAccount.company_id == cid))
+    acc_origen = res_origen.scalar_one_or_none()
+    if not acc_origen:
+        raise ValueError("Cuenta bancaria de origen no encontrada.")
+
+    res_destino = await db.execute(select(BankAccount).where(BankAccount.id == data.destino_account_id, BankAccount.company_id == cid))
+    acc_destino = res_destino.scalar_one_or_none()
+    if not acc_destino:
+        raise ValueError("Cuenta bancaria de destino no encontrada.")
+
+    ref_str = data.referencia or f"TRANSF-{datetime.now().strftime('%Y%m%d%H%M')}"
+    desc_origen = data.descripcion or f"Transferencia a {acc_destino.banco} ({acc_destino.numero_cuenta})"
+    desc_destino = data.descripcion or f"Transferencia desde {acc_origen.banco} ({acc_origen.numero_cuenta})"
+
+    # 1. Débito en origen
+    tx_debito = BankTransaction(
+        company_id=cid,
+        bank_account_id=acc_origen.id,
+        fecha=data.fecha,
+        tipo="debito",
+        monto=data.monto,
+        moneda=data.moneda,
+        descripcion=desc_origen,
+        referencia=ref_str,
+        contraparte=f"{acc_destino.banco} - {acc_destino.titular or acc_destino.numero_cuenta}",
+        categoria="transferencia_interna",
+    )
+    db.add(tx_debito)
+    acc_origen.saldo_actual = (acc_origen.saldo_actual or Decimal("0")) - data.monto
+
+    # 2. Crédito en destino
+    tx_credito = BankTransaction(
+        company_id=cid,
+        bank_account_id=acc_destino.id,
+        fecha=data.fecha,
+        tipo="credito",
+        monto=data.monto,
+        moneda=data.moneda,
+        descripcion=desc_destino,
+        referencia=ref_str,
+        contraparte=f"{acc_origen.banco} - {acc_origen.titular or acc_origen.numero_cuenta}",
+        categoria="transferencia_interna",
+    )
+    db.add(tx_credito)
+    acc_destino.saldo_actual = (acc_destino.saldo_actual or Decimal("0")) + data.monto
+
+    # 3. Comisión en origen si aplica
+    tx_comision = None
+    if data.comision and data.comision > Decimal("0"):
+        tx_comision = BankTransaction(
+            company_id=cid,
+            bank_account_id=acc_origen.id,
+            fecha=data.fecha,
+            tipo="debito",
+            monto=data.comision,
+            moneda=data.moneda,
+            descripcion=f"Comisión por transferencia ref. {ref_str}",
+            referencia=f"COM-{ref_str}",
+            contraparte=acc_origen.banco,
+            categoria="comision_bancaria",
+        )
+        db.add(tx_comision)
+        acc_origen.saldo_actual = acc_origen.saldo_actual - data.comision
+
+    await db.flush()
+    await db.refresh(tx_debito)
+    await db.refresh(tx_credito)
+
+    return {
+        "success": True,
+        "origen_tx_id": str(tx_debito.id),
+        "destino_tx_id": str(tx_credito.id),
+        "comision_tx_id": str(tx_comision.id) if tx_comision else None,
+        "origen_saldo_nuevo": float(acc_origen.saldo_actual),
+        "destino_saldo_nuevo": float(acc_destino.saldo_actual),
+        "mensaje": f"Transferencia de {float(data.monto):,.0f} Gs. procesada con éxito entre {acc_origen.banco} y {acc_destino.banco}."
+    }
+
+
+async def delete_bank_transaction(db: AsyncSession, company_id: str, transaction_id: str) -> bool:
+    """Elimina una transacción bancaria manual no conciliada y revierte su impacto en el saldo."""
+    tx_uuid = uuid.UUID(transaction_id)
+    cid = uuid.UUID(company_id)
+    res = await db.execute(select(BankTransaction).where(BankTransaction.id == tx_uuid, BankTransaction.company_id == cid))
+    bt = res.scalar_one_or_none()
+    if not bt:
+        raise ValueError("Movimiento bancario no encontrado.")
+
+    if bt.conciliado:
+        raise ValueError("No se puede eliminar un movimiento bancario ya conciliado. Desconcilie primero.")
+
+    acc_res = await db.execute(select(BankAccount).where(BankAccount.id == bt.bank_account_id))
+    acc = acc_res.scalar_one_or_none()
+    if acc:
+        acc.saldo_actual = (acc.saldo_actual or Decimal("0")) - (bt.monto if bt.tipo == "credito" else -bt.monto)
+
+    await db.delete(bt)
+    await db.flush()
+    return True
 
 
 async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, file_bytes: bytes, mes: int, anio: int) -> dict:

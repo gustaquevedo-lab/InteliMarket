@@ -32,7 +32,7 @@ from api.src.purchases.schemas import (
     LostDemandCreate, LostDemandResponse, LostDemandUpdate,
     PurchaseInboxConfigCreate, PurchaseInboxConfigUpdate, PurchaseInboxConfigResponse,
     SyncInboxResponse, UploadXmlResponse,
-    Perform3WayMatchRequest, Perform3WayMatchResponse,
+    Perform3WayMatchRequest, Perform3WayMatchResponse, AssociatePurchaseOrderRequest,
     SupplierNcRequestResponse, ResolveSupplierNcRequest,
     SupplierProductItemResponse, ProductInvoiceOptionResponse,
     SupplierReturnCreateInput, SupplierReturnRejectInput, SupplierReturnCompleteInput,
@@ -726,6 +726,7 @@ async def upload_invoice_xml(
     company_id: str,
     file: UploadFile = File(...),
     user_id: Optional[str] = Form(None),
+    purchase_order_id: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db)
 ):
     try:
@@ -739,7 +740,8 @@ async def upload_invoice_xml(
             xml_raw=xml_str,
             origen="upload_manual",
             origen_info=f"Archivo: {file.filename}",
-            user_id=user_id
+            user_id=user_id,
+            purchase_order_id=purchase_order_id,
         )
         await db.commit()
         return {
@@ -755,6 +757,7 @@ async def upload_invoice_xml(
             "items_mapeados": res.get("items_mapeados", 0),
             "purchase_order_id": res.get("purchase_order_id"),
             "purchase_order_numero": res.get("purchase_order_numero"),
+            "matching": res.get("matching"),
             "mensaje": res.get("mensaje") or "Factura electrónica y sus ítems procesados exitosamente."
         }
     except Exception as e:
@@ -777,6 +780,106 @@ async def reconcile_invoice(body: Perform3WayMatchRequest, db: AsyncSession = De
         )
     except Exception as e:
         logger.error(f"Error en 3-Way Match: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/purchases/invoices/{invoice_id}/associate-po", response_model=Perform3WayMatchResponse)
+async def associate_po_to_invoice(
+    invoice_id: str,
+    body: AssociatePurchaseOrderRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        from api.src.financial.models import SupplierInvoice
+        from sqlalchemy import select
+        import uuid
+
+        inv_uuid = uuid.UUID(invoice_id)
+        po_uuid = body.purchase_order_id
+
+        inv_q = select(SupplierInvoice).where(SupplierInvoice.id == inv_uuid)
+        inv_res = await db.execute(inv_q)
+        invoice = inv_res.scalar_one_or_none()
+        if not invoice:
+            raise HTTPException(status_code=404, detail="Factura no encontrada.")
+
+        invoice.purchase_order_id = po_uuid
+        await db.commit()
+
+        return await matching_service.perform_3way_match(
+            db=db,
+            invoice_id=invoice_id,
+            user_id=str(body.user_id) if body.user_id else None
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al asociar Pedido a Factura: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/companies/{company_id}/purchase-orders/{order_id}/receive-invoice")
+async def receive_invoice_for_order(
+    company_id: str,
+    order_id: str,
+    file: Optional[UploadFile] = File(None),
+    invoice_id: Optional[str] = Form(None),
+    user_id: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        import uuid
+        from api.src.financial.models import SupplierInvoice
+        from sqlalchemy import select
+
+        po_uuid = uuid.UUID(order_id)
+
+        if file:
+            content = await file.read()
+            dte_data = sifen_xml_parser.parse_sifen_xml(content)
+            xml_str = content.decode("utf-8", errors="replace")
+            res = await imap_service.ingest_parsed_dte(
+                db=db,
+                company_id=company_id,
+                dte_data=dte_data,
+                xml_raw=xml_str,
+                origen="recepcion_orden",
+                origen_info=f"Recibido para Pedido {order_id} - Archivo: {file.filename}",
+                user_id=user_id,
+                purchase_order_id=order_id
+            )
+            await db.commit()
+            match_res = await matching_service.perform_3way_match(db, res["id"], user_id)
+            return {
+                "success": True,
+                "factura_id": res["id"],
+                "numero_factura": res.get("numero_factura"),
+                "total": res.get("total"),
+                "matching": match_res
+            }
+        elif invoice_id:
+            inv_uuid = uuid.UUID(invoice_id)
+            inv_q = select(SupplierInvoice).where(SupplierInvoice.id == inv_uuid)
+            inv_res = await db.execute(inv_q)
+            invoice = inv_res.scalar_one_or_none()
+            if not invoice:
+                raise HTTPException(status_code=404, detail="Factura no encontrada.")
+            invoice.purchase_order_id = po_uuid
+            await db.commit()
+            match_res = await matching_service.perform_3way_match(db, invoice_id, user_id)
+            return {
+                "success": True,
+                "factura_id": str(invoice.id),
+                "numero_factura": invoice.numero_factura,
+                "total": float(invoice.total),
+                "matching": match_res
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Debe proporcionar un archivo XML o seleccionar una factura existente.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al recibir factura para pedido: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
 
 

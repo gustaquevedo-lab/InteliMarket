@@ -232,6 +232,20 @@ export default function PurchasesPage() {
   })
   const [resolvingNc, setResolvingNc] = useState(false)
 
+  // Estados para Recepción de Factura y Matching contra Pedido
+  const [showReceiveInvoiceModal, setShowReceiveInvoiceModal] = useState(false)
+  const [selectedPoForInvoiceReceipt, setSelectedPoForInvoiceReceipt] = useState<PurchaseOrder | null>(null)
+  const [receivingInvoiceMode, setReceivingInvoiceMode] = useState<"xml" | "existente">("xml")
+  const [receivingInvoiceFile, setReceivingInvoiceFile] = useState<File | null>(null)
+  const [selectedExistingInvoiceId, setSelectedExistingInvoiceId] = useState<string>("")
+  const [processingInvoiceReceipt, setProcessingInvoiceReceipt] = useState(false)
+  const [receiptMatchingResult, setReceiptMatchingResult] = useState<any | null>(null)
+  const [dragOverOrderXml, setDragOverOrderXml] = useState(false)
+  const [showAssociatePoModal, setShowAssociatePoModal] = useState(false)
+  const [invoiceToAssociatePo, setInvoiceToAssociatePo] = useState<any | null>(null)
+  const [targetPoIdForAssociation, setTargetPoIdForAssociation] = useState<string>("")
+  const [associatingPo, setAssociatingPo] = useState(false)
+
   // Adición extraordinaria en recepción
   const [extraordinarySearch, setExtraordinarySearch] = useState("")
   const [extraordinaryResults, setExtraordinaryResults] = useState<Product[]>([])
@@ -1380,6 +1394,80 @@ export default function PurchasesPage() {
     }
   }
 
+  // ── Handlers Recepción de Factura y Matching contra Pedido ─────────────────
+  const handleOpenReceiveInvoiceModal = (po: PurchaseOrder) => {
+    setSelectedPoForInvoiceReceipt(po)
+    setReceivingInvoiceMode("xml")
+    setReceivingInvoiceFile(null)
+    setSelectedExistingInvoiceId("")
+    setReceiptMatchingResult(null)
+    setShowReceiveInvoiceModal(true)
+  }
+
+  const handleProcessReceiveInvoice = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedPoForInvoiceReceipt?.id) return
+    if (receivingInvoiceMode === "xml" && !receivingInvoiceFile) {
+      toast.error("Archivo requerido", "Por favor seleccione un archivo XML de Factura Electrónica.")
+      return
+    }
+    if (receivingInvoiceMode === "existente" && !selectedExistingInvoiceId) {
+      toast.error("Factura requerida", "Por favor seleccione una factura existente de la lista.")
+      return
+    }
+
+    setProcessingInvoiceReceipt(true)
+    try {
+      const res = await api.purchases.receiveInvoiceForOrder(
+        selectedPoForInvoiceReceipt.id,
+        {
+          file: receivingInvoiceFile || undefined,
+          invoice_id: selectedExistingInvoiceId || undefined,
+          user_id: user?.id,
+        }
+      )
+
+      if (res.success) {
+        setReceiptMatchingResult(res.matching)
+        if (res.matching?.estado_matching === "match_perfecto") {
+          toast.success("¡Match Exacto con el Pedido!", res.matching.mensaje || "Los valores y precios coinciden 100%.")
+        } else {
+          toast.warning("Discrepancia Detectada", res.matching?.mensaje || "Se detectaron diferencias y la factura fue bloqueada para pago.")
+        }
+        fetchAll()
+      } else {
+        toast.error("Error al procesar", res.error || "No se pudo procesar la recepción.")
+      }
+    } catch (err: any) {
+      toast.error("Error al recibir factura", err.message)
+    } finally {
+      setProcessingInvoiceReceipt(false)
+    }
+  }
+
+  const handleOpenAssociatePo = (inv: any) => {
+    setInvoiceToAssociatePo(inv)
+    setTargetPoIdForAssociation(inv.purchase_order_id || "")
+    setShowAssociatePoModal(true)
+  }
+
+  const handleSaveAssociatePo = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!invoiceToAssociatePo?.id || !targetPoIdForAssociation) return
+    setAssociatingPo(true)
+    try {
+      const res = await api.purchases.associateInvoiceToPO(invoiceToAssociatePo.id, targetPoIdForAssociation, user?.id)
+      toast.success("Pedido Asociado", res.mensaje || "Se actualizó la vinculación y se ejecutó el matching.")
+      setShowAssociatePoModal(false)
+      fetchAll()
+      setMatchResult(res)
+      setShowMatchModal(true)
+    } catch (err: any) {
+      toast.error("Error al asociar pedido", err.message)
+    } finally {
+      setAssociatingPo(false)
+    }
+  }
 
   const handleSaveRequisition = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -3262,6 +3350,16 @@ export default function PurchasesPage() {
                                 </button>
                               )}
 
+                              {["confirmado", "enviada", "enviado", "parcial"].includes(po.estado || "") && (
+                                <button
+                                  onClick={() => handleOpenReceiveInvoiceModal(po)}
+                                  className="p-1.5 rounded-lg bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400 hover:bg-teal-100 transition-colors font-bold text-[10px] flex items-center gap-1"
+                                  title="Recibir Factura y Validar Match con Pedido"
+                                >
+                                  <Receipt className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
                               {po.estado === "borrador" && po.id && (
                                 <button
                                   onClick={() => handleCancelPO(po.id!)}
@@ -3569,6 +3667,7 @@ export default function PurchasesPage() {
                     <tr>
                       <th className="p-3">N° Factura Fiscal</th>
                       <th className="p-3">Proveedor</th>
+                      <th className="p-3">Pedido / OC</th>
                       <th className="p-3">Emisión</th>
                       <th className="p-3">Vencimiento</th>
                       <th className="p-3 text-right">Total Factura</th>
@@ -3593,6 +3692,30 @@ export default function PurchasesPage() {
                         </td>
                         <td className="p-3 font-medium text-gray-700 dark:text-gray-300 line-clamp-1 max-w-[180px]" title={inv.supplier_nombre}>
                           {inv.supplier_nombre || "Proveedor"}
+                        </td>
+                        <td className="p-3">
+                          {inv.purchase_order_id ? (
+                            <div className="flex flex-col">
+                              <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                                {orders.find(o => o.id === inv.purchase_order_id)?.numero || inv.purchase_order_numero || "OC Vinculada"}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenAssociatePo(inv)}
+                                className="text-[10px] text-gray-400 hover:text-indigo-500 underline text-left"
+                              >
+                                Cambiar
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAssociatePo(inv)}
+                              className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200"
+                            >
+                              + Vincular Pedido
+                            </button>
+                          )}
                         </td>
                         <td className="p-3 text-gray-500 font-mono">
                           {inv.fecha_emision ? formatDate(inv.fecha_emision) : "—"}
@@ -6293,6 +6416,414 @@ export default function PurchasesPage() {
                 Cerrar Auditoría
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: RECIBIR Y VALIDAR FACTURA CONTRA PEDIDO
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showReceiveInvoiceModal && selectedPoForInvoiceReceipt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-4xl w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[92vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <div>
+                <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                  <Receipt className="w-5 h-5 text-indigo-600" />
+                  Recibir Factura & Validar Match con Pedido
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Pedido <strong>{selectedPoForInvoiceReceipt.numero}</strong> • Proveedor: <strong>{selectedPoForInvoiceReceipt.supplier?.razon_social}</strong>
+                </p>
+              </div>
+              <button
+                onClick={() => { setShowReceiveInvoiceModal(false); setReceiptMatchingResult(null); }}
+                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Resumen del Pedido Pactado */}
+            <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap items-center justify-between gap-4 text-xs">
+              <div>
+                <span className="text-[10px] text-gray-400 uppercase font-bold block">Proveedor</span>
+                <span className="font-bold text-gray-800 dark:text-gray-200">
+                  {selectedPoForInvoiceReceipt.supplier?.razon_social} ({selectedPoForInvoiceReceipt.supplier?.ruc || "Sin RUC"})
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-gray-400 uppercase font-bold block">Total Pactado en Pedido</span>
+                <span className="font-mono font-extrabold text-base text-indigo-600 dark:text-indigo-400">
+                  {formatPYG(selectedPoForInvoiceReceipt.total || 0)}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-gray-400 uppercase font-bold block">Estado Actual Pedido</span>
+                <span className="font-bold capitalize text-slate-700 dark:text-slate-300">
+                  {selectedPoForInvoiceReceipt.estado}
+                </span>
+              </div>
+            </div>
+
+            {receiptMatchingResult ? (
+              /* RESULTADO DEL MATCHING EN TIEMPO REAL */
+              <div className="space-y-4">
+                {/* Banner Semáforo */}
+                <div className={`p-4 rounded-xl border flex items-center justify-between ${
+                  receiptMatchingResult.estado_matching === "match_perfecto"
+                    ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200"
+                    : "bg-rose-50 dark:bg-rose-950/20 border-rose-300 dark:border-rose-800/60 text-rose-900 dark:text-rose-200"
+                }`}>
+                  <div className="flex items-center gap-3">
+                    {receiptMatchingResult.estado_matching === "match_perfecto" ? (
+                      <CheckCircle2 className="w-7 h-7 text-emerald-600 shrink-0" />
+                    ) : (
+                      <ShieldAlert className="w-7 h-7 text-rose-600 shrink-0" />
+                    )}
+                    <div>
+                      <h4 className="font-bold text-sm">
+                        {receiptMatchingResult.estado_matching === "match_perfecto"
+                          ? "¡Match Conforme! El valor de la factura coincide con el Pedido"
+                          : "Discrepancia con el Pedido — Factura Bloqueada para Tesorería"}
+                      </h4>
+                      <p className="text-xs opacity-90 mt-0.5">
+                        {receiptMatchingResult.mensaje}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Métricas clave */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Total Pedido Pactado</span>
+                    <p className="text-base font-extrabold font-mono text-gray-900 dark:text-white mt-1">
+                      {formatPYG(receiptMatchingResult.purchase_order_total ?? selectedPoForInvoiceReceipt.total ?? 0)}
+                    </p>
+                  </div>
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Total Factura Recibida</span>
+                    <p className="text-base font-extrabold font-mono text-indigo-600 mt-1">
+                      {formatPYG(receiptMatchingResult.total_factura || receiptMatchingResult.total_facturado || 0)}
+                    </p>
+                  </div>
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Diferencia con Pedido</span>
+                    <p className={`text-base font-extrabold font-mono mt-1 ${
+                      Math.abs(receiptMatchingResult.diferencia_total || receiptMatchingResult.diferencia_pedido_monto || 0) <= 10
+                        ? "text-emerald-600"
+                        : "text-rose-600"
+                    }`}>
+                      {formatPYG(receiptMatchingResult.diferencia_total || receiptMatchingResult.diferencia_pedido_monto || 0)}
+                    </p>
+                  </div>
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Control Tesorería</span>
+                    <p className={`text-xs font-bold mt-1 ${
+                      receiptMatchingResult.bloqueada_para_pago ? "text-rose-600" : "text-emerald-600"
+                    }`}>
+                      {receiptMatchingResult.bloqueada_para_pago ? "PAGO RETENIDO" : "HABILITADA PAGO"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Banner de Solicitud de NC emitida */}
+                {receiptMatchingResult.solicitud_nc && (
+                  <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                        <FileText className="w-4 h-4 text-amber-600" />
+                        Solicitud de Nota de Crédito Emitida Automáticamente
+                      </span>
+                      <span className="font-mono font-bold text-amber-900 dark:text-amber-200">
+                        {receiptMatchingResult.solicitud_nc.numero_solicitud}
+                      </span>
+                    </div>
+                    <p className="text-amber-800 dark:text-amber-300">
+                      Monto Reclamado: <strong>{formatPYG(receiptMatchingResult.solicitud_nc.monto_reclamado || 0)}</strong>.
+                      Regla Supermercado: <em>Sin entrega de Nota de Crédito por el sobreprecio/faltante, no se procesa ningún pago.</em>
+                    </p>
+                  </div>
+                )}
+
+                {/* Tabla de Comparación Ítem por Ítem */}
+                <div className="space-y-2">
+                  <h5 className="text-xs font-bold uppercase tracking-wider text-gray-500">
+                    Auditoría Ítem por Ítem: Factura vs Pedido
+                  </h5>
+                  <div className="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-xl">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px]">
+                        <tr>
+                          <th className="p-2.5">Producto</th>
+                          <th className="p-2.5 text-right">Precio Pedido</th>
+                          <th className="p-2.5 text-right">Precio Factura</th>
+                          <th className="p-2.5 text-right">Cant. Pedida</th>
+                          <th className="p-2.5 text-right">Cant. Facturada</th>
+                          <th className="p-2.5 text-right">Diferencia</th>
+                          <th className="p-2.5">Estado / Motivo</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                        {(receiptMatchingResult.items || receiptMatchingResult.discrepancias || []).map((it: any, idx: number) => {
+                          const isOk = it.estado === "conforme"
+                          return (
+                            <tr key={idx} className={isOk ? "" : "bg-rose-50/40 dark:bg-rose-950/10"}>
+                              <td className="p-2.5 font-medium text-gray-900 dark:text-white">
+                                {it.descripcion}
+                                {it.codigo_proveedor && (
+                                  <span className="text-[10px] text-gray-400 block font-mono">Cód: {it.codigo_proveedor}</span>
+                                )}
+                              </td>
+                              <td className="p-2.5 text-right font-mono text-gray-600 dark:text-gray-300">
+                                {it.precio_orden !== null && it.precio_orden !== undefined ? formatPYG(it.precio_orden) : "—"}
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-bold text-gray-900 dark:text-white">
+                                {formatPYG(it.precio_facturado || 0)}
+                              </td>
+                              <td className="p-2.5 text-right font-mono text-gray-600 dark:text-gray-300">
+                                {it.cantidad_ordenada !== null && it.cantidad_ordenada !== undefined ? it.cantidad_ordenada : "—"}
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-bold">
+                                {it.cantidad_facturada}
+                              </td>
+                              <td className={`p-2.5 text-right font-mono font-black ${it.diferencia_monto > 0 ? "text-rose-600" : "text-emerald-600"}`}>
+                                {formatPYG(it.diferencia_monto || 0)}
+                              </td>
+                              <td className="p-2.5">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  isOk
+                                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                    : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
+                                }`}>
+                                  {it.motivos || (isOk ? "Conforme" : it.estado)}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setReceiptMatchingResult(null)}
+                    className="btn-secondary text-xs px-4 py-2"
+                  >
+                    Recibir Otra Factura
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowReceiveInvoiceModal(false); setReceiptMatchingResult(null); }}
+                    className="btn-primary text-xs px-6 py-2"
+                  >
+                    Finalizar y Cerrar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* FORMULARIO DE CARGA / RECEPCIÓN */
+              <form onSubmit={handleProcessReceiveInvoice} className="space-y-4">
+                <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setReceivingInvoiceMode("xml")}
+                    className={`pb-2 font-bold px-3 transition-colors ${
+                      receivingInvoiceMode === "xml"
+                        ? "border-b-2 border-indigo-600 text-indigo-600 dark:text-indigo-400"
+                        : "text-gray-500 hover:text-gray-800"
+                    }`}
+                  >
+                    Subir Archivo XML SIFEN
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReceivingInvoiceMode("existente")}
+                    className={`pb-2 font-bold px-3 transition-colors ${
+                      receivingInvoiceMode === "existente"
+                        ? "border-b-2 border-indigo-600 text-indigo-600 dark:text-indigo-400"
+                        : "text-gray-500 hover:text-gray-800"
+                    }`}
+                  >
+                    Seleccionar Factura Existente de Bandeja
+                  </button>
+                </div>
+
+                {receivingInvoiceMode === "xml" ? (
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setDragOverOrderXml(true); }}
+                    onDragLeave={() => setDragOverOrderXml(false)}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      setDragOverOrderXml(false)
+                      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                        setReceivingInvoiceFile(e.dataTransfer.files[0])
+                      }
+                    }}
+                    className={`p-6 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center text-center transition-all ${
+                      dragOverOrderXml
+                        ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40"
+                        : "border-slate-300 dark:border-slate-700 hover:border-indigo-400 bg-white dark:bg-slate-800/90"
+                    }`}
+                  >
+                    <label className="cursor-pointer w-full flex flex-col items-center justify-center">
+                      <input
+                        type="file"
+                        accept=".xml"
+                        className="hidden"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            setReceivingInvoiceFile(e.target.files[0])
+                          }
+                        }}
+                      />
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 flex items-center justify-center mb-3 text-indigo-600">
+                        <FileText className="w-6 h-6" />
+                      </div>
+                      {receivingInvoiceFile ? (
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                            <CheckCircle2 className="w-4 h-4" /> {receivingInvoiceFile.name}
+                          </span>
+                          <span className="text-[10px] text-gray-400 block">
+                            {(receivingInvoiceFile.size / 1024).toFixed(1)} KB — Listo para procesar y validar
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold text-gray-800 dark:text-gray-200">
+                            Arrastra el archivo XML de la factura aquí o haz click para buscar
+                          </span>
+                          <span className="text-[10px] text-gray-400 block">
+                            Formato estándar SIFEN (Paraguay)
+                          </span>
+                        </div>
+                      )}
+                    </label>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                      Seleccione una factura de este proveedor ingresada en el sistema:
+                    </label>
+                    <select
+                      value={selectedExistingInvoiceId}
+                      onChange={(e) => setSelectedExistingInvoiceId(e.target.value)}
+                      className="input-field text-xs w-full"
+                    >
+                      <option value="">-- Seleccione un comprobante --</option>
+                      {allSupplierInvoices
+                        .filter(i => !selectedPoForInvoiceReceipt.supplier_id || i.supplier_id === selectedPoForInvoiceReceipt.supplier_id)
+                        .map(inv => (
+                          <option key={inv.id} value={inv.id}>
+                            Factura {inv.numero_factura} ({inv.fecha_emision ? formatDate(inv.fecha_emision) : "S/F"}) — Total: {formatPYG(inv.total || 0)} {inv.purchase_order_id ? "(Ya vinculada a otra OC)" : ""}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setShowReceiveInvoiceModal(false)}
+                    className="btn-secondary text-xs px-4 py-2"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={processingInvoiceReceipt || (receivingInvoiceMode === "xml" && !receivingInvoiceFile) || (receivingInvoiceMode === "existente" && !selectedExistingInvoiceId)}
+                    className="btn-primary text-xs px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {processingInvoiceReceipt ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Validando Match con Pedido...
+                      </>
+                    ) : (
+                      <>
+                        <Scale className="w-4 h-4" />
+                        Procesar y Validar Match
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: VINCULAR FACTURA EXISTENTE A PEDIDO
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showAssociatePoModal && invoiceToAssociatePo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-md w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <Link2 className="w-5 h-5 text-indigo-600" /> Vincular a Pedido / OC
+              </h3>
+              <button
+                onClick={() => setShowAssociatePoModal(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl text-xs space-y-1 border border-slate-200 dark:border-slate-700">
+              <p>Factura: <strong className="font-mono">{invoiceToAssociatePo.numero_factura}</strong></p>
+              <p>Proveedor: <strong>{invoiceToAssociatePo.supplier_nombre}</strong></p>
+              <p>Total Factura: <strong className="font-mono text-indigo-600">{formatPYG(invoiceToAssociatePo.total || 0)}</strong></p>
+            </div>
+
+            <form onSubmit={handleSaveAssociatePo} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                  Seleccione el Pedido (Orden de Compra):
+                </label>
+                <select
+                  value={targetPoIdForAssociation}
+                  onChange={(e) => setTargetPoIdForAssociation(e.target.value)}
+                  className="input-field text-xs w-full"
+                  required
+                >
+                  <option value="">-- Seleccionar Pedido --</option>
+                  {orders
+                    .filter(o => !invoiceToAssociatePo.supplier_id || o.supplier_id === invoiceToAssociatePo.supplier_id)
+                    .map(o => (
+                      <option key={o.id} value={o.id}>
+                        {o.numero} — Total: {formatPYG(o.total || 0)} ({o.estado})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setShowAssociatePoModal(false)}
+                  className="btn-secondary text-xs px-4 py-2"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={associatingPo || !targetPoIdForAssociation}
+                  className="btn-primary text-xs px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center gap-2 disabled:opacity-50"
+                >
+                  {associatingPo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Scale className="w-4 h-4" />}
+                  Vincular y Auditar Match
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
