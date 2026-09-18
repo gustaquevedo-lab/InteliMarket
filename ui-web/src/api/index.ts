@@ -930,8 +930,72 @@ export interface AgreementVolume { id: string; agreement_id?: string; supplier_i
 export interface SupplierNegotiation { id: string; agreement_id?: string; supplier_id?: string; fecha?: string; tema?: string; resultado?: string; compromisos?: string; proxima_reunion?: string; estado?: string; observaciones?: string; created_at?: string }
 export interface InteliContEntry { id: string; company_id?: string; fecha?: string; tipo?: string; numero?: string; concepto?: string; monto_debe?: number; monto_haber?: number; cuenta_codigo?: string; cuenta_nombre?: string; documento_tipo?: string; documento_numero?: string; estado?: string; error_mensaje?: string; created_at?: string; updated_at?: string }
 export interface InteliAuditEvent { id: string; company_id?: string; fecha?: string; tipo?: string; modulo?: string; entidad_id?: string; entidad_tipo?: string; usuario_id?: string; accion?: string; datos_anteriores?: Record<string, unknown>; datos_nuevos?: Record<string, unknown>; ip_address?: string; user_agent?: string; riesgo_score?: number; estado?: string; created_at?: string }
+export interface PaymentOrderAllocation {
+  id: string;
+  invoice_id: string;
+  numero_factura?: string;
+  timbrado?: string;
+  fecha_emision?: string;
+  fecha_vencimiento?: string;
+  monto_aplicado: number;
+  monto_retencion: number;
+  saldo_anterior: number;
+  saldo_restante: number;
+}
+
+export interface PaymentOrderDisbursement {
+  id: string;
+  forma_pago: string;
+  monto: number;
+  moneda: string;
+  tipo_cambio: number;
+  monto_pyg: number;
+  bank_account_id?: string | null;
+  banco_nombre?: string | null;
+  referencia_transferencia?: string | null;
+  cheque_id?: string | null;
+  numero_cheque?: string | null;
+  banco_cheque?: string | null;
+  fecha_cheque_emision?: string | null;
+  fecha_cheque_vencimiento?: string | null;
+  es_cheque_diferido?: boolean;
+  titular_cheque?: string | null;
+  petty_cash_fund_id?: string | null;
+  fondo_nombre?: string | null;
+  credit_note_id?: string | null;
+  numero_nc?: string | null;
+  comprobante_url?: string | null;
+  observaciones?: string | null;
+  created_at?: string;
+}
+
+export interface SupplierPaymentOrder {
+  id: string;
+  company_id: string;
+  supplier_id: string;
+  supplier_nombre?: string;
+  supplier_ruc?: string;
+  numero_orden: string;
+  fecha_emision: string;
+  fecha_pago?: string | null;
+  estado: 'registrado' | 'pagado' | 'anulado' | string;
+  moneda: string;
+  monto_total: number;
+  monto_retenido: number;
+  monto_neto: number;
+  observaciones?: string | null;
+  recibo_proveedor?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  total_facturas?: number;
+  formas_pago_resumen?: string;
+  allocations?: PaymentOrderAllocation[];
+  disbursements?: PaymentOrderDisbursement[];
+}
+
 export interface SueldokPayroll { id: string; company_id?: string; periodo?: string; fecha_inicio?: string; fecha_fin?: string; total_neto?: number; total_bruto?: number; total_descuentos?: number; total_aportes?: number; cantidad_empleados?: number; estado?: string; created_at?: string; updated_at?: string }
 export interface Promotion {
+
   id: string
   company_id?: string
   nombre: string
@@ -3176,6 +3240,20 @@ export const api = {
       pay: (id: string, data: any) => client.post<{ pending_approval: boolean; request_id?: string; id?: string; monto: number; estado?: string }>(`/v1/financial/invoices/${id}/pay`, data),
       byReceipt: (receiptId: string) => client.get<{ found: boolean; id?: string; numero_factura?: string; total?: number; estado?: string }>(`/v1/financial/invoices/by-receipt/${receiptId}`),
       downloadStatementPdf: (supplierId: string) => downloadAuthenticated(`/v1/financial/suppliers/${supplierId}/statement.pdf`, { company_id: COMPANY_ID }, `estado_cuenta_proveedor_${supplierId.slice(0, 8)}.pdf`),
+    },
+    paymentOrders: {
+      list: (params?: { supplier_id?: string; estado?: string; forma_pago?: string; fecha_desde?: string; fecha_hasta?: string; limit?: number; offset?: number }) =>
+        client.get<{ items: SupplierPaymentOrder[]; total: number }>("/v1/financial/payment-orders", { company_id: COMPANY_ID, ...params } as any),
+      get: (orderId: string) =>
+        client.get<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}`, { company_id: COMPANY_ID } as any),
+      create: (data: { supplier_id: string; fecha_emision?: string; observaciones?: string; recibo_proveedor?: string; allocations: any[]; disbursements?: any[] }) =>
+        client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders?company_id=${COMPANY_ID}`, data),
+      disburse: (orderId: string, data: { fecha_pago?: string; recibo_proveedor?: string; observaciones?: string; disbursements: any[] }) =>
+        client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}/disburse?company_id=${COMPANY_ID}`, data),
+      downloadPdf: (orderId: string, numOrden: string) =>
+        downloadAuthenticated(`/v1/financial/payment-orders/${orderId}/pdf`, { company_id: COMPANY_ID }, `recibo_orden_pago_${numOrden}.pdf`),
+      exportReportPdf: (params?: { supplier_id?: string; estado?: string; forma_pago?: string; fecha_desde?: string; fecha_hasta?: string }) =>
+        downloadAuthenticated("/v1/financial/payment-orders/export/report.pdf", { company_id: COMPANY_ID, ...params }, `reporte_pagos_proveedores_${new Date().toISOString().slice(0, 10)}.pdf`),
     },
     aging: () => client.get<any[]>("/v1/financial/aging", { company_id: COMPANY_ID } as any),
     apDashboard: () => client.get<APDashboard>("/v1/financial/dashboard", { company_id: COMPANY_ID } as any),

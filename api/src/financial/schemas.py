@@ -491,3 +491,122 @@ class SupplierCreditNoteApply(BaseModel):
     monto: float
     observaciones: Optional[str] = None
 
+
+# ── Supplier Payment Orders (OP Multifactura y Multimedio) ─────────────────────────
+
+class PaymentOrderAllocationCreate(BaseModel):
+    invoice_id: UUID
+    monto_aplicado: Decimal = Field(gt=0)
+    monto_retencion: Decimal = Decimal("0")
+
+
+class PaymentOrderDisbursementCreate(BaseModel):
+    forma_pago: str  # boveda, fondo_fijo, transferencia, cheque, nota_credito, otro
+    monto: Decimal = Field(gt=0)
+    moneda: str = "PYG"
+    tipo_cambio: Decimal = Decimal("1")
+    bank_account_id: Optional[UUID] = None
+    referencia_transferencia: Optional[str] = None
+    numero_cheque: Optional[str] = None
+    banco_cheque: Optional[str] = None
+    fecha_cheque_emision: Optional[date] = None
+    fecha_cheque_vencimiento: Optional[date] = None
+    es_cheque_diferido: bool = False
+    titular_cheque: Optional[str] = None
+    petty_cash_fund_id: Optional[UUID] = None
+    credit_note_id: Optional[UUID] = None
+    comprobante_url: Optional[str] = None
+    observaciones: Optional[str] = None
+
+
+class SupplierPaymentOrderCreate(BaseModel):
+    supplier_id: UUID
+    fecha_emision: Optional[date] = None
+    observaciones: Optional[str] = None
+    recibo_proveedor: Optional[str] = None
+    allocations: list[PaymentOrderAllocationCreate]
+    disbursements: Optional[list[PaymentOrderDisbursementCreate]] = None
+
+
+class SupplierPaymentOrderDisburse(BaseModel):
+    fecha_pago: Optional[date] = None
+    recibo_proveedor: Optional[str] = None
+    observaciones: Optional[str] = None
+    disbursements: list[PaymentOrderDisbursementCreate]
+
+
+class PaymentOrderAllocationResponse(BaseModel):
+    id: UUID
+    invoice_id: UUID
+    numero_factura: Optional[str] = None
+    timbrado: Optional[str] = None
+    fecha_emision: Optional[date] = None
+    fecha_vencimiento: Optional[date] = None
+    monto_aplicado: Decimal
+    monto_retencion: Decimal
+    saldo_anterior: Decimal
+    saldo_restante: Decimal
+
+    class Config:
+        from_attributes = True
+
+
+class PaymentOrderDisbursementResponse(BaseModel):
+    id: UUID
+    forma_pago: str
+    monto: Decimal
+    moneda: str
+    tipo_cambio: Decimal
+    monto_pyg: Decimal
+    bank_account_id: Optional[UUID] = None
+    banco_nombre: Optional[str] = None
+    referencia_transferencia: Optional[str] = None
+    cheque_id: Optional[UUID] = None
+    numero_cheque: Optional[str] = None
+    banco_cheque: Optional[str] = None
+    fecha_cheque_emision: Optional[date] = None
+    fecha_cheque_vencimiento: Optional[date] = None
+    es_cheque_diferido: bool = False
+    titular_cheque: Optional[str] = None
+    petty_cash_fund_id: Optional[UUID] = None
+    fondo_nombre: Optional[str] = None
+    credit_note_id: Optional[UUID] = None
+    numero_nc: Optional[str] = None
+    comprobante_url: Optional[str] = None
+    observaciones: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SupplierPaymentOrderResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    supplier_id: UUID
+    supplier_nombre: Optional[str] = None
+    supplier_ruc: Optional[str] = None
+    numero_orden: str
+    fecha_emision: date
+    fecha_pago: Optional[date] = None
+    estado: str  # registrado, pagado, anulado
+    moneda: str
+    monto_total: Decimal
+    monto_retenido: Decimal
+    monto_neto: Decimal
+    observaciones: Optional[str] = None
+    recibo_proveedor: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    total_facturas: Optional[int] = 0
+    formas_pago_resumen: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SupplierPaymentOrderDetailResponse(SupplierPaymentOrderResponse):
+    allocations: list[PaymentOrderAllocationResponse] = []
+    disbursements: list[PaymentOrderDisbursementResponse] = []
+
+

@@ -1,18 +1,20 @@
 import Supplier360Modal from "../purchases/Supplier360Modal"
+import SupplierPaymentOrderModal from "./SupplierPaymentOrderModal"
+import SupplierPaymentOrderDetailModal from "./SupplierPaymentOrderDetailModal"
 import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   CreditCard, Search, Plus, Filter, Download, Eye, CheckCircle2,
   XCircle, AlertTriangle, Clock, Calendar, RefreshCw, Loader2,
   Building2, User, FileText, ArrowUpRight, DollarSign, Layers,
   Check, X, FileSpreadsheet, ShieldAlert, Sparkles, Info, ArrowRight,
-  TrendingDown, CheckSquare, Square
+  TrendingDown, CheckSquare, Square, Wallet, Printer, FileCheck
 } from "lucide-react"
-import { api } from "../../api"
+import { api, SupplierPaymentOrder } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatCurrency } from "../../utils/format"
 
-type ApTab = "facturas" | "aging" | "lotes" | "historial_pagos"
+type ApTab = "facturas" | "ordenes_pago" | "aging" | "lotes"
 
 export default function PaymentsPage() {
   const toast = useToast()
@@ -23,17 +25,25 @@ export default function PaymentsPage() {
   // Datos reales
   const [invoices, setInvoices] = useState<any[]>([])
   const [paymentRuns, setPaymentRuns] = useState<any[]>([])
+  const [paymentOrders, setPaymentOrders] = useState<SupplierPaymentOrder[]>([])
   const [suppliers, setSuppliers] = useState<any[]>([])
   const [bankAccounts, setBankAccounts] = useState<any[]>([])
 
-  // Filtros
+  // Filtros pestaña Facturas
   const [search, setSearch] = useState("")
   const [filterSupplier, setFilterSupplier] = useState("all")
   const [filterVencimiento, setFilterVencimiento] = useState("all")
   const [selected360SupplierId, setSelected360SupplierId] = useState<string | null>(null)
   const [selected360SupplierNombre, setSelected360SupplierNombre] = useState<string | null>(null)
 
-  // Selección múltiple para Lote de Pago
+  // Filtros pestaña Órdenes de Pago
+  const [searchOrders, setSearchOrders] = useState("")
+  const [filterOrderEstado, setFilterOrderEstado] = useState("all")
+  const [filterOrderFormaPago, setFilterOrderFormaPago] = useState("all")
+  const [filterOrderSupplier, setFilterOrderSupplier] = useState("all")
+  const [exportingReportPdf, setExportingReportPdf] = useState(false)
+
+  // Selección múltiple para Órdenes de Pago y Lotes
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([])
   const [showPaymentRunModal, setShowPaymentRunModal] = useState(false)
   const [savingPaymentRun, setSavingPaymentRun] = useState(false)
@@ -45,34 +55,32 @@ export default function PaymentsPage() {
     notas: "",
   })
 
-  // Modal Pago Individual
-  const [selectedInvoice, setSelectedInvoice] = useState<any>(null)
-  const [showPayModal, setShowPayModal] = useState(false)
-  const [savingPay, setSavingPay] = useState(false)
-  const [payForm, setPayForm] = useState({
-    monto_pago: "",
-    metodo_pago: "transferencia_sipap",
-    bank_account_id: "",
-    numero_comprobante: "",
-    retencion_iva: "0",
-    retencion_renta: "0",
-    observaciones: "",
-  })
+  // Modales de Orden de Pago
+  const [orderModalData, setOrderModalData] = useState<{
+    supplier: any
+    initialInvoices: any[]
+    availableInvoices?: any[]
+    existingOrder?: SupplierPaymentOrder | null
+  } | null>(null)
+
+  const [detailOrder, setDetailOrder] = useState<SupplierPaymentOrder | null>(null)
 
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [invRes, runsRes, supRes, bnkRes] = await Promise.allSettled([
+      const [invRes, runsRes, supRes, bnkRes, ordersRes] = await Promise.allSettled([
         api.financial.payableInvoices(),
         api.financial.paymentRuns.list(),
         api.purchases.listSuppliers(),
         api.financial.banks.list(),
+        api.financial.paymentOrders.list(),
       ])
 
       if (invRes.status === "fulfilled" && Array.isArray(invRes.value)) setInvoices(invRes.value)
       if (runsRes.status === "fulfilled" && Array.isArray(runsRes.value)) setPaymentRuns(runsRes.value)
       if (supRes.status === "fulfilled" && Array.isArray(supRes.value)) setSuppliers(supRes.value)
       if (bnkRes.status === "fulfilled" && Array.isArray(bnkRes.value)) setBankAccounts(bnkRes.value)
+      if (ordersRes.status === "fulfilled" && ordersRes.value?.items) setPaymentOrders(ordersRes.value.items)
     } catch (e: any) {
       toast.error("Error al sincronizar cuentas por pagar", e.message)
     } finally {
@@ -119,6 +127,12 @@ export default function PaymentsPage() {
       }
     })
 
+    const ordenesRegistradas = paymentOrders.filter(o => o.estado === "registrado").length
+    const ordenesPagadas = paymentOrders.filter(o => o.estado === "pagado").length
+    const totalPagadoMes = paymentOrders
+      .filter(o => o.estado === "pagado")
+      .reduce((s, o) => s + Number(o.monto_neto || 0), 0)
+
     return {
       totalDeuda,
       totalFacturas: invoices.length,
@@ -128,9 +142,12 @@ export default function PaymentsPage() {
       porVencer30Count,
       porVencer60Monto,
       porVencerMayor60Monto,
-      proveedoresConDeuda: new Set(invoices.map(i => i.supplier_id || i.supplier_nombre)).size
+      proveedoresConDeuda: new Set(invoices.map(i => i.supplier_id || i.supplier_nombre)).size,
+      ordenesRegistradas,
+      ordenesPagadas,
+      totalPagadoMes,
     }
-  }, [invoices])
+  }, [invoices, paymentOrders])
 
   // Agrupamiento por Proveedor para Matriz de Aging
   const supplierAging = useMemo(() => {
@@ -178,6 +195,7 @@ export default function PaymentsPage() {
     return Object.values(groups).sort((a, b) => b.total - a.total)
   }, [invoices, supplierMap])
 
+  // Filtro facturas
   const filteredInvoices = useMemo(() => {
     return invoices.filter(inv => {
       const matchesSearch = !search ||
@@ -197,7 +215,24 @@ export default function PaymentsPage() {
     })
   }, [invoices, search, filterSupplier, filterVencimiento, supplierMap])
 
-  // Selección múltiple
+  // Filtro órdenes de pago
+  const filteredOrders = useMemo(() => {
+    return paymentOrders.filter(o => {
+      const matchesSearch = !searchOrders ||
+        (o.numero_orden || "").toLowerCase().includes(searchOrders.toLowerCase()) ||
+        (o.supplier_nombre || "").toLowerCase().includes(searchOrders.toLowerCase()) ||
+        (o.recibo_proveedor || "").toLowerCase().includes(searchOrders.toLowerCase())
+
+      const matchesEstado = filterOrderEstado === "all" || o.estado === filterOrderEstado
+      const matchesSupplier = filterOrderSupplier === "all" || o.supplier_id === filterOrderSupplier
+      const matchesFormaPago = filterOrderFormaPago === "all" ||
+        (o.formas_pago_resumen || "").toLowerCase().includes(filterOrderFormaPago.toLowerCase())
+
+      return matchesSearch && matchesEstado && matchesSupplier && matchesFormaPago
+    })
+  }, [paymentOrders, searchOrders, filterOrderEstado, filterOrderSupplier, filterOrderFormaPago])
+
+  // Selección múltiple facturas
   const toggleSelectInvoice = (id: string) => {
     setSelectedInvoices(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
@@ -209,105 +244,140 @@ export default function PaymentsPage() {
     else setSelectedInvoices(filteredInvoices.map(i => i.id))
   }
 
-  const selectedTotal = useMemo(() => {
-    return invoices
-      .filter(i => selectedInvoices.includes(i.id))
-      .reduce((s, i) => s + Number(i.saldo_pendiente || i.total || 0), 0)
+  const selectedInvoicesObjs = useMemo(() => {
+    return invoices.filter(i => selectedInvoices.includes(i.id))
   }, [invoices, selectedInvoices])
 
-  const handleCreatePaymentRun = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (selectedInvoices.length === 0) { toast.error("Seleccioná al menos una factura", ""); return }
-    setSavingPaymentRun(true)
+  const selectedTotal = useMemo(() => {
+    return selectedInvoicesObjs.reduce((s, i) => s + Number(i.saldo_pendiente || i.total || 0), 0)
+  }, [selectedInvoicesObjs])
+
+  // Verificar si las facturas seleccionadas son del mismo proveedor
+  const sameSupplierSelected = useMemo(() => {
+    if (selectedInvoicesObjs.length === 0) return null
+    const firstSupId = selectedInvoicesObjs[0].supplier_id
+    const isSame = selectedInvoicesObjs.every(i => i.supplier_id === firstSupId)
+    if (!isSame) return null
+    return {
+      id: firstSupId,
+      razon_social: selectedInvoicesObjs[0].supplier_nombre || supplierMap[firstSupId] || "Proveedor",
+      ruc: suppliers.find((s: any) => s.id === firstSupId)?.ruc
+    }
+  }, [selectedInvoicesObjs, supplierMap, suppliers])
+
+  // Abrir Modal Orden de Pago para facturas seleccionadas
+  const handleOpenOrderModalForSelection = () => {
+    if (!sameSupplierSelected) {
+      toast.error(
+        "Proveedores Múltiples",
+        "Para emitir una Orden de Pago multifactura, todas las facturas seleccionadas deben ser del mismo proveedor."
+      )
+      return
+    }
+
+    setOrderModalData({
+      supplier: sameSupplierSelected,
+      initialInvoices: selectedInvoicesObjs,
+      availableInvoices: invoices.filter(i => i.supplier_id === sameSupplierSelected.id),
+      existingOrder: null,
+    })
+  }
+
+  // Abrir Modal Orden de Pago individual
+  const handleOpenIndividualOrderModal = (inv: any) => {
+    const sup = {
+      id: inv.supplier_id,
+      razon_social: inv.supplier_nombre || supplierMap[inv.supplier_id] || "Proveedor",
+      ruc: suppliers.find((s: any) => s.id === inv.supplier_id)?.ruc
+    }
+    setOrderModalData({
+      supplier: sup,
+      initialInvoices: [inv],
+      availableInvoices: invoices.filter(i => i.supplier_id === inv.supplier_id),
+      existingOrder: null,
+    })
+  }
+
+  // Abrir Modal para Liquidar una orden previamente registrada
+  const handleOpenDisburseForOrder = async (order: SupplierPaymentOrder) => {
     try {
-      await api.financial.paymentRuns.create({
-        ...runForm,
-        invoice_ids: selectedInvoices,
-        monto_total: selectedTotal,
+      setLoading(true)
+      const detail = await api.financial.paymentOrders.get(order.id)
+      const sup = {
+        id: detail.supplier_id,
+        razon_social: detail.supplier_nombre,
+        ruc: detail.supplier_ruc,
+      }
+      setOrderModalData({
+        supplier: sup,
+        initialInvoices: [],
+        availableInvoices: [],
+        existingOrder: detail,
       })
-      toast.success("Lote de Pago Creado", `Se programó el pago masivo de ${selectedInvoices.length} facturas por ${formatPYG(selectedTotal)}.`)
-      setShowPaymentRunModal(false)
-      setSelectedInvoices([])
-      loadData()
-      setTab("lotes")
     } catch (err: any) {
-      toast.error("Error al crear lote de pago", err.message)
+      toast.error("Error al cargar orden", err.message)
     } finally {
-      setSavingPaymentRun(false)
+      setLoading(false)
     }
   }
 
-  const handleOpenPayModal = (inv: any) => {
-    setSelectedInvoice(inv)
-    setPayForm({
-      monto_pago: String(inv.saldo_pendiente || inv.total || 0),
-      metodo_pago: "transferencia_sipap",
-      bank_account_id: bankAccounts[0]?.id || "",
-      numero_comprobante: "",
-      retencion_iva: "0",
-      retencion_renta: "0",
-      observaciones: `Cancelación factura ${inv.numero_factura}`,
-    })
-    setShowPayModal(true)
+  // Ver detalle de una orden
+  const handleOpenOrderDetail = async (order: SupplierPaymentOrder) => {
+    try {
+      const detail = await api.financial.paymentOrders.get(order.id)
+      setDetailOrder(detail)
+    } catch (err: any) {
+      toast.error("Error al cargar detalle de orden", err.message)
+    }
   }
 
-  const handleSaveIndividualPayment = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!selectedInvoice) return
-    setSavingPay(true)
+  // Descarga directa de reporte consolidado PDF
+  const handleExportReportPdf = async () => {
+    setExportingReportPdf(true)
     try {
-      await api.financial.invoices.pay(selectedInvoice.id, {
-        monto: parseFloat(payForm.monto_pago) || 0,
-        metodo_pago: payForm.metodo_pago,
-        bank_account_id: payForm.bank_account_id || undefined,
-        numero_comprobante: payForm.numero_comprobante || undefined,
-        notas: payForm.observaciones || undefined,
+      await api.financial.paymentOrders.exportReportPdf({
+        estado: filterOrderEstado !== "all" ? filterOrderEstado : undefined,
+        forma_pago: filterOrderFormaPago !== "all" ? filterOrderFormaPago : undefined,
       })
-      toast.success("Pago Registrado", `Se registró el pago de ${formatPYG(parseFloat(payForm.monto_pago) || 0)} para ${selectedInvoice.numero_factura}.`)
-      setShowPayModal(false)
-      setSelectedInvoice(null)
-      loadData()
+      toast.success("Reporte Exportado", "Se generó el reporte consolidado oficial en PDF.")
     } catch (err: any) {
-      toast.error("Error al registrar pago", err.message)
+      toast.error("Error al generar PDF", err.message)
     } finally {
-      setSavingPay(false)
+      setExportingReportPdf(false)
     }
   }
 
   return (
-    <div className="space-y-6 min-w-0 animate-fade-in-up pb-16">
-      {/* 🌟 LUXURY COMMAND DECK HEADER */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-rose-950/90 text-white p-7 border border-rose-500/20 shadow-2xl shadow-rose-950/30">
-        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-rose-500/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+    <div className="space-y-6 pb-20 animate-fade-in max-w-7xl mx-auto px-2 sm:px-4">
+      {/* 🌟 HERO INSTITUCIONAL EXTRA SUPERMERCADO */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-rose-950/40 border border-slate-800/80 p-6 sm:p-8 shadow-2xl backdrop-blur-xl">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-rose-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
+        <div className="absolute bottom-0 left-0 w-80 h-80 bg-orange-500/10 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20" />
 
         <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-          <div className="space-y-3">
+          <div className="space-y-2">
             <div className="flex items-center gap-3">
-              <div className="relative">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-rose-600 to-orange-600 border border-rose-400/30 text-white flex items-center justify-center shadow-lg shadow-rose-500/25">
-                  <Building2 className="w-7 h-7" />
-                </div>
-                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-4 w-4 bg-rose-500 border-2 border-slate-950"></span>
-                </span>
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-rose-600 to-orange-500 flex items-center justify-center shadow-lg shadow-rose-600/30 text-white font-black">
+                <CreditCard className="w-6 h-6" />
               </div>
               <div>
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <span className="text-[10px] font-extrabold tracking-widest text-rose-400 uppercase bg-rose-500/10 px-2.5 py-0.5 rounded-md border border-rose-500/20">
-                    FINANZAS & TESORERÍA · CUENTAS POR PAGAR (AP) & PASIVOS
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Módulo AP & Tesorería
                   </span>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
                     {analytics.totalFacturas} Facturas por Pagar
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    {analytics.ordenesRegistradas} OPs Pendientes
                   </span>
                 </div>
                 <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
-                  Cuentas por Pagar & Vencimientos
+                  Pagos a Proveedores & Órdenes de Pago
                 </h1>
                 <p className="text-xs text-slate-400 font-medium mt-0.5">
-                  Control de facturas comerciales, matriz de antigüedad de saldos (Aging AP), lotes de pago masivo SIPAP y optimización de capital de trabajo
+                  Flujo integral AP de 2 pasos, amortización multifactura/parcial, desembolso multimedio (Bóveda, Fondo Fijo, SIPAP, Cheques Diferidos, NC) y recibos oficiales PDF.
                 </p>
               </div>
             </div>
@@ -323,6 +393,9 @@ export default function PaymentsPage() {
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-amber-300">
                 ⚠️ {analytics.vencidasCount} vencidas ({formatPYG(analytics.vencidasMonto)})
               </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-300">
+                ✅ {formatPYG(analytics.totalPagadoMes)} amortizado
+              </span>
             </div>
           </div>
 
@@ -336,19 +409,23 @@ export default function PaymentsPage() {
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-rose-400" : ""}`} />
             </button>
             <button
-              onClick={() => api.financial.downloadApAgingPdf()}
+              onClick={handleExportReportPdf}
+              disabled={exportingReportPdf}
               className="px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+              title="Exportar Reporte Consolidado Analítico en PDF"
             >
               <Download className="w-4 h-4 text-rose-400" />
-              <span>Aging PDF</span>
+              <span>{exportingReportPdf ? "Generando..." : "Reporte Pagos PDF"}</span>
             </button>
+
+            {/* BOTÓN MULTIFACTURA */}
             {selectedInvoices.length > 0 && (
               <button
-                onClick={() => setShowPaymentRunModal(true)}
+                onClick={handleOpenOrderModalForSelection}
                 className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-rose-500/25 animate-pulse"
               >
-                <CreditCard className="w-4 h-4" />
-                <span>Pagar Selección ({selectedInvoices.length})</span>
+                <Wallet className="w-4 h-4" />
+                <span>Generar OP Multifactura ({selectedInvoices.length})</span>
               </button>
             )}
           </div>
@@ -380,24 +457,24 @@ export default function PaymentsPage() {
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Vencen ≤ 30d</span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">OPs Registradas</span>
               <Clock className="w-4 h-4 text-amber-400" />
             </div>
-            <p className="text-xl font-black font-mono tracking-tight text-amber-400 truncate" title={formatPYG(analytics.porVencer30Monto)}>
-              {formatPYG(analytics.porVencer30Monto)}
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {analytics.ordenesRegistradas}
             </p>
-            <p className="text-[11px] text-slate-400">Próximo vencimiento</p>
+            <p className="text-[11px] text-slate-400">Pendientes liquidación</p>
           </div>
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">31 - 60 Días</span>
-              <Calendar className="w-4 h-4 text-blue-400" />
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">OPs Liquidadas</span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
             </div>
-            <p className="text-xl font-black font-mono tracking-tight text-blue-300 truncate" title={formatPYG(analytics.porVencer60Monto)}>
-              {formatPYG(analytics.porVencer60Monto)}
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {analytics.ordenesPagadas}
             </p>
-            <p className="text-[11px] text-slate-400">Mediano plazo</p>
+            <p className="text-[11px] text-slate-400">Comprobantes listos</p>
           </div>
 
           <div
@@ -413,7 +490,7 @@ export default function PaymentsPage() {
               {analytics.proveedoresConDeuda}
             </p>
             <p className="text-[11px] text-slate-400 group-hover:text-purple-400 flex items-center gap-1 font-bold">
-              Ver listado AP <ArrowRight className="w-3 h-3" />
+              Ver Aging AP <ArrowRight className="w-3 h-3" />
             </p>
           </div>
 
@@ -431,11 +508,12 @@ export default function PaymentsPage() {
       </div>
 
       {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
-      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+      <div className="bg-slate-100 dark:bg-slate-850/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-wrap gap-1.5 shadow-sm">
         {[
-          { id: "facturas", label: "Facturas por Pagar", icon: FileText, count: invoices.length },
+          { id: "facturas", label: "Facturas Comerciales por Pagar", icon: FileText, count: invoices.length },
+          { id: "ordenes_pago", label: "Órdenes de Pago & Recibos AP", icon: Wallet, count: paymentOrders.length },
           { id: "aging", label: "Matriz Aging por Proveedor", icon: Calendar, count: supplierAging.length },
-          { id: "lotes", label: "Lotes de Pago (Payment Runs)", icon: Layers, count: paymentRuns.length },
+          { id: "lotes", label: "Lotes Masivos SIPAP", icon: Layers, count: paymentRuns.length },
         ].map((t) => {
           const Icon = t.icon
           const active = tab === t.id
@@ -451,81 +529,100 @@ export default function PaymentsPage() {
             >
               <Icon className="w-4 h-4" />
               <span>{t.label}</span>
-              {t.count !== undefined && t.count > 0 && (
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
-                  active ? "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
-                }`}>
-                  {t.count}
-                </span>
-              )}
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black ${
+                active
+                  ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                  : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+              }`}>
+                {t.count}
+              </span>
             </button>
           )
         })}
       </div>
 
+      {/* ── TAB 1: FACTURAS POR PAGAR ────────────────────────────────────── */}
       {tab === "facturas" && (
         <div className="space-y-4">
-          {/* Filtros */}
-          <div className="card p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl flex items-center gap-3 flex-wrap text-xs">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por N° factura o proveedor..." className="input text-xs pl-8 w-full" />
-            </div>
-            <select value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)} className="input text-xs w-auto">
-              <option value="all">Todos los Proveedores</option>
-              {suppliers.map((s: any) => <option key={s.id} value={s.id}>{s.razon_social || s.nombre}</option>)}
-            </select>
-            <select value={filterVencimiento} onChange={e => setFilterVencimiento(e.target.value)} className="input text-xs w-auto">
-              <option value="all">Todos los Vencimientos</option>
-              <option value="vencidas">Vencidas (Expiradas)</option>
-              <option value="urgente_7d">Vencen en los próximos 7 días</option>
-              <option value="al_dia">Al día / No vencidas</option>
-            </select>
-
-            {selectedInvoices.length > 0 && (
-              <div className="flex items-center gap-2 bg-rose-50 dark:bg-rose-950/40 px-3 py-1.5 rounded-xl border border-rose-200 dark:border-rose-900/50">
-                <span className="font-bold text-rose-800 dark:text-rose-300">{selectedInvoices.length} seleccionadas ({formatPYG(selectedTotal)})</span>
-                <button onClick={() => setShowPaymentRunModal(true)} className="btn-primary text-[10px] px-2.5 py-1 bg-rose-600 hover:bg-rose-700">
-                  Crear Lote
-                </button>
+          {/* BARRA DE FILTROS */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3 flex-1 min-w-[280px]">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por N° factura, proveedor o RUC..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition"
+                />
               </div>
-            )}
+
+              <select
+                value={filterSupplier}
+                onChange={(e) => setFilterSupplier(e.target.value)}
+                className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-medium max-w-[200px]"
+              >
+                <option value="all">Todos los Proveedores</option>
+                {suppliers.map((s: any) => (
+                  <option key={s.id} value={s.id}>{s.razon_social || s.nombre}</option>
+                ))}
+              </select>
+
+              <select
+                value={filterVencimiento}
+                onChange={(e) => setFilterVencimiento(e.target.value)}
+                className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-medium"
+              >
+                <option value="all">Cualquier Estado</option>
+                <option value="vencidas">Solo Vencidas</option>
+                <option value="urgente_7d">Vencen en ≤ 7 días</option>
+                <option value="al_dia">Al Día (Normal)</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 font-mono">
+                {filteredInvoices.length} facturas
+              </span>
+              {selectedInvoices.length > 0 && (
+                <span className="text-xs font-bold text-rose-500 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 rounded-xl border border-rose-200 dark:border-rose-900/50">
+                  {selectedInvoices.length} marcadas ({formatPYG(selectedTotal)})
+                </span>
+              )}
+            </div>
           </div>
 
-          {/* Tabla de Facturas */}
-          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
-            {loading ? (
-              <div className="flex items-center justify-center py-16 text-gray-400 text-xs gap-2">
-                <Loader2 className="w-5 h-5 animate-spin" /> Cargando {invoices.length || "..."} facturas de proveedores...
-              </div>
-            ) : filteredInvoices.length === 0 ? (
-              <div className="text-center py-16 text-gray-400 text-xs">
-                <CheckCircle2 className="w-10 h-10 mx-auto mb-3 opacity-40 text-emerald-500" />
-                <p className="font-bold text-sm text-emerald-600">Sin facturas pendientes de pago</p>
-                <p className="mt-1">Todas las facturas de proveedores se encuentran conciliadas o no coinciden con los filtros.</p>
+          {/* TABLA DE FACTURAS */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+            {filteredInvoices.length === 0 ? (
+              <div className="text-center py-20 text-slate-400 text-xs">
+                <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p className="font-bold text-sm text-slate-600 dark:text-slate-300">No hay facturas que coincidan</p>
+                <p className="mt-1">Probá cambiando los filtros o el término de búsqueda.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-xs min-w-[850px]">
-                  <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-850/80 text-slate-500 uppercase text-[10px] font-extrabold border-b border-slate-200 dark:border-slate-800">
                     <tr>
-                      <th className="p-3.5 text-center w-10">
-                        <button onClick={selectAllFiltered} className="p-1 hover:text-gray-700">
-                          {selectedInvoices.length === filteredInvoices.length && filteredInvoices.length > 0 ? (
+                      <th className="p-3.5 text-center w-12">
+                        <button onClick={selectAllFiltered} className="p-1 hover:text-rose-600 transition" title="Seleccionar todas">
+                          {selectedInvoices.length > 0 && selectedInvoices.length === filteredInvoices.length ? (
                             <CheckSquare className="w-4 h-4 text-rose-600" />
                           ) : (
-                            <Square className="w-4 h-4 text-gray-400" />
+                            <Square className="w-4 h-4 text-slate-400" />
                           )}
                         </button>
                       </th>
-                      <th className="p-3.5 text-left">N° Factura / Proveedor</th>
-                      <th className="p-3.5 text-left">Vencimiento & Estado</th>
+                      <th className="p-3.5">N° Factura / Proveedor</th>
+                      <th className="p-3.5">Vencimiento & Estado</th>
                       <th className="p-3.5 text-right">Saldo Pendiente</th>
                       <th className="p-3.5 text-center">Condición</th>
                       <th className="p-3.5 text-right">Acción</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
                     {filteredInvoices.slice(0, 100).map((inv: any) => {
                       const isSelected = selectedInvoices.includes(inv.id)
                       const dias = Number(inv.dias_vencido || 0)
@@ -533,14 +630,23 @@ export default function PaymentsPage() {
                       const esUrgente = dias <= 0 && Math.abs(dias) <= 7
 
                       return (
-                        <tr key={inv.id} className={`hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition ${isSelected ? "bg-rose-50/30 dark:bg-rose-950/20" : ""}`}>
+                        <tr
+                          key={inv.id}
+                          className={`hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition ${
+                            isSelected ? "bg-rose-50/40 dark:bg-rose-950/20" : ""
+                          }`}
+                        >
                           <td className="p-3.5 text-center">
                             <button onClick={() => toggleSelectInvoice(inv.id)} className="p-1">
-                              {isSelected ? <CheckSquare className="w-4 h-4 text-rose-600" /> : <Square className="w-4 h-4 text-gray-300 dark:text-gray-600" />}
+                              {isSelected ? (
+                                <CheckSquare className="w-4 h-4 text-rose-600" />
+                              ) : (
+                                <Square className="w-4 h-4 text-slate-300 dark:text-slate-600" />
+                              )}
                             </button>
                           </td>
                           <td className="p-3.5">
-                            <p className="font-extrabold text-gray-900 dark:text-white font-mono">{inv.numero_factura || "Factura S/N"}</p>
+                            <p className="font-extrabold text-slate-900 dark:text-white font-mono">{inv.numero_factura || "Factura S/N"}</p>
                             <button
                               type="button"
                               onClick={() => {
@@ -551,27 +657,37 @@ export default function PaymentsPage() {
                               title="Abrir Visión 360° del Proveedor"
                             >
                               <Building2 className="w-3 h-3" />
-                              <span className="truncate max-w-[160px]">{inv.supplier_nombre || supplierMap[inv.supplier_id] || "Proveedor"}</span>
+                              <span className="truncate max-w-[180px]">{inv.supplier_nombre || supplierMap[inv.supplier_id] || "Proveedor"}</span>
                               <span className="text-[9px] bg-rose-200 dark:bg-rose-900 text-rose-800 dark:text-rose-200 group-hover:bg-white group-hover:text-rose-700 px-1 py-0.2 rounded font-black">
                                 360°
                               </span>
                             </button>
                           </td>
                           <td className="p-3.5">
-                            <p className="font-mono text-gray-800 dark:text-gray-200">{inv.fecha_vencimiento ? formatDate(inv.fecha_vencimiento) : "Sin fecha"}</p>
-                            <span className={`inline-block mt-0.5 text-[9px] font-black uppercase px-2 py-0.2 rounded-full ${esVencida ? "text-red-700 bg-red-100 dark:bg-red-950/50" : esUrgente ? "text-amber-700 bg-amber-100 dark:bg-amber-950/50" : "text-emerald-700 bg-emerald-100 dark:bg-emerald-950/50"}`}>
+                            <p className="font-mono text-slate-700 dark:text-slate-300">{inv.fecha_vencimiento ? formatDate(inv.fecha_vencimiento) : "Sin fecha"}</p>
+                            <span className={`inline-block mt-0.5 text-[9px] font-black uppercase px-2 py-0.2 rounded-full ${
+                              esVencida
+                                ? "text-red-700 bg-red-100 dark:bg-red-950/50"
+                                : esUrgente
+                                  ? "text-amber-700 bg-amber-100 dark:bg-amber-950/50"
+                                  : "text-emerald-700 bg-emerald-100 dark:bg-emerald-950/50"
+                            }`}>
                               {esVencida ? `Vencida (+${dias}d)` : esUrgente ? `Vence en ${Math.abs(dias)}d` : `Al día (${Math.abs(dias)}d rest.)`}
                             </span>
                           </td>
-                          <td className="p-3.5 text-right font-mono font-black text-gray-900 dark:text-white text-sm">
+                          <td className="p-3.5 text-right font-mono font-black text-slate-900 dark:text-white text-sm">
                             {formatCurrency(inv.saldo_pendiente || inv.total, inv.moneda)}
                           </td>
                           <td className="p-3.5 text-center">
-                            <span className="text-[10px] text-gray-500 font-bold uppercase">{inv.condicion || "Crédito"}</span>
+                            <span className="text-[10px] text-slate-500 font-bold uppercase">{inv.condicion || "Crédito"}</span>
                           </td>
                           <td className="p-3.5 text-right">
-                            <button onClick={() => handleOpenPayModal(inv)} className="btn-primary text-[10px] px-3 py-1 bg-rose-600 hover:bg-rose-700">
-                              Liquidar
+                            <button
+                              onClick={() => handleOpenIndividualOrderModal(inv)}
+                              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white font-extrabold text-[11px] transition shadow-sm flex items-center gap-1 ml-auto"
+                            >
+                              <Wallet className="w-3.5 h-3.5" />
+                              <span>Pagar / OP</span>
                             </button>
                           </td>
                         </tr>
@@ -579,74 +695,222 @@ export default function PaymentsPage() {
                     })}
                   </tbody>
                 </table>
-                {filteredInvoices.length > 100 && (
-                  <div className="p-3 bg-gray-50 dark:bg-slate-800 text-center text-xs text-gray-500 border-t border-gray-100 dark:border-slate-700">
-                    Mostrando las primeras 100 de {filteredInvoices.length.toLocaleString("es-PY")} facturas. Usá el buscador para filtrar.
-                  </div>
-                )}
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* TAB AGING POR PROVEEDOR */}
+      {/* ── TAB 2: HISTORIAL DE ÓRDENES DE PAGO (AP) ────────────────────────── */}
+      {tab === "ordenes_pago" && (
+        <div className="space-y-4">
+          {/* BARRA DE FILTROS DE ÓRDENES */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3 flex-1 min-w-[280px] flex-wrap">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por N° orden, proveedor o recibo..."
+                  value={searchOrders}
+                  onChange={(e) => setSearchOrders(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                />
+              </div>
+
+              <select
+                value={filterOrderEstado}
+                onChange={(e) => setFilterOrderEstado(e.target.value)}
+                className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-medium"
+              >
+                <option value="all">Todos los Estados</option>
+                <option value="registrado">🟡 Registrado (Pte. Pago)</option>
+                <option value="pagado">🟢 Pagado (Liquidado)</option>
+              </select>
+
+              <select
+                value={filterOrderFormaPago}
+                onChange={(e) => setFilterOrderFormaPago(e.target.value)}
+                className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-medium"
+              >
+                <option value="all">Cualquier Medio de Pago</option>
+                <option value="boveda">Bóveda Central</option>
+                <option value="fondo_fijo">Fondo Fijo (Caja Chica)</option>
+                <option value="transferencia">Transferencia Bancaria</option>
+                <option value="cheque">Cheques</option>
+                <option value="nota_credito">Notas de Crédito</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleExportReportPdf}
+                disabled={exportingReportPdf}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5 text-rose-400" />
+                <span>PDF Consolidado</span>
+              </button>
+            </div>
+          </div>
+
+          {/* TABLA DE ÓRDENES DE PAGO */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+            {filteredOrders.length === 0 ? (
+              <div className="text-center py-20 text-slate-400 text-xs">
+                <Wallet className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p className="font-bold text-sm text-slate-600 dark:text-slate-300">No hay órdenes de pago registradas</p>
+                <p className="mt-1">Seleccioná facturas en la primera pestaña para generar una orden de pago.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-850/80 text-slate-500 uppercase text-[10px] font-extrabold border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="p-3.5">N° Orden & Fecha</th>
+                      <th className="p-3.5">Proveedor</th>
+                      <th className="p-3.5 text-center">Facturas</th>
+                      <th className="p-3.5">Medios de Pago Asignados</th>
+                      <th className="p-3.5 text-right">Monto Neto</th>
+                      <th className="p-3.5 text-center">Estado</th>
+                      <th className="p-3.5 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                    {filteredOrders.map((order) => {
+                      const isPaid = order.estado === "pagado"
+                      const isRegistrado = order.estado === "registrado"
+
+                      return (
+                        <tr key={order.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
+                          <td className="p-3.5">
+                            <p className="font-mono font-black text-slate-900 dark:text-white text-xs">{order.numero_orden}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              {formatDate(order.fecha_pago || order.fecha_emision)}
+                            </p>
+                          </td>
+                          <td className="p-3.5">
+                            <p className="font-bold text-slate-800 dark:text-slate-200">{order.supplier_nombre}</p>
+                            <p className="text-[10px] text-slate-400 font-mono">RUC: {order.supplier_ruc || "-"}</p>
+                          </td>
+                          <td className="p-3.5 text-center">
+                            <span className="font-mono font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-lg">
+                              {order.total_facturas || 1} fac.
+                            </span>
+                          </td>
+                          <td className="p-3.5">
+                            <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 bg-slate-100/80 dark:bg-slate-800/60 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700/60">
+                              {order.formas_pago_resumen || "-"}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-right font-mono font-black text-rose-600 dark:text-rose-400 text-sm">
+                            {formatPYG(order.monto_neto)}
+                          </td>
+                          <td className="p-3.5 text-center">
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase border ${
+                              isPaid
+                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                                : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                            }`}>
+                              {order.estado}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {isRegistrado && (
+                                <button
+                                  onClick={() => handleOpenDisburseForOrder(order)}
+                                  className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] transition shadow-xs flex items-center gap-1"
+                                  title="Liquidar / Asignar Medios de Pago"
+                                >
+                                  <Wallet className="w-3 h-3" /> Liquidar
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleOpenOrderDetail(order)}
+                                className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
+                                title="Ver Detalle de la Orden"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => api.financial.paymentOrders.downloadPdf(order.id, order.numero_orden)}
+                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 text-rose-600 dark:text-rose-400 transition"
+                                title="Descargar Recibo / OP Oficial PDF"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB 3: AGING POR PROVEEDOR ────────────────────────────────────── */}
       {tab === "aging" && (
-        <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
-          <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+          <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
             <div>
-              <h3 className="font-extrabold text-sm text-gray-900 dark:text-white uppercase flex items-center gap-2">
+              <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
                 <Clock className="w-4 h-4 text-rose-600" /> Matriz de Antigüedad de Deuda (AP Aging)
               </h3>
-              <p className="text-[11px] text-gray-400">Distribución de deuda acumulada por proveedor y franja de vencimiento</p>
+              <p className="text-[11px] text-slate-400">Deuda estructurada por proveedor y tramos de vencimiento</p>
             </div>
-            <button onClick={() => api.financial.downloadApAgingPdf()} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5 text-red-600 border-red-200">
-              <Download className="w-3.5 h-3.5" /> Descargar Planilla
+            <button
+              onClick={() => api.financial.downloadApAgingPdf()}
+              className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5"
+            >
+              <Download className="w-3.5 h-3.5" /> Descargar Aging PDF
             </button>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-xs min-w-[750px]">
-              <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-50 dark:bg-slate-850/80 text-slate-500 uppercase text-[10px] font-extrabold border-b border-slate-200 dark:border-slate-800">
                 <tr>
-                  <th className="p-3.5 text-left">Proveedor</th>
-                  <th className="p-3.5 text-right font-mono">Total Deuda</th>
-                  <th className="p-3.5 text-right font-mono text-red-600">Vencido</th>
-                  <th className="p-3.5 text-right font-mono text-amber-600">1 a 30 Días</th>
-                  <th className="p-3.5 text-right font-mono text-blue-600">31 a 60 Días</th>
-                  <th className="p-3.5 text-right font-mono text-gray-500">+60 Días</th>
+                  <th className="p-3.5">Proveedor</th>
                   <th className="p-3.5 text-center">Facturas</th>
-                  <th className="p-3.5 text-center">Visión 360°</th>
+                  <th className="p-3.5 text-right text-red-600">Vencido</th>
+                  <th className="p-3.5 text-right text-amber-600">1 - 30 Días</th>
+                  <th className="p-3.5 text-right text-blue-600">31 - 60 Días</th>
+                  <th className="p-3.5 text-right text-slate-500">+60 Días</th>
+                  <th className="p-3.5 text-right">Total General</th>
+                  <th className="p-3.5 text-center">Acción</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
-                {supplierAging.slice(0, 50).map((s, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40">
-                    <td className="p-3.5 font-extrabold text-gray-900 dark:text-white">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelected360SupplierId(s.supplier_id)
-                          setSelected360SupplierNombre(s.supplier_nombre)
-                        }}
-                        className="flex items-center gap-1.5 text-left group hover:text-rose-600 transition"
-                        title="Abrir Visión 360° del Proveedor"
-                      >
-                        <span className="group-hover:underline">{s.supplier_nombre}</span>
-                        <span className="p-1 rounded-md bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 group-hover:bg-rose-600 group-hover:text-white transition">
-                          <Eye className="w-3 h-3" />
-                        </span>
-                      </button>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono">
+                {supplierAging.map((s) => (
+                  <tr key={s.supplier_id || s.supplier_nombre} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition">
+                    <td className="p-3.5 font-sans font-bold text-slate-900 dark:text-white">
+                      {s.supplier_nombre}
                     </td>
-                    <td className="p-3.5 text-right font-mono font-black text-gray-900 dark:text-white">{formatPYG(s.total)}</td>
-                    <td className="p-3.5 text-right font-mono font-bold text-red-600">{formatPYG(s.vencido)}</td>
-                    <td className="p-3.5 text-right font-mono text-amber-600">{formatPYG(s.dias_1_30)}</td>
-                    <td className="p-3.5 text-right font-mono text-blue-600">{formatPYG(s.dias_31_60)}</td>
-                    <td className="p-3.5 text-right font-mono text-gray-500">{formatPYG(s.dias_mas_60)}</td>
-                    <td className="p-3.5 text-center font-mono font-bold text-gray-400">{s.facturas_count}</td>
-                    <td className="p-3.5 text-center">
+                    <td className="p-3.5 text-center font-bold text-slate-500">
+                      {s.facturas_count}
+                    </td>
+                    <td className="p-3.5 text-right font-black text-red-600">
+                      {s.vencido > 0 ? formatPYG(s.vencido) : "-"}
+                    </td>
+                    <td className="p-3.5 text-right font-black text-amber-600">
+                      {s.dias_1_30 > 0 ? formatPYG(s.dias_1_30) : "-"}
+                    </td>
+                    <td className="p-3.5 text-right font-black text-blue-500">
+                      {s.dias_31_60 > 0 ? formatPYG(s.dias_31_60) : "-"}
+                    </td>
+                    <td className="p-3.5 text-right text-slate-400">
+                      {s.dias_mas_60 > 0 ? formatPYG(s.dias_mas_60) : "-"}
+                    </td>
+                    <td className="p-3.5 text-right font-black text-slate-900 dark:text-white text-sm">
+                      {formatPYG(s.total)}
+                    </td>
+                    <td className="p-3.5 text-center font-sans">
                       <button
-                        type="button"
                         onClick={() => {
                           setSelected360SupplierId(s.supplier_id)
                           setSelected360SupplierNombre(s.supplier_nombre)
@@ -665,32 +929,32 @@ export default function PaymentsPage() {
         </div>
       )}
 
-      {/* TAB LOTES DE PAGO */}
+      {/* ── TAB 4: LOTES DE PAGO MASIVO ──────────────────────────────────── */}
       {tab === "lotes" && (
         <div className="space-y-4">
-          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
-            <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
               <div>
-                <h3 className="font-extrabold text-sm text-gray-900 dark:text-white uppercase flex items-center gap-2">
+                <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
                   <CreditCard className="w-4 h-4 text-purple-600" /> Lotes de Pago Masivo Programados (Payment Runs)
                 </h3>
-                <p className="text-[11px] text-gray-400">Agrupación de transferencias bancarias masivas para autorización y ejecución</p>
+                <p className="text-[11px] text-slate-400">Agrupación de transferencias bancarias masivas para autorización y ejecución</p>
               </div>
             </div>
 
             {paymentRuns.length === 0 ? (
-              <div className="text-center py-16 text-gray-400 text-xs">
+              <div className="text-center py-16 text-slate-400 text-xs">
                 <CreditCard className="w-10 h-10 mx-auto mb-3 opacity-40" />
-                <p className="font-bold text-sm text-gray-600 dark:text-gray-300">Sin lotes de pago pendientes</p>
+                <p className="font-bold text-sm text-slate-600 dark:text-slate-300">Sin lotes de pago pendientes</p>
                 <p className="mt-1">Seleccioná facturas en la pestaña "Facturas por Pagar" para generar un lote masivo.</p>
               </div>
             ) : (
-              <div className="divide-y divide-gray-100 dark:divide-slate-800/60">
+              <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
                 {paymentRuns.map((r: any) => (
-                  <div key={r.id} className="p-4 hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition flex items-center justify-between text-xs">
+                  <div key={r.id} className="p-4 hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition flex items-center justify-between text-xs">
                     <div>
-                      <p className="font-extrabold text-gray-900 dark:text-white">{r.nombre || "Lote de Pago"}</p>
-                      <p className="text-[10px] text-gray-400">Fecha: {r.fecha_programada} · Método: {r.metodo_pago?.replace(/_/g, " ")}</p>
+                      <p className="font-extrabold text-slate-900 dark:text-white">{r.nombre || "Lote de Pago"}</p>
+                      <p className="text-[10px] text-slate-400">Fecha: {r.fecha_programada} · Método: {r.metodo_pago?.replace(/_/g, " ")}</p>
                     </div>
                     <div className="text-right flex items-center gap-3">
                       <div>
@@ -717,115 +981,33 @@ export default function PaymentsPage() {
         </div>
       )}
 
-      {/* MODAL CREAR LOTE DE PAGO */}
-      {showPaymentRunModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md border border-gray-200 dark:border-slate-800 p-6 space-y-4">
-            <h2 className="font-extrabold text-base text-gray-900 dark:text-white uppercase">Crear Lote de Pago Masivo</h2>
-            <div className="p-3 bg-rose-50 dark:bg-rose-950/30 rounded-2xl border border-rose-200 dark:border-rose-900/40 text-xs">
-              <p className="text-rose-800 dark:text-rose-300 font-bold">Total a liquidar: {formatPYG(selectedTotal)}</p>
-              <p className="text-[10px] text-rose-600 dark:text-rose-400">{selectedInvoices.length} facturas seleccionadas</p>
-            </div>
-            <form onSubmit={handleCreatePaymentRun} className="space-y-3 text-xs">
-              <div>
-                <label className="label-sm">Nombre del Lote *</label>
-                <input required className="input text-xs" value={runForm.nombre} onChange={e => setRunForm(f => ({ ...f, nombre: e.target.value }))} />
-              </div>
-              <div>
-                <label className="label-sm">Fecha Programada de Transferencia *</label>
-                <input type="date" required className="input text-xs" value={runForm.fecha_programada} onChange={e => setRunForm(f => ({ ...f, fecha_programada: e.target.value }))} />
-              </div>
-              <div>
-                <label className="label-sm">Cuenta Bancaria Pagadora</label>
-                <select className="input text-xs" value={runForm.bank_account_id} onChange={e => setRunForm(f => ({ ...f, bank_account_id: e.target.value }))}>
-                  {bankAccounts.map((b: any) => (
-                    <option key={b.id} value={b.id}>
-                      {b.alias ? `[${b.alias}] ` : ""}{b.banco} — {b.numero_cuenta} ({b.moneda})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label-sm">Método de Transferencia</label>
-                <select className="input text-xs" value={runForm.metodo_pago} onChange={e => setRunForm(f => ({ ...f, metodo_pago: e.target.value }))}>
-                  <option value="transferencia_sipap">Transferencia SIPAP / LBTR</option>
-                  <option value="cheque_bancario">Emisión de Cheques Masivos</option>
-                  <option value="efectivo_tesoreria">Efectivo / Caja Central</option>
-                </select>
-              </div>
-              <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-slate-800">
-                <button type="button" onClick={() => setShowPaymentRunModal(false)} className="btn-secondary text-xs px-4 py-2">Cancelar</button>
-                <button type="submit" disabled={savingPaymentRun} className="btn-primary text-xs px-5 py-2 flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700">
-                  {savingPaymentRun ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Confirmar Lote
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* MODALES ACTIVOS */}
+      {orderModalData && (
+        <SupplierPaymentOrderModal
+          supplier={orderModalData.supplier}
+          initialInvoices={orderModalData.initialInvoices}
+          availableInvoices={orderModalData.availableInvoices}
+          existingOrder={orderModalData.existingOrder}
+          onClose={() => setOrderModalData(null)}
+          onSuccess={(order) => {
+            setOrderModalData(null)
+            loadData()
+            setTab("ordenes_pago")
+          }}
+        />
       )}
 
-      {/* MODAL PAGO INDIVIDUAL */}
-      {showPayModal && selectedInvoice && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md border border-gray-200 dark:border-slate-800 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3">
-              <div>
-                <h2 className="font-extrabold text-base text-gray-900 dark:text-white uppercase">Liquidar Factura Proveedor</h2>
-                <p className="text-[11px] text-gray-400 font-mono">Factura: {selectedInvoice.numero_factura} · {selectedInvoice.supplier_nombre}</p>
-              </div>
-              <button onClick={() => setShowPayModal(false)} className="btn-ghost p-1"><X className="w-4 h-4" /></button>
-            </div>
-
-            <form onSubmit={handleSaveIndividualPayment} className="space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label-sm">Monto a Liquidar (Gs.) *</label>
-                  <input required type="number" className="input text-xs font-mono font-bold" value={payForm.monto_pago} onChange={e => setPayForm(f => ({ ...f, monto_pago: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="label-sm">Medio de Pago *</label>
-                  <select className="input text-xs" value={payForm.metodo_pago} onChange={e => setPayForm(f => ({ ...f, metodo_pago: e.target.value }))}>
-                    <option value="transferencia_sipap">Transferencia SIPAP</option>
-                    <option value="cheque">Cheque</option>
-                    <option value="efectivo">Efectivo</option>
-                  </select>
-                </div>
-                <div className="col-span-2">
-                  <label className="label-sm">Cuenta Bancaria de Débito</label>
-                  <select className="input text-xs" value={payForm.bank_account_id} onChange={e => setPayForm(f => ({ ...f, bank_account_id: e.target.value }))}>
-                    {bankAccounts.map((b: any) => (
-                      <option key={b.id} value={b.id}>
-                        {b.alias ? `[${b.alias}] ` : ""}{b.banco} — {b.numero_cuenta} ({b.moneda})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="label-sm">N° Comprobante / Ref.</label>
-                  <input className="input text-xs font-mono" value={payForm.numero_comprobante} onChange={e => setPayForm(f => ({ ...f, numero_comprobante: e.target.value }))} placeholder="N° Transferencia" />
-                </div>
-                <div>
-                  <label className="label-sm">Retención IVA (Gs.)</label>
-                  <input type="number" className="input text-xs font-mono" value={payForm.retencion_iva} onChange={e => setPayForm(f => ({ ...f, retencion_iva: e.target.value }))} />
-                </div>
-              </div>
-
-              <div>
-                <label className="label-sm">Observaciones</label>
-                <textarea className="input text-xs h-12" value={payForm.observaciones} onChange={e => setPayForm(f => ({ ...f, observaciones: e.target.value }))} />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-slate-800">
-                <button type="button" onClick={() => setShowPayModal(false)} className="btn-secondary text-xs px-4 py-2">Cancelar</button>
-                <button type="submit" disabled={savingPay} className="btn-primary text-xs px-5 py-2 flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700">
-                  {savingPay ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Liquidar Pago
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {detailOrder && (
+        <SupplierPaymentOrderDetailModal
+          order={detailOrder}
+          onClose={() => setDetailOrder(null)}
+          onDisburseRequest={(ord) => {
+            setDetailOrder(null)
+            handleOpenDisburseForOrder(ord)
+          }}
+        />
       )}
-    
+
       {selected360SupplierId && (
         <Supplier360Modal
           supplierId={selected360SupplierId}

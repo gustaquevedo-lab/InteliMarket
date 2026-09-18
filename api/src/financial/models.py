@@ -335,3 +335,93 @@ class APPaymentApprovalRequest(Base):
     rechazado_motivo = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SupplierPaymentOrder(Base):
+    """Orden de Pago a Proveedor (AP).
+    Permite agrupar una o varias facturas de un mismo proveedor para pago total o parcial.
+    Flujo de 2 pasos:
+      1. Registrado: se crea la orden con las facturas a amortizar sin mover fondos.
+      2. Pagado / Liquidado: se asignan los medios de pago (Bóveda, Fondo Fijo, Banco, Cheque, NC)
+         y se ejecuta la salida de fondos y amortización de facturas.
+    """
+    __tablename__ = "supplier_payment_orders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False, index=True)
+    numero_orden = Column(String(50), nullable=False, unique=True, index=True)
+    fecha_emision = Column(Date, nullable=False, server_default=func.current_date())
+    fecha_pago = Column(Date, nullable=True)
+    estado = Column(String(30), nullable=False, default="registrado")  # registrado, pagado, anulado
+    moneda = Column(String(3), nullable=False, default="PYG")
+    monto_total = Column(Numeric(15, 0), nullable=False, default=0)
+    monto_retenido = Column(Numeric(15, 0), nullable=False, default=0)
+    monto_neto = Column(Numeric(15, 0), nullable=False, default=0)
+    observaciones = Column(Text, nullable=True)
+    recibo_proveedor = Column(String(100), nullable=True)  # Número de recibo oficial emitido por el proveedor
+    created_by = Column(UUID(as_uuid=True), nullable=True)
+    paid_by = Column(UUID(as_uuid=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    allocations = relationship("SupplierPaymentOrderAllocation", back_populates="payment_order", cascade="all, delete-orphan")
+    disbursements = relationship("SupplierPaymentOrderDisbursement", back_populates="payment_order", cascade="all, delete-orphan")
+
+
+class SupplierPaymentOrderAllocation(Base):
+    """Amortización por factura individual dentro de la Orden de Pago."""
+    __tablename__ = "supplier_payment_order_allocations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    payment_order_id = Column(UUID(as_uuid=True), ForeignKey("supplier_payment_orders.id"), nullable=False, index=True)
+    invoice_id = Column(UUID(as_uuid=True), ForeignKey("supplier_invoices.id"), nullable=False, index=True)
+    monto_aplicado = Column(Numeric(15, 0), nullable=False)
+    monto_retencion = Column(Numeric(15, 0), default=0)
+    saldo_anterior = Column(Numeric(15, 0), nullable=False)
+    saldo_restante = Column(Numeric(15, 0), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    payment_order = relationship("SupplierPaymentOrder", back_populates="allocations")
+    invoice = relationship("SupplierInvoice")
+
+
+class SupplierPaymentOrderDisbursement(Base):
+    """Desembolso / forma de pago asignada para liquidar la Orden de Pago.
+    Formas soportadas: boveda, fondo_fijo, transferencia, cheque, nota_credito, otro.
+    """
+    __tablename__ = "supplier_payment_order_disbursements"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    payment_order_id = Column(UUID(as_uuid=True), ForeignKey("supplier_payment_orders.id"), nullable=False, index=True)
+    forma_pago = Column(String(30), nullable=False)  # boveda | fondo_fijo | transferencia | cheque | nota_credito | otro
+    monto = Column(Numeric(15, 2), nullable=False)
+    moneda = Column(String(3), nullable=False, default="PYG")
+    tipo_cambio = Column(Numeric(10, 2), default=1)
+    monto_pyg = Column(Numeric(15, 0), nullable=False)
+
+    # Vínculo con Bancos
+    bank_account_id = Column(UUID(as_uuid=True), ForeignKey("bank_accounts.id"), nullable=True)
+    referencia_transferencia = Column(String(100), nullable=True)
+
+    # Vínculo con Cheque emitido
+    cheque_id = Column(UUID(as_uuid=True), nullable=True)
+    numero_cheque = Column(String(50), nullable=True)
+    banco_cheque = Column(String(100), nullable=True)
+    fecha_cheque_emision = Column(Date, nullable=True)
+    fecha_cheque_vencimiento = Column(Date, nullable=True)
+    es_cheque_diferido = Column(Boolean, default=False)
+    titular_cheque = Column(String(200), nullable=True)
+
+    # Vínculo con Fondo Fijo (Caja Chica)
+    petty_cash_fund_id = Column(UUID(as_uuid=True), nullable=True)
+
+    # Vínculo con Nota de Crédito de Proveedor
+    credit_note_id = Column(UUID(as_uuid=True), ForeignKey("supplier_credit_notes.id"), nullable=True)
+
+    comprobante_url = Column(Text, nullable=True)
+    observaciones = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    payment_order = relationship("SupplierPaymentOrder", back_populates="disbursements")
+

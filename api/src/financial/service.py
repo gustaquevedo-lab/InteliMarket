@@ -17,6 +17,7 @@ from api.src.financial.models import (
     CashFlowProjection, Budget,
     PaymentRun, PaymentRunItem,
     SupplierCreditNote, SupplierCreditNoteApplication, SupplierReturn, PayrollMovement,
+    SupplierPaymentOrder, SupplierPaymentOrderAllocation, SupplierPaymentOrderDisbursement,
 )
 from api.src.financial.schemas import (
     SupplierInvoiceCreate, SupplierInvoicePaymentCreate,
@@ -26,8 +27,14 @@ from api.src.financial.schemas import (
     PaymentRunCreate,
     CashFlowAlertConfig,
     SupplierCreditNoteCreate, SupplierCreditNoteApply,
+    SupplierPaymentOrderCreate, SupplierPaymentOrderDisburse,
 )
 from api.src.purchases.models import Supplier
+from api.src.caja.models import VaultEntry, CashRegisterMovement
+from api.src.petty_cash.models import PettyCashFund, PettyCashFundMovement
+from api.src.cheques.models import Cheque, ChequeHistorial
+from fastapi import HTTPException
+
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -2617,3 +2624,719 @@ async def list_payroll_movements(db: AsyncSession, company_id: str, empleado_nom
         }
         for m in result.scalars().all()
     ]
+
+
+# ── Órdenes de Pago a Proveedores (AP Multifactura & Multimedio) ─────────────
+
+async def _generate_order_number(db: AsyncSession, company_id: uuid.UUID) -> str:
+    """Genera número correlativo de Orden de Pago con formato OP-YYYYMMDD-XXXX."""
+    today_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+    prefix = f"OP-{today_str}-"
+    q = (
+        select(func.count(SupplierPaymentOrder.id))
+        .where(
+            SupplierPaymentOrder.company_id == company_id,
+            SupplierPaymentOrder.numero_orden.like(f"{prefix}%")
+        )
+    )
+    count = (await db.execute(q)).scalar_one() or 0
+    return f"{prefix}{count + 1:04d}"
+
+
+async def create_supplier_payment_order(
+    db: AsyncSession,
+    company_id: str,
+    data: SupplierPaymentOrderCreate,
+    user_id: str | None = None
+) -> dict:
+    """Crea una Orden de Pago a Proveedor (AP).
+    Permite amortizar una o varias facturas del mismo proveedor.
+    Si se incluyen disbursements, se liquida de inmediato en el mismo acto;
+    si no, queda en estado 'registrado' para su posterior asignación de medios de pago.
+    """
+    cid = uuid.UUID(company_id)
+    sup_id = data.supplier_id
+
+    # 1. Validar Proveedor
+    sup_res = await db.execute(select(Supplier).where(Supplier.id == sup_id, Supplier.company_id == cid))
+    supplier = sup_res.scalar_one_or_none()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado en esta empresa.")
+
+    if not data.allocations:
+        raise HTTPException(status_code=400, detail="Debe incluir al menos una factura a pagar en la orden.")
+
+    # 2. Validar Facturas
+    inv_ids = [a.invoice_id for a in data.allocations]
+    invoices_res = await db.execute(
+        select(SupplierInvoice).where(
+            SupplierInvoice.id.in_(inv_ids),
+            SupplierInvoice.company_id == cid,
+            SupplierInvoice.supplier_id == sup_id
+        )
+    )
+    invoices_by_id = {inv.id: inv for inv in invoices_res.scalars().all()}
+
+    if len(invoices_by_id) != len(inv_ids):
+        raise HTTPException(
+            status_code=400,
+            detail="Una o más facturas seleccionadas no pertenecen a este proveedor o no existen."
+        )
+
+    monto_total = Decimal("0")
+    monto_retenido = Decimal("0")
+    allocations_to_create = []
+
+    for alloc_in in data.allocations:
+        inv = invoices_by_id[alloc_in.invoice_id]
+        if inv.estado in ("pagada", "cancelada"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"La factura {inv.numero_factura} ya se encuentra {inv.estado}."
+            )
+
+        aplicado = alloc_in.monto_aplicado
+        retencion = alloc_in.monto_retencion or Decimal("0")
+        total_amortizar = aplicado + retencion
+
+        if total_amortizar > inv.saldo_pendiente:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El monto a amortizar (₲ {total_amortizar:,.0f}) supera el saldo pendiente (₲ {inv.saldo_pendiente:,.0f}) de la factura {inv.numero_factura}."
+            )
+
+        saldo_anterior = inv.saldo_pendiente
+        saldo_restante = saldo_anterior - total_amortizar
+
+        monto_total += aplicado
+        monto_retenido += retencion
+
+        allocations_to_create.append({
+            "invoice": inv,
+            "monto_aplicado": aplicado,
+            "monto_retencion": retencion,
+            "saldo_anterior": saldo_anterior,
+            "saldo_restante": saldo_restante,
+        })
+
+    monto_neto = monto_total - monto_retenido
+    if monto_neto < Decimal("0"):
+        raise HTTPException(status_code=400, detail="El monto retenido no puede superar el monto total.")
+
+    # 3. Crear Orden de Pago
+    num_orden = await _generate_order_number(db, cid)
+    order = SupplierPaymentOrder(
+        company_id=cid,
+        supplier_id=sup_id,
+        numero_orden=num_orden,
+        fecha_emision=data.fecha_emision or _today(),
+        estado="registrado",
+        moneda="PYG",
+        monto_total=monto_total,
+        monto_retenido=monto_retenido,
+        monto_neto=monto_neto,
+        observaciones=data.observaciones,
+        recibo_proveedor=data.recibo_proveedor,
+        created_by=uuid.UUID(user_id) if user_id else None,
+    )
+    db.add(order)
+    await db.flush()
+
+    # 4. Crear Allocations
+    for item in allocations_to_create:
+        db.add(SupplierPaymentOrderAllocation(
+            payment_order_id=order.id,
+            invoice_id=item["invoice"].id,
+            monto_aplicado=item["monto_aplicado"],
+            monto_retencion=item["monto_retencion"],
+            saldo_anterior=item["saldo_anterior"],
+            saldo_restante=item["saldo_restante"],
+        ))
+
+    await db.flush()
+
+    # 5. Si vinieron medios de pago, liquidar de inmediato
+    if data.disbursements and len(data.disbursements) > 0:
+        disburse_payload = SupplierPaymentOrderDisburse(
+            fecha_pago=data.fecha_emision or _today(),
+            recibo_proveedor=data.recibo_proveedor,
+            observaciones=data.observaciones,
+            disbursements=data.disbursements,
+        )
+        await _execute_disbursements_internal(
+            db=db,
+            order=order,
+            supplier=supplier,
+            payload=disburse_payload,
+            user_id=user_id,
+            user_nombre=None
+        )
+
+    await db.commit()
+    return await get_supplier_payment_order_detail(db, company_id, str(order.id))
+
+
+async def _execute_disbursements_internal(
+    db: AsyncSession,
+    order: SupplierPaymentOrder,
+    supplier: Supplier,
+    payload: SupplierPaymentOrderDisburse,
+    user_id: str | None,
+    user_nombre: str | None
+) -> None:
+    """Lógica atómica interna de liquidación de medios de pago para una Orden de Pago."""
+    cid = order.company_id
+    total_desembolso_pyg = Decimal("0")
+
+    if not payload.disbursements:
+        raise HTTPException(status_code=400, detail="Debe asignar al menos un medio de pago para liquidar la orden.")
+
+    # 1. Validar cuadre exacto de importes
+    for d in payload.disbursements:
+        tc = d.tipo_cambio or Decimal("1")
+        m_pyg = Decimal(str(d.monto)) * tc
+        total_desembolso_pyg += m_pyg
+
+    diff = abs(total_desembolso_pyg - order.monto_neto)
+    if diff > Decimal("50"):  # Margen de 50 Gs por posibles redondeos
+        raise HTTPException(
+            status_code=400,
+            detail=f"El total de los medios de pago (₲ {total_desembolso_pyg:,.0f}) no coincide con el monto neto de la orden (₲ {order.monto_neto:,.0f}). Diferencia: ₲ {diff:,.0f}."
+        )
+
+    # 2. Cargar allocations de la orden
+    alloc_res = await db.execute(
+        select(SupplierPaymentOrderAllocation)
+        .where(SupplierPaymentOrderAllocation.payment_order_id == order.id)
+    )
+    allocations = list(alloc_res.scalars().all())
+    primera_factura_id = allocations[0].invoice_id if allocations else None
+
+    # 3. Procesar cada forma de pago
+    for d in payload.disbursements:
+        fp = (d.forma_pago or "").lower().strip()
+        tc = d.tipo_cambio or Decimal("1")
+        m_pyg = Decimal(str(d.monto)) * tc
+        monto_original = Decimal(str(d.monto))
+
+        disb_record = SupplierPaymentOrderDisbursement(
+            payment_order_id=order.id,
+            forma_pago=fp,
+            monto=monto_original,
+            moneda=d.moneda or "PYG",
+            tipo_cambio=tc,
+            monto_pyg=m_pyg,
+            referencia_transferencia=d.referencia_transferencia,
+            comprobante_url=d.comprobante_url,
+            observaciones=d.observaciones,
+        )
+
+        # ── A. EFECTIVO BÓVEDA CENTRAL ───────────────────────────────────────
+        if fp == "boveda":
+            # Verificar saldo en bóveda
+            bov_saldo_res = await db.execute(
+                select(func.coalesce(func.sum(VaultEntry.monto_pyg), 0))
+                .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda")
+            )
+            saldo_boveda = bov_saldo_res.scalar_one() or Decimal("0")
+            if saldo_boveda < m_pyg:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Saldo insuficiente en Bóveda Central. Disponible: ₲ {saldo_boveda:,.0f} | Solicitado: ₲ {m_pyg:,.0f}"
+                )
+
+            # Consumo FIFO de VaultEntry
+            entries_res = await db.execute(
+                select(VaultEntry)
+                .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda")
+                .order_by(VaultEntry.created_at.asc())
+            )
+            vault_entries = list(entries_res.scalars().all())
+            remaining = m_pyg
+            now_dt = datetime.now(timezone.utc)
+
+            for e in vault_entries:
+                if remaining <= Decimal("0"):
+                    break
+                e_monto = Decimal(str(e.monto_pyg or 0))
+                if e_monto <= remaining:
+                    e.estado = "pagado_proveedor"
+                    e.fecha_deposito = now_dt
+                    e.observaciones = f"Egreso por Pago Proveedor {order.numero_orden}"
+                    if user_id:
+                        e.registrado_por = uuid.UUID(user_id)
+                    remaining -= e_monto
+                else:
+                    remanente_monto = e_monto - remaining
+                    db.add(VaultEntry(
+                        company_id=cid,
+                        branch_id=e.branch_id,
+                        origen="remanente",
+                        handoff_id=e.handoff_id,
+                        monto_pyg=remanente_monto,
+                        monto_usd=Decimal("0"),
+                        monto_brl=Decimal("0"),
+                        estado="en_boveda",
+                        registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
+                        observaciones=f"Remanente en bóveda tras pago a proveedor {order.numero_orden}",
+                    ))
+                    e.monto_pyg = remaining
+                    e.estado = "pagado_proveedor"
+                    e.fecha_deposito = now_dt
+                    e.observaciones = f"Egreso por Pago Proveedor {order.numero_orden}"
+                    remaining = Decimal("0")
+
+            # Registrar movimiento de caja/bóveda
+            db.add(CashRegisterMovement(
+                company_id=cid,
+                tipo="retiro",
+                monto_pyg=m_pyg,
+                monto_usd=Decimal("0"),
+                monto_brl=Decimal("0"),
+                concepto=f"Pago Proveedor {order.numero_orden} - {supplier.razon_social}",
+                autorizado_por=uuid.UUID(user_id) if user_id else None,
+            ))
+
+        # ── B. EFECTIVO FONDO FIJO (CAJA CHICA) ──────────────────────────────
+        elif fp == "fondo_fijo":
+            if not d.petty_cash_fund_id:
+                # Buscar fondo por defecto si no viene especificado
+                f_res = await db.execute(
+                    select(PettyCashFund).where(PettyCashFund.company_id == cid, PettyCashFund.activo == True).limit(1)
+                )
+                fund = f_res.scalar_one_or_none()
+            else:
+                f_res = await db.execute(
+                    select(PettyCashFund).where(PettyCashFund.id == d.petty_cash_fund_id, PettyCashFund.company_id == cid)
+                )
+                fund = f_res.scalar_one_or_none()
+
+            if not fund:
+                raise HTTPException(status_code=400, detail="Fondo Fijo (Caja Chica) no encontrado o inactivo.")
+
+            if fund.saldo_actual < m_pyg:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Saldo insuficiente en Fondo Fijo '{fund.nombre}'. Disponible: ₲ {fund.saldo_actual:,.0f} | Solicitado: ₲ {m_pyg:,.0f}"
+                )
+
+            s_ant = fund.saldo_actual
+            fund.saldo_actual -= m_pyg
+            s_nuevo = fund.saldo_actual
+
+            db.add(PettyCashFundMovement(
+                fund_id=fund.id,
+                tipo="gasto",
+                monto=m_pyg,
+                saldo_anterior=s_ant,
+                saldo_nuevo=s_nuevo,
+                referencia_type="payment_order",
+                referencia_id=order.id,
+                observaciones=f"Pago Proveedor {order.numero_orden} - {supplier.razon_social}",
+                created_by=uuid.UUID(user_id) if user_id else None,
+            ))
+            disb_record.petty_cash_fund_id = fund.id
+
+        # ── C. BANCO - TRANSFERENCIA ─────────────────────────────────────────
+        elif fp == "transferencia":
+            if not d.bank_account_id:
+                raise HTTPException(status_code=400, detail="Debe seleccionar la cuenta bancaria para la transferencia.")
+
+            b_res = await db.execute(
+                select(BankAccount).where(BankAccount.id == d.bank_account_id, BankAccount.company_id == cid)
+            )
+            bank_acc = b_res.scalar_one_or_none()
+            if not bank_acc:
+                raise HTTPException(status_code=400, detail="Cuenta bancaria no encontrada.")
+
+            bank_acc.saldo_actual -= m_pyg
+
+            bt = BankTransaction(
+                company_id=cid,
+                bank_account_id=bank_acc.id,
+                fecha=payload.fecha_pago or _today(),
+                tipo="debito",
+                monto=m_pyg,
+                moneda="PYG",
+                descripcion=f"Pago Proveedor {order.numero_orden} - {supplier.razon_social}",
+                referencia=d.referencia_transferencia,
+                contraparte=supplier.razon_social,
+                conciliado=True,
+                fecha_conciliacion=datetime.now(timezone.utc),
+                invoice_id=primera_factura_id,
+                categoria="proveedores",
+            )
+            db.add(bt)
+            disb_record.bank_account_id = bank_acc.id
+
+        # ── D. BANCO - CHEQUE EMITIDO (AL DÍA O DIFERIDO) ────────────────────
+        elif fp == "cheque":
+            if not d.numero_cheque:
+                raise HTTPException(status_code=400, detail="Debe ingresar el número de cheque.")
+
+            fecha_em = d.fecha_cheque_emision or _today()
+            fecha_venc = d.fecha_cheque_vencimiento or fecha_em
+            es_dif = bool(d.es_cheque_diferido or (fecha_venc > fecha_em))
+
+            cheque = Cheque(
+                company_id=cid,
+                numero=d.numero_cheque,
+                numero_confiable=True,
+                banco_emisor=d.banco_cheque or "Banco",
+                bank_account_id=d.bank_account_id,
+                beneficiario=d.titular_cheque or supplier.razon_social,
+                supplier_id=supplier.id,
+                tipo_cheque="emitido",
+                monto=m_pyg,
+                moneda="PYG",
+                fecha_emision=fecha_em,
+                fecha_entrega=_today(),
+                fecha_pago=fecha_venc,
+                diferido=es_dif,
+                estado="pendiente",
+                concepto=f"Pago Proveedor {order.numero_orden}",
+                notas=f"OP {order.numero_orden} - Ref: {d.observaciones or ''}",
+                created_by=uuid.UUID(user_id) if user_id else None,
+            )
+            db.add(cheque)
+            await db.flush()
+
+            db.add(ChequeHistorial(
+                cheque_id=cheque.id,
+                estado_anterior=None,
+                estado_nuevo="pendiente",
+                user_id=uuid.UUID(user_id) if user_id else None,
+                user_nombre=user_nombre or "Finanzas",
+                notas=f"Emitido en Pago de Proveedor {order.numero_orden}",
+            ))
+
+            disb_record.cheque_id = cheque.id
+            disb_record.bank_account_id = d.bank_account_id
+            disb_record.numero_cheque = d.numero_cheque
+            disb_record.banco_cheque = d.banco_cheque
+            disb_record.fecha_cheque_emision = fecha_em
+            disb_record.fecha_cheque_vencimiento = fecha_venc
+            disb_record.es_cheque_diferido = es_dif
+            disb_record.titular_cheque = d.titular_cheque or supplier.razon_social
+
+        # ── E. NOTA DE CRÉDITO DE PROVEEDOR ──────────────────────────────────
+        elif fp == "nota_credito":
+            if not d.credit_note_id:
+                raise HTTPException(status_code=400, detail="Debe seleccionar la Nota de Crédito a aplicar.")
+
+            cn_res = await db.execute(
+                select(SupplierCreditNote).where(
+                    SupplierCreditNote.id == d.credit_note_id,
+                    SupplierCreditNote.company_id == cid,
+                    SupplierCreditNote.supplier_id == supplier.id
+                )
+            )
+            nc = cn_res.scalar_one_or_none()
+            if not nc:
+                raise HTTPException(status_code=400, detail="Nota de Crédito no encontrada o no pertenece al proveedor.")
+
+            saldo_nc = Decimal(str(nc.saldo_disponible or nc.monto or 0))
+            if saldo_nc < m_pyg:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Saldo insuficiente en NC N° {nc.numero}. Disponible: ₲ {saldo_nc:,.0f} | Requerido: ₲ {m_pyg:,.0f}"
+                )
+
+            nc.saldo_disponible = saldo_nc - m_pyg
+            if primera_factura_id:
+                db.add(SupplierCreditNoteApplication(
+                    company_id=cid,
+                    credit_note_id=nc.id,
+                    invoice_id=primera_factura_id,
+                    monto_aplicado=m_pyg,
+                    observaciones=f"Aplicado vía OP {order.numero_orden}",
+                ))
+            disb_record.credit_note_id = nc.id
+
+        db.add(disb_record)
+
+    # 4. Amortizar Facturas vinculadas (SupplierInvoice)
+    for alloc in allocations:
+        inv_res = await db.execute(
+            select(SupplierInvoice).where(SupplierInvoice.id == alloc.invoice_id)
+        )
+        inv = inv_res.scalar_one_or_none()
+        if inv:
+            total_amort = alloc.monto_aplicado + alloc.monto_retencion
+            inv.saldo_pendiente = max(Decimal("0"), inv.saldo_pendiente - total_amort)
+            if inv.saldo_pendiente <= Decimal("0"):
+                inv.estado = "pagada"
+            else:
+                inv.estado = "parcial"
+
+            # Registrar compatibilidad con SupplierInvoicePayment
+            db.add(SupplierInvoicePayment(
+                invoice_id=inv.id,
+                payment_method="orden_de_pago",
+                monto=alloc.monto_aplicado,
+                moneda="PYG",
+                fecha_pago=payload.fecha_pago or _today(),
+                referencia=f"{order.numero_orden} (OP)",
+                estado="conciliado",
+            ))
+
+    # 5. Marcar Orden como Pagada
+    order.estado = "pagado"
+    order.fecha_pago = payload.fecha_pago or _today()
+    if payload.recibo_proveedor:
+        order.recibo_proveedor = payload.recibo_proveedor
+    if payload.observaciones:
+        order.observaciones = (order.observaciones or "") + ("\n" if order.observaciones else "") + payload.observaciones
+    order.paid_by = uuid.UUID(user_id) if user_id else None
+
+
+async def disburse_supplier_payment_order(
+    db: AsyncSession,
+    company_id: str,
+    order_id: str,
+    data: SupplierPaymentOrderDisburse,
+    user_id: str | None = None,
+    user_nombre: str | None = None
+) -> dict:
+    """Paso 2: Liquidar y desembolsar fondos para una Orden de Pago en estado 'registrado'."""
+    cid = uuid.UUID(company_id)
+    ord_id = uuid.UUID(order_id)
+
+    q = select(SupplierPaymentOrder).where(SupplierPaymentOrder.id == ord_id, SupplierPaymentOrder.company_id == cid)
+    order = (await db.execute(q)).scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Orden de Pago no encontrada.")
+
+    if order.estado != "registrado":
+        raise HTTPException(
+            status_code=400,
+            detail=f"La orden no puede ser liquidada porque su estado actual es '{order.estado}'."
+        )
+
+    sup_res = await db.execute(select(Supplier).where(Supplier.id == order.supplier_id))
+    supplier = sup_res.scalar_one_or_none()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Proveedor de la orden no encontrado.")
+
+    await _execute_disbursements_internal(
+        db=db,
+        order=order,
+        supplier=supplier,
+        payload=data,
+        user_id=user_id,
+        user_nombre=user_nombre,
+    )
+    await db.commit()
+    return await get_supplier_payment_order_detail(db, company_id, order_id)
+
+
+async def list_supplier_payment_orders(
+    db: AsyncSession,
+    company_id: str,
+    supplier_id: str | None = None,
+    estado: str | None = None,
+    forma_pago: str | None = None,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+    limit: int = 100,
+    offset: int = 0
+) -> dict:
+    """Lista las Órdenes de Pago a proveedores con filtros y metadatos calculados."""
+    cid = uuid.UUID(company_id)
+    query = (
+        select(
+            SupplierPaymentOrder,
+            Supplier.razon_social.label("supplier_nombre"),
+            Supplier.ruc.label("supplier_ruc"),
+            func.count(SupplierPaymentOrderAllocation.id).label("total_facturas")
+        )
+        .join(Supplier, Supplier.id == SupplierPaymentOrder.supplier_id, isouter=True)
+        .join(SupplierPaymentOrderAllocation, SupplierPaymentOrderAllocation.payment_order_id == SupplierPaymentOrder.id, isouter=True)
+        .where(SupplierPaymentOrder.company_id == cid)
+        .group_by(SupplierPaymentOrder.id, Supplier.razon_social, Supplier.ruc)
+    )
+
+    if supplier_id:
+        query = query.where(SupplierPaymentOrder.supplier_id == uuid.UUID(supplier_id))
+    if estado:
+        query = query.where(SupplierPaymentOrder.estado == estado)
+    if fecha_desde:
+        query = query.where(SupplierPaymentOrder.fecha_emision >= fecha_desde)
+    if fecha_hasta:
+        query = query.where(SupplierPaymentOrder.fecha_emision <= fecha_hasta)
+
+    query = query.order_by(SupplierPaymentOrder.created_at.desc()).limit(limit).offset(offset)
+    results = (await db.execute(query)).all()
+
+    orders_list = []
+    order_ids = [r.SupplierPaymentOrder.id for r in results]
+
+    # Pre-cargar resumen de formas de pago
+    disb_map = {}
+    if order_ids:
+        disb_q = select(
+            SupplierPaymentOrderDisbursement.payment_order_id,
+            SupplierPaymentOrderDisbursement.forma_pago,
+            SupplierPaymentOrderDisbursement.monto_pyg,
+            SupplierPaymentOrderDisbursement.es_cheque_diferido
+        ).where(SupplierPaymentOrderDisbursement.payment_order_id.in_(order_ids))
+        disb_rows = (await db.execute(disb_q)).all()
+        for d in disb_rows:
+            fp_label = d.forma_pago.replace("_", " ").title()
+            if d.forma_pago == "cheque" and d.es_cheque_diferido:
+                fp_label = "Cheque Dif."
+            disb_map.setdefault(d.payment_order_id, []).append(fp_label)
+
+    for r in results:
+        o = r.SupplierPaymentOrder
+        fps = list(set(disb_map.get(o.id, [])))
+        if forma_pago and forma_pago not in [f.lower().replace(" ", "_") for f in fps]:
+            continue
+
+        orders_list.append({
+            "id": str(o.id),
+            "company_id": str(o.company_id),
+            "supplier_id": str(o.supplier_id),
+            "supplier_nombre": r.supplier_nombre or "Proveedor General",
+            "supplier_ruc": r.supplier_ruc or "-",
+            "numero_orden": o.numero_orden,
+            "fecha_emision": o.fecha_emision.isoformat() if o.fecha_emision else None,
+            "fecha_pago": o.fecha_pago.isoformat() if o.fecha_pago else None,
+            "estado": o.estado,
+            "moneda": o.moneda,
+            "monto_total": float(o.monto_total),
+            "monto_retenido": float(o.monto_retenido),
+            "monto_neto": float(o.monto_neto),
+            "observaciones": o.observaciones,
+            "recibo_proveedor": o.recibo_proveedor,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "updated_at": o.updated_at.isoformat() if o.updated_at else None,
+            "total_facturas": r.total_facturas or 0,
+            "formas_pago_resumen": ", ".join(fps) if fps else ("Pendiente de pago" if o.estado == "registrado" else "-"),
+        })
+
+    return {"items": orders_list, "total": len(orders_list)}
+
+
+async def get_supplier_payment_order_detail(
+    db: AsyncSession,
+    company_id: str,
+    order_id: str
+) -> dict | None:
+    """Obtiene el detalle completo de una Orden de Pago con facturas y desembolsos."""
+    cid = uuid.UUID(company_id)
+    ord_id = uuid.UUID(order_id)
+
+    q = (
+        select(
+            SupplierPaymentOrder,
+            Supplier.razon_social.label("supplier_nombre"),
+            Supplier.ruc.label("supplier_ruc")
+        )
+        .join(Supplier, Supplier.id == SupplierPaymentOrder.supplier_id, isouter=True)
+        .where(SupplierPaymentOrder.id == ord_id, SupplierPaymentOrder.company_id == cid)
+    )
+    row = (await db.execute(q)).first()
+    if not row:
+        return None
+
+    o = row.SupplierPaymentOrder
+
+    # Cargar Allocations enriquecidas
+    alloc_q = (
+        select(
+            SupplierPaymentOrderAllocation,
+            SupplierInvoice.numero_factura,
+            SupplierInvoice.timbrado,
+            SupplierInvoice.fecha_emision,
+            SupplierInvoice.fecha_vencimiento
+        )
+        .join(SupplierInvoice, SupplierInvoice.id == SupplierPaymentOrderAllocation.invoice_id)
+        .where(SupplierPaymentOrderAllocation.payment_order_id == o.id)
+    )
+    alloc_rows = (await db.execute(alloc_q)).all()
+    allocations_data = [
+        {
+            "id": str(a.SupplierPaymentOrderAllocation.id),
+            "invoice_id": str(a.SupplierPaymentOrderAllocation.invoice_id),
+            "numero_factura": a.numero_factura,
+            "timbrado": a.timbrado,
+            "fecha_emision": a.fecha_emision.isoformat() if a.fecha_emision else None,
+            "fecha_vencimiento": a.fecha_vencimiento.isoformat() if a.fecha_vencimiento else None,
+            "monto_aplicado": float(a.SupplierPaymentOrderAllocation.monto_aplicado),
+            "monto_retencion": float(a.SupplierPaymentOrderAllocation.monto_retencion),
+            "saldo_anterior": float(a.SupplierPaymentOrderAllocation.saldo_anterior),
+            "saldo_restante": float(a.SupplierPaymentOrderAllocation.saldo_restante),
+        }
+        for a in alloc_rows
+    ]
+
+    # Cargar Disbursements enriquecidos
+    disb_q = (
+        select(
+            SupplierPaymentOrderDisbursement,
+            BankAccount.banco.label("banco_nombre"),
+            PettyCashFund.nombre.label("fondo_nombre"),
+            SupplierCreditNote.numero.label("numero_nc")
+        )
+        .join(BankAccount, BankAccount.id == SupplierPaymentOrderDisbursement.bank_account_id, isouter=True)
+        .join(PettyCashFund, PettyCashFund.id == SupplierPaymentOrderDisbursement.petty_cash_fund_id, isouter=True)
+        .join(SupplierCreditNote, SupplierCreditNote.id == SupplierPaymentOrderDisbursement.credit_note_id, isouter=True)
+        .where(SupplierPaymentOrderDisbursement.payment_order_id == o.id)
+    )
+    disb_rows = (await db.execute(disb_q)).all()
+    disbursements_data = [
+        {
+            "id": str(d.SupplierPaymentOrderDisbursement.id),
+            "forma_pago": d.SupplierPaymentOrderDisbursement.forma_pago,
+            "monto": float(d.SupplierPaymentOrderDisbursement.monto),
+            "moneda": d.SupplierPaymentOrderDisbursement.moneda,
+            "tipo_cambio": float(d.SupplierPaymentOrderDisbursement.tipo_cambio),
+            "monto_pyg": float(d.SupplierPaymentOrderDisbursement.monto_pyg),
+            "bank_account_id": str(d.SupplierPaymentOrderDisbursement.bank_account_id) if d.SupplierPaymentOrderDisbursement.bank_account_id else None,
+            "banco_nombre": d.banco_nombre or d.SupplierPaymentOrderDisbursement.banco_cheque,
+            "referencia_transferencia": d.SupplierPaymentOrderDisbursement.referencia_transferencia,
+            "cheque_id": str(d.SupplierPaymentOrderDisbursement.cheque_id) if d.SupplierPaymentOrderDisbursement.cheque_id else None,
+            "numero_cheque": d.SupplierPaymentOrderDisbursement.numero_cheque,
+            "banco_cheque": d.SupplierPaymentOrderDisbursement.banco_cheque,
+            "fecha_cheque_emision": d.SupplierPaymentOrderDisbursement.fecha_cheque_emision.isoformat() if d.SupplierPaymentOrderDisbursement.fecha_cheque_emision else None,
+            "fecha_cheque_vencimiento": d.SupplierPaymentOrderDisbursement.fecha_cheque_vencimiento.isoformat() if d.SupplierPaymentOrderDisbursement.fecha_cheque_vencimiento else None,
+            "es_cheque_diferido": d.SupplierPaymentOrderDisbursement.es_cheque_diferido,
+            "titular_cheque": d.SupplierPaymentOrderDisbursement.titular_cheque,
+            "petty_cash_fund_id": str(d.SupplierPaymentOrderDisbursement.petty_cash_fund_id) if d.SupplierPaymentOrderDisbursement.petty_cash_fund_id else None,
+            "fondo_nombre": d.fondo_nombre,
+            "credit_note_id": str(d.SupplierPaymentOrderDisbursement.credit_note_id) if d.SupplierPaymentOrderDisbursement.credit_note_id else None,
+            "numero_nc": d.numero_nc,
+            "comprobante_url": d.SupplierPaymentOrderDisbursement.comprobante_url,
+            "observaciones": d.SupplierPaymentOrderDisbursement.observaciones,
+            "created_at": d.SupplierPaymentOrderDisbursement.created_at.isoformat() if d.SupplierPaymentOrderDisbursement.created_at else None,
+        }
+        for d in disb_rows
+    ]
+
+    fps = list(set([d["forma_pago"].replace("_", " ").title() for d in disbursements_data]))
+
+    return {
+        "id": str(o.id),
+        "company_id": str(o.company_id),
+        "supplier_id": str(o.supplier_id),
+        "supplier_nombre": row.supplier_nombre or "Proveedor General",
+        "supplier_ruc": row.supplier_ruc or "-",
+        "numero_orden": o.numero_orden,
+        "fecha_emision": o.fecha_emision.isoformat() if o.fecha_emision else None,
+        "fecha_pago": o.fecha_pago.isoformat() if o.fecha_pago else None,
+        "estado": o.estado,
+        "moneda": o.moneda,
+        "monto_total": float(o.monto_total),
+        "monto_retenido": float(o.monto_retenido),
+        "monto_neto": float(o.monto_neto),
+        "observaciones": o.observaciones,
+        "recibo_proveedor": o.recibo_proveedor,
+        "created_at": o.created_at.isoformat() if o.created_at else None,
+        "updated_at": o.updated_at.isoformat() if o.updated_at else None,
+        "total_facturas": len(allocations_data),
+        "formas_pago_resumen": ", ".join(fps) if fps else ("Pendiente de pago" if o.estado == "registrado" else "-"),
+        "allocations": allocations_data,
+        "disbursements": disbursements_data,
+    }
+

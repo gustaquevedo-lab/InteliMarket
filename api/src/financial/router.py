@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from api.src.integrated_finance import pdf_reports
 from api.src.financial import pdf_reports as bancos_pdf_reports
 from api.src.financial import ap_pdf_reports
+from api.src.financial import payment_order_pdf
 from api.src.auth.middleware import require_auth
 from api.src.financial.schemas import (
     SupplierInvoiceCreate, SupplierInvoiceResponse, SupplierInvoiceWithPayments,
@@ -25,8 +26,10 @@ from api.src.financial.schemas import (
     APPaymentRejectRequest,
     CashFlowAlertConfig,
     SupplierCreditNoteCreate, SupplierCreditNoteApply,
+    SupplierPaymentOrderCreate, SupplierPaymentOrderDisburse,
 )
 from api.src.financial import service
+
 
 router = APIRouter(prefix="/api/v1/financial", tags=["financial"], dependencies=[Depends(require_auth)])
 
@@ -687,3 +690,113 @@ async def payroll_by_concepto(
 @router.get("/payroll-movements")
 async def list_payroll_movements(company_id: str = Query(), empleado_nombre: str | None = Query(None), db: AsyncSession = Depends(get_db)):
     return await service.list_payroll_movements(db, company_id, empleado_nombre)
+
+
+# ── Órdenes de Pago a Proveedores (AP) & PDF Oficial ─────────────────────────
+
+@router.post("/payment-orders", status_code=status.HTTP_201_CREATED)
+async def create_payment_order(
+    body: SupplierPaymentOrderCreate,
+    company_id: str = Query(),
+    user_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.create_supplier_payment_order(db, company_id, body, user_id)
+
+
+@router.get("/payment-orders")
+async def list_payment_orders(
+    company_id: str = Query(),
+    supplier_id: str | None = Query(None),
+    estado: str | None = Query(None),
+    forma_pago: str | None = Query(None),
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.list_supplier_payment_orders(
+        db, company_id, supplier_id, estado, forma_pago, fecha_desde, fecha_hasta, limit, offset
+    )
+
+
+@router.get("/payment-orders/export/report.pdf")
+async def export_payment_orders_pdf(
+    company_id: str = Query(),
+    supplier_id: str | None = Query(None),
+    estado: str | None = Query(None),
+    forma_pago: str | None = Query(None),
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await service.list_supplier_payment_orders(
+        db, company_id, supplier_id, estado, forma_pago, fecha_desde, fecha_hasta, limit=500
+    )
+    company = await _get_company_info(db, company_id)
+    pdf_bytes = payment_order_pdf.generate_supplier_payments_report_pdf(
+        company=company,
+        orders=res.get("items", []),
+        filters={
+            "fecha_desde": fecha_desde.isoformat() if fecha_desde else None,
+            "fecha_hasta": fecha_hasta.isoformat() if fecha_hasta else None,
+        }
+    )
+    filename = f"reporte_pagos_proveedores_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={filename}", "Content-Length": str(len(pdf_bytes))}
+    )
+
+
+@router.get("/payment-orders/{order_id}")
+async def get_payment_order(
+    order_id: str,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    detail = await service.get_supplier_payment_order_detail(db, company_id, order_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Orden de Pago no encontrada.")
+    return detail
+
+
+@router.post("/payment-orders/{order_id}/disburse")
+async def disburse_payment_order(
+    order_id: str,
+    body: SupplierPaymentOrderDisburse,
+    company_id: str = Query(),
+    user_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.disburse_supplier_payment_order(
+        db, company_id, order_id, body, user_id=user_id
+    )
+
+
+@router.get("/payment-orders/{order_id}/pdf")
+async def get_payment_order_pdf(
+    order_id: str,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    detail = await service.get_supplier_payment_order_detail(db, company_id, order_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Orden de Pago no encontrada.")
+
+    company = await _get_company_info(db, company_id)
+    pdf_bytes = payment_order_pdf.generate_payment_order_receipt_pdf(
+        company=company,
+        order=detail,
+        allocations=detail.get("allocations", []),
+        disbursements=detail.get("disbursements", []),
+    )
+    filename = f"recibo_orden_pago_{detail.get('numero_orden', order_id[:8])}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={filename}", "Content-Length": str(len(pdf_bytes))}
+    )
+
