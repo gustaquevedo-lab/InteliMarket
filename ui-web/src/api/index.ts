@@ -1217,6 +1217,12 @@ export interface Supplier360Response {
     reclamos_nc_pendientes_monto: number
     reclamos_nc_resueltos_monto: number
     reclamos_nc_total_monto: number
+    monedero_nc_saldo_disponible?: number
+    monedero_nc_total_emitido?: number
+    monedero_nc_total_aplicado?: number
+    obligaciones_nc_pendientes_monto?: number
+    credito_total_potencial_nc?: number
+    deuda_neta_efectiva?: number
   }
   aging_buckets: {
     vencido: number
@@ -1241,6 +1247,30 @@ export interface Supplier360Response {
     bloqueada_para_pago: boolean
     monto_retenido_nc: number
     requiere_nc: boolean
+    tiene_nc_vinculada?: boolean
+    ncs_vinculadas?: Array<{
+      id: string
+      credit_note_id: string
+      invoice_id: string
+      numero_nc: string
+      timbrado_nc?: string
+      motivo_nc?: string
+      motivo_categoria?: string
+      monto_aplicado: number
+      fecha: string
+      observaciones?: string
+    }>
+    monto_nc_aplicado?: number
+    saldo_neto_real?: number
+    fase_pago?: string
+    fase_pago_label?: string
+    fase_pago_color?: string
+    lote_pago?: {
+      nombre: string
+      fecha?: string
+      estado?: string
+      monto?: number
+    }
   }>
   cheques: Array<{
     id: string
@@ -1289,18 +1319,109 @@ export interface Supplier360Response {
     motivo_revision?: string
     observaciones?: string
   }>
+  monedero_nc?: {
+    saldo_disponible: number
+    total_emitido: number
+    total_aplicado: number
+    cantidad_ncs: number
+    cantidad_con_saldo: number
+    obligaciones_pendientes_emision: number
+    credito_total_potencial: number
+    items: Array<{
+      id: string
+      numero: string
+      timbrado?: string
+      fecha: string
+      numero_factura_origen?: string
+      motivo?: string
+      motivo_categoria?: string
+      origen_clave: string
+      origen_label: string
+      origen_icono: string
+      monto_original: number
+      monto_aplicado: number
+      saldo_disponible: number
+      estado_monedero: "disponible_total" | "disponible_parcial" | "agotada"
+      etapa_codigo: string
+      etapa_label: string
+      aplicaciones: Array<{
+        id: string
+        invoice_id: string
+        monto_aplicado: number
+        fecha: string
+        observaciones?: string
+      }>
+    }>
+    aplicaciones_historial: Array<{
+      id: string
+      credit_note_id: string
+      invoice_id: string
+      numero_nc: string
+      timbrado_nc?: string
+      motivo_nc?: string
+      motivo_categoria?: string
+      monto_aplicado: number
+      fecha: string
+      observaciones?: string
+    }>
+    devoluciones_fisicas: Array<{
+      id: string
+      codigo: string
+      tipo: string
+      fecha: string
+      valor_estimado: number
+      tiene_nc: boolean
+      nota_credito_numero?: string
+      nota_credito_monto?: number
+      estado: string
+      etapa_codigo: string
+      etapa_label: string
+      origen_clave: string
+      origen_label: string
+      observaciones?: string
+    }>
+    reclamos: Array<{
+      id: string
+      numero_solicitud: string
+      invoice_id?: string
+      invoice_numero?: string
+      receipt_id?: string
+      tipo_motivo: string
+      origen_clave: string
+      origen_label: string
+      origen_icono: string
+      monto_reclamado: number
+      estado: string
+      etapa_codigo: string
+      etapa_label: string
+      nc_recibida_numero?: string
+      nc_recibida_timbrado?: string
+      nc_recibida_monto?: number
+      nc_recibida_fecha?: string
+      observaciones?: string
+      created_at: string
+    }>
+  }
   reclamos_nc: Array<{
     id: string
     numero_solicitud: string
     invoice_id?: string
     invoice_numero?: string
+    receipt_id?: string
     tipo_motivo: string
+    origen_clave?: string
+    origen_label?: string
+    origen_icono?: string
     monto_reclamado: number
     estado: string
+    etapa_codigo?: string
+    etapa_label?: string
     nc_recibida_numero?: string
+    nc_recibida_timbrado?: string
     nc_recibida_monto: number
     nc_recibida_fecha?: string
     observaciones?: string
+    created_at?: string
   }>
   productos: Array<{
     id: string
@@ -2018,9 +2139,11 @@ export const api = {
     getSupplierEvaluations: (id: string) => client.get<any[]>(`/v1/suppliers/${id}/evaluations`),
     getSupplier360: (supplierId: string) =>
       client.get<Supplier360Response>(`/v1/purchases/suppliers/${supplierId}/360`, { company_id: COMPANY_ID }),
-    downloadSupplier360Pdf: (supplierId: string, razonSocial?: string) => {
+    downloadSupplier360Pdf: (supplierId: string, razonSocial?: string, tab?: string) => {
       const clean = (razonSocial || "proveedor").replace(/\s+/g, "_")
-      return downloadAuthenticated(`/v1/purchases/suppliers/${supplierId}/360/pdf?company_id=${COMPANY_ID}`, {}, `Informe_360_${clean}.pdf`)
+      const tabParam = tab ? `&tab=${encodeURIComponent(tab)}` : ""
+      const tabSuffix = tab ? `_${tab}` : ""
+      return downloadAuthenticated(`/v1/purchases/suppliers/${supplierId}/360/pdf?company_id=${COMPANY_ID}${tabParam}`, {}, `Informe_360_${clean}${tabSuffix}.pdf`)
     },
     getSupplierPerformance: (id: string) => client.get<{ supplier_id: string; razon_social: string; total_orders: number; total_spent: number; on_time_rate: number | null; avg_quality_score: number | null; avg_delivery_score: number | null; avg_price_score: number | null; avg_attention_score: number | null; overall_rating: number | null; last_evaluation_date: string | null }>(`/v1/suppliers/${id}/performance`),
     getSupplierPriceHistory: (id: string) => client.get<{ product_id: string; product_nombre: string; sku: string; purchase_order_id: string; fecha_orden: string; precio_unitario: number; cantidad: number }[]>(`/v1/suppliers/${id}/price-history`),

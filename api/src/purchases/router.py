@@ -963,19 +963,21 @@ async def get_supplier_360_endpoint(
 @router.get("/suppliers/{supplier_id}/360/pdf")
 async def export_supplier_360_pdf_endpoint(
     supplier_id: str,
+    tab: Optional[str] = Query(None, description="Pestaña específica a exportar en PDF (deudas, nc_reclamos, cheques, pagos, compras, stock, informe) o todas si es None"),
     company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    """Genera y descarga el Informe Gerencial 360° del Proveedor en PDF editorial de alta fidelidad."""
+    """Genera y descarga el Informe Gerencial 360° del Proveedor en PDF editorial de alta fidelidad, con soporte por pestaña."""
     cid = uuid.UUID(user.get("company_id") or company_id)
     sid = uuid.UUID(supplier_id)
     data = await supplier_360_service.get_supplier_360(db, cid, sid)
     company = await _get_company_info(db, str(cid))
     user_name = user.get("nombre") or user.get("email") or "Auditoría Financiera"
-    pdf_bytes = supplier_360_pdf.generate_supplier_360_pdf(company, data, generated_by=user_name)
+    pdf_bytes = supplier_360_pdf.generate_supplier_360_pdf(company, data, generated_by=user_name, tab=tab)
     rz_clean = (data.get("supplier", {}).get("razon_social") or "proveedor").replace(" ", "_")
-    filename = f"Informe_360_{rz_clean}.pdf"
+    tab_suffix = f"_{tab}" if tab else ""
+    filename = f"Informe_360_{rz_clean}{tab_suffix}.pdf"
     return StreamingResponse(
         iter([pdf_bytes]),
         media_type="application/pdf",
