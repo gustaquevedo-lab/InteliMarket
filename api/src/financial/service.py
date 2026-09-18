@@ -4,6 +4,7 @@ from sqlalchemy import select, func, and_, or_, text, case
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, date, timedelta
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 from pathlib import Path
 import json
@@ -29,6 +30,7 @@ from api.src.financial.schemas import (
     CashFlowAlertConfig,
     SupplierCreditNoteCreate, SupplierCreditNoteApply,
     SupplierPaymentOrderCreate, SupplierPaymentOrderDisburse,
+    MultiSupplierPaymentBatchCreate,
 )
 from api.src.purchases.models import Supplier
 from api.src.caja.models import VaultEntry, CashRegisterMovement
@@ -2793,9 +2795,10 @@ async def list_payroll_movements(db: AsyncSession, company_id: str, empleado_nom
 
 # ── Órdenes de Pago a Proveedores (AP Multifactura & Multimedio) ─────────────
 
-async def _generate_order_number(db: AsyncSession, company_id: uuid.UUID) -> str:
+async def _generate_order_number(db: AsyncSession, company_id: uuid.UUID, offset: int = 0) -> str:
     """Genera número correlativo de Orden de Pago con formato OP-YYYYMMDD-XXXX."""
-    today_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+    py_tz = ZoneInfo("America/Asuncion")
+    today_str = datetime.now(py_tz).strftime("%Y%m%d")
     prefix = f"OP-{today_str}-"
     q = (
         select(func.count(SupplierPaymentOrder.id))
@@ -2805,7 +2808,7 @@ async def _generate_order_number(db: AsyncSession, company_id: uuid.UUID) -> str
         )
     )
     count = (await db.execute(q)).scalar_one() or 0
-    return f"{prefix}{count + 1:04d}"
+    return f"{prefix}{count + 1 + offset:04d}"
 
 
 async def create_supplier_payment_order(
@@ -3134,55 +3137,103 @@ async def _execute_disbursements_internal(
             db.add(bt)
             disb_record.bank_account_id = bank_acc.id
 
-        # ── D. BANCO - CHEQUE EMITIDO (AL DÍA O DIFERIDO) ────────────────────
+        # ── D. BANCO - CHEQUE EMITIDO (AL DÍA O DIFERIDO / COMPARTIDO) ───────
         elif fp == "cheque":
-            if not d.numero_cheque:
-                raise HTTPException(status_code=400, detail="Debe ingresar el número de cheque.")
+            if d.cheque_id:
+                # El usuario vinculó un cheque ya emitido o compartido existente con saldo disponible
+                ch_res = await db.execute(
+                    select(Cheque).where(Cheque.id == d.cheque_id, Cheque.company_id == cid)
+                )
+                cheque = ch_res.scalar_one_or_none()
+                if not cheque:
+                    raise HTTPException(status_code=404, detail="El cheque seleccionado no existe.")
 
-            fecha_em = d.fecha_cheque_emision or _today()
-            fecha_venc = d.fecha_cheque_vencimiento or fecha_em
-            es_dif = bool(d.es_cheque_diferido or (fecha_venc > fecha_em))
+                # Calcular cuánto se ha consumido de este cheque en otras OPs
+                consumed_res = await db.execute(
+                    select(func.coalesce(func.sum(SupplierPaymentOrderDisbursement.monto_pyg), 0))
+                    .where(
+                        SupplierPaymentOrderDisbursement.cheque_id == cheque.id,
+                        SupplierPaymentOrderDisbursement.payment_order_id != order.id
+                    )
+                )
+                consumed_monto = consumed_res.scalar_one() or Decimal("0")
+                monto_total_ch = Decimal(str(cheque.monto or 0))
+                disponible = monto_total_ch - consumed_monto
 
-            cheque = Cheque(
-                company_id=cid,
-                numero=d.numero_cheque,
-                numero_confiable=True,
-                banco_emisor=d.banco_cheque or "Banco",
-                bank_account_id=d.bank_account_id,
-                beneficiario=d.titular_cheque or supplier.razon_social,
-                supplier_id=supplier.id,
-                tipo_cheque="emitido",
-                monto=m_pyg,
-                moneda="PYG",
-                fecha_emision=fecha_em,
-                fecha_entrega=_today(),
-                fecha_pago=fecha_venc,
-                diferido=es_dif,
-                estado="pendiente",
-                concepto=f"Pago Proveedor {order.numero_orden}",
-                notas=f"OP {order.numero_orden} - Ref: {d.observaciones or ''}",
-                created_by=uuid.UUID(user_id) if user_id else None,
-            )
-            db.add(cheque)
-            await db.flush()
+                if m_pyg > disponible:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Saldo insuficiente en cheque N° {cheque.numero}. Total: ₲ {monto_total_ch:,.0f} | Consumido: ₲ {consumed_monto:,.0f} | Disponible: ₲ {disponible:,.0f} | Requerido: ₲ {m_pyg:,.0f}"
+                    )
 
-            db.add(ChequeHistorial(
-                cheque_id=cheque.id,
-                estado_anterior=None,
-                estado_nuevo="pendiente",
-                user_id=uuid.UUID(user_id) if user_id else None,
-                user_nombre=user_nombre or "Finanzas",
-                notas=f"Emitido en Pago de Proveedor {order.numero_orden}",
-            ))
+                db.add(ChequeHistorial(
+                    cheque_id=cheque.id,
+                    estado_anterior=cheque.estado,
+                    estado_nuevo=cheque.estado,
+                    user_id=uuid.UUID(user_id) if user_id else None,
+                    user_nombre=user_nombre or "Finanzas",
+                    notas=f"Vinculado a OP {order.numero_orden} ({supplier.razon_social}) por ₲ {m_pyg:,.0f}",
+                ))
 
-            disb_record.cheque_id = cheque.id
-            disb_record.bank_account_id = d.bank_account_id
-            disb_record.numero_cheque = d.numero_cheque
-            disb_record.banco_cheque = d.banco_cheque
-            disb_record.fecha_cheque_emision = fecha_em
-            disb_record.fecha_cheque_vencimiento = fecha_venc
-            disb_record.es_cheque_diferido = es_dif
-            disb_record.titular_cheque = d.titular_cheque or supplier.razon_social
+                disb_record.cheque_id = cheque.id
+                disb_record.bank_account_id = cheque.bank_account_id
+                disb_record.numero_cheque = cheque.numero
+                disb_record.banco_cheque = cheque.banco_emisor
+                disb_record.fecha_cheque_emision = cheque.fecha_emision
+                disb_record.fecha_cheque_vencimiento = cheque.fecha_pago
+                disb_record.es_cheque_diferido = cheque.diferido
+                disb_record.titular_cheque = cheque.beneficiario
+            else:
+                if not d.numero_cheque:
+                    raise HTTPException(status_code=400, detail="Debe ingresar el número de cheque.")
+
+                fecha_em = d.fecha_cheque_emision or _today()
+                fecha_venc = d.fecha_cheque_vencimiento or fecha_em
+                es_dif = bool(d.es_cheque_diferido or (fecha_venc > fecha_em))
+
+                # Monto nominal del cheque: si se especificó monto_total_cheque (para cheque matriz compartido)
+                monto_cheque = Decimal(str(d.monto_total_cheque)) if (d.monto_total_cheque and Decimal(str(d.monto_total_cheque)) >= m_pyg) else m_pyg
+
+                cheque = Cheque(
+                    company_id=cid,
+                    numero=d.numero_cheque,
+                    numero_confiable=True,
+                    banco_emisor=d.banco_cheque or "Banco",
+                    bank_account_id=d.bank_account_id,
+                    beneficiario=d.titular_cheque or supplier.razon_social,
+                    supplier_id=supplier.id,
+                    tipo_cheque="emitido",
+                    monto=monto_cheque,
+                    moneda="PYG",
+                    fecha_emision=fecha_em,
+                    fecha_entrega=_today(),
+                    fecha_pago=fecha_venc,
+                    diferido=es_dif,
+                    estado="pendiente",
+                    concepto=f"Pago Proveedor {order.numero_orden}" if monto_cheque == m_pyg else f"Cheque Compartido / Matriz (OP {order.numero_orden})",
+                    notas=f"OP {order.numero_orden} - Ref: {d.observaciones or ''}",
+                    created_by=uuid.UUID(user_id) if user_id else None,
+                )
+                db.add(cheque)
+                await db.flush()
+
+                db.add(ChequeHistorial(
+                    cheque_id=cheque.id,
+                    estado_anterior=None,
+                    estado_nuevo="pendiente",
+                    user_id=uuid.UUID(user_id) if user_id else None,
+                    user_nombre=user_nombre or "Finanzas",
+                    notas=f"Emitido en OP {order.numero_orden} por total ₲ {monto_cheque:,.0f} (Aplicado a esta OP: ₲ {m_pyg:,.0f})",
+                ))
+
+                disb_record.cheque_id = cheque.id
+                disb_record.bank_account_id = d.bank_account_id
+                disb_record.numero_cheque = d.numero_cheque
+                disb_record.banco_cheque = d.banco_cheque
+                disb_record.fecha_cheque_emision = fecha_em
+                disb_record.fecha_cheque_vencimiento = fecha_venc
+                disb_record.es_cheque_diferido = es_dif
+                disb_record.titular_cheque = d.titular_cheque or supplier.razon_social
 
         # ── E. NOTA DE CRÉDITO DE PROVEEDOR ──────────────────────────────────
         elif fp == "nota_credito":
@@ -3504,4 +3555,377 @@ async def get_supplier_payment_order_detail(
         "allocations": allocations_data,
         "disbursements": disbursements_data,
     }
+
+
+async def get_cheques_available_for_disbursement(
+    db: AsyncSession,
+    company_id: str
+) -> list[dict]:
+    """Obtiene cheques emitidos pendientes/en cartera con saldo remanente disponible para ser vinculados a OPs."""
+    cid = uuid.UUID(company_id)
+
+    consumed_subq = (
+        select(
+            SupplierPaymentOrderDisbursement.cheque_id,
+            func.coalesce(func.sum(SupplierPaymentOrderDisbursement.monto_pyg), 0).label("consumido_pyg")
+        )
+        .where(SupplierPaymentOrderDisbursement.cheque_id.isnot(None))
+        .group_by(SupplierPaymentOrderDisbursement.cheque_id)
+        .subquery()
+    )
+
+    stmt = (
+        select(
+            Cheque,
+            func.coalesce(consumed_subq.c.consumido_pyg, 0).label("consumido")
+        )
+        .outerjoin(consumed_subq, Cheque.id == consumed_subq.c.cheque_id)
+        .where(
+            Cheque.company_id == cid,
+            Cheque.tipo_cheque == "emitido",
+            Cheque.estado.in_(["pendiente", "en_cartera", "entregado"]),
+        )
+        .order_by(Cheque.fecha_emision.desc(), Cheque.created_at.desc())
+    )
+
+    rows = (await db.execute(stmt)).all()
+    results = []
+    for ch, consumido in rows:
+        monto_total = Decimal(str(ch.monto or 0))
+        monto_consumido = Decimal(str(consumido or 0))
+        disponible = monto_total - monto_consumido
+        if disponible > Decimal("0"):
+            results.append({
+                "id": str(ch.id),
+                "numero": ch.numero,
+                "banco_emisor": ch.banco_emisor,
+                "bank_account_id": str(ch.bank_account_id) if ch.bank_account_id else None,
+                "beneficiario": ch.beneficiario,
+                "monto_total": float(monto_total),
+                "monto_consumido": float(monto_consumido),
+                "saldo_disponible": float(disponible),
+                "fecha_emision": ch.fecha_emision.isoformat() if ch.fecha_emision else None,
+                "fecha_pago": ch.fecha_pago.isoformat() if ch.fecha_pago else None,
+                "diferido": ch.diferido,
+                "estado": ch.estado,
+                "concepto": ch.concepto,
+            })
+    return results
+
+
+async def create_multi_supplier_payment_batch(
+    db: AsyncSession,
+    company_id: str,
+    payload: MultiSupplierPaymentBatchCreate,
+    user_id: str | None = None,
+    user_nombre: str | None = None
+) -> dict:
+    """Crea un Lote de Pago Multi-Proveedor (e.g. Lote Brasil / Cambista).
+    Genera 1 Orden de Pago individual por cada proveedor con sus facturas amortizadas,
+    y respalda todo el lote bajo UN SOLO instrumento de desembolso (Cheque único, Transferencia bancaria o Bóveda).
+    """
+    cid = uuid.UUID(company_id)
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="Debe incluir al menos un proveedor en el lote.")
+
+    # 1. Validar sumatorias
+    total_desembolso_declarado = Decimal(str(payload.monto_total_desembolso_pyg))
+    total_items_pyg = Decimal("0")
+
+    for item in payload.items:
+        if not item.allocations:
+            raise HTTPException(status_code=400, detail=f"El proveedor {item.supplier_id} no tiene facturas asignadas.")
+        total_item_alloc = sum(Decimal(str(a.monto_aplicado)) for a in item.allocations)
+        if abs(total_item_alloc - Decimal(str(item.monto_pyg))) > Decimal("50"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"La suma de facturas para el proveedor (₲ {total_item_alloc:,.0f}) no coincide con su monto en Guaraníes (₲ {item.monto_pyg:,.0f})."
+            )
+        total_items_pyg += Decimal(str(item.monto_pyg))
+
+    diff_total = abs(total_items_pyg - total_desembolso_declarado)
+    if diff_total > Decimal("100"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"El desembolso total declarado (₲ {total_desembolso_declarado:,.0f}) no coincide con la suma de los proveedores (₲ {total_items_pyg:,.0f}). Diferencia: ₲ {diff_total:,.0f}"
+        )
+
+    fp = (payload.forma_pago or "").lower().strip()
+    fecha_pago_efectiva = payload.fecha_pago or _today()
+
+    # 2. Desembolso centralizado (Instrumento Financiero Único)
+    cheque_obj: Cheque | None = None
+    bank_acc_obj: BankAccount | None = None
+
+    if fp == "cheque":
+        if payload.cheque_id:
+            # Cheque existente
+            ch_res = await db.execute(select(Cheque).where(Cheque.id == payload.cheque_id, Cheque.company_id == cid))
+            cheque_obj = ch_res.scalar_one_or_none()
+            if not cheque_obj:
+                raise HTTPException(status_code=404, detail="El cheque seleccionado no existe.")
+
+            consumed_res = await db.execute(
+                select(func.coalesce(func.sum(SupplierPaymentOrderDisbursement.monto_pyg), 0))
+                .where(SupplierPaymentOrderDisbursement.cheque_id == cheque_obj.id)
+            )
+            consumed_monto = consumed_res.scalar_one() or Decimal("0")
+            disponible = Decimal(str(cheque_obj.monto or 0)) - consumed_monto
+            if total_items_pyg > disponible:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Saldo insuficiente en cheque N° {cheque_obj.numero}. Total: ₲ {cheque_obj.monto:,.0f} | Disponible: ₲ {disponible:,.0f} | Requerido por lote: ₲ {total_items_pyg:,.0f}"
+                )
+
+            db.add(ChequeHistorial(
+                cheque_id=cheque_obj.id,
+                estado_anterior=cheque_obj.estado,
+                estado_nuevo=cheque_obj.estado,
+                user_id=uuid.UUID(user_id) if user_id else None,
+                user_nombre=user_nombre or "Finanzas",
+                notas=f"Asignado a Lote Multi-Proveedor ({len(payload.items)} proveedores) por ₲ {total_items_pyg:,.0f}",
+            ))
+        else:
+            if not payload.numero_cheque:
+                raise HTTPException(status_code=400, detail="Debe indicar el número de cheque.")
+
+            fecha_em = payload.fecha_cheque_emision or _today()
+            fecha_venc = payload.fecha_cheque_vencimiento or fecha_em
+            es_dif = bool(payload.es_cheque_diferido or (fecha_venc > fecha_em))
+
+            cheque_obj = Cheque(
+                company_id=cid,
+                numero=payload.numero_cheque,
+                numero_confiable=True,
+                banco_emisor=payload.banco_cheque or "Banco",
+                bank_account_id=payload.bank_account_id,
+                beneficiario=payload.titular_cheque or f"Lote Brasil ({len(payload.items)} proveedores)",
+                tipo_cheque="emitido",
+                monto=total_desembolso_declarado,
+                moneda="PYG",
+                fecha_emision=fecha_em,
+                fecha_entrega=_today(),
+                fecha_pago=fecha_venc,
+                diferido=es_dif,
+                estado="pendiente",
+                concepto=f"Lote Multi-Proveedor / Brasil ({len(payload.items)} proveedores)",
+                notas=payload.observaciones or "Cheque único por compra de divisas / pago agrupado",
+                created_by=uuid.UUID(user_id) if user_id else None,
+            )
+            db.add(cheque_obj)
+            await db.flush()
+
+            db.add(ChequeHistorial(
+                cheque_id=cheque_obj.id,
+                estado_anterior=None,
+                estado_nuevo="pendiente",
+                user_id=uuid.UUID(user_id) if user_id else None,
+                user_nombre=user_nombre or "Finanzas",
+                notas=f"Emitido en Lote Multi-Proveedor ({len(payload.items)} proveedores) por ₲ {total_desembolso_declarado:,.0f}",
+            ))
+
+    elif fp == "transferencia":
+        if not payload.bank_account_id:
+            raise HTTPException(status_code=400, detail="Debe seleccionar la cuenta bancaria de origen para la transferencia.")
+
+        b_res = await db.execute(
+            select(BankAccount).where(BankAccount.id == payload.bank_account_id, BankAccount.company_id == cid)
+        )
+        bank_acc_obj = b_res.scalar_one_or_none()
+        if not bank_acc_obj:
+            raise HTTPException(status_code=404, detail="Cuenta bancaria no encontrada.")
+
+        bank_acc_obj.saldo_actual -= total_desembolso_declarado
+
+        bt = BankTransaction(
+            company_id=cid,
+            bank_account_id=bank_acc_obj.id,
+            fecha=fecha_pago_efectiva,
+            tipo="debito",
+            monto=total_desembolso_declarado,
+            moneda="PYG",
+            descripcion=f"Transferencia Lote Multi-Proveedor ({len(payload.items)} prov.)",
+            referencia=payload.referencia_transferencia,
+            contraparte=payload.titular_cheque or "Lote Proveedores",
+            conciliado=True,
+            fecha_conciliacion=datetime.now(timezone.utc),
+            categoria="proveedores",
+        )
+        db.add(bt)
+
+    elif fp == "boveda":
+        bov_saldo_res = await db.execute(
+            select(func.coalesce(func.sum(VaultEntry.monto_pyg), 0))
+            .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda")
+        )
+        saldo_boveda = bov_saldo_res.scalar_one() or Decimal("0")
+        if saldo_boveda < total_desembolso_declarado:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Saldo insuficiente en Bóveda Central. Disponible: ₲ {saldo_boveda:,.0f} | Solicitado: ₲ {total_desembolso_declarado:,.0f}"
+            )
+
+        entries_res = await db.execute(
+            select(VaultEntry)
+            .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda")
+            .order_by(VaultEntry.created_at.asc())
+        )
+        vault_entries = list(entries_res.scalars().all())
+        remaining = total_desembolso_declarado
+        now_dt = datetime.now(timezone.utc)
+
+        for e in vault_entries:
+            if remaining <= Decimal("0"):
+                break
+            e_monto = Decimal(str(e.monto_pyg or 0))
+            if e_monto <= remaining:
+                e.estado = "pagado_proveedor"
+                e.fecha_deposito = now_dt
+                e.observaciones = f"Egreso por Lote Multi-Proveedor ({len(payload.items)} prov.)"
+                if user_id:
+                    e.registrado_por = uuid.UUID(user_id)
+                remaining -= e_monto
+            else:
+                remanente_monto = e_monto - remaining
+                db.add(VaultEntry(
+                    company_id=cid,
+                    branch_id=e.branch_id,
+                    origen="remanente",
+                    handoff_id=e.handoff_id,
+                    monto_pyg=remanente_monto,
+                    monto_usd=Decimal("0"),
+                    monto_brl=Decimal("0"),
+                    estado="en_boveda",
+                    registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
+                    observaciones="Remanente en bóveda tras pago Lote Multi-Proveedor",
+                ))
+                e.monto_pyg = remaining
+                e.estado = "pagado_proveedor"
+                e.fecha_deposito = now_dt
+                e.observaciones = f"Egreso por Lote Multi-Proveedor ({len(payload.items)} prov.)"
+                remaining = Decimal("0")
+
+        db.add(CashRegisterMovement(
+            company_id=cid,
+            tipo="retiro",
+            monto_pyg=total_desembolso_declarado,
+            monto_usd=Decimal("0"),
+            monto_brl=Decimal("0"),
+            concepto=f"Egreso Bóveda Lote Multi-Proveedor ({len(payload.items)} prov.)",
+            autorizado_por=uuid.UUID(user_id) if user_id else None,
+        ))
+
+    # 3. Iterar cada proveedor y generar su OP individual
+    created_orders = []
+    for idx, item in enumerate(payload.items):
+        sup_res = await db.execute(select(Supplier).where(Supplier.id == item.supplier_id, Supplier.company_id == cid))
+        sup = sup_res.scalar_one_or_none()
+        if not sup:
+            raise HTTPException(status_code=404, detail=f"Proveedor con ID {item.supplier_id} no encontrado.")
+
+        num_orden = await _generate_order_number(db, cid, offset=idx)
+        monto_item_pyg = Decimal(str(item.monto_pyg))
+        monto_moneda = Decimal(str(item.monto_moneda))
+        tc = Decimal(str(item.tipo_cambio or 1))
+
+        total_ret = sum(Decimal(str(a.monto_retencion or 0)) for a in item.allocations)
+
+        op = SupplierPaymentOrder(
+            company_id=cid,
+            supplier_id=sup.id,
+            numero_orden=num_orden,
+            fecha_emision=_today(),
+            fecha_pago=fecha_pago_efectiva,
+            estado="pagado",
+            moneda="PYG",
+            monto_total=monto_item_pyg + total_ret,
+            monto_retenido=total_ret,
+            monto_neto=monto_item_pyg,
+            observaciones=f"[Lote Multi-Proveedor / Brasil] {item.observaciones or payload.observaciones or ''}".strip(),
+            recibo_proveedor=item.recibo_proveedor,
+            created_by=uuid.UUID(user_id) if user_id else None,
+        )
+        db.add(op)
+        await db.flush()
+
+        # Allocations y amortización de facturas
+        for alloc in item.allocations:
+            inv_res = await db.execute(
+                select(SupplierInvoice).where(SupplierInvoice.id == alloc.invoice_id, SupplierInvoice.company_id == cid)
+            )
+            inv = inv_res.scalar_one_or_none()
+            if not inv:
+                raise HTTPException(status_code=404, detail=f"Factura {alloc.invoice_id} no encontrada.")
+
+            m_aplicado = Decimal(str(alloc.monto_aplicado))
+            m_ret = Decimal(str(alloc.monto_retencion or 0))
+            saldo_ant = Decimal(str(inv.saldo_pendiente or inv.total))
+
+            db.add(SupplierPaymentOrderAllocation(
+                payment_order_id=op.id,
+                invoice_id=inv.id,
+                monto_aplicado=m_aplicado,
+                monto_retencion=m_ret,
+                saldo_anterior=saldo_ant,
+            ))
+
+            total_amort = m_aplicado + m_ret
+            inv.saldo_pendiente = max(Decimal("0"), saldo_ant - total_amort)
+            if inv.saldo_pendiente <= Decimal("0"):
+                inv.estado = "pagada"
+            else:
+                inv.estado = "parcial"
+
+            db.add(SupplierInvoicePayment(
+                invoice_id=inv.id,
+                payment_method="orden_de_pago",
+                monto=m_aplicado,
+                moneda="PYG",
+                fecha_pago=fecha_pago_efectiva,
+                referencia=f"{op.numero_orden} (Lote Brasil)",
+                estado="conciliado",
+            ))
+
+        # Disbursement individual vinculado a esta OP
+        disb = SupplierPaymentOrderDisbursement(
+            payment_order_id=op.id,
+            forma_pago=fp,
+            monto=monto_moneda,
+            moneda=item.moneda or "PYG",
+            tipo_cambio=tc,
+            monto_pyg=monto_item_pyg,
+            bank_account_id=payload.bank_account_id if fp == "transferencia" else (cheque_obj.bank_account_id if cheque_obj else None),
+            referencia_transferencia=payload.referencia_transferencia if fp == "transferencia" else None,
+            cheque_id=cheque_obj.id if cheque_obj else None,
+            numero_cheque=cheque_obj.numero if cheque_obj else None,
+            banco_cheque=cheque_obj.banco_emisor if cheque_obj else None,
+            fecha_cheque_emision=cheque_obj.fecha_emision if cheque_obj else None,
+            fecha_cheque_vencimiento=cheque_obj.fecha_pago if cheque_obj else None,
+            es_cheque_diferido=cheque_obj.diferido if cheque_obj else False,
+            titular_cheque=cheque_obj.beneficiario if cheque_obj else None,
+            observaciones=f"Lote Multi-Proveedor {item.observaciones or ''}".strip(),
+        )
+        db.add(disb)
+        created_orders.append({
+            "order_id": str(op.id),
+            "numero_orden": op.numero_orden,
+            "supplier_id": str(sup.id),
+            "supplier_nombre": sup.razon_social,
+            "monto_pyg": float(monto_item_pyg),
+            "monto_moneda": float(monto_moneda),
+            "moneda": item.moneda,
+        })
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "message": f"Se procesó con éxito el Lote Multi-Proveedor con {len(created_orders)} órdenes de pago.",
+        "forma_pago": fp,
+        "total_pyg": float(total_desembolso_declarado),
+        "cheque_id": str(cheque_obj.id) if cheque_obj else None,
+        "numero_cheque": cheque_obj.numero if cheque_obj else None,
+        "orders": created_orders,
+    }
+
 

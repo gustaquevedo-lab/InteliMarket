@@ -23,6 +23,12 @@ interface InvoiceToPay {
 interface DisbursementRow {
   forma_pago: "boveda" | "fondo_fijo" | "transferencia" | "cheque" | "nota_credito"
   monto: number
+  moneda?: string
+  tipo_cambio?: number
+  cheque_id?: string
+  monto_total_cheque?: number
+  is_shared_cheque?: boolean
+  is_master_cheque?: boolean
   bank_account_id?: string
   referencia_transferencia?: string
   numero_cheque?: string
@@ -75,6 +81,7 @@ export default function SupplierPaymentOrderModal({
   const [pettyCashFunds, setPettyCashFunds] = useState<any[]>([])
   const [creditNotes, setCreditNotes] = useState<any[]>([])
   const [vaultBalance, setVaultBalance] = useState<number>(0)
+  const [availableCheques, setAvailableCheques] = useState<any[]>([])
   const [loadingAux, setLoadingAux] = useState(true)
 
   // Desembolsos / medios de pago
@@ -115,16 +122,17 @@ export default function SupplierPaymentOrderModal({
     }
   }, [initialInvoices, existingOrder, supplier])
 
-  // Cargar datos de tesorería, bancos, fondos fijos y notas de crédito
+  // Cargar datos de tesorería, bancos, fondos fijos, notas de crédito y cheques disponibles
   useEffect(() => {
     let mounted = true
     async function loadAuxData() {
       try {
-        const [banksRes, fundsRes, cnRes, vaultRes] = await Promise.allSettled([
+        const [banksRes, fundsRes, cnRes, vaultRes, chequesRes] = await Promise.allSettled([
           api.financial.banks.list(),
           api.expenses.funds.list({ activo: true }),
           api.financial.creditNotes.list({ supplier_id: supplier.id }),
           api.vault.dashboard(),
+          api.financial.paymentOrders.getChequesDisponibles(),
         ])
 
         if (!mounted) return
@@ -135,11 +143,13 @@ export default function SupplierPaymentOrderModal({
           setPettyCashFunds(fundsRes.value)
         }
         if (cnRes.status === "fulfilled" && Array.isArray(cnRes.value)) {
-          // Filtrar notas con saldo disponible > 0
           setCreditNotes(cnRes.value.filter((n: any) => (n.saldo_disponible ?? n.monto) > 0))
         }
         if (vaultRes.status === "fulfilled" && vaultRes.value) {
           setVaultBalance(Number(vaultRes.value.saldo_en_boveda_pyg || 0))
+        }
+        if (chequesRes.status === "fulfilled" && Array.isArray(chequesRes.value)) {
+          setAvailableCheques(chequesRes.value)
         }
       } catch (err) {
         console.error("Error al cargar datos auxiliares de tesorería", err)
@@ -273,13 +283,33 @@ export default function SupplierPaymentOrderModal({
 
     setSubmitting(true)
     try {
+      const sanitizedDisbursements = disbursements.map(d => ({
+        forma_pago: d.forma_pago,
+        monto: d.monto,
+        moneda: d.moneda || "PYG",
+        tipo_cambio: d.tipo_cambio || 1,
+        bank_account_id: d.bank_account_id || undefined,
+        referencia_transferencia: d.referencia_transferencia || undefined,
+        cheque_id: d.is_shared_cheque ? d.cheque_id : undefined,
+        monto_total_cheque: d.is_master_cheque ? d.monto_total_cheque : undefined,
+        numero_cheque: d.numero_cheque || undefined,
+        banco_cheque: d.banco_cheque || undefined,
+        fecha_cheque_emision: d.fecha_cheque_emision || undefined,
+        fecha_cheque_vencimiento: d.fecha_cheque_vencimiento || undefined,
+        es_cheque_diferido: d.es_cheque_diferido,
+        titular_cheque: d.titular_cheque || undefined,
+        petty_cash_fund_id: d.petty_cash_fund_id || undefined,
+        credit_note_id: d.credit_note_id || undefined,
+        observaciones: d.observaciones || undefined,
+      }))
+
       if (existingOrder) {
         // Liquidar orden existente
         const res = await api.financial.paymentOrders.disburse(existingOrder.id, {
           fecha_pago: fechaPago,
           recibo_proveedor: reciboProveedor || undefined,
           observaciones: observaciones || undefined,
-          disbursements,
+          disbursements: sanitizedDisbursements,
         })
         toast.success("Orden de Pago Liquidada", `Se desembolsó exitosamente la orden ${res.numero_orden}. Fondos y saldos actualizados.`)
         onSuccess(res)
@@ -297,7 +327,7 @@ export default function SupplierPaymentOrderModal({
           recibo_proveedor: reciboProveedor || undefined,
           observaciones: observaciones || undefined,
           allocations,
-          disbursements,
+          disbursements: sanitizedDisbursements,
         })
         toast.success("Pago Liquidado con Éxito", `Se emitió y liquidó la orden ${res.numero_orden} por ${formatPYG(summaryFacturas.neto)}.`)
         onSuccess(res)
@@ -720,87 +750,201 @@ export default function SupplierPaymentOrderModal({
                         </div>
                       )}
 
-                      {/* CAMPOS PARA CHEQUES */}
+                      {/* CAMPOS PARA CHEQUES (OPCIÓN A: EMITIR O VINCULAR CHEQUE COMPARTIDO) */}
                       {d.forma_pago === "cheque" && (
-                        <>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">N° de Cheque *</label>
-                            <input
-                              type="text"
-                              required
-                              placeholder="Ej: 0048192"
-                              value={d.numero_cheque || ""}
-                              onChange={e => updateDisbursementRow(index, { numero_cheque: e.target.value })}
-                              className="w-full p-2 text-xs font-mono font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Banco Emisor / Cuenta</label>
-                            <select
-                              value={d.bank_account_id || ""}
-                              onChange={e => {
-                                const acc = bankAccounts.find((b: any) => b.id === e.target.value)
-                                updateDisbursementRow(index, {
-                                  bank_account_id: e.target.value,
-                                  banco_cheque: acc ? acc.banco : undefined
-                                })
-                              }}
-                              className="w-full p-2 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl"
-                            >
-                              <option value="">Seleccionar banco...</option>
-                              {bankAccounts.map((b: any) => (
-                                <option key={b.id} value={b.id}>
-                                  {b.banco} — Cuenta: {b.numero_cuenta}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Modalidad de Cheque</label>
-                            <div className="flex items-center gap-3 pt-1">
-                              <label className="flex items-center gap-1.5 cursor-pointer">
-                                <input
-                                  type="radio"
-                                  checked={!d.es_cheque_diferido}
-                                  onChange={() => updateDisbursementRow(index, {
-                                    es_cheque_diferido: false,
-                                    fecha_cheque_vencimiento: d.fecha_cheque_emision || fechaPago
-                                  })}
-                                />
-                                <span className="text-xs font-bold">Al Día</span>
-                              </label>
-                              <label className="flex items-center gap-1.5 cursor-pointer">
-                                <input
-                                  type="radio"
-                                  checked={d.es_cheque_diferido}
-                                  onChange={() => updateDisbursementRow(index, { es_cheque_diferido: true })}
-                                />
-                                <span className="text-xs font-bold text-rose-500">Diferido</span>
-                              </label>
-                            </div>
-                          </div>
-                          {d.es_cheque_diferido && (
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Fecha Cobro / Vencimiento *</label>
+                        <div className="sm:col-span-3 space-y-3 bg-slate-50 dark:bg-slate-900/60 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800">
+                          {/* CONMUTADOR DE MODO: EMITIR O VINCULAR */}
+                          <div className="flex flex-wrap items-center gap-4 pb-2 border-b border-slate-200 dark:border-slate-800">
+                            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold">
                               <input
-                                type="date"
-                                required
-                                value={d.fecha_cheque_vencimiento || ""}
-                                onChange={e => updateDisbursementRow(index, { fecha_cheque_vencimiento: e.target.value })}
-                                className="w-full p-2 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-mono font-bold"
+                                type="radio"
+                                checked={!d.is_shared_cheque}
+                                onChange={() => updateDisbursementRow(index, {
+                                  is_shared_cheque: false,
+                                  cheque_id: undefined,
+                                })}
                               />
+                              <span>Emitir Cheque Nuevo</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-rose-600 dark:text-rose-400">
+                              <input
+                                type="radio"
+                                checked={!!d.is_shared_cheque}
+                                onChange={() => updateDisbursementRow(index, {
+                                  is_shared_cheque: true,
+                                })}
+                              />
+                              <span>Vincular a Cheque Compartido con Saldo ({availableCheques.length} disponibles)</span>
+                            </label>
+                          </div>
+
+                          {d.is_shared_cheque ? (
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                                Seleccionar Cheque Emitido con Saldo Remanente *
+                              </label>
+                              {availableCheques.length === 0 ? (
+                                <p className="text-xs text-amber-500 p-2 bg-amber-50 dark:bg-amber-950/30 rounded-lg">
+                                  No hay cheques emitidos con saldo disponible actualmente. Seleccioná "Emitir Cheque Nuevo".
+                                </p>
+                              ) : (
+                                <select
+                                  value={d.cheque_id || ""}
+                                  onChange={e => {
+                                    const chId = e.target.value
+                                    const ch = availableCheques.find((c: any) => c.id === chId)
+                                    if (ch) {
+                                      updateDisbursementRow(index, {
+                                        cheque_id: ch.id,
+                                        numero_cheque: ch.numero,
+                                        banco_cheque: ch.banco_emisor,
+                                        bank_account_id: ch.bank_account_id,
+                                        titular_cheque: ch.beneficiario,
+                                        fecha_cheque_vencimiento: ch.fecha_pago,
+                                        es_cheque_diferido: ch.diferido,
+                                      })
+                                    } else {
+                                      updateDisbursementRow(index, { cheque_id: undefined })
+                                    }
+                                  }}
+                                  className="w-full p-2.5 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold"
+                                  required
+                                >
+                                  <option value="">Seleccione cheque emitido...</option>
+                                  {availableCheques.map((c: any) => (
+                                    <option key={c.id} value={c.id}>
+                                      Cheque N° {c.numero} ({c.banco_emisor}) — Titular: {c.beneficiario} | Disp: {formatPYG(c.saldo_disponible)} (Total: {formatPYG(c.monto_total)}) - Venc: {formatDate(c.fecha_pago)}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                              {d.cheque_id && (
+                                <div className="mt-2 p-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl text-[11px] text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
+                                  <span>Cheque N° <strong>{d.numero_cheque}</strong> ({d.banco_cheque}) asignado a esta orden.</span>
+                                  <span>{d.es_cheque_diferido ? `Diferido al ${formatDate(d.fecha_cheque_vencimiento)}` : "Al Día"}</span>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">N° de Cheque *</label>
+                                <input
+                                  type="text"
+                                  required
+                                  placeholder="Ej: 0048192"
+                                  value={d.numero_cheque || ""}
+                                  onChange={e => updateDisbursementRow(index, { numero_cheque: e.target.value })}
+                                  className="w-full p-2 text-xs font-mono font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Banco Emisor / Cuenta</label>
+                                <select
+                                  value={d.bank_account_id || ""}
+                                  onChange={e => {
+                                    const acc = bankAccounts.find((b: any) => b.id === e.target.value)
+                                    updateDisbursementRow(index, {
+                                      bank_account_id: e.target.value,
+                                      banco_cheque: acc ? acc.banco : undefined
+                                    })
+                                  }}
+                                  className="w-full p-2 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl"
+                                >
+                                  <option value="">Seleccionar banco...</option>
+                                  {bankAccounts.map((b: any) => (
+                                    <option key={b.id} value={b.id}>
+                                      {b.banco} — Cuenta: {b.numero_cuenta}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Modalidad de Cheque</label>
+                                <div className="flex items-center gap-3 pt-1">
+                                  <label className="flex items-center gap-1.5 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      checked={!d.es_cheque_diferido}
+                                      onChange={() => updateDisbursementRow(index, {
+                                        es_cheque_diferido: false,
+                                        fecha_cheque_vencimiento: d.fecha_cheque_emision || fechaPago
+                                      })}
+                                    />
+                                    <span className="text-xs font-bold">Al Día</span>
+                                  </label>
+                                  <label className="flex items-center gap-1.5 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      checked={d.es_cheque_diferido}
+                                      onChange={() => updateDisbursementRow(index, { es_cheque_diferido: true })}
+                                    />
+                                    <span className="text-xs font-bold text-rose-500">Diferido</span>
+                                  </label>
+                                </div>
+                              </div>
+                              {d.es_cheque_diferido && (
+                                <div>
+                                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Fecha Cobro / Vencimiento *</label>
+                                  <input
+                                    type="date"
+                                    required
+                                    value={d.fecha_cheque_vencimiento || ""}
+                                    onChange={e => updateDisbursementRow(index, { fecha_cheque_vencimiento: e.target.value })}
+                                    className="w-full p-2 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-mono font-bold"
+                                  />
+                                </div>
+                              )}
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Beneficiario / Titular</label>
+                                <input
+                                  type="text"
+                                  value={d.titular_cheque || ""}
+                                  onChange={e => updateDisbursementRow(index, { titular_cheque: e.target.value })}
+                                  className="w-full p-2 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl"
+                                />
+                              </div>
+
+                              {/* OPCIÓN CHEQUE MATRIZ COMPARTIDO */}
+                              <div className="sm:col-span-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-300">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!d.is_master_cheque}
+                                    onChange={e => {
+                                      const checked = e.target.checked
+                                      updateDisbursementRow(index, {
+                                        is_master_cheque: checked,
+                                        monto_total_cheque: checked ? (d.monto_total_cheque || d.monto) : undefined,
+                                      })
+                                    }}
+                                  />
+                                  <span>¿Es un Cheque Matriz Compartido? (El cheque físico tiene un monto mayor para compartir con otras órdenes)</span>
+                                </label>
+
+                                {d.is_master_cheque && (
+                                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-xl">
+                                    <div>
+                                      <label className="text-[10px] font-bold text-amber-800 dark:text-amber-300 uppercase block mb-1">
+                                        Monto Nominal Total del Cheque Físico (₲) *
+                                      </label>
+                                      <input
+                                        type="number"
+                                        min={d.monto}
+                                        value={d.monto_total_cheque || d.monto}
+                                        onChange={e => updateDisbursementRow(index, { monto_total_cheque: Number(e.target.value) || d.monto })}
+                                        className="w-full p-2 text-xs font-mono font-black text-amber-700 dark:text-amber-400 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 rounded-xl"
+                                      />
+                                    </div>
+                                    <div className="flex items-center text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+                                      Esta OP consumirá <strong>{formatPYG(d.monto)}</strong>. El remanente de <strong>{formatPYG(Math.max(0, (d.monto_total_cheque || d.monto) - d.monto))}</strong> quedará disponible para vincular a otras OPs.
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           )}
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Beneficiario / Titular</label>
-                            <input
-                              type="text"
-                              value={d.titular_cheque || ""}
-                              onChange={e => updateDisbursementRow(index, { titular_cheque: e.target.value })}
-                              className="w-full p-2 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl"
-                            />
-                          </div>
-                        </>
+                        </div>
                       )}
 
                       {d.forma_pago === "transferencia" && (

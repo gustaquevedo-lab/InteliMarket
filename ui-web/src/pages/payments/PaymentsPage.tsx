@@ -1,13 +1,14 @@
 import Supplier360Modal from "../purchases/Supplier360Modal"
 import SupplierPaymentOrderModal from "./SupplierPaymentOrderModal"
 import SupplierPaymentOrderDetailModal from "./SupplierPaymentOrderDetailModal"
+import MultiSupplierPaymentModal from "./MultiSupplierPaymentModal"
 import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   CreditCard, Search, Plus, Filter, Download, Eye, CheckCircle2,
   XCircle, AlertTriangle, Clock, Calendar, RefreshCw, Loader2,
   Building2, User, FileText, ArrowUpRight, DollarSign, Layers,
   Check, X, FileSpreadsheet, ShieldAlert, Sparkles, Info, ArrowRight,
-  TrendingDown, CheckSquare, Square, Wallet, Printer, FileCheck
+  TrendingDown, CheckSquare, Square, Wallet, Printer, FileCheck, Globe
 } from "lucide-react"
 import { api, SupplierPaymentOrder } from "../../api"
 import { useAuth } from "../../context/AuthContext"
@@ -64,6 +65,7 @@ export default function PaymentsPage() {
   } | null>(null)
 
   const [detailOrder, setDetailOrder] = useState<SupplierPaymentOrder | null>(null)
+  const [showMultiSupplierModal, setShowMultiSupplierModal] = useState(false)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -418,15 +420,35 @@ export default function PaymentsPage() {
               <span>{exportingReportPdf ? "Generando..." : "Reporte Pagos PDF"}</span>
             </button>
 
-            {/* BOTÓN MULTIFACTURA */}
+            {/* BOTÓN LOTE BRASIL / MULTI-PROVEEDOR SIEMPRE ACCESIBLE */}
+            <button
+              onClick={() => setShowMultiSupplierModal(true)}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold transition flex items-center gap-2 shadow-md shadow-emerald-950/20"
+              title="Pago agrupado multi-proveedor o compras en R$ contra un único instrumento financiero"
+            >
+              <Globe className="w-4 h-4 text-emerald-300" />
+              <span>Lote Brasil / Multi-Proveedor</span>
+            </button>
+
+            {/* BOTONES MULTIFACTURA DINÁMICOS */}
             {selectedInvoices.length > 0 && (
-              <button
-                onClick={handleOpenOrderModalForSelection}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-rose-500/25 animate-pulse"
-              >
-                <Wallet className="w-4 h-4" />
-                <span>Generar OP Multifactura ({selectedInvoices.length})</span>
-              </button>
+              sameSupplierSelected ? (
+                <button
+                  onClick={handleOpenOrderModalForSelection}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-rose-500/25 animate-pulse"
+                >
+                  <Wallet className="w-4 h-4" />
+                  <span>Generar OP Multifactura ({selectedInvoices.length})</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowMultiSupplierModal(true)}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-emerald-500/25 animate-pulse"
+                >
+                  <Globe className="w-4 h-4" />
+                  <span>Pago Lote Brasil ({selectedInvoices.length} facturas)</span>
+                </button>
+              )
             )}
           </div>
         </div>
@@ -1015,6 +1037,21 @@ export default function PaymentsPage() {
           onClose={() => {
             setSelected360SupplierId(null)
             setSelected360SupplierNombre(null)
+          }}
+        />
+      )}
+
+      {showMultiSupplierModal && (
+        <MultiSupplierPaymentModal
+          initialInvoices={selectedInvoicesObjs}
+          allPayableInvoices={invoices}
+          suppliers={suppliers}
+          onClose={() => setShowMultiSupplierModal(false)}
+          onSuccess={() => {
+            setShowMultiSupplierModal(false)
+            setSelectedInvoices([])
+            loadData()
+            setTab("ordenes_pago")
           }}
         />
       )}

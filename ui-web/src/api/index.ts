@@ -3274,6 +3274,10 @@ export const api = {
         downloadAuthenticated(`/v1/financial/payment-orders/${orderId}/pdf`, { company_id: COMPANY_ID }, `recibo_orden_pago_${numOrden}.pdf`),
       exportReportPdf: (params?: { supplier_id?: string; estado?: string; forma_pago?: string; fecha_desde?: string; fecha_hasta?: string }) =>
         downloadAuthenticated("/v1/financial/payment-orders/export/report.pdf", { company_id: COMPANY_ID, ...params }, `reporte_pagos_proveedores_${new Date().toISOString().slice(0, 10)}.pdf`),
+      getChequesDisponibles: () =>
+        client.get<any[]>("/v1/financial/payment-orders/cheques-disponibles", { company_id: COMPANY_ID } as any),
+      createMultiSupplierBatch: (data: any) =>
+        client.post<any>(`/v1/financial/payment-orders/batch-multi-supplier?company_id=${COMPANY_ID}`, data),
     },
     aging: () => client.get<any[]>("/v1/financial/aging", { company_id: COMPANY_ID } as any),
     apDashboard: () => client.get<APDashboard>("/v1/financial/dashboard", { company_id: COMPANY_ID } as any),

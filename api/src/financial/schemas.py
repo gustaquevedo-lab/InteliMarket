@@ -519,12 +519,14 @@ class PaymentOrderDisbursementCreate(BaseModel):
     tipo_cambio: Decimal = Decimal("1")
     bank_account_id: Optional[UUID] = None
     referencia_transferencia: Optional[str] = None
+    cheque_id: Optional[UUID] = None  # Si se vincula a cheque existente / compartido
     numero_cheque: Optional[str] = None
     banco_cheque: Optional[str] = None
     fecha_cheque_emision: Optional[date] = None
     fecha_cheque_vencimiento: Optional[date] = None
     es_cheque_diferido: bool = False
     titular_cheque: Optional[str] = None
+    monto_total_cheque: Optional[Decimal] = None  # Si se crea un nuevo cheque matriz compartido
     petty_cash_fund_id: Optional[UUID] = None
     credit_note_id: Optional[UUID] = None
     comprobante_url: Optional[str] = None
@@ -545,6 +547,36 @@ class SupplierPaymentOrderDisburse(BaseModel):
     recibo_proveedor: Optional[str] = None
     observaciones: Optional[str] = None
     disbursements: list[PaymentOrderDisbursementCreate]
+
+
+class MultiSupplierBatchItem(BaseModel):
+    supplier_id: UUID
+    recibo_proveedor: Optional[str] = None
+    observaciones: Optional[str] = None
+    moneda: str = "PYG"  # "BRL" o "PYG"
+    tipo_cambio: Decimal = Decimal("1")
+    monto_moneda: Decimal
+    monto_pyg: Decimal
+    allocations: list[PaymentOrderAllocationCreate]
+
+
+class MultiSupplierPaymentBatchCreate(BaseModel):
+    fecha_pago: Optional[date] = None
+    observaciones: Optional[str] = None
+    forma_pago: str  # "cheque", "transferencia", "boveda"
+    moneda_desembolso: str = "PYG"
+    bank_account_id: Optional[UUID] = None
+    referencia_transferencia: Optional[str] = None
+    # Datos de cheque (si forma_pago == "cheque"):
+    cheque_id: Optional[UUID] = None  # Si se vincula a uno existente
+    numero_cheque: Optional[str] = None
+    banco_cheque: Optional[str] = None
+    titular_cheque: Optional[str] = None
+    fecha_cheque_emision: Optional[date] = None
+    fecha_cheque_vencimiento: Optional[date] = None
+    es_cheque_diferido: bool = False
+    monto_total_desembolso_pyg: Decimal  # Monto total del cheque/transferencia matriz
+    items: list[MultiSupplierBatchItem]
 
 
 class PaymentOrderAllocationResponse(BaseModel):

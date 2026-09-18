@@ -27,6 +27,7 @@ from api.src.financial.schemas import (
     CashFlowAlertConfig,
     SupplierCreditNoteCreate, SupplierCreditNoteApply,
     SupplierPaymentOrderCreate, SupplierPaymentOrderDisburse,
+    MultiSupplierPaymentBatchCreate,
 )
 from api.src.financial import service
 
@@ -795,6 +796,27 @@ async def export_payment_orders_pdf(
         iter([pdf_bytes]),
         media_type="application/pdf",
         headers={"Content-Disposition": f"inline; filename={filename}", "Content-Length": str(len(pdf_bytes))}
+    )
+
+
+@router.get("/payment-orders/cheques-disponibles")
+async def list_available_cheques_for_payment_orders(
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.get_cheques_available_for_disbursement(db, company_id)
+
+
+@router.post("/payment-orders/batch-multi-supplier", status_code=status.HTTP_201_CREATED)
+async def create_multi_supplier_payment_batch(
+    body: MultiSupplierPaymentBatchCreate,
+    company_id: str = Query(),
+    user_id: str | None = Query(None),
+    user_nombre: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.create_multi_supplier_payment_batch(
+        db, company_id, body, user_id, user_nombre
     )
 
 
