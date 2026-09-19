@@ -154,6 +154,7 @@ class ExpenseUpdate(BaseModel):
     es_inversion: Optional[bool] = None
     vida_util_meses: Optional[int] = None
     categoria_activo: Optional[str] = None
+    fecha_gasto: Optional[date] = None
     notas: Optional[str] = None
 
 

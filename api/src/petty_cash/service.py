@@ -994,8 +994,9 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
 
     # Convertir UUIDs
     for field in ("cost_center_id", "category_id"):
-        if field in update_data and update_data[field]:
-            update_data[field] = uuid.UUID(update_data[field])
+        if field in update_data:
+            val = update_data[field]
+            update_data[field] = uuid.UUID(str(val)) if val else None
 
     for field, value in update_data.items():
         if value is not None:

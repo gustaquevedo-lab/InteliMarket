@@ -5,7 +5,8 @@ import {
   AlertTriangle, ThumbsUp, ThumbsDown, Layers, PiggyBank, UserCircle2, Landmark,
   Paperclip, ClipboardCheck, Scale, Filter, Eye, RefreshCw, ShieldAlert, ArrowRight,
   SlidersHorizontal, Check, AlertCircle, FileText, Download, Calendar, Tag,
-  FileSpreadsheet, Printer, PieChart, BookOpen, FileCheck, ScrollText, CheckCheck
+  FileSpreadsheet, Printer, PieChart, BookOpen, FileCheck, ScrollText, CheckCheck,
+  Pencil
 } from "lucide-react"
 import {
   api, API_ORIGIN, type Expense, type ExpenseCategory, type CostCenter,
@@ -43,6 +44,7 @@ export default function ExpensesPage() {
 
   // Modales
   const [showForm, setShowForm] = useState(false)
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null)
   const [showCategoryForm, setShowCategoryForm] = useState(false)
   const [showSectorForm, setShowSectorForm] = useState(false)
   const [showFundForm, setShowFundForm] = useState(false)
@@ -320,6 +322,62 @@ export default function ExpensesPage() {
     }
   }
 
+  const handleOpenCreate = () => {
+    setEditingExpenseId(null)
+    setForm({
+      monto: "",
+      descripcion: "",
+      fund_id: "",
+      category_id: "",
+      cost_center_id: "",
+      proveedor: "",
+      ruc: "",
+      timbrado: "",
+      numero_factura: "",
+      tipo_comprobante: "factura_contado",
+      iva_10: "",
+      iva_5: "",
+      exentas: "",
+      tipo_pago: "efectivo",
+      fecha_gasto: getTodayAsuncion(),
+      es_inversion: false,
+      asset_nombre: "",
+      asset_codigo_interno: "",
+      asset_categoria: "muebles_equipos",
+      asset_vida_util_meses: 60,
+    })
+    setComprobanteFile(null)
+    setShowForm(true)
+  }
+
+  const handleOpenEdit = (e: Expense) => {
+    setEditingExpenseId(e.id)
+    setForm({
+      monto: String(e.monto || ""),
+      descripcion: e.descripcion || "",
+      fund_id: (e.fund_id as string) || "",
+      category_id: (e.category_id as string) || "",
+      cost_center_id: (e.cost_center_id as string) || "",
+      proveedor: e.proveedor || "",
+      ruc: e.ruc || "",
+      timbrado: e.timbrado || "",
+      numero_factura: e.numero_factura || "",
+      tipo_comprobante: (e.tipo_comprobante as string) || "factura_contado",
+      iva_10: e.iva_10 ? String(e.iva_10) : "",
+      iva_5: e.iva_5 ? String(e.iva_5) : "",
+      exentas: e.exentas ? String(e.exentas) : "",
+      tipo_pago: (e.tipo_pago as string) || "efectivo",
+      fecha_gasto: e.fecha_gasto ? String(e.fecha_gasto).slice(0, 10) : getTodayAsuncion(),
+      es_inversion: e.es_inversion || false,
+      asset_nombre: "",
+      asset_codigo_interno: "",
+      asset_categoria: e.categoria_activo || "muebles_equipos",
+      asset_vida_util_meses: e.vida_util_meses || 60,
+    })
+    setComprobanteFile(null)
+    setShowForm(true)
+  }
+
   const handleCreateExpense = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.monto || Number(form.monto) <= 0) {
@@ -338,35 +396,59 @@ export default function ExpensesPage() {
         try {
           const res = await api.expenses.uploadComprobante(comprobanteFile)
           comprobante_url = res.url
-        } catch (e: any) {
-          toast.error("Error al subir comprobante", e.message)
+        } catch (err: any) {
+          toast.error("Error al subir comprobante", err.message)
           setUploadingComprobante(false)
           return
         }
         setUploadingComprobante(false)
       }
 
-      await api.expenses.create({
-        ...form,
-        fund_id: form.fund_id || undefined,
-        category_id: form.category_id || undefined,
-        cost_center_id: form.cost_center_id || undefined,
-        monto: Number(form.monto),
-        iva_10: form.iva_10 ? Number(form.iva_10) : undefined,
-        iva_5: form.iva_5 ? Number(form.iva_5) : undefined,
-        exentas: form.exentas ? Number(form.exentas) : undefined,
-        es_inversion: form.es_inversion || false,
-        asset_nombre: form.es_inversion ? form.asset_nombre : undefined,
-        asset_codigo_interno: form.es_inversion ? form.asset_codigo_interno : undefined,
-        asset_categoria: form.es_inversion ? form.asset_categoria : undefined,
-        asset_vida_util_meses: form.es_inversion && form.asset_vida_util_meses ? Number(form.asset_vida_util_meses) : undefined,
-        comprobante_url
-      })
+      if (editingExpenseId) {
+        await api.expenses.update(editingExpenseId, {
+          fund_id: form.fund_id || undefined,
+          category_id: form.category_id || undefined,
+          cost_center_id: form.cost_center_id || undefined,
+          monto: Number(form.monto),
+          descripcion: form.descripcion,
+          proveedor: form.proveedor || undefined,
+          ruc: form.ruc || undefined,
+          timbrado: form.timbrado || undefined,
+          numero_factura: form.numero_factura || undefined,
+          tipo_comprobante: form.tipo_comprobante,
+          iva_10: form.iva_10 ? Number(form.iva_10) : 0,
+          iva_5: form.iva_5 ? Number(form.iva_5) : 0,
+          exentas: form.exentas ? Number(form.exentas) : 0,
+          tipo_pago: form.tipo_pago,
+          fecha_gasto: form.fecha_gasto || undefined,
+          es_inversion: form.es_inversion || false,
+          categoria_activo: form.es_inversion ? form.asset_categoria : undefined,
+          vida_util_meses: form.es_inversion && form.asset_vida_util_meses ? Number(form.asset_vida_util_meses) : undefined,
+          ...(comprobante_url ? { comprobante_url } : {})
+        })
+        toast.success("Comprobante Actualizado", "Los cambios en el gasto fueron guardados exitosamente.")
+      } else {
+        await api.expenses.create({
+          ...form,
+          fund_id: form.fund_id || undefined,
+          category_id: form.category_id || undefined,
+          cost_center_id: form.cost_center_id || undefined,
+          monto: Number(form.monto),
+          iva_10: form.iva_10 ? Number(form.iva_10) : undefined,
+          iva_5: form.iva_5 ? Number(form.iva_5) : undefined,
+          exentas: form.exentas ? Number(form.exentas) : undefined,
+          es_inversion: form.es_inversion || false,
+          asset_nombre: form.es_inversion ? form.asset_nombre : undefined,
+          asset_codigo_interno: form.es_inversion ? form.asset_codigo_interno : undefined,
+          asset_categoria: form.es_inversion ? form.asset_categoria : undefined,
+          asset_vida_util_meses: form.es_inversion && form.asset_vida_util_meses ? Number(form.asset_vida_util_meses) : undefined,
+          comprobante_url
+        })
+        toast.success("Comprobante Registrado", "El gasto quedó en estado Pendiente de Aprobación. Aprobalo para luego asignar la forma de pago.")
+      }
 
-      toast.success("Comprobante Registrado", "El gasto quedó en estado Pendiente de Aprobación. Aprobalo para luego asignar la forma de pago.")
       setShowForm(false)
-      setTab("list")
-      setFilterEstado("pendiente")
+      setEditingExpenseId(null)
       setForm({
         monto: "",
         descripcion: "",
@@ -392,7 +474,7 @@ export default function ExpensesPage() {
       setComprobanteFile(null)
       fetchAll()
     } catch (e: any) {
-      toast.error("Error al registrar gasto", e.message)
+      toast.error(editingExpenseId ? "Error al actualizar gasto" : "Error al registrar gasto", e.message)
     }
   }
 
@@ -732,10 +814,7 @@ export default function ExpensesPage() {
 
           <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
             <button
-              onClick={() => {
-                setForm((f: any) => ({ ...f, fund_id: "" }))
-                setShowForm(true)
-              }}
+              onClick={handleOpenCreate}
               className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-rose-500/25"
             >
               <Plus className="w-4 h-4" />
@@ -1580,6 +1659,17 @@ export default function ExpensesPage() {
                           </td>
                           <td className="p-3.5 text-right whitespace-nowrap">
                             <div className="flex items-center justify-end gap-1.5">
+                              {/* 0. Botón Editar Comprobante */}
+                              {!e.anulado && e.estado !== "anulado" && (
+                                <button
+                                  onClick={() => handleOpenEdit(e)}
+                                  title="Editar comprobante de gasto"
+                                  className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                              )}
+
                               {/* 1. Si está pendiente: Botones de Aprobar y Rechazar */}
                               {e.estado === "pendiente" && (
                                 <>
@@ -2476,10 +2566,10 @@ export default function ExpensesPage() {
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
               <div>
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                  <ReceiptIcon className="w-5 h-5 text-indigo-600" /> Registrar Comprobante de Gasto / Inversión
+                  <ReceiptIcon className="w-5 h-5 text-indigo-600" /> {editingExpenseId ? "Editar Comprobante de Gasto" : "Registrar Comprobante de Gasto / Inversión"}
                 </h3>
                 <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-[10px] font-bold">
-                  📋 Paso 1 de 3 — Carga de Comprobante (quedará en estado Pendiente)
+                  {editingExpenseId ? "✏️ Modificación de Comprobante Existente" : "📋 Paso 1 de 3 — Carga de Comprobante (quedará en estado Pendiente)"}
                 </span>
               </div>
               <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-gray-600">
@@ -2888,7 +2978,7 @@ export default function ExpensesPage() {
                   className="btn-primary text-xs px-5 py-2 flex items-center gap-2"
                 >
                   {uploadingComprobante ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  {uploadingComprobante ? "Subiendo Comprobante..." : "Guardar Comprobante"}
+                  {uploadingComprobante ? "Subiendo Comprobante..." : editingExpenseId ? "Guardar Cambios" : "Guardar Comprobante"}
                 </button>
               </div>
             </form>
