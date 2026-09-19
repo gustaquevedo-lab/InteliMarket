@@ -1616,6 +1616,57 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
                 "user_id": user_id,
             },
         )
+    elif forma_pago == "cheque":
+        cheque_id = uuid.uuid4()
+        chq_f_emision = getattr(data, "fecha_cheque_emision", None) or getattr(data, "fecha_pago", None) or date.today()
+        chq_f_cobro = getattr(data, "fecha_cheque_cobro", None) or chq_f_emision
+        es_diferido = bool(getattr(data, "es_cheque_diferido", False) or (chq_f_cobro and chq_f_emision and chq_f_cobro > chq_f_emision))
+        chq_numero = getattr(data, "numero_cheque", None) or getattr(data, "referencia", None) or f"CHQ-{rem.numero_remision}"
+        chq_banco = getattr(data, "banco_cheque", None) or "Banco"
+        chq_librador = getattr(data, "titular_cheque", None) or empresa_nombre
+        uid = uuid.UUID(str(user_id)) if user_id else None
+
+        await db.execute(
+            text("""
+                INSERT INTO cheques
+                    (id, company_id, numero, banco_emisor, beneficiario, librador_nombre, librador_documento,
+                     monto, moneda, fecha_emision, fecha_pago, diferido, estado, tipo_cheque,
+                     customer_id, concepto, notas, created_by, created_at, updated_at)
+                VALUES
+                    (:id, :company_id, :numero, :banco, 'Extra Supermercado Mayorista', :librador, :ruc,
+                     :monto, 'PYG', :f_emision, :f_pago, :diferido, 'en_cartera', 'recibido',
+                     :customer_id, :concepto, :notas, :user_id, NOW(), NOW())
+            """),
+            {
+                "id": cheque_id,
+                "company_id": company_id,
+                "numero": chq_numero,
+                "banco": chq_banco,
+                "librador": chq_librador,
+                "ruc": getattr(rem, "empresa_vinculada_ruc", None),
+                "monto": float(monto_pago),
+                "f_emision": chq_f_emision,
+                "f_pago": chq_f_cobro,
+                "diferido": es_diferido,
+                "customer_id": getattr(rem, "empresa_customer_id", None),
+                "concepto": f"Cobro Remisión {rem.numero_remision} - {empresa_nombre}",
+                "notas": getattr(data, "notas", None),
+                "user_id": uid,
+            },
+        )
+        await db.execute(
+            text("""
+                INSERT INTO cheque_historial
+                    (id, cheque_id, estado_anterior, estado_nuevo, user_id, user_nombre, notas, created_at)
+                VALUES
+                    (gen_random_uuid(), :cheque_id, NULL, 'en_cartera', :user_id, 'Sistema (Cobranzas)', :notas, NOW())
+            """),
+            {
+                "cheque_id": cheque_id,
+                "user_id": uid,
+                "notas": f"Cheque {'diferido' if es_diferido else 'al día'} recibido de {empresa_nombre} por remisión {rem.numero_remision}",
+            },
+        )
 
     nuevo_saldo = saldo_actual - monto_pago
     nuevo_estado = "PAGADO" if nuevo_saldo <= Decimal("0") else "PAGADO_PARCIAL"

@@ -3,13 +3,14 @@ import {
   CreditCard, Search, Plus, Filter, Download, Eye, CheckCircle2,
   XCircle, AlertTriangle, Clock, Calendar, RefreshCw, Loader2,
   Building2, Landmark, User, FileText, ArrowUpRight, ArrowDownLeft, ShieldCheck,
-  Check, X, FileSpreadsheet, History, Info, Sparkles, DollarSign
+  Check, X, FileSpreadsheet, History, Info, Sparkles, DollarSign, Receipt
 } from "lucide-react"
 import { api } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatCurrency, getTodayAsuncion } from "../../utils/format"
 import CurrencyInput from "../../components/CurrencyInput"
+import SupplierSearchInput from "../../components/SupplierSearchInput"
 
 type ChequeTab = "cartera" | "emitidos" | "depositados" | "rechazados" | "dashboard"
 type ChequeTipo = "recibido" | "emitido"
@@ -181,24 +182,28 @@ export default function ChequesPage() {
 
   const handleSaveCheque = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.numero) { toast.error("Ingresá el número de cheque", ""); return }
+    if (!form.numero.trim()) { toast.error("Ingresá el número de cheque", ""); return }
+    if (!form.beneficiario.trim()) { toast.error("Ingresá el beneficiario o cliente librador", ""); return }
     if (!form.monto || parseFloat(form.monto) <= 0) { toast.error("Ingresá un monto válido", ""); return }
+    if (form.tipo === "emitido" && !form.bank_account_id) { toast.error("Seleccioná la cuenta bancaria emisora", ""); return }
     setSaving(true)
     try {
       await api.cheques.create({
         ...form,
+        numero: form.numero.trim(),
+        beneficiario: form.beneficiario.trim(),
         monto: parseFloat(form.monto),
         supplier_id: form.supplier_id || undefined,
-        bank_account_id: form.bank_account_id || undefined,
+        bank_account_id: form.tipo === "emitido" ? (form.bank_account_id || undefined) : undefined,
         fecha_entrega: form.fecha_entrega ? form.fecha_entrega : undefined,
-        fecha_pago: form.fecha_pago ? form.fecha_pago : undefined,
-        concepto: form.observaciones || undefined,
+        fecha_pago: form.diferido ? (form.fecha_pago || undefined) : form.fecha_emision,
+        concepto: form.observaciones?.trim() || undefined,
         estado: form.tipo === "emitido" ? "entregado" : "en_cartera",
       })
-      toast.success("Cheque Registrado", `El cheque N° ${form.numero} fue guardado en cartera.`)
+      toast.success("Cheque Registrado", `El cheque N° ${form.numero} fue guardado correctamente.`)
       setShowModal(false)
       setForm({
-        numero: "", banco_emisor: BANCOS_PARAGUAY[0], bank_account_id: "", beneficiario: "",
+        numero: "", banco_emisor: BANCOS_PARAGUAY[0], bank_account_id: bankAccounts.length > 0 ? bankAccounts[0].id : "", beneficiario: "",
         supplier_id: "", monto: "", moneda: "PYG", fecha_emision: getTodayAsuncion(),
         fecha_pago: getTodayAsuncion(), fecha_entrega: "", tipo: "emitido",
         diferido: false, cruzado: true, no_a_la_orden: false, observaciones: ""
@@ -287,7 +292,26 @@ export default function ChequesPage() {
               <span>Excel</span>
             </button>
             <button
-              onClick={() => setShowModal(true)}
+              onClick={() => {
+                setForm({
+                  numero: "",
+                  banco_emisor: BANCOS_PARAGUAY[0],
+                  bank_account_id: bankAccounts.length > 0 ? bankAccounts[0].id : "",
+                  beneficiario: "",
+                  supplier_id: "",
+                  monto: "",
+                  moneda: "PYG",
+                  fecha_emision: getTodayAsuncion(),
+                  fecha_pago: getTodayAsuncion(),
+                  fecha_entrega: "",
+                  tipo: "emitido",
+                  diferido: false,
+                  cruzado: true,
+                  no_a_la_orden: false,
+                  observaciones: "",
+                })
+                setShowModal(true)
+              }}
               className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-purple-500/25"
             >
               <Plus className="w-4 h-4" />
@@ -524,110 +548,448 @@ export default function ChequesPage() {
       </div>
 
       {/* MODAL REGISTRAR NUEVO CHEQUE */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-lg border border-gray-200 dark:border-slate-800 p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-            <h2 className="font-extrabold text-base text-gray-900 dark:text-white uppercase">Registrar Cheque en Tesorería</h2>
-            <form onSubmit={handleSaveCheque} className="space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label-sm">Tipo de Operación *</label>
-                  <select className="input text-xs" value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
-                    <option value="emitido">Cheque Emitido a Proveedor</option>
-                    <option value="recibido">Cheque Recibido de Cliente</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="label-sm">Número de Cheque *</label>
-                  <input required className="input text-xs font-mono" value={form.numero} onChange={e => setForm(f => ({ ...f, numero: e.target.value }))} placeholder="Ej: 00482910" />
-                </div>
-                <div className="col-span-2">
-                  <label className="label-sm">Banco Emisor *</label>
-                  <select className="input text-xs" value={form.banco_emisor} onChange={e => setForm(f => ({ ...f, banco_emisor: e.target.value }))}>
-                    {BANCOS_PARAGUAY.map(b => <option key={b} value={b}>{b}</option>)}
-                  </select>
-                </div>
+      {showModal && (() => {
+        const selectedAccount = bankAccounts.find((ba: any) => ba.id === form.bank_account_id)
+        const currentSaldo = selectedAccount ? Number(selectedAccount.saldo_actual || 0) : 0
+        const montoNum = Number(form.monto) || 0
+        const saldoProyectado = currentSaldo - montoNum
+        const currency = form.tipo === "emitido" ? (selectedAccount?.moneda || "PYG") : form.moneda
+        const prefix = currency === "USD" ? "US$" : "₲"
 
-                {form.tipo === "emitido" && (
-                  <div className="col-span-2">
-                    <label className="label-sm">Cuenta Bancaria Origen</label>
-                    <select className="input text-xs" value={form.bank_account_id} onChange={e => setForm(f => ({ ...f, bank_account_id: e.target.value }))}>
-                      {bankAccounts.map((ba: any) => (
-                        <option key={ba.id} value={ba.id}>
-                          {ba.alias ? `[${ba.alias}] ` : ""}{ba.banco} — {ba.numero_cuenta} ({ba.moneda})
-                        </option>
-                      ))}
-                    </select>
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
+            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-slate-800 overflow-hidden" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gradient-to-r from-purple-500/10 via-purple-500/5 to-transparent dark:from-purple-950/40 dark:via-purple-950/20">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                    <Receipt className="w-5 h-5" />
                   </div>
-                )}
-
-                <div className="col-span-2">
-                  <label className="label-sm">Beneficiario / Proveedor *</label>
-                  <select className="input text-xs mb-1" value={form.supplier_id} onChange={e => {
-                    const sup = suppliers.find(s => s.id === e.target.value)
-                    setForm(f => ({ ...f, supplier_id: e.target.value, beneficiario: sup?.razon_social || sup?.nombre || f.beneficiario }))
-                  }}>
-                    <option value="">Seleccionar proveedor registrado...</option>
-                    {suppliers.map((s: any) => <option key={s.id} value={s.id}>{s.razon_social || s.nombre}</option>)}
-                  </select>
-                  <input required className="input text-xs" value={form.beneficiario} onChange={e => setForm(f => ({ ...f, beneficiario: e.target.value }))} placeholder="O escribir nombre del beneficiario..." />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-gray-900 dark:text-white">Registrar Cheque en Tesorería</h3>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/60 dark:text-purple-300">
+                        Extra Supermercado
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                      Control integral de cheques propios emitidos y recibidos en cartera
+                    </p>
+                  </div>
                 </div>
-
-                <div>
-                  <label className="label-sm">Monto *</label>
-                  <CurrencyInput
-                    required
-                    currency={form.moneda === "USD" ? "USD" : "PYG"}
-                    className="input text-xs font-mono font-bold"
-                    value={form.monto}
-                    onChangeValue={(num, formatted) => setForm(f => ({ ...f, monto: String(num) }))}
-                    placeholder={form.moneda === "USD" ? "0.00" : "Ej: 5.000.000"}
-                  />
-                </div>
-                <div>
-                  <label className="label-sm">Moneda</label>
-                  <select className="input text-xs" value={form.moneda} onChange={e => setForm(f => ({ ...f, moneda: e.target.value }))}>
-                    <option value="PYG">PYG (Gs.)</option>
-                    <option value="USD">USD ($)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="label-sm">Fecha de Emisión *</label>
-                  <input type="date" required className="input text-xs" value={form.fecha_emision} onChange={e => setForm(f => ({ ...f, fecha_emision: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="label-sm">Fecha de Cobro / Pago *</label>
-                  <input type="date" required className="input text-xs" value={form.fecha_pago} onChange={e => setForm(f => ({ ...f, fecha_pago: e.target.value }))} />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4 pt-2">
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input type="checkbox" checked={form.cruzado} onChange={e => setForm(f => ({ ...f, cruzado: e.target.checked }))} className="w-3.5 h-3.5 accent-blue-600" />
-                  <span className="font-bold text-gray-700 dark:text-gray-300">Cruzado</span>
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input type="checkbox" checked={form.no_a_la_orden} onChange={e => setForm(f => ({ ...f, no_a_la_orden: e.target.checked }))} className="w-3.5 h-3.5 accent-blue-600" />
-                  <span className="font-bold text-gray-700 dark:text-gray-300">No a la Orden</span>
-                </label>
-              </div>
-
-              <div>
-                <label className="label-sm">Observaciones / Concepto</label>
-                <textarea className="input text-xs h-14" value={form.observaciones} onChange={e => setForm(f => ({ ...f, observaciones: e.target.value }))} placeholder="Facturas asociadas, entrega en mano, etc." />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-slate-800">
-                <button type="button" onClick={() => setShowModal(false)} className="btn-secondary text-xs px-4 py-2">Cancelar</button>
-                <button type="submit" disabled={saving} className="btn-primary text-xs px-5 py-2 flex items-center gap-1.5">
-                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Guardar Cheque
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
                 </button>
               </div>
-            </form>
+
+              {/* Selector de Tipo (Tabs de Modo) */}
+              <div className="grid grid-cols-2 p-1.5 bg-gray-100/70 dark:bg-slate-800/60 border-b border-gray-200 dark:border-gray-800 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, tipo: "emitido", bank_account_id: f.bank_account_id || (bankAccounts[0]?.id || "") }))}
+                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all ${
+                    form.tipo === "emitido"
+                      ? "bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-sm border border-purple-200 dark:border-purple-800/80"
+                      : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-white/40 dark:hover:bg-slate-800/40"
+                  }`}
+                >
+                  <ArrowUpRight className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                  <span>Cheque Emitido a Proveedor</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, tipo: "recibido", bank_account_id: "" }))}
+                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all ${
+                    form.tipo === "recibido"
+                      ? "bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm border border-emerald-200 dark:border-emerald-800/80"
+                      : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-white/40 dark:hover:bg-slate-800/40"
+                  }`}
+                >
+                  <ArrowDownLeft className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <span>Cheque Recibido de Cliente</span>
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveCheque}>
+                <div className="p-6 space-y-5 overflow-y-auto max-h-[72vh]">
+                  {/* Banner Contextual */}
+                  {form.tipo === "emitido" ? (
+                    <div className="p-3.5 rounded-2xl bg-purple-50/80 dark:bg-purple-950/30 border border-purple-200/80 dark:border-purple-800/60 flex items-start gap-2.5">
+                      <div className="p-2 rounded-xl bg-purple-100 dark:bg-purple-900/60 text-purple-600 dark:text-purple-400 mt-0.5">
+                        <ArrowUpRight className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-purple-900 dark:text-purple-200">Emisión de Cheque Propio (Pago Proveedor)</span>
+                        <p className="text-[11px] text-purple-700/80 dark:text-purple-300/80 mt-0.5">
+                          El cheque se librará contra una cuenta corriente de Extra Supermercado para cancelar obligaciones comerciales.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3.5 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-800/60 flex items-start gap-2.5">
+                      <div className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600 dark:text-emerald-400 mt-0.5">
+                        <ArrowDownLeft className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">Recepción de Cheque en Cartera (Cobranza Cliente)</span>
+                        <p className="text-[11px] text-emerald-700/80 dark:text-emerald-300/80 mt-0.5">
+                          El documento ingresará formalmente a <strong>Bóveda Central</strong> en custodia física hasta su depósito en banco o efectivización.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* BLOQUE 1: BANCO Y NÚMERO */}
+                  <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-4">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-purple-500" />
+                      1. Entidad Bancaria y Número de Cheque
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-start">
+                      {form.tipo === "emitido" ? (
+                        <div className="sm:col-span-7">
+                          <label className="label-field mb-1">Cuenta Bancaria Emisora *</label>
+                          <select
+                            className="input-field text-xs font-medium"
+                            value={form.bank_account_id}
+                            onChange={e => {
+                              const ba = bankAccounts.find((b: any) => b.id === e.target.value)
+                              setForm(f => ({
+                                ...f,
+                                bank_account_id: e.target.value,
+                                banco_emisor: ba?.banco || f.banco_emisor,
+                                moneda: ba?.moneda || f.moneda,
+                              }))
+                            }}
+                          >
+                            <option value="">— Seleccionar cuenta corriente —</option>
+                            {bankAccounts.map((ba: any) => (
+                              <option key={ba.id} value={ba.id}>
+                                {ba.alias ? `[${ba.alias}] ` : ""}{ba.banco} — {ba.numero_cuenta} ({ba.moneda}) · Saldo: Gs. {Number(ba.saldo_actual || 0).toLocaleString("es-PY")}
+                              </option>
+                            ))}
+                          </select>
+                          {selectedAccount && (
+                            <div className="mt-1.5 flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400 px-1">
+                              <span>Titular: <strong>{selectedAccount.titular || "Extra Supermercado"}</strong></span>
+                              <span className="font-mono">Saldo actual: <strong className="text-gray-800 dark:text-gray-200">Gs. {Number(selectedAccount.saldo_actual || 0).toLocaleString("es-PY")}</strong></span>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="sm:col-span-7">
+                          <label className="label-field mb-1">Banco Emisor del Cheque *</label>
+                          <select
+                            className="input-field text-xs font-medium"
+                            value={form.banco_emisor}
+                            onChange={e => setForm(f => ({ ...f, banco_emisor: e.target.value }))}
+                          >
+                            {BANCOS_PARAGUAY.map(b => (
+                              <option key={b} value={b}>{b}</option>
+                            ))}
+                          </select>
+                          <p className="text-[10px] text-gray-400 mt-1">Entidad bancaria emisora del cheque del cliente</p>
+                        </div>
+                      )}
+
+                      <div className="sm:col-span-5">
+                        <label className="label-field mb-1">Número de Cheque *</label>
+                        <input
+                          type="text"
+                          required
+                          className="input-field font-mono text-xs font-bold"
+                          placeholder="Ej: 00482910"
+                          value={form.numero}
+                          onChange={e => setForm(f => ({ ...f, numero: e.target.value }))}
+                        />
+                        <p className="text-[10px] text-gray-400 mt-1">Número preimpreso en el cheque</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* BLOQUE 2: BENEFICIARIO / PROVEEDOR / CLIENTE Y MONTO */}
+                  <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-4">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                      2. Contraparte y Monto del Cheque
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
+                      {form.tipo === "emitido" ? (
+                        <div className="md:col-span-7">
+                          <SupplierSearchInput
+                            label="Beneficiario / Proveedor"
+                            required
+                            suppliers={suppliers}
+                            value={form.beneficiario}
+                            supplierId={form.supplier_id}
+                            onSelectSupplier={({ id, name }) => setForm(f => ({ ...f, beneficiario: name, supplier_id: id || "" }))}
+                            onClear={() => setForm(f => ({ ...f, beneficiario: "", supplier_id: "" }))}
+                            placeholder="Buscar proveedor por Razón Social o RUC..."
+                          />
+                        </div>
+                      ) : (
+                        <div className="md:col-span-7">
+                          <label className="label-field mb-1">Cliente Librador / Titular *</label>
+                          <div className="relative">
+                            <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                            <input
+                              type="text"
+                              required
+                              className="input-field pl-9 text-xs font-semibold"
+                              placeholder="Nombre o razón social del cliente librador..."
+                              value={form.beneficiario}
+                              onChange={e => setForm(f => ({ ...f, beneficiario: e.target.value }))}
+                            />
+                          </div>
+                          <p className="text-[10px] text-gray-400 mt-1">Nombre que figura en la firma del cheque</p>
+                        </div>
+                      )}
+
+                      {/* Monto con CurrencyInput canónico */}
+                      <div className="md:col-span-5">
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="label-field mb-0">Monto del Cheque *</label>
+                          {form.tipo === "recibido" && (
+                            <div className="flex gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setForm(f => ({ ...f, moneda: "PYG" }))}
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${form.moneda === "PYG" ? "bg-emerald-600 text-white" : "bg-gray-200 dark:bg-slate-700 text-gray-600 dark:text-gray-300"}`}
+                              >
+                                Gs.
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setForm(f => ({ ...f, moneda: "USD" }))}
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${form.moneda === "USD" ? "bg-emerald-600 text-white" : "bg-gray-200 dark:bg-slate-700 text-gray-600 dark:text-gray-300"}`}
+                              >
+                                USD
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <CurrencyInput
+                          currency={currency === "USD" ? "USD" : "PYG"}
+                          prefix={prefix}
+                          placeholder={currency === "USD" ? "0.00" : "0"}
+                          value={form.monto}
+                          onChangeValue={(num) => setForm(f => ({ ...f, monto: String(num) }))}
+                          className="input-field font-mono text-base font-black text-right shadow-xs focus:ring-2 focus:ring-purple-500/20"
+                        />
+                        {montoNum > 0 && (
+                          <p className="text-[11px] font-mono text-right text-purple-600 dark:text-purple-400 font-bold mt-1">
+                            {currency === "USD" ? `US$ ${montoNum.toLocaleString("en-US", { minimumFractionDigits: 2 })}` : `Gs. ${montoNum.toLocaleString("es-PY")}`}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* BLOQUE 3: FECHAS Y MODALIDAD */}
+                  <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-4">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                      <span className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-blue-500" />
+                        3. Fechas y Modalidad de Pago
+                      </span>
+
+                      {/* Selector Al Día vs Diferido */}
+                      <div className="flex p-0.5 bg-slate-200/70 dark:bg-slate-700 rounded-lg text-[11px]">
+                        <button
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, diferido: false, fecha_pago: f.fecha_emision }))}
+                          className={`px-2.5 py-1 rounded-md font-bold transition ${
+                            !form.diferido
+                              ? "bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-xs"
+                              : "text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                          }`}
+                        >
+                          Al Día (A la vista)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, diferido: true }))}
+                          className={`px-2.5 py-1 rounded-md font-bold transition ${
+                            form.diferido
+                              ? "bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-xs"
+                              : "text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                          }`}
+                        >
+                          Pago Diferido
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="label-field mb-1">Fecha de Emisión *</label>
+                        <input
+                          type="date"
+                          required
+                          className="input-field text-xs font-mono"
+                          value={form.fecha_emision}
+                          onChange={e => {
+                            const val = e.target.value
+                            setForm(f => ({ ...f, fecha_emision: val, ...(!f.diferido ? { fecha_pago: val } : {}) }))
+                          }}
+                        />
+                        <p className="text-[10px] text-gray-400 mt-1">Fecha impresa en el cheque</p>
+                      </div>
+
+                      <div>
+                        <label className="label-field mb-1">
+                          {form.diferido ? "Fecha de Cobro / Vencimiento *" : "Fecha de Cobro (Al Día)"}
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          disabled={!form.diferido}
+                          className={`input-field text-xs font-mono ${!form.diferido ? "opacity-60 bg-gray-100 dark:bg-slate-800 cursor-not-allowed" : ""}`}
+                          value={form.fecha_pago}
+                          onChange={e => setForm(f => ({ ...f, fecha_pago: e.target.value }))}
+                        />
+                        <p className="text-[10px] text-gray-400 mt-1">
+                          {form.diferido ? "Fecha a partir de la cual puede depositarse o efectivizarse" : "Efectivizable inmediatamente"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Cláusulas y Concepto */}
+                    <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 space-y-3">
+                      <div className="flex flex-wrap gap-4">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={form.cruzado}
+                            onChange={e => setForm(f => ({ ...f, cruzado: e.target.checked }))}
+                            className="rounded text-purple-600 focus:ring-purple-500 w-4 h-4"
+                          />
+                          <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                            Cheque Cruzado (Solo para depósito en cuenta)
+                          </span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={form.no_a_la_orden}
+                            onChange={e => setForm(f => ({ ...f, no_a_la_orden: e.target.checked }))}
+                            className="rounded text-purple-600 focus:ring-purple-500 w-4 h-4"
+                          />
+                          <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                            No a la Orden (Intransferible por endoso)
+                          </span>
+                        </label>
+                      </div>
+
+                      <div>
+                        <label className="label-field mb-1">Concepto / Facturas / Observaciones</label>
+                        <input
+                          type="text"
+                          className="input-field text-xs"
+                          placeholder="Ej: Factura 001-002-123456 / Entrega en mano / Cobranza de crédito"
+                          value={form.observaciones}
+                          onChange={e => setForm(f => ({ ...f, observaciones: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* BLOQUE 4: IMPACTO FINANCIERO O CUSTODIA */}
+                  {form.tipo === "emitido" && selectedAccount && montoNum > 0 && (
+                    <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-500/10 via-purple-500/5 to-transparent dark:from-purple-950/40 dark:via-purple-950/20 border border-purple-500/30 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-purple-800 dark:text-purple-300 uppercase tracking-wide flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-purple-600" />
+                          Impacto Financiero Proyectado
+                        </span>
+                        <span className="text-[10px] font-mono text-purple-700 dark:text-purple-400 bg-purple-100/80 dark:bg-purple-900/60 px-2 py-0.5 rounded-full font-bold">
+                          {selectedAccount.banco} ({currency})
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                        <div className="bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-xl border border-purple-200/60 dark:border-purple-800/40 text-center">
+                          <span className="text-[10px] text-gray-500 dark:text-gray-400 font-semibold block">Saldo Actual Cuenta</span>
+                          <span className="text-xs font-bold font-mono text-gray-800 dark:text-gray-200">
+                            Gs. {currentSaldo.toLocaleString("es-PY")}
+                          </span>
+                        </div>
+                        <div className="bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-xl border border-rose-300/80 dark:border-rose-700/60 text-center ring-1 ring-rose-500/20">
+                          <span className="text-[10px] text-rose-600 dark:text-rose-400 font-bold block">- Importe del Cheque</span>
+                          <span className="text-xs font-black font-mono text-rose-600 dark:text-rose-400">
+                            - Gs. {montoNum.toLocaleString("es-PY")}
+                          </span>
+                        </div>
+                        <div className="bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-xl border border-purple-400/80 dark:border-purple-600/60 text-center shadow-xs">
+                          <span className="text-[10px] text-purple-800 dark:text-purple-300 font-extrabold block">= Saldo Proyectado</span>
+                          <span className={`text-xs font-black font-mono ${saldoProyectado < 0 ? "text-rose-600 dark:text-rose-400" : "text-purple-700 dark:text-purple-300"}`}>
+                            Gs. {saldoProyectado.toLocaleString("es-PY")}
+                          </span>
+                        </div>
+                      </div>
+
+                      {saldoProyectado < 0 && (
+                        <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-200 flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                          <span>
+                            <strong>Advertencia:</strong> El importe del cheque excede el saldo actual en cuenta corriente. Asegurar fondos suficientes antes del {form.fecha_pago || form.fecha_emision}.
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {form.tipo === "recibido" && (
+                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs flex items-center gap-3">
+                      <div className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 shrink-0">
+                        <ShieldCheck className="w-4 h-4" />
+                      </div>
+                      <div className="text-[11px]">
+                        <strong>Custodia Garantizada:</strong> El cheque se registrará con estado <em>"En Cartera"</em> en la Bóveda Central de Extra Supermercado hasta su depósito bancario o cobro por ventanilla.
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50/70 dark:bg-slate-900/50">
+                  <button
+                    type="button"
+                    onClick={() => setShowModal(false)}
+                    disabled={saving}
+                    className="btn-outline text-xs px-4 py-2"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving || !form.numero.trim() || !form.beneficiario.trim() || montoNum <= 0 || (form.tipo === "emitido" && !form.bank_account_id)}
+                    className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-black transition disabled:opacity-50 flex items-center gap-2 shadow-sm"
+                  >
+                    {saving ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Guardando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Guardar Cheque {montoNum > 0 ? `(${currency} ${montoNum.toLocaleString("es-PY")})` : ""}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* MODAL HISTORIAL DE CHEQUE */}
       {selectedCheque && (

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react"
 import { api, type BankAccount } from "../../api"
 import { formatPYG, getTodayAsuncion } from "../../utils/format"
 import CurrencyInput from "../../components/CurrencyInput"
+import SupplierSearchInput from "../../components/SupplierSearchInput"
 import { useToast } from "../../context/ToastContext"
 
 import {
@@ -76,9 +77,20 @@ export default function BancosPage() {
   const [showChequeModal, setShowChequeModal] = useState(false)
   const [chequeHistorial, setChequeHistorial] = useState<{ cheque: any; items: any[] } | null>(null)
   const [chequeForm, setChequeForm] = useState({
-    numero: "", bank_account_id: "", banco_emisor: "", beneficiario: "",
-    monto: "", moneda: "PYG", fecha_emision: getTodayAsuncion(),
-    fecha_entrega: "", fecha_pago: "", diferido: false, concepto: "",
+    numero: "",
+    bank_account_id: "",
+    banco_emisor: "",
+    beneficiario: "",
+    supplier_id: "",
+    monto: "",
+    moneda: "PYG",
+    fecha_emision: getTodayAsuncion(),
+    fecha_entrega: "",
+    fecha_pago: getTodayAsuncion(),
+    diferido: false,
+    cruzado: true,
+    no_a_la_orden: false,
+    concepto: "",
   })
   const [submittingCheque, setSubmittingCheque] = useState(false)
 
@@ -127,12 +139,13 @@ export default function BancosPage() {
   // Modal de Depósito Bancario
   const [showDepositModal, setShowDepositModal] = useState(false)
   const [depositMode, setDepositMode] = useState<"boveda" | "externo">("boveda")
+  const [depositVaultBalance, setDepositVaultBalance] = useState<number | null>(null)
   const [submittingDeposit, setSubmittingDeposit] = useState(false)
   const [depositForm, setDepositForm] = useState({
     bank_account_id: "",
     monto: "",
     numero_boleta: "",
-    transportadora: "",
+    transportadora: "Prosegur",
     fecha_deposito: getTodayAsuncion(),
     observaciones: "",
     // externo
@@ -453,28 +466,36 @@ export default function BancosPage() {
   }
 
   const handleCreateCheque = async () => {
-    if (!chequeForm.numero || !chequeForm.beneficiario || !chequeForm.monto) {
-      toast.error("Datos incompletos", "Completá número, beneficiario y monto")
+    if (!chequeForm.numero.trim() || !chequeForm.beneficiario.trim() || !chequeForm.monto || Number(chequeForm.monto) <= 0) {
+      toast.error("Datos incompletos", "Completá el número de cheque, beneficiario y un monto válido")
       return
     }
     setSubmittingCheque(true)
     try {
       await api.cheques.create({
         ...chequeForm,
+        numero: chequeForm.numero.trim(),
+        beneficiario: chequeForm.beneficiario.trim(),
         monto: Number(chequeForm.monto),
+        supplier_id: chequeForm.supplier_id || undefined,
         diferido: chequeForm.diferido,
+        cruzado: chequeForm.cruzado,
+        no_a_la_orden: chequeForm.no_a_la_orden,
         fecha_entrega: chequeForm.fecha_entrega || undefined,
-        fecha_pago: chequeForm.fecha_pago || undefined,
+        fecha_pago: chequeForm.diferido ? (chequeForm.fecha_pago || undefined) : chequeForm.fecha_emision,
         bank_account_id: chequeForm.bank_account_id || undefined,
+        estado: "entregado",
       })
-      toast.success("Cheque registrado", "Cheque emitido exitosamente")
+      toast.success("Cheque emitido", `Cheque N° ${chequeForm.numero} emitido exitosamente`)
       setShowChequeModal(false)
       setChequeForm({
         numero: "", bank_account_id: "", banco_emisor: "", beneficiario: "",
-        monto: "", moneda: "PYG", fecha_emision: getTodayAsuncion(),
-        fecha_entrega: "", fecha_pago: "", diferido: false, concepto: "",
+        supplier_id: "", monto: "", moneda: "PYG", fecha_emision: getTodayAsuncion(),
+        fecha_entrega: "", fecha_pago: getTodayAsuncion(), diferido: false,
+        cruzado: true, no_a_la_orden: false, concepto: "",
       })
       fetchCheques()
+      fetchAll()
     } catch (e: any) {
       toast.error("Error", e.message || "No se pudo emitir el cheque")
     } finally {
@@ -704,7 +725,27 @@ export default function BancosPage() {
               <span>Importar Extracto</span>
             </button>
             <button
-              onClick={() => setShowChequeModal(true)}
+              onClick={() => {
+                const defaultBankId = selectedBank || (banks.length > 0 ? banks[0].id : "")
+                const acct = banks.find(b => b.id === defaultBankId)
+                setChequeForm({
+                  numero: "",
+                  bank_account_id: defaultBankId,
+                  banco_emisor: acct?.banco || "",
+                  beneficiario: "",
+                  supplier_id: "",
+                  monto: "",
+                  moneda: acct?.moneda || "PYG",
+                  fecha_emision: getTodayAsuncion(),
+                  fecha_entrega: "",
+                  fecha_pago: getTodayAsuncion(),
+                  diferido: false,
+                  cruzado: true,
+                  no_a_la_orden: false,
+                  concepto: "",
+                })
+                setShowChequeModal(true)
+              }}
               className="px-4 py-2.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 hover:text-white border border-purple-500/30 text-xs font-bold transition flex items-center gap-2 shadow-sm"
             >
               <Receipt className="w-4 h-4 text-purple-400" />
@@ -726,8 +767,22 @@ export default function BancosPage() {
             </button>
             <button
               onClick={() => {
-                setDepositForm(f => ({ ...f, bank_account_id: selectedBank || (banks.length > 0 ? banks[0].id : ""), fecha_deposito: getTodayAsuncion() }))
+                setDepositForm({
+                  bank_account_id: selectedBank || (banks.length > 0 ? banks[0].id : ""),
+                  monto: "",
+                  numero_boleta: "",
+                  transportadora: "Prosegur",
+                  fecha_deposito: getTodayAsuncion(),
+                  observaciones: "",
+                  categoria_ext: "deposito_efectivo",
+                  referencia_ext: "",
+                  contraparte_ext: "",
+                  descripcion_ext: "",
+                })
                 setDepositMode("boveda")
+                api.vault.dashboard().then((res: any) => {
+                  setDepositVaultBalance(Number(res?.saldo_en_boveda_pyg ?? 0))
+                }).catch(() => setDepositVaultBalance(null))
                 setShowDepositModal(true)
               }}
               className="px-4 py-2.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 hover:text-white border border-sky-500/30 text-xs font-bold transition flex items-center gap-2 shadow-sm"
@@ -2030,52 +2085,324 @@ export default function BancosPage() {
       )}
 
       {/* MODAL: Emitir Cheque */}
-      {showChequeModal && (
-        <div className="modal-overlay" onClick={() => setShowChequeModal(false)}>
-          <div className="modal-content max-w-md" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <Receipt className="w-5 h-5 text-purple-500" />
-                Emitir Nuevo Cheque
-              </h3>
-            </div>
-            <div className="p-6 space-y-4">
-              <div><label className="label-field">N° de Cheque *</label><input className="input-field font-mono" placeholder="Ej: 0048192" value={chequeForm.numero} onChange={e => setChequeForm({ ...chequeForm, numero: e.target.value })} /></div>
-              <div>
-                <label className="label-field">Cuenta Bancaria Emisora *</label>
-                <select
-                  className="input-field"
-                  value={chequeForm.bank_account_id}
-                  onChange={e => {
-                    const acct = banks.find(b => b.id === e.target.value)
-                    setChequeForm({ ...chequeForm, bank_account_id: e.target.value, banco_emisor: acct?.banco || "" })
-                  }}
+      {showChequeModal && (() => {
+        const issuingAccount = banks.find(b => b.id === chequeForm.bank_account_id)
+        const currentSaldo = issuingAccount ? Number(issuingAccount.saldo_actual || 0) : 0
+        const montoNum = Number(chequeForm.monto) || 0
+        const saldoProyectado = currentSaldo - montoNum
+        const currency = issuingAccount?.moneda === "USD" ? "USD" : "PYG"
+        const prefix = issuingAccount?.moneda === "USD" ? "US$" : "₲"
+
+        return (
+          <div className="modal-overlay" onClick={() => setShowChequeModal(false)}>
+            <div className="modal-content max-w-2xl p-0 overflow-hidden shadow-2xl rounded-2xl border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gradient-to-r from-purple-500/10 via-purple-500/5 to-transparent dark:from-purple-950/40 dark:via-purple-950/20">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                    <Receipt className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-gray-900 dark:text-white">Emitir Nuevo Cheque</h3>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/60 dark:text-purple-300">
+                        Extra Supermercado
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                      Chequera corporativa propia para pago a proveedores y acreedores
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowChequeModal(false)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
                 >
-                  <option value="">Seleccionar cuenta...</option>
-                  {banks.map(b => <option key={b.id} value={b.id}>{formatBankLabel(b)}</option>)}
-                </select>
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <div><label className="label-field">Beneficiario / Proveedor *</label><input className="input-field" placeholder="Razón social o nombre" value={chequeForm.beneficiario} onChange={e => setChequeForm({ ...chequeForm, beneficiario: e.target.value })} /></div>
-              <div><label className="label-field">Monto (Gs.) *</label><CurrencyInput currency="PYG" placeholder="Ej: 15.000.000" className="input-field font-mono text-right" value={chequeForm.monto} onChangeValue={(num, formatted) => setChequeForm({ ...chequeForm, monto: String(num) })} /></div>
-              <div className="grid grid-cols-2 gap-4">
-                <div><label className="label-field">Fecha de Emisión</label><input className="input-field" type="date" value={chequeForm.fecha_emision} onChange={e => setChequeForm({ ...chequeForm, fecha_emision: e.target.value })} /></div>
-                <div><label className="label-field">Fecha de Cobro / Venc.</label><input className="input-field" type="date" value={chequeForm.fecha_pago} onChange={e => setChequeForm({ ...chequeForm, fecha_pago: e.target.value })} /></div>
+
+              <div className="p-6 space-y-5 overflow-y-auto max-h-[72vh]">
+                {/* BLOQUE 1: CUENTA BANCARIA Y NÚMERO DE CHEQUE */}
+                <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-4">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-purple-500" />
+                    1. Cuenta Bancaria Emisora y Comprobante
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-start">
+                    <div className="sm:col-span-7">
+                      <label className="label-field mb-1">Cuenta Bancaria Emisora *</label>
+                      <select
+                        className="input-field text-xs font-medium"
+                        value={chequeForm.bank_account_id}
+                        onChange={e => {
+                          const acct = banks.find(b => b.id === e.target.value)
+                          setChequeForm(f => ({
+                            ...f,
+                            bank_account_id: e.target.value,
+                            banco_emisor: acct?.banco || "",
+                            moneda: acct?.moneda || "PYG",
+                          }))
+                        }}
+                      >
+                        <option value="">— Seleccionar cuenta corriente —</option>
+                        {banks.map(b => (
+                          <option key={b.id} value={b.id}>
+                            {formatBankLabel(b)} · Saldo: Gs. {Number(b.saldo_actual || 0).toLocaleString("es-PY")}
+                          </option>
+                        ))}
+                      </select>
+                      {issuingAccount && (
+                        <div className="mt-1.5 flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400 px-1">
+                          <span>Banco: <strong>{issuingAccount.banco}</strong></span>
+                          <span className="font-mono">Saldo actual: <strong className="text-gray-800 dark:text-gray-200">Gs. {Number(issuingAccount.saldo_actual || 0).toLocaleString("es-PY")}</strong></span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="sm:col-span-5">
+                      <label className="label-field mb-1">Número de Cheque *</label>
+                      <input
+                        type="text"
+                        className="input-field font-mono text-xs font-bold"
+                        placeholder="Ej: 0048192"
+                        value={chequeForm.numero}
+                        onChange={e => setChequeForm(f => ({ ...f, numero: e.target.value }))}
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1">Número preimpreso en la chequera</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* BLOQUE 2: BENEFICIARIO / PROVEEDOR Y MONTO */}
+                <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-4">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    2. Beneficiario y Monto del Cheque
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
+                    {/* Buscador de Proveedor */}
+                    <div className="md:col-span-7">
+                      <SupplierSearchInput
+                        label="Beneficiario / Proveedor"
+                        required
+                        value={chequeForm.beneficiario}
+                        supplierId={chequeForm.supplier_id}
+                        onSelectSupplier={({ id, name }) => setChequeForm(f => ({ ...f, beneficiario: name, supplier_id: id || "" }))}
+                        onClear={() => setChequeForm(f => ({ ...f, beneficiario: "", supplier_id: "" }))}
+                        placeholder="Buscar por Razón Social o RUC..."
+                      />
+                    </div>
+
+                    {/* Monto con CurrencyInput canónico */}
+                    <div className="md:col-span-5">
+                      <label className="label-field mb-1">Monto del Cheque ({currency}) *</label>
+                      <CurrencyInput
+                        currency={currency}
+                        prefix={prefix}
+                        placeholder={currency === "USD" ? "0.00" : "0"}
+                        value={chequeForm.monto}
+                        onChangeValue={(num) => setChequeForm(f => ({ ...f, monto: String(num) }))}
+                        className="input-field font-mono text-base font-black text-right shadow-xs focus:ring-2 focus:ring-purple-500/20"
+                      />
+                      {montoNum > 0 && (
+                        <p className="text-[11px] font-mono text-right text-purple-600 dark:text-purple-400 font-bold mt-1">
+                          {currency === "USD" ? `US$ ${montoNum.toLocaleString("en-US", { minimumFractionDigits: 2 })}` : `Gs. ${montoNum.toLocaleString("es-PY")}`}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* BLOQUE 3: FECHAS Y MODALIDAD DE PAGO */}
+                <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-4">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-blue-500" />
+                      3. Fechas y Modalidad de Pago
+                    </span>
+
+                    {/* Selector Al Día vs Diferido */}
+                    <div className="flex p-0.5 bg-slate-200/70 dark:bg-slate-700 rounded-lg text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => setChequeForm(f => ({ ...f, diferido: false, fecha_pago: f.fecha_emision }))}
+                        className={`px-2.5 py-1 rounded-md font-bold transition ${
+                          !chequeForm.diferido
+                            ? "bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-xs"
+                            : "text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                        }`}
+                      >
+                        Al Día (A la vista)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setChequeForm(f => ({ ...f, diferido: true }))}
+                        className={`px-2.5 py-1 rounded-md font-bold transition ${
+                          chequeForm.diferido
+                            ? "bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-xs"
+                            : "text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                        }`}
+                      >
+                        Pago Diferido
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="label-field mb-1">Fecha de Emisión *</label>
+                      <input
+                        type="date"
+                        className="input-field text-xs font-mono"
+                        value={chequeForm.fecha_emision}
+                        onChange={e => {
+                          const val = e.target.value
+                          setChequeForm(f => ({ ...f, fecha_emision: val, ...(!f.diferido ? { fecha_pago: val } : {}) }))
+                        }}
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1">Fecha de libramiento</p>
+                    </div>
+
+                    <div>
+                      <label className="label-field mb-1">
+                        {chequeForm.diferido ? "Fecha de Cobro / Vencimiento *" : "Fecha de Cobro (Al Día)"}
+                      </label>
+                      <input
+                        type="date"
+                        disabled={!chequeForm.diferido}
+                        className={`input-field text-xs font-mono ${!chequeForm.diferido ? "opacity-60 bg-gray-100 dark:bg-slate-800 cursor-not-allowed" : ""}`}
+                        value={chequeForm.fecha_pago}
+                        onChange={e => setChequeForm(f => ({ ...f, fecha_pago: e.target.value }))}
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        {chequeForm.diferido ? "Habilitado para depósito o cobro a partir de esta fecha" : "Efectivizable inmediatamente"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Cláusulas de Seguridad y Concepto */}
+                  <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 space-y-3">
+                    <div className="flex flex-wrap gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={chequeForm.cruzado}
+                          onChange={e => setChequeForm(f => ({ ...f, cruzado: e.target.checked }))}
+                          className="rounded text-purple-600 focus:ring-purple-500 w-4 h-4"
+                        />
+                        <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                          Cheque Cruzado (Solo para depósito en cuenta)
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={chequeForm.no_a_la_orden}
+                          onChange={e => setChequeForm(f => ({ ...f, no_a_la_orden: e.target.checked }))}
+                          className="rounded text-purple-600 focus:ring-purple-500 w-4 h-4"
+                        />
+                        <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                          No a la Orden (Intransferible por endoso)
+                        </span>
+                      </label>
+                    </div>
+
+                    <div>
+                      <label className="label-field mb-1">Concepto / Factura / Observaciones (Opcional)</label>
+                      <input
+                        type="text"
+                        className="input-field text-xs"
+                        placeholder="Ej: Pago Factura Contado 001-002-123456 / Mercaderías Lácteos"
+                        value={chequeForm.concepto}
+                        onChange={e => setChequeForm(f => ({ ...f, concepto: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* BLOQUE 4: IMPACTO FINANCIERO EN TIEMPO REAL */}
+                {issuingAccount && montoNum > 0 && (
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-500/10 via-purple-500/5 to-transparent dark:from-purple-950/40 dark:via-purple-950/20 border border-purple-500/30 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-purple-800 dark:text-purple-300 uppercase tracking-wide flex items-center gap-1.5">
+                        <CheckCircle className="w-4 h-4 text-purple-600" />
+                        Impacto Financiero Proyectado
+                      </span>
+                      <span className="text-[10px] font-mono text-purple-700 dark:text-purple-400 bg-purple-100/80 dark:bg-purple-900/60 px-2 py-0.5 rounded-full font-bold">
+                        {issuingAccount.banco} ({currency})
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                      <div className="bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-xl border border-purple-200/60 dark:border-purple-800/40 text-center">
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 font-semibold block">Saldo Actual Cuenta</span>
+                        <span className="text-xs font-bold font-mono text-gray-800 dark:text-gray-200">
+                          Gs. {currentSaldo.toLocaleString("es-PY")}
+                        </span>
+                      </div>
+                      <div className="bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-xl border border-rose-300/80 dark:border-rose-700/60 text-center ring-1 ring-rose-500/20">
+                        <span className="text-[10px] text-rose-600 dark:text-rose-400 font-bold block">- Importe del Cheque</span>
+                        <span className="text-xs font-black font-mono text-rose-600 dark:text-rose-400">
+                          - Gs. {montoNum.toLocaleString("es-PY")}
+                        </span>
+                      </div>
+                      <div className="bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-xl border border-purple-400/80 dark:border-purple-600/60 text-center shadow-xs">
+                        <span className="text-[10px] text-purple-800 dark:text-purple-300 font-extrabold block">= Saldo Proyectado</span>
+                        <span className={`text-xs font-black font-mono ${saldoProyectado < 0 ? "text-rose-600 dark:text-rose-400" : "text-purple-700 dark:text-purple-300"}`}>
+                          Gs. {saldoProyectado.toLocaleString("es-PY")}
+                        </span>
+                      </div>
+                    </div>
+
+                    {saldoProyectado < 0 && (
+                      <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-200 flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                        <span>
+                          <strong>Advertencia:</strong> El importe del cheque excede el saldo actual disponible en cuenta. Asegurar fondos suficientes antes de la fecha de compensación ({chequeForm.fecha_pago || chequeForm.fecha_emision}).
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-2">
-                <input type="checkbox" id="diferido_check" checked={chequeForm.diferido} onChange={e => setChequeForm({ ...chequeForm, diferido: e.target.checked })} className="rounded text-primary" />
-                <label htmlFor="diferido_check" className="text-xs text-gray-700 dark:text-gray-300 font-medium">Cheque de pago diferido</label>
+
+              {/* Footer */}
+              <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50/70 dark:bg-slate-900/50">
+                <button
+                  type="button"
+                  onClick={() => setShowChequeModal(false)}
+                  disabled={submittingCheque}
+                  className="btn-outline text-xs px-4 py-2"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreateCheque}
+                  disabled={submittingCheque || !chequeForm.numero.trim() || !chequeForm.beneficiario.trim() || montoNum <= 0 || !chequeForm.bank_account_id}
+                  className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-black transition disabled:opacity-50 flex items-center gap-2 shadow-sm"
+                >
+                  {submittingCheque ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Emitiendo...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Receipt className="w-4 h-4" />
+                      <span>Emitir Cheque {montoNum > 0 ? `(Gs. ${montoNum.toLocaleString("es-PY")})` : ""}</span>
+                    </>
+                  )}
+                </button>
               </div>
-              <div><label className="label-field">Concepto / Referencia</label><input className="input-field text-xs" placeholder="Ej: Pago Factura 001-002-123456" value={chequeForm.concepto} onChange={e => setChequeForm({ ...chequeForm, concepto: e.target.value })} /></div>
-            </div>
-            <div className="p-6 border-t flex justify-end gap-3">
-              <button onClick={() => setShowChequeModal(false)} className="btn-ghost text-xs">Cancelar</button>
-              <button onClick={handleCreateCheque} disabled={submittingCheque || !chequeForm.numero || !chequeForm.beneficiario || !chequeForm.monto} className="btn-primary text-xs disabled:opacity-50">
-                {submittingCheque ? <Loader2 className="w-4 h-4 animate-spin" /> : "Emitir Cheque"}
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* MODAL: REGISTRO DE MOVIMIENTOS BANCARIOS (DIRECTOS Y TRANSFERENCIAS) */}
       {showTxModal && (() => {
@@ -2251,18 +2578,17 @@ export default function BancosPage() {
                   {/* Monto y Fecha */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="label-field mb-1">Monto de la Operación (Gs.) *</label>
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        placeholder="Ej: 5000000"
-                        className="input-field font-mono text-sm font-semibold"
+                      <label className="label-field mb-1">Monto de la Operación ({selectedAccount?.moneda || "Gs."}) *</label>
+                      <CurrencyInput
+                        currency={selectedAccount?.moneda === "USD" ? "USD" : "PYG"}
+                        prefix={selectedAccount?.moneda === "USD" ? "US$" : "₲"}
+                        placeholder={selectedAccount?.moneda === "USD" ? "0.00" : "0"}
+                        className="input-field font-mono text-sm font-semibold text-right"
                         value={txForm.monto}
-                        onChange={e => setTxForm({ ...txForm, monto: e.target.value })}
+                        onChangeValue={(num) => setTxForm({ ...txForm, monto: String(num) })}
                       />
                       {montoOperacion > 0 && (
-                        <p className="text-[11px] text-gray-500 font-mono mt-1">
+                        <p className="text-[11px] text-gray-500 font-mono mt-1 text-right">
                           {formatGs(montoOperacion)}
                         </p>
                       )}
@@ -2333,13 +2659,13 @@ export default function BancosPage() {
                         <div className="pt-2 pl-6 flex flex-col sm:flex-row sm:items-center gap-3">
                           <div className="w-48">
                             <label className="text-[11px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider block mb-1">Monto Comisión (Gs.)</label>
-                            <input
-                              type="number"
-                              min="0"
-                              className="input-field text-xs font-mono font-bold"
-                              placeholder="5500"
+                            <CurrencyInput
+                              currency="PYG"
+                              prefix="₲"
+                              className="input-field text-xs font-mono font-bold text-right"
+                              placeholder="5.500"
                               value={txForm.comision_adicional}
-                              onChange={e => setTxForm({ ...txForm, comision_adicional: e.target.value })}
+                              onChangeValue={(num) => setTxForm({ ...txForm, comision_adicional: String(num) })}
                             />
                           </div>
                           <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 sm:mt-4">
@@ -2430,18 +2756,17 @@ export default function BancosPage() {
                   {/* Monto y Fecha */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="label-field mb-1">Monto a Transferir (Gs.) *</label>
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        placeholder="Ej: 25000000"
-                        className="input-field font-mono text-sm font-semibold"
+                      <label className="label-field mb-1">Monto a Transferir ({origenAccount?.moneda || "Gs."}) *</label>
+                      <CurrencyInput
+                        currency={origenAccount?.moneda === "USD" ? "USD" : "PYG"}
+                        prefix={origenAccount?.moneda === "USD" ? "US$" : "₲"}
+                        placeholder={origenAccount?.moneda === "USD" ? "0.00" : "0"}
+                        className="input-field font-mono text-sm font-semibold text-right"
                         value={transferForm.monto}
-                        onChange={e => setTransferForm({ ...transferForm, monto: e.target.value })}
+                        onChangeValue={(num) => setTransferForm({ ...transferForm, monto: String(num) })}
                       />
                       {montoTrf > 0 && (
-                        <p className="text-[11px] text-gray-500 font-mono mt-1">
+                        <p className="text-[11px] text-gray-500 font-mono mt-1 text-right">
                           {formatGs(montoTrf)}
                         </p>
                       )}
@@ -2463,13 +2788,13 @@ export default function BancosPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="label-field mb-1">Comisión Bancaria al Origen (Gs.) [Opcional]</label>
-                      <input
-                        type="number"
-                        min="0"
-                        placeholder="Ej: 5500 (SIPAP) o 0"
-                        className="input-field font-mono text-xs"
+                      <CurrencyInput
+                        currency="PYG"
+                        prefix="₲"
+                        placeholder="Ej: 5.500"
+                        className="input-field font-mono text-xs text-right"
                         value={transferForm.comision}
-                        onChange={e => setTransferForm({ ...transferForm, comision: e.target.value })}
+                        onChangeValue={(num) => setTransferForm({ ...transferForm, comision: String(num) })}
                       />
                       <p className="text-[10px] text-gray-400 mt-1">Se debita del saldo de la cuenta origen</p>
                     </div>
@@ -2622,7 +2947,7 @@ export default function BancosPage() {
             return
           }
           if (depositMode === "boveda" && !depositForm.numero_boleta.trim()) {
-            toast.error("N° de boleta requerido", "Ingresá el número de boleta del depósito")
+            toast.error("N° de boleta requerido", "Ingresá el número de boleta del depósito bancario")
             return
           }
           setSubmittingDeposit(true)
@@ -2631,10 +2956,10 @@ export default function BancosPage() {
               await api.vault.depositAmountToBank({
                 monto_pyg: montoNum,
                 bank_account_id: depositForm.bank_account_id,
-                numero_boleta: depositForm.numero_boleta,
+                numero_boleta: depositForm.numero_boleta.trim(),
                 transportadora: depositForm.transportadora || undefined,
                 fecha_deposito: depositForm.fecha_deposito || undefined,
-                observaciones: depositForm.observaciones || undefined,
+                observaciones: depositForm.observaciones?.trim() || undefined,
               })
               toast.success("Depósito registrado", `Gs. ${montoNum.toLocaleString("es-PY")} depositados desde Bóveda`)
             } else {
@@ -2643,9 +2968,9 @@ export default function BancosPage() {
                 categoria: depositForm.categoria_ext,
                 monto: montoNum,
                 fecha: depositForm.fecha_deposito,
-                referencia: depositForm.referencia_ext || undefined,
-                contraparte: depositForm.contraparte_ext || undefined,
-                descripcion: depositForm.descripcion_ext || undefined,
+                referencia: depositForm.referencia_ext?.trim() || undefined,
+                contraparte: depositForm.contraparte_ext?.trim() || undefined,
+                descripcion: depositForm.descripcion_ext?.trim() || undefined,
               })
               toast.success("Depósito externo registrado", `Gs. ${montoNum.toLocaleString("es-PY")} acreditados en ${destAccount?.banco || "cuenta"}`)
             }
@@ -2660,212 +2985,375 @@ export default function BancosPage() {
 
         return (
           <div className="modal-overlay" onClick={() => setShowDepositModal(false)}>
-            <div className="modal-content max-w-lg p-0 overflow-hidden shadow-2xl rounded-2xl" onClick={e => e.stopPropagation()}>
+            <div className="modal-content max-w-2xl p-0 overflow-hidden shadow-2xl rounded-2xl border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
               {/* Header */}
-              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-sky-50/60 dark:bg-sky-950/30">
+              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gradient-to-r from-sky-500/10 via-sky-500/5 to-transparent dark:from-sky-950/40 dark:via-sky-950/20">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-sky-500/15 text-sky-600 dark:text-sky-400">
+                  <div className="p-2.5 rounded-xl bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/20">
                     <Building2 className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-gray-900 dark:text-white">Depósito Bancario</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-gray-900 dark:text-white">Depósito Bancario</h3>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 dark:bg-sky-900/60 dark:text-sky-300">
+                        Extra Supermercado
+                      </span>
+                    </div>
                     <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
-                      Extra Supermercado — Desde bóveda o depósito externo recibido
+                      Registro oficial de acreditaciones y remesas a cuentas comerciales
                     </p>
                   </div>
                 </div>
-                <button type="button" onClick={() => setShowDepositModal(false)} className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">
+                <button
+                  type="button"
+                  onClick={() => setShowDepositModal(false)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
+                >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* Tabs */}
-              <div className="flex border-b border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-slate-900/30 px-6 pt-2.5 gap-2">
+              {/* Selector de Modo (Tabs modernas) */}
+              <div className="grid grid-cols-2 p-1.5 bg-gray-100/70 dark:bg-slate-800/60 border-b border-gray-200 dark:border-gray-800 gap-1.5">
                 <button
                   type="button"
                   onClick={() => setDepositMode("boveda")}
-                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold border-b-2 transition-all ${
+                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all ${
                     depositMode === "boveda"
-                      ? "border-sky-600 text-sky-700 dark:text-sky-400 bg-white dark:bg-slate-800 rounded-t-lg shadow-sm"
-                      : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                      ? "bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-sm border border-sky-200 dark:border-sky-800/80"
+                      : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-white/40 dark:hover:bg-slate-800/40"
                   }`}
                 >
-                  <Building2 className="w-3.5 h-3.5" /> Desde Bóveda
+                  <ShieldCheck className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                  <span>Remesa desde Bóveda Central</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setDepositMode("externo")}
-                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold border-b-2 transition-all ${
+                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all ${
                     depositMode === "externo"
-                      ? "border-emerald-600 text-emerald-700 dark:text-emerald-400 bg-white dark:bg-slate-800 rounded-t-lg shadow-sm"
-                      : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                      ? "bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm border border-emerald-200 dark:border-emerald-800/80"
+                      : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-white/40 dark:hover:bg-slate-800/40"
                   }`}
                 >
-                  <ArrowDownRight className="w-3.5 h-3.5" /> Externo / Recibido
+                  <ArrowDownRight className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <span>Depósito Externo / Recibido</span>
                 </button>
               </div>
 
-              <div className="p-6 space-y-4 overflow-y-auto max-h-[70vh]">
-                {/* Cuenta destino (común) */}
-                <div>
-                  <label className="form-label">Cuenta destino *</label>
-                  <select
-                    className="form-control text-xs"
-                    value={depositForm.bank_account_id}
-                    onChange={e => setDepositForm(f => ({ ...f, bank_account_id: e.target.value }))}
-                  >
-                    <option value="">— Seleccioná cuenta —</option>
-                    {banks.map(b => (
-                      <option key={b.id} value={b.id}>
-                        {b.alias ? `[${b.alias}] ` : ""}{b.banco} — {b.numero_cuenta} ({b.moneda})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Monto (común) */}
-                <div>
-                  <label className="form-label">Monto (Gs.) *</label>
-                  <input
-                    type="number"
-                    className="form-control text-xs"
-                    placeholder="0"
-                    min={0}
-                    value={depositForm.monto}
-                    onChange={e => setDepositForm(f => ({ ...f, monto: e.target.value }))}
-                  />
-                </div>
-
-                {/* Fecha (común) */}
-                <div>
-                  <label className="form-label">Fecha del depósito *</label>
-                  <input
-                    type="date"
-                    className="form-control text-xs"
-                    value={depositForm.fecha_deposito}
-                    onChange={e => setDepositForm(f => ({ ...f, fecha_deposito: e.target.value }))}
-                  />
-                </div>
-
+              <div className="p-6 space-y-5 overflow-y-auto max-h-[72vh]">
+                {/* Banner Contextual del Modo */}
                 {depositMode === "boveda" ? (
-                  <>
-                    {/* Modo Bóveda */}
-                    <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 text-[11px] text-sky-700 dark:text-sky-300">
-                      💡 El monto será deducido automáticamente de la <strong>Bóveda de Efectivo</strong> y acreditado en la cuenta bancaria seleccionada.
+                  <div className="p-3.5 rounded-2xl bg-sky-50/80 dark:bg-sky-950/30 border border-sky-200/80 dark:border-sky-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-2.5">
+                      <div className="p-2 rounded-xl bg-sky-100 dark:bg-sky-900/60 text-sky-600 dark:text-sky-400 mt-0.5">
+                        <Landmark className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-sky-900 dark:text-sky-200">Remesa de Efectivo a Banco</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-200/70 dark:bg-sky-900 text-sky-800 dark:text-sky-300 font-semibold">
+                            Custodia Bóveda
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-sky-700/80 dark:text-sky-300/80 mt-0.5">
+                          El importe se debitará de <strong>Bóveda Central</strong> y se acreditará inmediatamente en la cuenta bancaria.
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <label className="form-label">N° de Boleta de depósito *</label>
-                      <input
-                        type="text"
-                        className="form-control text-xs"
-                        placeholder="Ej: 0012345"
-                        value={depositForm.numero_boleta}
-                        onChange={e => setDepositForm(f => ({ ...f, numero_boleta: e.target.value }))}
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label">Transportadora / Responsable</label>
-                      <input
-                        type="text"
-                        className="form-control text-xs"
-                        placeholder="Ej: Prosegur, Juan Pérez..."
-                        value={depositForm.transportadora}
-                        onChange={e => setDepositForm(f => ({ ...f, transportadora: e.target.value }))}
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label">Observaciones</label>
-                      <textarea
-                        className="form-control text-xs h-20"
-                        placeholder="Notas adicionales..."
-                        value={depositForm.observaciones}
-                        onChange={e => setDepositForm(f => ({ ...f, observaciones: e.target.value }))}
-                      />
-                    </div>
-                  </>
+                    {depositVaultBalance !== null && (
+                      <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center border-t sm:border-t-0 pt-2 sm:pt-0 border-sky-200/60 dark:border-sky-800/60 shrink-0">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-sky-700 dark:text-sky-400">Saldo en Bóveda</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black font-mono text-sky-950 dark:text-sky-100">
+                            Gs. {depositVaultBalance.toLocaleString("es-PY")}
+                          </span>
+                          {depositVaultBalance > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setDepositForm(f => ({ ...f, monto: String(depositVaultBalance) }))}
+                              className="px-2 py-0.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] transition shadow-xs"
+                            >
+                              Usar todo
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 ) : (
-                  <>
-                    {/* Modo Externo */}
-                    <div>
-                      <label className="form-label">Tipo de depósito *</label>
-                      <select
-                        className="form-control text-xs"
-                        value={depositForm.categoria_ext}
-                        onChange={e => setDepositForm(f => ({ ...f, categoria_ext: e.target.value }))}
-                      >
-                        <option value="deposito_efectivo">Depósito en efectivo</option>
-                        <option value="deposito_caja">Depósito de caja</option>
-                        <option value="transferencia_recibida">Transferencia recibida</option>
-                        <option value="liquidacion_tarjeta">Liquidación de tarjeta</option>
-                        <option value="interes_ganado">Interés / Rendimiento</option>
-                        <option value="otros">Otro ingreso</option>
-                      </select>
+                  <div className="p-3.5 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-800/60 flex items-start gap-2.5">
+                    <div className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600 dark:text-emerald-400 mt-0.5">
+                      <ArrowDownRight className="w-4 h-4" />
                     </div>
                     <div>
-                      <label className="form-label">Referencia / N° boleta</label>
-                      <input
-                        type="text"
-                        className="form-control text-xs"
-                        placeholder="Ej: TRF-001234, Boleta 5678..."
-                        value={depositForm.referencia_ext}
-                        onChange={e => setDepositForm(f => ({ ...f, referencia_ext: e.target.value }))}
-                      />
+                      <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">Acreditación Directa en Cuenta</span>
+                      <p className="text-[11px] text-emerald-700/80 dark:text-emerald-300/80 mt-0.5">
+                        Registra fondos acreditados directamente en banco (cobranza, transferencias recibidas SIPAP, liquidaciones POS o depósitos en ventanilla).
+                      </p>
                     </div>
-                    <div>
-                      <label className="form-label">Origen / Remitente</label>
-                      <input
-                        type="text"
-                        className="form-control text-xs"
-                        placeholder="Ej: Cliente XYZ, Banco Itaú..."
-                        value={depositForm.contraparte_ext}
-                        onChange={e => setDepositForm(f => ({ ...f, contraparte_ext: e.target.value }))}
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label">Descripción</label>
-                      <textarea
-                        className="form-control text-xs h-20"
-                        placeholder="Descripción del depósito..."
-                        value={depositForm.descripcion_ext}
-                        onChange={e => setDepositForm(f => ({ ...f, descripcion_ext: e.target.value }))}
-                      />
-                    </div>
-                  </>
+                  </div>
                 )}
 
-                {/* Preview saldo */}
+                {/* BLOQUE 1: CUENTA DESTINO Y MONTO (Grid organizado) */}
+                <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-4">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-sky-500" />
+                    1. Cuenta Bancaria Receptora y Monto
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
+                    {/* Cuenta Destino */}
+                    <div className="md:col-span-7">
+                      <label className="label-field mb-1">Cuenta Destino *</label>
+                      <select
+                        className="input-field text-xs font-medium"
+                        value={depositForm.bank_account_id}
+                        onChange={e => setDepositForm(f => ({ ...f, bank_account_id: e.target.value }))}
+                      >
+                        <option value="">— Seleccionar cuenta bancaria —</option>
+                        {banks.map(b => (
+                          <option key={b.id} value={b.id}>
+                            {formatBankLabel(b)} · Saldo: Gs. {Number(b.saldo_actual || 0).toLocaleString("es-PY")}
+                          </option>
+                        ))}
+                      </select>
+                      {destAccount && (
+                        <div className="mt-1.5 flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400 px-1">
+                          <span>Titular: <strong>{destAccount.titular || "Extra Supermercado"}</strong></span>
+                          <span className="font-mono">Saldo actual: <strong className="text-gray-800 dark:text-gray-200">Gs. {Number(destAccount.saldo_actual || 0).toLocaleString("es-PY")}</strong></span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Monto con CurrencyInput canónico */}
+                    <div className="md:col-span-5">
+                      <label className="label-field mb-1">Monto del Depósito ({destAccount?.moneda || "PYG"}) *</label>
+                      <CurrencyInput
+                        currency={destAccount?.moneda === "USD" ? "USD" : "PYG"}
+                        prefix={destAccount?.moneda === "USD" ? "US$" : "₲"}
+                        placeholder={destAccount?.moneda === "USD" ? "0.00" : "0"}
+                        value={depositForm.monto}
+                        onChangeValue={(num) => setDepositForm(f => ({ ...f, monto: String(num) }))}
+                        className="input-field font-mono text-base font-black text-right shadow-xs focus:ring-2 focus:ring-sky-500/20"
+                      />
+                      {montoNum > 0 && (
+                        <p className="text-[11px] font-mono text-right text-sky-600 dark:text-sky-400 font-bold mt-1">
+                          {destAccount?.moneda === "USD" ? `US$ ${montoNum.toLocaleString("en-US", { minimumFractionDigits: 2 })}` : `Gs. ${montoNum.toLocaleString("es-PY")}`}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Alerta si supera saldo en bóveda */}
+                  {depositMode === "boveda" && depositVaultBalance !== null && montoNum > depositVaultBalance && (
+                    <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-[11px] text-rose-700 dark:text-rose-300 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                      <span>
+                        <strong>Atención:</strong> El monto a depositar (Gs. {montoNum.toLocaleString("es-PY")}) supera el saldo disponible en Bóveda Central (Gs. {depositVaultBalance.toLocaleString("es-PY")}).
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* BLOQUE 2: DATOS DEL COMPROBANTE Y FECHA */}
+                <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-4">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    2. Comprobante, Fecha y Logística
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Fecha de Depósito */}
+                    <div>
+                      <label className="label-field mb-1">Fecha de Depósito *</label>
+                      <input
+                        type="date"
+                        className="input-field text-xs font-mono"
+                        value={depositForm.fecha_deposito}
+                        onChange={e => setDepositForm(f => ({ ...f, fecha_deposito: e.target.value }))}
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1">Hora local de Paraguay (Asunción)</p>
+                    </div>
+
+                    {/* N° Boleta / Referencia */}
+                    <div>
+                      <label className="label-field mb-1">
+                        {depositMode === "boveda" ? "N° de Boleta de Depósito *" : "N° Boleta / Referencia Bancaria"}
+                      </label>
+                      <input
+                        type="text"
+                        className="input-field text-xs font-mono"
+                        placeholder={depositMode === "boveda" ? "Ej: 00123456" : "Ej: TRF-091829 / Boleta 5678"}
+                        value={depositMode === "boveda" ? depositForm.numero_boleta : depositForm.referencia_ext}
+                        onChange={e => {
+                          const val = e.target.value
+                          setDepositForm(f => depositMode === "boveda" ? { ...f, numero_boleta: val } : { ...f, referencia_ext: val })
+                        }}
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        {depositMode === "boveda" ? "Número impreso en la boleta bancaria" : "Identificador o comprobante bancario"}
+                      </p>
+                    </div>
+
+                    {/* Campos específicos según modo */}
+                    {depositMode === "boveda" ? (
+                      <>
+                        <div>
+                          <label className="label-field mb-1">Transportadora / Canal *</label>
+                          <select
+                            className="input-field text-xs"
+                            value={depositForm.transportadora}
+                            onChange={e => setDepositForm(f => ({ ...f, transportadora: e.target.value }))}
+                          >
+                            <option value="Prosegur">Prosegur (Camión de caudales)</option>
+                            <option value="Yrendagüe">Yrendagüe (Transporte de caudales)</option>
+                            <option value="Depósito en Ventanilla">Depósito Directo en Ventanilla / Sucursal</option>
+                            <option value="Buzón 24hs">Buzón nocturno 24hs</option>
+                            <option value="Otro">Otro canal</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="label-field mb-1">Responsable / Custodio (Opcional)</label>
+                          <input
+                            type="text"
+                            className="input-field text-xs"
+                            placeholder="Ej: Guardián Prosegur / Juan Pérez"
+                            value={depositForm.contraparte_ext}
+                            onChange={e => setDepositForm(f => ({ ...f, contraparte_ext: e.target.value }))}
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="label-field mb-1">Tipo de Ingreso *</label>
+                          <select
+                            className="input-field text-xs"
+                            value={depositForm.categoria_ext}
+                            onChange={e => setDepositForm(f => ({ ...f, categoria_ext: e.target.value }))}
+                          >
+                            <option value="deposito_efectivo">Depósito en efectivo (ventanilla / buzón)</option>
+                            <option value="deposito_caja">Depósito de recaudación de caja</option>
+                            <option value="transferencia_recibida">Transferencia recibida (SIPAP / Clientes)</option>
+                            <option value="liquidacion_tarjeta">Liquidación POS / Tarjetas</option>
+                            <option value="interes_ganado">Interés ganado / Rendimiento</option>
+                            <option value="otros">Otros ingresos bancarios</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="label-field mb-1">Origen / Depositante / Contraparte</label>
+                          <input
+                            type="text"
+                            className="input-field text-xs"
+                            placeholder="Ej: Cliente Mayorista, Dinelco, Bancard..."
+                            value={depositForm.contraparte_ext}
+                            onChange={e => setDepositForm(f => ({ ...f, contraparte_ext: e.target.value }))}
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Observaciones / Notas */}
+                  <div>
+                    <label className="label-field mb-1">
+                      {depositMode === "boveda" ? "Observaciones (Opcional)" : "Descripción / Detalle (Opcional)"}
+                    </label>
+                    <textarea
+                      className="input-field text-xs h-16 resize-none"
+                      placeholder={depositMode === "boveda" ? "Notas adicionales sobre la remesa de caudales..." : "Detalle conceptual del depósito recibido..."}
+                      value={depositMode === "boveda" ? depositForm.observaciones : depositForm.descripcion_ext}
+                      onChange={e => {
+                        const val = e.target.value
+                        setDepositForm(f => depositMode === "boveda" ? { ...f, observaciones: val } : { ...f, descripcion_ext: val })
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* BLOQUE 3: PREVIEW DE IMPACTO FINANCIERO (Fintech Style) */}
                 {destAccount && montoNum > 0 && (
-                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-1">
-                    <p className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">Preview saldo</p>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-500">Saldo actual</span>
-                      <span className="font-mono font-bold text-gray-800 dark:text-gray-200">Gs. {Number(destAccount.saldo_actual || 0).toLocaleString("es-PY")}</span>
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent dark:from-emerald-950/40 dark:via-emerald-950/20 border border-emerald-500/30 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wide flex items-center gap-1.5">
+                        <CheckCircle className="w-4 h-4 text-emerald-600" />
+                        Impacto Financiero Proyectado
+                      </span>
+                      <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400 bg-emerald-100/80 dark:bg-emerald-900/60 px-2 py-0.5 rounded-full font-bold">
+                        {destAccount.banco} ({destAccount.moneda})
+                      </span>
                     </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-500">+ Depósito</span>
-                      <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">Gs. {montoNum.toLocaleString("es-PY")}</span>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                      <div className="bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 text-center">
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 font-semibold block">Saldo Actual Cuenta</span>
+                        <span className="text-xs font-bold font-mono text-gray-800 dark:text-gray-200">
+                          Gs. {Number(destAccount.saldo_actual || 0).toLocaleString("es-PY")}
+                        </span>
+                      </div>
+                      <div className="bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-xl border border-emerald-300/80 dark:border-emerald-700/60 text-center ring-1 ring-emerald-500/20">
+                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold block">+ Depósito a Acreditar</span>
+                        <span className="text-xs font-black font-mono text-emerald-600 dark:text-emerald-400">
+                          + Gs. {montoNum.toLocaleString("es-PY")}
+                        </span>
+                      </div>
+                      <div className="bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-xl border border-emerald-400/80 dark:border-emerald-600/60 text-center shadow-xs">
+                        <span className="text-[10px] text-emerald-800 dark:text-emerald-300 font-extrabold block">= Saldo Proyectado</span>
+                        <span className="text-xs font-black font-mono text-emerald-700 dark:text-emerald-300">
+                          Gs. {(Number(destAccount.saldo_actual || 0) + montoNum).toLocaleString("es-PY")}
+                        </span>
+                      </div>
                     </div>
-                    <div className="border-t border-emerald-200 dark:border-emerald-800 pt-1 flex justify-between text-xs">
-                      <span className="font-bold text-gray-700 dark:text-gray-300">Saldo proyectado</span>
-                      <span className="font-mono font-extrabold text-emerald-700 dark:text-emerald-300">Gs. {(Number(destAccount.saldo_actual || 0) + montoNum).toLocaleString("es-PY")}</span>
-                    </div>
+
+                    {depositMode === "boveda" && depositVaultBalance !== null && (
+                      <div className="pt-2 border-t border-emerald-200/60 dark:border-emerald-800/40 flex items-center justify-between text-[11px] text-gray-600 dark:text-gray-300 font-mono">
+                        <span>Remanente Bóveda Central:</span>
+                        <span className={`font-bold ${depositVaultBalance - montoNum < 0 ? "text-rose-600 dark:text-rose-400" : "text-gray-800 dark:text-gray-200"}`}>
+                          Gs. {Math.max(0, depositVaultBalance - montoNum).toLocaleString("es-PY")}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
 
               {/* Footer */}
-              <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-700 flex justify-end gap-3 bg-gray-50/40 dark:bg-slate-900/20">
-                <button type="button" onClick={() => setShowDepositModal(false)} className="btn-outline text-xs">
+              <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50/70 dark:bg-slate-900/50">
+                <button
+                  type="button"
+                  onClick={() => setShowDepositModal(false)}
+                  disabled={submittingDeposit}
+                  className="btn-outline text-xs px-4 py-2"
+                >
                   Cancelar
                 </button>
                 <button
                   type="button"
                   onClick={handleDeposit}
-                  disabled={submittingDeposit || !depositForm.bank_account_id || montoNum <= 0}
-                  className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-extrabold transition disabled:opacity-50 flex items-center gap-2"
+                  disabled={
+                    submittingDeposit ||
+                    !depositForm.bank_account_id ||
+                    montoNum <= 0 ||
+                    (depositMode === "boveda" && !depositForm.numero_boleta.trim())
+                  }
+                  className="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-black transition disabled:opacity-50 flex items-center gap-2 shadow-sm"
                 >
-                  {submittingDeposit ? <Loader2 className="w-4 h-4 animate-spin" /> : <Building2 className="w-4 h-4" />}
-                  {depositMode === "boveda" ? "Registrar Depósito desde Bóveda" : "Registrar Depósito Externo"}
+                  {submittingDeposit ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Procesando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Building2 className="w-4 h-4" />
+                      <span>
+                        {depositMode === "boveda"
+                          ? `Registrar Depósito desde Bóveda ${montoNum > 0 ? `(Gs. ${montoNum.toLocaleString("es-PY")})` : ""}`
+                          : `Registrar Depósito Externo ${montoNum > 0 ? `(Gs. ${montoNum.toLocaleString("es-PY")})` : ""}`}
+                      </span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

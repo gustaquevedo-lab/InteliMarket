@@ -133,6 +133,14 @@ class CorporateRemissionPayInput(BaseModel):
     referencia: Optional[str] = None
     fecha_pago: Optional[date] = None
     notas: Optional[str] = None
+    # Datos de cheque (al día o diferido)
+    numero_cheque: Optional[str] = None
+    banco_cheque: Optional[str] = None
+    es_cheque_diferido: Optional[bool] = False
+    fecha_cheque_emision: Optional[date] = None
+    fecha_cheque_cobro: Optional[date] = None
+    titular_cheque: Optional[str] = None
+
 
 
 

@@ -2744,7 +2744,21 @@ export const api = {
     listCorporateRemissions: (empresa?: string) => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions`, empresa ? { empresa_nombre: empresa } : undefined),
     getCorporateRemissionDetail: (id: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}`),
     downloadRemisionPdf: (id: string, numero?: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/pdf`, undefined, `remision_${numero || id.slice(0, 8)}.pdf`),
-    payCorporateRemission: (id: string, data: { monto: number; forma_pago?: string; bank_account_id?: string; destino_fondos?: string; referencia?: string; fecha_pago?: string; notas?: string }) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/pay`, data),
+    payCorporateRemission: (id: string, data: {
+      monto: number;
+      forma_pago?: string;
+      bank_account_id?: string;
+      destino_fondos?: string;
+      referencia?: string;
+      fecha_pago?: string;
+      notas?: string;
+      numero_cheque?: string;
+      banco_cheque?: string;
+      es_cheque_diferido?: boolean;
+      fecha_cheque_emision?: string;
+      fecha_cheque_cobro?: string;
+      titular_cheque?: string;
+    }) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/pay`, data),
     listBanks: () => client.get<any[]>("/v1/financial/banks", { company_id: COMPANY_ID } as any),
   },
 

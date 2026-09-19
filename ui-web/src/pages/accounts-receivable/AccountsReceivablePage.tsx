@@ -15,6 +15,13 @@ const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
 type TabType = "documentos" | "aging" | "scoring" | "recibos" | "empresas_vinculadas" | "reportes"
 
+const BANCOS_PARAGUAY = [
+  "BANCO CONTINENTAL", "BANCO ITAÚ PARAGUAY", "BANCO GNB PARAGUAY",
+  "BANCO ATLAS", "BANCOP", "BANCO SUDAMERIS", "BANCO BASA",
+  "BANCO FAMILIAR", "BANCO INTERFISA", "BANCO NACIONAL DE FOMENTO (BNF)",
+  "SOLAR BANCO", "UENO BANK", "ZETA BANCO"
+]
+
 
 interface CustomerScore {
   id: string
@@ -203,6 +210,13 @@ export default function AccountsReceivablePage() {
     referencia: "",
     fecha_pago: getTodayAsuncion(),
     notas: "",
+    // Cheques al día / diferidos
+    numero_cheque: "",
+    banco_cheque: "BANCO CONTINENTAL",
+    es_cheque_diferido: false,
+    fecha_cheque_emision: getTodayAsuncion(),
+    fecha_cheque_cobro: getTodayAsuncion(),
+    titular_cheque: "",
   })
   const [payingRemission, setPayingRemission] = useState(false)
 
@@ -398,6 +412,18 @@ export default function AccountsReceivablePage() {
       toast.warning("Monto requerido", "Ingresá un monto válido pagado por la empresa")
       return
     }
+
+    if (payRemForm.forma_pago === "cheque") {
+      if (!payRemForm.numero_cheque.trim()) {
+        toast.warning("N° de Cheque requerido", "Por favor ingresá el número del cheque recibido")
+        return
+      }
+      if (payRemForm.es_cheque_diferido && !payRemForm.fecha_cheque_cobro) {
+        toast.warning("Fecha de Cobro requerida", "Ingresá la fecha de cobro para el cheque diferido")
+        return
+      }
+    }
+
     setPayingRemission(true)
     try {
       const res = await api.accountsReceivable.payCorporateRemission(showPayRemissionModal.id, {
@@ -407,8 +433,24 @@ export default function AccountsReceivablePage() {
         referencia: payRemForm.referencia || undefined,
         fecha_pago: payRemForm.fecha_pago || undefined,
         notas: payRemForm.notas || undefined,
+        // Cheques al día / diferidos
+        numero_cheque: payRemForm.numero_cheque.trim() || undefined,
+        banco_cheque: payRemForm.banco_cheque || undefined,
+        es_cheque_diferido: payRemForm.es_cheque_diferido,
+        fecha_cheque_emision: payRemForm.fecha_cheque_emision || undefined,
+        fecha_cheque_cobro: payRemForm.es_cheque_diferido ? payRemForm.fecha_cheque_cobro : (payRemForm.fecha_cheque_emision || undefined),
+        titular_cheque: payRemForm.titular_cheque.trim() || undefined,
       })
-      toast.success("Pago de empresa registrado", `Se canceló ${formatPYG(monto)} del saldo adeudado por la empresa (${res.estado})`)
+
+      if (payRemForm.forma_pago === "cheque") {
+        toast.success(
+          "Pago con Cheque Registrado",
+          `Se guardó el cheque ${payRemForm.es_cheque_diferido ? 'diferido' : 'al día'} N° ${payRemForm.numero_cheque} en cartera por ${formatPYG(monto)} (${res.estado}).`
+        )
+      } else {
+        toast.success("Pago de empresa registrado", `Se canceló ${formatPYG(monto)} del saldo adeudado por la empresa (${res.estado})`)
+      }
+
       setShowPayRemissionModal(null)
       fetchRemissions()
       fetchAgreements()
@@ -1910,6 +1952,12 @@ export default function AccountsReceivablePage() {
                                         referencia: "",
                                         fecha_pago: getTodayAsuncion(),
                                         notas: "",
+                                        numero_cheque: "",
+                                        banco_cheque: "BANCO CONTINENTAL",
+                                        es_cheque_diferido: false,
+                                        fecha_cheque_emision: getTodayAsuncion(),
+                                        fecha_cheque_cobro: getTodayAsuncion(),
+                                        titular_cheque: r.empresa_vinculada_nombre || "",
                                       })
                                     }}
                                     className="btn-primary py-1 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs inline-flex items-center gap-1 shadow-sm font-bold"
@@ -3320,16 +3368,141 @@ export default function AccountsReceivablePage() {
                 </div>
               )}
 
-              <div>
-                <label className="label-field">N° Boleta / Referencia Bancaria</label>
-                <input
-                  type="text"
-                  placeholder="Ej: SIPAP 4589201"
-                  className="input-field text-xs"
-                  value={payRemForm.referencia}
-                  onChange={e => setPayRemForm({ ...payRemForm, referencia: e.target.value })}
-                />
-              </div>
+              {payRemForm.forma_pago === "cheque" ? (
+                <div className="p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900 dark:text-indigo-200">
+                      <CreditCard className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                      <span>Detalles del Cheque Corporativo</span>
+                    </div>
+
+                    {/* Selector de Cheque al Día vs Diferido */}
+                    <div className="flex items-center bg-white dark:bg-slate-900 p-0.5 rounded-lg border border-indigo-200 dark:border-indigo-800">
+                      <button
+                        type="button"
+                        onClick={() => setPayRemForm({ ...payRemForm, es_cheque_diferido: false })}
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-colors ${
+                          !payRemForm.es_cheque_diferido
+                            ? "bg-indigo-600 text-white shadow-xs"
+                            : "text-gray-500 hover:text-gray-700 dark:text-gray-400"
+                        }`}
+                      >
+                        Al Día
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPayRemForm({ ...payRemForm, es_cheque_diferido: true })}
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-colors ${
+                          payRemForm.es_cheque_diferido
+                            ? "bg-amber-600 text-white shadow-xs"
+                            : "text-gray-500 hover:text-gray-700 dark:text-gray-400"
+                        }`}
+                      >
+                        Diferido
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label-field text-[11px] font-semibold">
+                        N° de Cheque <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ej: 00481920"
+                        className="input-field text-xs font-mono font-bold"
+                        value={payRemForm.numero_cheque}
+                        onChange={e => setPayRemForm({ ...payRemForm, numero_cheque: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="label-field text-[11px] font-semibold">Banco Emisor</label>
+                      <select
+                        className="input-field text-xs"
+                        value={payRemForm.banco_cheque}
+                        onChange={e => setPayRemForm({ ...payRemForm, banco_cheque: e.target.value })}
+                      >
+                        {BANCOS_PARAGUAY.map(b => (
+                          <option key={b} value={b}>{b}</option>
+                        ))}
+                        <option value="OTRO">OTRO BANCO</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {payRemForm.es_cheque_diferido ? (
+                    <div className="grid grid-cols-2 gap-3 p-2.5 bg-amber-50/80 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-800/50">
+                      <div>
+                        <label className="label-field text-[11px] font-semibold text-amber-900 dark:text-amber-200">
+                          Fecha de Emisión
+                        </label>
+                        <input
+                          type="date"
+                          className="input-field text-xs"
+                          value={payRemForm.fecha_cheque_emision}
+                          onChange={e => setPayRemForm({ ...payRemForm, fecha_cheque_emision: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="label-field text-[11px] font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1">
+                          <span>Fecha de Cobro</span>
+                          <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          className="input-field text-xs font-bold border-amber-400"
+                          value={payRemForm.fecha_cheque_cobro}
+                          onChange={e => setPayRemForm({ ...payRemForm, fecha_cheque_cobro: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="label-field text-[11px] font-semibold">
+                        Fecha de Emisión / Cobro
+                      </label>
+                      <input
+                        type="date"
+                        className="input-field text-xs"
+                        value={payRemForm.fecha_cheque_emision}
+                        onChange={e => setPayRemForm({ ...payRemForm, fecha_cheque_emision: e.target.value, fecha_cheque_cobro: e.target.value })}
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="label-field text-[11px] font-semibold">Librador / Titular de la Cuenta</label>
+                    <input
+                      type="text"
+                      placeholder="Nombre de la empresa o librador"
+                      className="input-field text-xs"
+                      value={payRemForm.titular_cheque}
+                      onChange={e => setPayRemForm({ ...payRemForm, titular_cheque: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="text-[11px] text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5 pt-0.5">
+                    <Sparkles className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
+                    <span>
+                      {payRemForm.es_cheque_diferido
+                        ? "El cheque se registrará como Diferido en Gestión de Cheques (En Cartera) con vencimiento programado."
+                        : "El cheque se registrará en Gestión de Cheques (En Cartera) disponible para depósito inmediato."}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="label-field">N° Boleta / Referencia Bancaria</label>
+                  <input
+                    type="text"
+                    placeholder="Ej: SIPAP 4589201"
+                    className="input-field text-xs"
+                    value={payRemForm.referencia}
+                    onChange={e => setPayRemForm({ ...payRemForm, referencia: e.target.value })}
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="label-field">Notas / Observaciones</label>
