@@ -516,6 +516,9 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         es_inversion=bool(data.es_inversion),
         vida_util_meses=data.vida_util_meses if data.es_inversion else None,
         categoria_activo=data.categoria_activo if data.es_inversion else None,
+        es_pago_proveedor=bool(data.es_pago_proveedor),
+        supplier_id=uuid.UUID(data.supplier_id) if data.supplier_id else None,
+        supplier_invoice_id=uuid.UUID(data.supplier_invoice_id) if data.supplier_invoice_id else None,
         auditoria_estado=auditoria_estado,
         auditoria_motivo=auditoria_motivo,
         registrado_por=uuid.UUID(user_id),
@@ -523,6 +526,36 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         notas=data.notas,
     )
     db.add(exp)
+
+    # Si se asocia a una factura comercial pendiente, amortizar en Cuentas por Pagar
+    if data.supplier_invoice_id:
+        from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment
+        inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == uuid.UUID(data.supplier_invoice_id)))
+        target_inv = inv_res.scalar_one_or_none()
+        if target_inv:
+            monto_aplicar = min(monto, target_inv.saldo_pendiente)
+            target_inv.saldo_pendiente -= monto_aplicar
+            if target_inv.saldo_pendiente <= 0:
+                target_inv.saldo_pendiente = Decimal("0")
+                target_inv.estado = "pagada"
+            else:
+                target_inv.estado = "parcial"
+
+            payment = SupplierInvoicePayment(
+                invoice_id=target_inv.id,
+                payment_method="fondo_fijo",
+                monto=monto_aplicar,
+                moneda="PYG",
+                fecha_pago=data.fecha_gasto or date.today(),
+                referencia=f"Comprobante caja chica {data.numero_factura or ''}",
+                petty_cash_fund_id=fund.id if fund else None,
+                estado="conciliado",
+            )
+            db.add(payment)
+            exp.es_pago_proveedor = True
+            if target_inv.supplier_id:
+                exp.supplier_id = target_inv.supplier_id
+
     await db.commit()
     await db.refresh(exp)
     return exp
@@ -993,10 +1026,40 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
                 ))
 
     # Convertir UUIDs
-    for field in ("cost_center_id", "category_id"):
+    for field in ("cost_center_id", "category_id", "supplier_id", "supplier_invoice_id"):
         if field in update_data:
             val = update_data[field]
             update_data[field] = uuid.UUID(str(val)) if val else None
+
+    # Si se asocia a una factura comercial pendiente mediante edición/reclasificación
+    target_invoice_id = update_data.get("supplier_invoice_id")
+    if target_invoice_id and exp.supplier_invoice_id != target_invoice_id:
+        from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment
+        inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == target_invoice_id))
+        target_inv = inv_res.scalar_one_or_none()
+        if target_inv:
+            monto_aplicar = min(Decimal(str(exp.monto)), target_inv.saldo_pendiente)
+            target_inv.saldo_pendiente -= monto_aplicar
+            if target_inv.saldo_pendiente <= 0:
+                target_inv.saldo_pendiente = Decimal("0")
+                target_inv.estado = "pagada"
+            else:
+                target_inv.estado = "parcial"
+
+            payment = SupplierInvoicePayment(
+                invoice_id=target_inv.id,
+                payment_method="fondo_fijo",
+                monto=monto_aplicar,
+                moneda="PYG",
+                fecha_pago=exp.fecha_gasto or date.today(),
+                referencia=f"Reclasificación comprobante gasto {exp.numero_factura or exp.id}",
+                petty_cash_fund_id=exp.fund_id,
+                estado="conciliado",
+            )
+            db.add(payment)
+            update_data["es_pago_proveedor"] = True
+            if target_inv.supplier_id:
+                update_data["supplier_id"] = target_inv.supplier_id
 
     for field, value in update_data.items():
         if value is not None:
@@ -1191,7 +1254,7 @@ async def get_summary(db: AsyncSession, company_id: str) -> ExpenseSummary:
     # Daily total
     r1 = await db.execute(
         select(sa_func.coalesce(sa_func.sum(Expense.monto), 0))
-        .where(Expense.company_id == cid, Expense.anulado == False, Expense.fecha_gasto == today)
+        .where(Expense.company_id == cid, Expense.anulado == False, Expense.es_pago_proveedor == False, Expense.fecha_gasto == today)
     )
     total_dia = float(r1.scalar())
 
@@ -1199,7 +1262,7 @@ async def get_summary(db: AsyncSession, company_id: str) -> ExpenseSummary:
     week_start = today - timedelta(days=today.weekday())
     r2 = await db.execute(
         select(sa_func.coalesce(sa_func.sum(Expense.monto), 0))
-        .where(Expense.company_id == cid, Expense.anulado == False, Expense.fecha_gasto >= week_start)
+        .where(Expense.company_id == cid, Expense.anulado == False, Expense.es_pago_proveedor == False, Expense.fecha_gasto >= week_start)
     )
     total_semana = float(r2.scalar())
 
@@ -1207,14 +1270,14 @@ async def get_summary(db: AsyncSession, company_id: str) -> ExpenseSummary:
     month_start = today.replace(day=1)
     r3 = await db.execute(
         select(sa_func.coalesce(sa_func.sum(Expense.monto), 0))
-        .where(Expense.company_id == cid, Expense.anulado == False, Expense.fecha_gasto >= month_start)
+        .where(Expense.company_id == cid, Expense.anulado == False, Expense.es_pago_proveedor == False, Expense.fecha_gasto >= month_start)
     )
     total_mes = float(r3.scalar())
 
     # By category
     r4 = await db.execute(
         select(Expense.category_id, sa_func.sum(Expense.monto))
-        .where(Expense.company_id == cid, Expense.anulado == False, Expense.fecha_gasto >= month_start)
+        .where(Expense.company_id == cid, Expense.anulado == False, Expense.es_pago_proveedor == False, Expense.fecha_gasto >= month_start)
         .group_by(Expense.category_id)
     )
     por_categoria = [{"category_id": str(k) if k else None, "total": float(v)} for k, v in r4.all()]
@@ -1222,7 +1285,7 @@ async def get_summary(db: AsyncSession, company_id: str) -> ExpenseSummary:
     # By branch
     r5 = await db.execute(
         select(Expense.branch_id, sa_func.sum(Expense.monto))
-        .where(Expense.company_id == cid, Expense.anulado == False, Expense.fecha_gasto >= month_start)
+        .where(Expense.company_id == cid, Expense.anulado == False, Expense.es_pago_proveedor == False, Expense.fecha_gasto >= month_start)
         .group_by(Expense.branch_id)
     )
     por_sucursal = [{"branch_id": str(k) if k else None, "total": float(v)} for k, v in r5.all()]

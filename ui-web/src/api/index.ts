@@ -1120,6 +1120,9 @@ export interface Expense {
   fixed_asset_id?: string | null;
   vida_util_meses?: number;
   categoria_activo?: string;
+  es_pago_proveedor?: boolean;
+  supplier_id?: string | null;
+  supplier_invoice_id?: string | null;
   auditoria_estado?: string;
   auditoria_motivo?: string;
   registrado_por?: string;

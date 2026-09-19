@@ -61,6 +61,7 @@ export default function FinancialPage() {
   const [paymentQueue, setPaymentQueue] = useState<any>(null)
   const [apApprovals, setApApprovals] = useState<any[]>([])
   const [banks, setBanks] = useState<BankAccount[]>([])
+  const [funds, setFunds] = useState<any[]>([])
 
   const { user } = useAuth()
   const companyId = (user as any)?.company_id || FALLBACK_COMPANY_ID
@@ -82,6 +83,7 @@ export default function FinancialPage() {
     monto: "",
     payment_method: "transferencia",
     bank_account_id: "",
+    petty_cash_fund_id: "",
     fecha_pago: getTodayAsuncion(),
     referencia: "",
     retencion_iva: "0",
@@ -175,6 +177,7 @@ export default function FinancialPage() {
         apprData,
         banksData,
         supsData,
+        fundsData,
       ] = await Promise.allSettled([
         api.financial.apDashboard(),
         api.financial.invoices.list({ limit: 2500 }),
@@ -188,6 +191,7 @@ export default function FinancialPage() {
         api.financial.apApprovals.list("pendiente").catch(() => []),
         api.financial.banks.list().catch(() => []),
         api.purchases.suppliers().catch(() => []),
+        api.expenses.funds.list().catch(() => []),
       ])
 
       if (dashData.status === "fulfilled") setDashboard(dashData.value)
@@ -205,6 +209,7 @@ export default function FinancialPage() {
       if (apprData.status === "fulfilled") setApApprovals(apprData.value)
       if (banksData.status === "fulfilled") setBanks(banksData.value)
       if (supsData.status === "fulfilled") setAllSuppliers(supsData.value || [])
+      if (fundsData.status === "fulfilled") setFunds(fundsData.value || [])
     } catch {
       toast.error("Error", "No se pudieron sincronizar los datos financieros")
     } finally {
@@ -469,6 +474,7 @@ export default function FinancialPage() {
       monto: String(inv.saldo_pendiente ?? inv.total ?? ""),
       payment_method: "transferencia",
       bank_account_id: banks[0]?.id || "",
+      petty_cash_fund_id: funds[0]?.id || "",
       fecha_pago: getTodayAsuncion(),
       referencia: "",
       retencion_iva: "0",
@@ -478,6 +484,10 @@ export default function FinancialPage() {
 
   const handleConfirmDirectPayment = async () => {
     if (!showPayModal) return
+    if (payForm.payment_method === "fondo_fijo" && !payForm.petty_cash_fund_id) {
+      toast.warning("Fondo requerido", "Seleccione la caja chica / fondo fijo de donde se desembolsa el pago.")
+      return
+    }
     setSubmittingPayment(true)
     try {
       await api.financial.invoices.pay(showPayModal.id, {
@@ -485,6 +495,8 @@ export default function FinancialPage() {
         payment_method: payForm.payment_method,
         fecha_pago: payForm.fecha_pago,
         referencia: payForm.referencia || undefined,
+        petty_cash_fund_id: payForm.payment_method === "fondo_fijo" ? payForm.petty_cash_fund_id : undefined,
+        bank_account_id: payForm.payment_method !== "fondo_fijo" && payForm.bank_account_id ? payForm.bank_account_id : undefined,
       })
       toast.success("Pago registrado", `Pago de ${formatPYG(Number(payForm.monto))} aplicado a factura ${showPayModal.numero_factura}`)
       setShowPayModal(null)
@@ -1438,8 +1450,32 @@ export default function FinancialPage() {
                   <option value="transferencia">Transferencia Bancaria (SIPAP)</option>
                   <option value="cheque">Cheque Propio</option>
                   <option value="efectivo">Efectivo de Caja Central</option>
+                  <option value="fondo_fijo">Fondo Fijo / Caja Chica</option>
                 </select>
               </div>
+
+              {payForm.payment_method === "fondo_fijo" && (
+                <div className="p-3 bg-indigo-50 dark:bg-indigo-950/40 rounded-xl border border-indigo-200 dark:border-indigo-800 space-y-2">
+                  <label className="label-field text-indigo-900 dark:text-indigo-200 font-bold">
+                    Caja Chica / Fondo Fijo de Origen *
+                  </label>
+                  <select
+                    className="input-field bg-white dark:bg-slate-800"
+                    value={payForm.petty_cash_fund_id}
+                    onChange={e => setPayForm({ ...payForm, petty_cash_fund_id: e.target.value })}
+                  >
+                    <option value="">-- Seleccionar fondo fijo --</option>
+                    {funds.map((f: any) => (
+                      <option key={f.id} value={f.id}>
+                        {f.nombre} — Saldo: {formatPYG(f.saldo_actual)}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-indigo-600 dark:text-indigo-400">
+                    ℹ️ El pago se descontará de la caja chica seleccionada y se generará el comprobante de rendición correspondiente.
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="label-field">N° Referencia / Comprobante</label>
                 <input

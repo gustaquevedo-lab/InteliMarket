@@ -6,7 +6,7 @@ import {
   Paperclip, ClipboardCheck, Scale, Filter, Eye, RefreshCw, ShieldAlert, ArrowRight,
   SlidersHorizontal, Check, AlertCircle, FileText, Download, Calendar, Tag,
   FileSpreadsheet, Printer, PieChart, BookOpen, FileCheck, ScrollText, CheckCheck,
-  Pencil
+  Pencil, Package
 } from "lucide-react"
 import {
   api, API_ORIGIN, type Expense, type ExpenseCategory, type CostCenter,
@@ -49,6 +49,7 @@ export default function ExpensesPage() {
   const [showSectorForm, setShowSectorForm] = useState(false)
   const [showFundForm, setShowFundForm] = useState(false)
   const [funds, setFunds] = useState<PettyCashFund[]>([])
+  const [pendingInvoices, setPendingInvoices] = useState<any[]>([])
   
   // Formularios
   const [form, setForm] = useState<any>({
@@ -72,6 +73,9 @@ export default function ExpensesPage() {
     asset_codigo_interno: "",
     asset_categoria: "muebles_equipos",
     asset_vida_util_meses: 60,
+    es_pago_proveedor: false,
+    supplier_id: "",
+    supplier_invoice_id: "",
   })
   const [catForm, setCatForm] = useState({ nombre: "", descripcion: "", presupuesto_mensual: "" })
   const [sectorForm, setSectorForm] = useState({ nombre: "", tipo: "sector", peso_prorateo: "1" })
@@ -177,7 +181,7 @@ export default function ExpensesPage() {
   const fetchAll = async () => {
     setLoading(true)
     try {
-      const [c, cc, f, ac, pc, bAccs, cRegs, rends] = await Promise.all([
+      const [c, cc, f, ac, pc, bAccs, cRegs, rends, invs] = await Promise.all([
         api.expenses.categories.list().catch(() => []),
         api.expenses.costCenters.list().catch(() => []),
         api.expenses.funds.list().catch(() => []),
@@ -185,7 +189,8 @@ export default function ExpensesPage() {
         api.expenses.funds.counts.pendingAll().catch(() => []),
         api.financial.banks.list().catch(() => []),
         api.caja.registers.list().catch(() => []),
-        api.expenses.rendiciones.list().catch(() => [])
+        api.expenses.rendiciones.list().catch(() => []),
+        api.financial.invoices.list({ limit: 1000 }).catch(() => []),
       ])
       setCategories(c)
       setCostCenters(cc)
@@ -194,6 +199,7 @@ export default function ExpensesPage() {
       setBankAccounts(bAccs.filter((b: any) => b.activo))
       setCashRegisters(cRegs)
       setRendiciones(Array.isArray(rends) ? [...rends].sort((a: any, b: any) => new Date(b.fecha_presentacion || b.created_at || 0).getTime() - new Date(a.fecha_presentacion || a.created_at || 0).getTime()) : [])
+      setPendingInvoices(Array.isArray(invs) ? invs.filter((i: any) => i.estado === "pendiente" || i.estado === "parcial") : [])
       if (ac) {
         setApprovalThreshold(ac.umbral_aprobacion)
         setApprovalThresholdForm(String(ac.umbral_aprobacion))
@@ -345,6 +351,9 @@ export default function ExpensesPage() {
       asset_codigo_interno: "",
       asset_categoria: "muebles_equipos",
       asset_vida_util_meses: 60,
+      es_pago_proveedor: false,
+      supplier_id: "",
+      supplier_invoice_id: "",
     })
     setComprobanteFile(null)
     setShowForm(true)
@@ -373,6 +382,9 @@ export default function ExpensesPage() {
       asset_codigo_interno: "",
       asset_categoria: e.categoria_activo || "muebles_equipos",
       asset_vida_util_meses: e.vida_util_meses || 60,
+      es_pago_proveedor: Boolean((e as any).es_pago_proveedor),
+      supplier_id: (e as any).supplier_id || "",
+      supplier_invoice_id: (e as any).supplier_invoice_id || "",
     })
     setComprobanteFile(null)
     setShowForm(true)
@@ -424,6 +436,9 @@ export default function ExpensesPage() {
           es_inversion: form.es_inversion || false,
           categoria_activo: form.es_inversion ? form.asset_categoria : undefined,
           vida_util_meses: form.es_inversion && form.asset_vida_util_meses ? Number(form.asset_vida_util_meses) : undefined,
+          es_pago_proveedor: form.es_pago_proveedor || false,
+          supplier_id: form.supplier_id || undefined,
+          supplier_invoice_id: form.supplier_invoice_id || undefined,
           ...(comprobante_url ? { comprobante_url } : {})
         })
         toast.success("Comprobante Actualizado", "Los cambios en el gasto fueron guardados exitosamente.")
@@ -442,6 +457,9 @@ export default function ExpensesPage() {
           asset_codigo_interno: form.es_inversion ? form.asset_codigo_interno : undefined,
           asset_categoria: form.es_inversion ? form.asset_categoria : undefined,
           asset_vida_util_meses: form.es_inversion && form.asset_vida_util_meses ? Number(form.asset_vida_util_meses) : undefined,
+          es_pago_proveedor: form.es_pago_proveedor || false,
+          supplier_id: form.supplier_id || undefined,
+          supplier_invoice_id: form.supplier_invoice_id || undefined,
           comprobante_url
         })
         toast.success("Comprobante Registrado", "El gasto quedó en estado Pendiente de Aprobación. Aprobalo para luego asignar la forma de pago.")
@@ -470,6 +488,9 @@ export default function ExpensesPage() {
         asset_codigo_interno: "",
         asset_categoria: "muebles_equipos",
         asset_vida_util_meses: 60,
+        es_pago_proveedor: false,
+        supplier_id: "",
+        supplier_invoice_id: "",
       })
       setComprobanteFile(null)
       fetchAll()
@@ -1605,7 +1626,14 @@ export default function ExpensesPage() {
                             {e.fecha_gasto ? new Date(e.fecha_gasto).toLocaleDateString("es-PY") : "—"}
                           </td>
                           <td className="p-3.5 font-bold text-gray-900 dark:text-white max-w-xs">
-                            <div>{e.descripcion}</div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span>{e.descripcion}</span>
+                              {e.es_pago_proveedor && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                                  <Package className="w-2.5 h-2.5" /> Mercaderías (Cuentas por Pagar)
+                                </span>
+                              )}
+                            </div>
                             {e.comprobante_url && (
                               <a
                                 href={e.comprobante_url.startsWith("http") ? e.comprobante_url : `${API_ORIGIN}${e.comprobante_url}`}
@@ -2590,6 +2618,87 @@ export default function ExpensesPage() {
             </div>
 
             <form onSubmit={handleCreateExpense} className="space-y-4 text-xs">
+              {/* Selector de Naturaleza / Destino */}
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                <span className="font-bold text-gray-700 dark:text-gray-300 block text-[11px] uppercase tracking-wider">
+                  Destino del Comprobante:
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setForm((prev: any) => ({ ...prev, es_pago_proveedor: false, supplier_invoice_id: "" }))}
+                    className={`p-2.5 rounded-lg border text-left flex items-center gap-2 transition ${
+                      !form.es_pago_proveedor
+                        ? "bg-rose-50 border-rose-400 text-rose-800 dark:bg-rose-950/40 dark:border-rose-700 dark:text-rose-200 font-bold shadow-sm"
+                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:bg-slate-50"
+                    }`}
+                  >
+                    <ReceiptIcon className="w-4 h-4 text-rose-500 shrink-0" />
+                    <div>
+                      <div className="text-xs">Gasto Operativo (OPEX)</div>
+                      <div className="text-[10px] text-gray-500 font-normal">Limpieza, papelería, servicios, fletes</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setForm((prev: any) => ({ ...prev, es_pago_proveedor: true }))}
+                    className={`p-2.5 rounded-lg border text-left flex items-center gap-2 transition ${
+                      form.es_pago_proveedor
+                        ? "bg-purple-50 border-purple-400 text-purple-800 dark:bg-purple-950/40 dark:border-purple-700 dark:text-purple-200 font-bold shadow-sm"
+                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:bg-slate-50"
+                    }`}
+                  >
+                    <Package className="w-4 h-4 text-purple-500 shrink-0" />
+                    <div>
+                      <div className="text-xs">Pago a Proveedor Mercadería</div>
+                      <div className="text-[10px] text-gray-500 font-normal">Cuentas por Pagar (Compras reventa)</div>
+                    </div>
+                  </button>
+                </div>
+
+                {form.es_pago_proveedor && (
+                  <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-700 space-y-1.5 animate-in fade-in">
+                    <label className="font-bold text-purple-900 dark:text-purple-200 block text-[11px]">
+                      Factura Comercial de Compra a Cancelar / Amortizar *
+                    </label>
+                    <select
+                      className="input-field w-full text-xs font-medium bg-white dark:bg-slate-800 border-purple-300 dark:border-purple-700"
+                      value={form.supplier_invoice_id || ""}
+                      onChange={e => {
+                        const invId = e.target.value
+                        const inv = pendingInvoices.find((i: any) => i.id === invId)
+                        if (inv) {
+                          setForm((prev: any) => ({
+                            ...prev,
+                            supplier_invoice_id: inv.id,
+                            supplier_id: inv.supplier_id,
+                            proveedor: inv.supplier_nombre || prev.proveedor,
+                            numero_factura: inv.numero_factura || prev.numero_factura,
+                            ruc: inv.ruc || prev.ruc,
+                            timbrado: inv.timbrado || prev.timbrado,
+                            monto: prev.monto && Number(prev.monto) > 0 ? prev.monto : String(inv.saldo_pendiente || inv.total),
+                            descripcion: prev.descripcion || `Pago proveedor ${inv.supplier_nombre || ''} - Factura ${inv.numero_factura}`,
+                          }))
+                        } else {
+                          setForm((prev: any) => ({ ...prev, supplier_invoice_id: "", supplier_id: "" }))
+                        }
+                      }}
+                    >
+                      <option value="">-- Seleccionar factura de compra pendiente (o cargar datos manualmente) --</option>
+                      {pendingInvoices.map((inv: any) => (
+                        <option key={inv.id} value={inv.id}>
+                          {inv.supplier_nombre || "Proveedor"} — Factura #{inv.numero_factura} (Saldo: {formatPYG(inv.saldo_pendiente || inv.total)})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-purple-600 dark:text-purple-400">
+                      ℹ️ Al guardar, se amortizará la deuda comercial en Cuentas por Pagar y no afectará el total de Gasto Operativo (OPEX).
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Monto Total (PYG) *</label>
