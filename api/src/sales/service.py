@@ -187,6 +187,25 @@ async def resolve_sale_number(db: AsyncSession, data: SaleCreate) -> str:
 
 
 async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
+    # ── PROTECCIÓN DE IDEMPOTENCIA DETERMINÍSTICA CLIENTE-SERVIDOR ──
+    # Si el cliente (POS online u offline sync) provee un UUID determinístico:
+    if data.id:
+        existing_res = await db.execute(select(Sale).where(Sale.id == data.id))
+        existing_sale = existing_res.scalar_one_or_none()
+        if existing_sale:
+            logger.info("Venta idempotente ya registrada previamente: id=%s, numero=%s", existing_sale.id, existing_sale.numero)
+            updated = False
+            if data.recibo_html and not existing_sale.recibo_html:
+                existing_sale.recibo_html = data.recibo_html
+                updated = True
+            if data.recibo_escpos_b64 and not existing_sale.recibo_escpos_b64:
+                existing_sale.recibo_escpos_b64 = data.recibo_escpos_b64
+                updated = True
+            if updated:
+                await db.commit()
+                await db.refresh(existing_sale)
+            return existing_sale
+
     numero = await resolve_sale_number(db, data)
     numero_interno = await generate_internal_sale_number(db, str(data.company_id))
 
@@ -373,7 +392,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     )
 
     sale = Sale(
-        id=uuid.uuid4(),
+        id=data.id or uuid.uuid4(),
         company_id=data.company_id,
         branch_id=data.branch_id,
         customer_id=data.customer_id,

@@ -7060,7 +7060,14 @@ export default function POSPage() {
         obsParts.push(`PlugPay Manual: Comp #${plugpayManualComprobante}${plugpayManualAutorizacion ? ` Aut: ${plugpayManualAutorizacion}` : ""}`)
       }
 
+      // ── IDEMPOTENCIA DETERMINÍSTICA CLIENTE-SERVIDOR ──
+      // Generar el UUID único de la venta aquí en el cliente. Este ID acompaña
+      // a la venta tanto en el envío online como en la cola offline (IndexedDB),
+      // asegurando que ante caídas de red o reintentos NUNCA se duplique.
+      const clientSaleId = crypto.randomUUID()
+
       const saleBasePayload = {
+        id: clientSaleId,
         company_id: COMPANY_ID,
         customer_id: customer.id,
         user_id: user?.id,
@@ -7091,11 +7098,8 @@ export default function POSPage() {
       let saleCreatePromise: Promise<any> | null = null
       if (tpl.usar_numero_interno_venta) {
         try {
-          // withTimeout: si el servidor esta caido (no solo lento), esto
-          // fallaba sin limite de tiempo -- colgaba la pantalla de cobro
-          // varios segundos o mas antes de caer al camino offline de abajo.
-          // 1.5s (igual que el resto de la app) fuerza el fallback rapido.
-          const created = await withTimeout(api.sales.create(saleBasePayload as any), 1500)
+          // withTimeout: 10s para permitir cálculo fiscal completo sin falsos fallos en red local
+          const created = await withTimeout(api.sales.create(saleBasePayload as any), 10000)
           numeroComprobante = created.numero || saleNumber
           numeroInterno = (created as any).numero_interno || null
           ventaYaCreadaSinRecibo = true
@@ -7391,7 +7395,7 @@ export default function POSPage() {
       // ticket -- antes se esperaba esta llamada antes de imprimir, lo que
       // sumaba al delay entre cobrar y que salga el ticket.
       if (!ventaYaCreadaSinRecibo) {
-        saleCreatePromise = withTimeout(api.sales.create({ ...saleBasePayload, recibo_html: receiptHtml } as any), 1500).catch(async (apiErr: any) => {
+        saleCreatePromise = withTimeout(api.sales.create({ ...saleBasePayload, recibo_html: receiptHtml } as any), 10000).catch(async (apiErr: any) => {
           console.warn("[POS] API central no disponible o demorada, encolando venta offline en IndexedDB...", apiErr)
           try {
             const offlineId = `off-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`

@@ -25,6 +25,7 @@ class SalePaymentInput(BaseModel):
 
 
 class SaleCreate(BaseModel):
+    id: Optional[UUID] = None
     company_id: UUID
     branch_id: Optional[UUID] = None
     customer_id: Optional[UUID] = None
