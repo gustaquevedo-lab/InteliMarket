@@ -38,6 +38,7 @@ async def get_aging_report(db: AsyncSession, company_id: str) -> dict:
             COALESCE(c.razon_social, c.nombre_fantasia, c.ruc, 'Cliente') as customer_name,
             c.ruc as customer_ruc,
             c.telefono as customer_telefono,
+            c.empresa_vinculada_nombre,
             ar.sale_id,
             ar.numero_documento,
             ar.fecha_emision,
@@ -92,6 +93,7 @@ async def get_aging_report(db: AsyncSession, company_id: str) -> dict:
                 "customer_name": row.customer_name or "N/A",
                 "customer_ruc": getattr(row, "customer_ruc", None) or "—",
                 "customer_telefono": getattr(row, "customer_telefono", None) or "—",
+                "empresa_vinculada_nombre": getattr(row, "empresa_vinculada_nombre", None),
                 "saldo_total": Decimal("0"),
                 "current": Decimal("0"), "days_1_30": Decimal("0"),
                 "days_31_60": Decimal("0"), "days_61_90": Decimal("0"),
@@ -144,6 +146,7 @@ async def get_accounts_receivable(
             COALESCE(c.razon_social, c.nombre_fantasia, c.ruc, 'Cliente') as customer_name,
             c.ruc as customer_ruc,
             c.telefono as customer_telefono,
+            c.empresa_vinculada_nombre,
             CASE
                 WHEN ar.estado <> 'pendiente' THEN 0
                 WHEN ar.fecha_vencimiento IS NULL THEN 0
@@ -162,7 +165,7 @@ async def get_accounts_receivable(
         params["estado"] = estado
     if search:
         s = f"%{search.strip()}%"
-        query = text(query.text + " AND (ar.numero_documento ILIKE :search OR c.razon_social ILIKE :search OR c.nombre_fantasia ILIKE :search OR c.ruc ILIKE :search)")
+        query = text(query.text + " AND (ar.numero_documento ILIKE :search OR c.razon_social ILIKE :search OR c.nombre_fantasia ILIKE :search OR c.ruc ILIKE :search OR c.empresa_vinculada_nombre ILIKE :search)")
         params["search"] = s
     # Los documentos pagados nunca cambian su fecha_vencimiento (queda fija en
     # el pasado) — ordenar solo por fecha hacia el frente hacia que, sin filtro
@@ -737,7 +740,8 @@ async def get_aging_for_report(
     today = date.today()
     query = """
         SELECT
-            ar.id, ar.customer_id, c.razon_social as customer_name, ar.sale_id,
+            ar.id, ar.customer_id, c.razon_social as customer_name, c.ruc as customer_ruc,
+            c.telefono as customer_telefono, c.empresa_vinculada_nombre, ar.sale_id,
             ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento, ar.moneda,
             ar.monto_original, ar.saldo_pendiente, ar.tipo, ar.estado,
             CASE WHEN ar.fecha_vencimiento IS NULL THEN 0 ELSE (DATE(:today) - ar.fecha_vencimiento)::int END as dias_mora
@@ -785,6 +789,9 @@ async def get_aging_for_report(
         if cid not in customer_aging:
             customer_aging[cid] = {
                 "customer_id": cid, "customer_name": row.customer_name or "N/A",
+                "customer_ruc": getattr(row, "customer_ruc", None) or "—",
+                "customer_telefono": getattr(row, "customer_telefono", None) or "—",
+                "empresa_vinculada_nombre": getattr(row, "empresa_vinculada_nombre", None),
                 "saldo_total": Decimal("0"), "current": Decimal("0"), "days_1_30": Decimal("0"),
                 "days_31_60": Decimal("0"), "days_61_90": Decimal("0"), "days_91_plus": Decimal("0"),
                 "total_documentos": 0,

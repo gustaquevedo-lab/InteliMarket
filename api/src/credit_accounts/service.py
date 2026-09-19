@@ -37,7 +37,7 @@ async def create_credit_account(db: AsyncSession, data: CreditAccountCreate) -> 
 
 
 async def list_credit_accounts(db: AsyncSession, company_id: str, activo: Optional[bool] = None) -> list[CreditAccount]:
-    query = select(CreditAccount, Customer.razon_social, Customer.ruc).join(
+    query = select(CreditAccount, Customer.razon_social, Customer.ruc, Customer.empresa_vinculada_nombre).join(
         Customer, Customer.id == CreditAccount.customer_id, isouter=True
     ).where(CreditAccount.company_id == company_id)
     if activo is not None:
@@ -45,9 +45,10 @@ async def list_credit_accounts(db: AsyncSession, company_id: str, activo: Option
     query = query.order_by(CreditAccount.saldo_utilizado.desc())
     result = await db.execute(query)
     accounts = []
-    for account, razon_social, ruc in result.all():
+    for account, razon_social, ruc, empresa_vinculada_nombre in result.all():
         account.customer_nombre = razon_social
         account.customer_ruc = ruc
+        account.empresa_vinculada_nombre = empresa_vinculada_nombre
         accounts.append(account)
 
     if accounts:
@@ -73,18 +74,38 @@ async def list_credit_accounts(db: AsyncSession, company_id: str, activo: Option
 
 
 async def get_credit_account(db: AsyncSession, account_id: str) -> CreditAccount | None:
-    result = await db.execute(select(CreditAccount).where(CreditAccount.id == uuid.UUID(account_id)))
-    return result.scalar_one_or_none()
+    result = await db.execute(
+        select(CreditAccount, Customer.razon_social, Customer.ruc, Customer.empresa_vinculada_nombre).join(
+            Customer, Customer.id == CreditAccount.customer_id, isouter=True
+        ).where(CreditAccount.id == uuid.UUID(account_id))
+    )
+    row = result.first()
+    if not row:
+        return None
+    account, razon_social, ruc, empresa_vinculada_nombre = row
+    account.customer_nombre = razon_social
+    account.customer_ruc = ruc
+    account.empresa_vinculada_nombre = empresa_vinculada_nombre
+    return account
 
 
 async def get_credit_account_by_customer(db: AsyncSession, company_id: str, customer_id: str) -> CreditAccount | None:
     result = await db.execute(
-        select(CreditAccount).where(
+        select(CreditAccount, Customer.razon_social, Customer.ruc, Customer.empresa_vinculada_nombre).join(
+            Customer, Customer.id == CreditAccount.customer_id, isouter=True
+        ).where(
             CreditAccount.company_id == company_id,
             CreditAccount.customer_id == uuid.UUID(customer_id),
         )
     )
-    return result.scalar_one_or_none()
+    row = result.first()
+    if not row:
+        return None
+    account, razon_social, ruc, empresa_vinculada_nombre = row
+    account.customer_nombre = razon_social
+    account.customer_ruc = ruc
+    account.empresa_vinculada_nombre = empresa_vinculada_nombre
+    return account
 
 
 async def update_credit_account(db: AsyncSession, account_id: str, data: CreditAccountUpdate) -> CreditAccount | None:
@@ -553,7 +574,7 @@ async def _get_mora_candidates(db: AsyncSession, company_id: str, config: MoraCo
     de la factura original que lo origino."""
     result = await db.execute(
         text("""
-            SELECT ar.id AS ar_id, ar.customer_id, c.razon_social AS customer_nombre, ca.id AS credit_account_id,
+            SELECT ar.id AS ar_id, ar.customer_id, c.razon_social AS customer_nombre, c.empresa_vinculada_nombre, ca.id AS credit_account_id,
                    ar.monto_original, GREATEST(0, CURRENT_DATE - ar.fecha_vencimiento) AS dias_mora
             FROM accounts_receivable ar
             JOIN credit_accounts ca ON ca.customer_id = ar.customer_id AND ca.company_id = ar.company_id
@@ -574,6 +595,7 @@ async def _get_mora_candidates(db: AsyncSession, company_id: str, config: MoraCo
             continue
         candidatos.append({
             "ar_id": r.ar_id, "customer_id": r.customer_id, "customer_nombre": r.customer_nombre,
+            "empresa_vinculada_nombre": getattr(r, "empresa_vinculada_nombre", None),
             "credit_account_id": r.credit_account_id, "recargo": recargo,
         })
     return candidatos
@@ -594,6 +616,7 @@ async def get_mora_preview(db: AsyncSession, company_id: str) -> dict:
                 "credit_account_id": c["credit_account_id"],
                 "customer_id": c["customer_id"],
                 "customer_nombre": c["customer_nombre"],
+                "empresa_vinculada_nombre": c.get("empresa_vinculada_nombre"),
                 "documentos_afectados": 0,
                 "recargo_total": Decimal("0"),
             }
@@ -864,14 +887,14 @@ async def _get_dunning_candidates(db: AsyncSession, company_id: str, config: Dun
 
     result = await db.execute(
         text("""
-            SELECT ar.customer_id, c.razon_social AS customer_nombre, c.telefono,
+            SELECT ar.customer_id, c.razon_social AS customer_nombre, c.empresa_vinculada_nombre, c.telefono,
                    SUM(ar.saldo_pendiente) AS monto_total,
                    MAX(GREATEST(0, CURRENT_DATE - ar.fecha_vencimiento)) AS dias_mora,
                    COUNT(*) AS documentos_count
             FROM accounts_receivable ar
             LEFT JOIN customers c ON c.id = ar.customer_id
             WHERE ar.company_id = :cid AND ar.estado = 'pendiente' AND ar.fecha_vencimiento < CURRENT_DATE
-            GROUP BY ar.customer_id, c.razon_social, c.telefono
+            GROUP BY ar.customer_id, c.razon_social, c.empresa_vinculada_nombre, c.telefono
         """),
         {"cid": company_id},
     )
@@ -895,7 +918,7 @@ async def _get_dunning_candidates(db: AsyncSession, company_id: str, config: Dun
             continue
 
         candidatos.append({
-            "customer_id": r.customer_id, "customer_nombre": r.customer_nombre, "telefono": r.telefono,
+            "customer_id": r.customer_id, "customer_nombre": r.customer_nombre, "empresa_vinculada_nombre": getattr(r, "empresa_vinculada_nombre", None), "telefono": r.telefono,
             "monto_total": float(r.monto_total), "dias_mora": dias_mora, "bucket_dias": bucket,
             "documentos_count": r.documentos_count,
         })

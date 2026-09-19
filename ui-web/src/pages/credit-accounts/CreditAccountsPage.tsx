@@ -3,7 +3,7 @@ import {
   Wallet, Plus, Search, Loader2, X, Check, DollarSign, TrendingUp, TrendingDown,
   History, ShieldAlert, Percent, Settings2, AlertCircle, Ban, FileX, MessageCircle,
   PiggyBank, ArrowRightLeft, ShieldCheck, RefreshCw, UserCheck, Phone, CheckCircle2,
-  Clock, ArrowUpRight, ChevronRight, Eye
+  Clock, ArrowUpRight, ChevronRight, Eye, Building2
 } from "lucide-react"
 import { api, type CreditAccount, type CreditMovement, type Customer, type MoraConfig, type MoraPreviewResponse, type WriteoffRequest, type DunningConfig, type DunningPreviewResponse, type CustomerAdvance } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -567,7 +567,15 @@ export default function CreditAccountsPage() {
                         return (
                           <tr key={a.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors">
                             <td className="p-3.5 font-bold text-gray-900 dark:text-white">
-                              {a.customer_nombre || "Cliente"}
+                              <div>{a.customer_nombre || "Cliente"}</div>
+                              {a.empresa_vinculada_nombre && (
+                                <div className="mt-1">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 max-w-[200px] truncate" title={`Convenio: ${a.empresa_vinculada_nombre}`}>
+                                    <Building2 className="w-3 h-3 shrink-0 text-indigo-500" />
+                                    <span className="truncate">{a.empresa_vinculada_nombre}</span>
+                                  </span>
+                                </div>
+                              )}
                             </td>
                             <td className="p-3.5 font-mono text-xs text-gray-500">
                               {a.customer_ruc || "—"}
@@ -678,6 +686,14 @@ export default function CreditAccountsPage() {
                       <div key={i.credit_account_id} className="p-3.5 rounded-xl border bg-orange-50/30 dark:bg-orange-950/10 flex items-center justify-between gap-3 text-xs">
                         <div>
                           <div className="font-bold text-gray-900 dark:text-white text-sm">{i.customer_nombre || "Cliente"}</div>
+                          {i.empresa_vinculada_nombre && (
+                            <div className="mt-0.5">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-300 border border-orange-200 dark:border-orange-800">
+                                <Building2 className="w-2.5 h-2.5 text-orange-600" />
+                                {i.empresa_vinculada_nombre}
+                              </span>
+                            </div>
+                          )}
                           <div className="text-gray-400 text-[11px] mt-0.5">
                             {i.documentos_afectados} documento(s) vencido(s)
                           </div>
@@ -741,6 +757,14 @@ export default function CreditAccountsPage() {
                       <div key={`${i.customer_id}-${i.bucket_dias}`} className="p-3.5 rounded-xl border bg-teal-50/30 dark:bg-teal-950/10 flex items-center justify-between gap-3 text-xs">
                         <div>
                           <div className="font-bold text-gray-900 dark:text-white text-sm">{i.customer_nombre || "Cliente"}</div>
+                          {i.empresa_vinculada_nombre && (
+                            <div className="mt-0.5">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
+                                <Building2 className="w-2.5 h-2.5 text-teal-600" />
+                                {i.empresa_vinculada_nombre}
+                              </span>
+                            </div>
+                          )}
                           <div className="text-gray-400 text-[11px] mt-0.5">
                             {i.documentos_count} facturas · {i.dias_mora} días de atraso (Tramo {i.bucket_dias}d)
                           </div>
@@ -783,6 +807,14 @@ export default function CreditAccountsPage() {
                       <div key={r.id} className="p-4 rounded-xl border border-red-200 dark:border-red-900/30 bg-red-50/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div>
                           <div className="font-bold text-sm text-gray-900 dark:text-white">{r.customer_nombre || "Cliente"}</div>
+                          {r.empresa_vinculada_nombre && (
+                            <div className="mt-0.5">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300 border border-red-200 dark:border-red-800">
+                                <Building2 className="w-2.5 h-2.5 text-red-600" />
+                                {r.empresa_vinculada_nombre}
+                              </span>
+                            </div>
+                          )}
                           <div className="text-xs text-gray-500 mt-0.5">Monto propuesto: <span className="font-mono font-bold text-red-600">{formatPYG(r.monto)}</span></div>
                           <div className="text-xs text-gray-400 mt-1 italic">"{r.motivo}"</div>
                         </div>
@@ -856,7 +888,9 @@ export default function CreditAccountsPage() {
                 <select className="input-field" value={form.customer_id} onChange={e => setForm({ ...form, customer_id: e.target.value })}>
                   <option value="">Seleccionar cliente...</option>
                   {customers.map(c => (
-                    <option key={c.id} value={c.id}>{c.razon_social || c.nombre} ({c.ruc || "Sin RUC"})</option>
+                    <option key={c.id} value={c.id}>
+                      {c.razon_social || c.nombre} ({c.ruc || "Sin RUC"}){c.empresa_vinculada_nombre ? ` [🏢 ${c.empresa_vinculada_nombre}]` : ""}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -881,7 +915,10 @@ export default function CreditAccountsPage() {
           <div className="modal-content max-w-md" onClick={e => e.stopPropagation()}>
             <div className="p-6 border-b">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white">Editar Línea de Crédito</h3>
-              <p className="text-xs text-gray-500 mt-1">{editingAccount.customer_nombre} · RUC: {editingAccount.customer_ruc || "—"}</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {editingAccount.customer_nombre} · RUC: {editingAccount.customer_ruc || "—"}
+                {editingAccount.empresa_vinculada_nombre && ` · Convenio: ${editingAccount.empresa_vinculada_nombre}`}
+              </p>
             </div>
             <div className="p-6 space-y-4 text-xs">
               <div>
@@ -964,7 +1001,15 @@ export default function CreditAccountsPage() {
             <div className="p-6 border-b flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white">Movimientos de Cuenta</h3>
-                <p className="text-xs text-gray-500 mt-0.5">{selectedAccount.customer_nombre} — Límite: {formatPYG(selectedAccount.limite_credito)}</p>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  <p className="text-xs text-gray-500">{selectedAccount.customer_nombre} — Límite: {formatPYG(selectedAccount.limite_credito)}</p>
+                  {selectedAccount.empresa_vinculada_nombre && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                      <Building2 className="w-2.5 h-2.5 text-indigo-500" />
+                      {selectedAccount.empresa_vinculada_nombre}
+                    </span>
+                  )}
+                </div>
               </div>
               <button onClick={() => setShowAdvanceModal(true)} className="btn-outline text-xs flex items-center gap-1">
                 <PiggyBank className="w-3.5 h-3.5 text-primary" /> Registrar Anticipo

@@ -793,7 +793,7 @@ async def list_customer_scores(db: AsyncSession, company_id: str, min_score: int
     from api.src.customers.models import Customer
 
     q = (
-        select(CustomerScore, Customer.razon_social)
+        select(CustomerScore, Customer.razon_social, Customer.empresa_vinculada_nombre, Customer.ruc)
         .join(Customer, Customer.id == CustomerScore.customer_id)
         .where(CustomerScore.company_id == uuid.UUID(company_id))
     )
@@ -802,10 +802,12 @@ async def list_customer_scores(db: AsyncSession, company_id: str, min_score: int
     q = q.order_by(CustomerScore.score.asc())
     r = await db.execute(q)
     out = []
-    for score, razon_social in r.all():
+    for score, razon_social, empresa_vinculada_nombre, ruc in r.all():
         out.append({
             "id": score.id, "company_id": score.company_id, "customer_id": score.customer_id,
             "customer_nombre": razon_social,
+            "customer_ruc": ruc,
+            "empresa_vinculada_nombre": empresa_vinculada_nombre,
             "score": score.score, "pago_puntual": score.pago_puntual, "dias_mora_promedio": score.dias_mora_promedio,
             "antiguedad_dias": score.antiguedad_dias, "total_compras": score.total_compras, "total_pagos": score.total_pagos,
             "veces_mora": score.veces_mora, "ultima_actualizacion": score.ultima_actualizacion,

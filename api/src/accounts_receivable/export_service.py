@@ -63,27 +63,27 @@ def export_aging_excel(aging: dict, fecha_desde: Optional[date], fecha_hasta: Op
 
     ws1 = wb.active
     ws1.title = "Por Cliente"
-    _write_title(ws1, "Antigüedad de Saldos (Aging)", fecha_desde, fecha_hasta, 8)
-    headers = ["Cliente", "Documentos", "Al día", "1-30 días", "31-60 días", "61-90 días", "+90 días", "Saldo Total"]
+    _write_title(ws1, "Antigüedad de Saldos (Aging)", fecha_desde, fecha_hasta, 9)
+    headers = ["Cliente", "Empresa Vinculada", "Documentos", "Al día", "1-30 días", "31-60 días", "61-90 días", "+90 días", "Saldo Total"]
     rows = [
         (
-            c["customer_name"], c["total_documentos"], float(c["current"]), float(c["days_1_30"]),
+            c["customer_name"], c.get("empresa_vinculada_nombre") or "—", c["total_documentos"], float(c["current"]), float(c["days_1_30"]),
             float(c["days_31_60"]), float(c["days_61_90"]), float(c["days_91_plus"]), float(c["saldo_total"]),
         )
         for c in aging.get("por_clientes", [])
     ]
-    rows.append(("TOTAL", aging.get("cantidad_documentos", 0), float(aging.get("current", 0)), float(aging.get("days_1_30", 0)), float(aging.get("days_31_60", 0)), float(aging.get("days_61_90", 0)), float(aging.get("days_91_plus", 0)), float(aging.get("total_pendiente", 0))))
+    rows.append(("TOTAL", "", aging.get("cantidad_documentos", 0), float(aging.get("current", 0)), float(aging.get("days_1_30", 0)), float(aging.get("days_31_60", 0)), float(aging.get("days_61_90", 0)), float(aging.get("days_91_plus", 0)), float(aging.get("total_pendiente", 0))))
     _write_data(ws1, headers, rows)
-    for c in range(1, 9):
+    for c in range(1, 10):
         ws1.cell(row=4 + len(rows), column=c).font = BOLD_FONT
     _auto_width(ws1)
 
     ws2 = wb.create_sheet("Documentos")
-    _write_title(ws2, "Documentos pendientes", fecha_desde, fecha_hasta, 7)
-    headers2 = ["N° Documento", "Cliente", "Emisión", "Vencimiento", "Monto Original", "Saldo Pendiente", "Días Mora"]
+    _write_title(ws2, "Documentos pendientes", fecha_desde, fecha_hasta, 8)
+    headers2 = ["N° Documento", "Cliente", "Empresa Vinculada", "Emisión", "Vencimiento", "Monto Original", "Saldo Pendiente", "Días Mora"]
     rows2 = [
         (
-            d["numero_documento"], d["customer_name"],
+            d["numero_documento"], d["customer_name"], d.get("empresa_vinculada_nombre") or "—",
             d["fecha_emision"].strftime("%d/%m/%Y") if d.get("fecha_emision") else "",
             d["fecha_vencimiento"].strftime("%d/%m/%Y") if d.get("fecha_vencimiento") else "",
             float(d["monto_original"]), float(d["saldo_pendiente"]), d.get("dias_mora") or 0,

@@ -9,6 +9,9 @@ class AccountsReceivableResponse(BaseModel):
     id: UUID
     company_id: UUID
     customer_id: UUID
+    customer_name: Optional[str] = None
+    customer_ruc: Optional[str] = None
+    empresa_vinculada_nombre: Optional[str] = None
     sale_id: Optional[UUID] = None
     numero_documento: Optional[str] = None
     fecha_emision: datetime
@@ -38,6 +41,9 @@ class AgingBucket(BaseModel):
 class CustomerAging(BaseModel):
     customer_id: UUID
     customer_name: str
+    customer_ruc: Optional[str] = None
+    customer_telefono: Optional[str] = None
+    empresa_vinculada_nombre: Optional[str] = None
     saldo_total: Decimal
     current: Decimal
     days_1_30: Decimal

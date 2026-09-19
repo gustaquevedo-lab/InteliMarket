@@ -3,7 +3,7 @@ import {
   Gauge, TrendingUp, AlertTriangle, Shield, History, Plus, Search, Loader2,
   Users, DollarSign, Zap, CheckCircle, XCircle, Lock, Unlock, FileSpreadsheet,
   RefreshCcw, BrainCircuit, Target, ShieldAlert, Ban, BarChart3, CheckCircle2,
-  Phone, ArrowUpRight, Filter, Sliders, Check, ShieldCheck
+  Phone, ArrowUpRight, Filter, Sliders, Check, ShieldCheck, Building2
 } from "lucide-react"
 import { api, type Customer } from "../../api"
 import { useAuth } from "../../context/AuthContext"
@@ -355,6 +355,14 @@ export default function CreditScoringPage() {
                         <td className="p-3.5">
                           <p className="font-extrabold text-gray-900 dark:text-white">{s.customer_name}</p>
                           <p className="text-[10px] text-gray-400 font-mono">RUC/CI: {s.ruc}</p>
+                          {s.empresa_vinculada_nombre && (
+                            <div className="mt-1">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 max-w-[200px] truncate" title={`Convenio: ${s.empresa_vinculada_nombre}`}>
+                                <Building2 className="w-3 h-3 shrink-0 text-indigo-500" />
+                                <span className="truncate">{s.empresa_vinculada_nombre}</span>
+                              </span>
+                            </div>
+                          )}
                         </td>
                         <td className="p-3.5 text-center">
                           <span className="font-mono font-black text-sm text-gray-900 dark:text-white">{s.score}</span>

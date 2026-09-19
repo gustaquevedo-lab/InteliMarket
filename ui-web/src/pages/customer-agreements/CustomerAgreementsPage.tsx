@@ -293,7 +293,15 @@ export default function CustomerAgreementsPage() {
                       <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center"><Users className="w-5 h-5 text-white" /></div>
                       <div>
                         <p className="font-bold">{a.nombre}</p>
-                        <p className="text-xs text-gray-400">{a.customer?.nombre || a.customer_id} · {formatDate(a.fecha_inicio)} → {formatDate(a.fecha_fin)}</p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-xs text-gray-400">{a.customer?.nombre || a.customer_id} · {formatDate(a.fecha_inicio)} → {formatDate(a.fecha_fin)}</p>
+                          {a.customer?.empresa_vinculada_nombre && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                              <Building2 className="w-2.5 h-2.5 text-indigo-500" />
+                              {a.customer.empresa_vinculada_nombre}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-4">

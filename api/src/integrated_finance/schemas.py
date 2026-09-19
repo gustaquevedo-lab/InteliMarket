@@ -275,6 +275,8 @@ class CustomerScoreResponse(BaseModel):
     company_id: UUID
     customer_id: UUID
     customer_nombre: Optional[str] = None
+    customer_ruc: Optional[str] = None
+    empresa_vinculada_nombre: Optional[str] = None
     score: int
     pago_puntual: float
     dias_mora_promedio: float

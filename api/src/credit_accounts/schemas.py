@@ -23,6 +23,7 @@ class CreditAccountResponse(BaseModel):
     customer_id: uuid.UUID
     customer_nombre: Optional[str] = None
     customer_ruc: Optional[str] = None
+    empresa_vinculada_nombre: Optional[str] = None
     limite_credito: float
     saldo_disponible: float
     saldo_utilizado: float
@@ -82,6 +83,7 @@ class DunningConfig(BaseModel):
 class DunningPreviewItem(BaseModel):
     customer_id: uuid.UUID
     customer_nombre: Optional[str] = None
+    empresa_vinculada_nombre: Optional[str] = None
     telefono: Optional[str] = None
     monto_total: float
     dias_mora: int
@@ -97,22 +99,23 @@ class DunningPreviewResponse(BaseModel):
 class WriteoffRequestCreate(BaseModel):
     accounts_receivable_id: uuid.UUID
     motivo: str
+    monto_estimado: Optional[float] = None
 
 
 class WriteoffRequestResponse(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID
-    accounts_receivable_id: uuid.UUID
     customer_id: uuid.UUID
     customer_nombre: Optional[str] = None
-    credit_account_id: Optional[uuid.UUID] = None
-    monto: float
+    accounts_receivable_id: uuid.UUID
+    numero_documento: Optional[str] = None
+    monto_estimado: float
     motivo: str
     estado: str
-    numero_documento: Optional[str] = None
-    aprobado_gerente_id: Optional[uuid.UUID] = None
-    aprobado_finanzas_id: Optional[uuid.UUID] = None
+    aprobado_por: Optional[uuid.UUID] = None
+    motivo_rechazo: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime]
 
     class Config:
         from_attributes = True
@@ -128,6 +131,7 @@ class MoraPreviewItem(BaseModel):
     credit_account_id: uuid.UUID
     customer_id: uuid.UUID
     customer_nombre: Optional[str] = None
+    empresa_vinculada_nombre: Optional[str] = None
     documentos_afectados: int
     recargo_total: float
 

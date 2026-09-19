@@ -20,6 +20,8 @@ interface CustomerScore {
   id: string
   customer_id: string
   customer_nombre: string | null
+  customer_ruc?: string
+  empresa_vinculada_nombre?: string
   score: number
   pago_puntual: number
   dias_mora_promedio: number
@@ -39,6 +41,7 @@ interface AgingData {
     customer_name: string
     customer_ruc?: string
     customer_telefono?: string
+    empresa_vinculada_nombre?: string
     saldo_total: number
     current: number
     days_1_30: number
@@ -121,7 +124,7 @@ export default function AccountsReceivablePage() {
 
   // Typeahead del modal de reporte
   const [customerSearchInput, setCustomerSearchInput] = useState("")
-  const [customerSearchResults, setCustomerSearchResults] = useState<{ id: string; razon_social: string; ruc?: string }[]>([])
+  const [customerSearchResults, setCustomerSearchResults] = useState<{ id: string; razon_social: string; ruc?: string; empresa_vinculada_nombre?: string }[]>([])
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false)
   const [customerSearchLoading, setCustomerSearchLoading] = useState(false)
   const [empresaSearchInput, setEmpresaSearchInput] = useState("")
@@ -246,7 +249,7 @@ export default function AccountsReceivablePage() {
     setCustomerSearchLoading(true)
     const t = setTimeout(() => {
       api.customers.list({ search: customerSearchInput.trim(), limit: 20 })
-        .then(rows => setCustomerSearchResults(rows.map(r => ({ id: r.id, razon_social: r.razon_social || "Cliente sin nombre", ruc: r.ruc }))))
+        .then(rows => setCustomerSearchResults(rows.map(r => ({ id: r.id, razon_social: r.razon_social || "Cliente sin nombre", ruc: r.ruc, empresa_vinculada_nombre: r.empresa_vinculada_nombre || undefined }))))
         .catch(() => setCustomerSearchResults([]))
         .finally(() => setCustomerSearchLoading(false))
     }, 300)
@@ -1144,6 +1147,14 @@ export default function AccountsReceivablePage() {
                               {d.customer_ruc && (
                                 <div className="text-[11px] font-mono text-gray-400 font-normal">CI/RUC: {d.customer_ruc}</div>
                               )}
+                              {(d.empresa_vinculada_nombre || (d as any).customer?.empresa_vinculada_nombre) && (
+                                <div className="mt-1">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 max-w-[200px] truncate" title={`Convenio: ${d.empresa_vinculada_nombre || (d as any).customer?.empresa_vinculada_nombre}`}>
+                                    <Building2 className="w-3 h-3 shrink-0 text-indigo-500" />
+                                    <span className="truncate">{d.empresa_vinculada_nombre || (d as any).customer?.empresa_vinculada_nombre}</span>
+                                  </span>
+                                </div>
+                              )}
                             </td>
                             <td className="p-3.5 text-xs text-gray-500 font-mono">
                               {d.fecha_emision ? new Date(d.fecha_emision).toLocaleDateString("es-PY") : "—"}
@@ -1301,6 +1312,14 @@ export default function AccountsReceivablePage() {
                                     <div className="text-xs text-gray-400 font-mono font-normal">
                                       {c.customer_ruc ? `RUC: ${c.customer_ruc}` : ""} {c.customer_telefono ? `· Tel: ${c.customer_telefono}` : ""}
                                     </div>
+                                    {c.empresa_vinculada_nombre && (
+                                      <div className="mt-1">
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 max-w-[220px] truncate" title={`Convenio: ${c.empresa_vinculada_nombre}`}>
+                                          <Building2 className="w-3 h-3 shrink-0 text-indigo-500" />
+                                          <span className="truncate">{c.empresa_vinculada_nombre}</span>
+                                        </span>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               </td>
@@ -1469,7 +1488,18 @@ export default function AccountsReceivablePage() {
                           return (
                             <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors">
                               <td className="p-3.5 font-bold text-gray-900 dark:text-white">
-                                {s.customer_nombre || "Cliente"}
+                                <div>{s.customer_nombre || "Cliente"}</div>
+                                {s.customer_ruc && (
+                                  <div className="text-[11px] font-mono text-gray-400 font-normal">CI/RUC: {s.customer_ruc}</div>
+                                )}
+                                {s.empresa_vinculada_nombre && (
+                                  <div className="mt-1">
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 max-w-[200px] truncate" title={`Convenio: ${s.empresa_vinculada_nombre}`}>
+                                      <Building2 className="w-3 h-3 shrink-0 text-indigo-500" />
+                                      <span className="truncate">{s.empresa_vinculada_nombre}</span>
+                                    </span>
+                                  </div>
+                                )}
                               </td>
                               <td className="p-3.5 font-mono font-extrabold text-base text-gray-900 dark:text-white">
                                 {s.score}
@@ -1988,9 +2018,19 @@ export default function AccountsReceivablePage() {
                                       setCustomerSearchResults([])
                                       setCustomerSearchInput("")
                                     }}
-                                    className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 cursor-pointer text-xs truncate font-medium flex items-center justify-between"
+                                    className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 cursor-pointer text-xs font-medium flex items-center justify-between"
                                   >
-                                    <span>{c.razon_social}</span>
+                                    <div>
+                                      <span>{c.razon_social}</span>
+                                      {c.empresa_vinculada_nombre && (
+                                        <div className="mt-0.5">
+                                          <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                            <Building2 className="w-2.5 h-2.5 text-indigo-500" />
+                                            {c.empresa_vinculada_nombre}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
                                     {c.ruc && <span className="text-[10px] text-gray-400 font-mono">({c.ruc})</span>}
                                   </div>
                                 ))}
@@ -3536,7 +3576,15 @@ export default function AccountsReceivablePage() {
             <div className="p-6 border-b flex items-start justify-between">
               <div>
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white">Documento N° {selectedDoc.numero_documento}</h3>
-                <p className="text-xs text-gray-500 mt-0.5">{selectedDoc.customer_name}</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <p className="text-xs text-gray-500">{selectedDoc.customer_name}</p>
+                  {(selectedDoc.empresa_vinculada_nombre || (selectedDoc as any).customer?.empresa_vinculada_nombre) && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                      <Building2 className="w-3 h-3 text-indigo-500" />
+                      {selectedDoc.empresa_vinculada_nombre || (selectedDoc as any).customer?.empresa_vinculada_nombre}
+                    </span>
+                  )}
+                </div>
               </div>
               <button onClick={() => setSelectedDoc(null)} className="p-1 text-gray-400 hover:text-gray-600 rounded">
                 <X className="w-5 h-5" />
