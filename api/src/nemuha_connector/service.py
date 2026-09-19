@@ -2256,6 +2256,7 @@ async def sync_supplier_credit_notes(db: AsyncSession, company_id: str, since: d
             fecha=r["DT_NOTA_CREDITO"].date() if hasattr(r["DT_NOTA_CREDITO"], "date") else r["DT_NOTA_CREDITO"],
             motivo=r["MOTIVO"],
             monto=Decimal(str(r["VL_TOTAL"])),
+            saldo_disponible=Decimal("0"),  # Las NCs del legado ya fueron aplicadas como pagos (fin_pagamento) contra las facturas
             moneda=MONEDA_MAP.get(r["ID_MOEDA"], "PYG"),
             observaciones=r["OBSERVACAO"],
         )

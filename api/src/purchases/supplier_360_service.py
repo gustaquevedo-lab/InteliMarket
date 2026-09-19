@@ -330,7 +330,7 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
         m_orig = _dec_to_float(cn.monto)
         apps_cn = apps_by_cn.get(cn.id, [])
         m_aplicado_cn = sum(a["monto_aplicado"] for a in apps_cn)
-        m_disp = _dec_to_float(cn.saldo_disponible) if cn.saldo_disponible is not None else max(0.0, m_orig - m_aplicado_cn)
+        m_disp = _dec_to_float(cn.saldo_disponible) if cn.saldo_disponible is not None else 0.0
 
         monedero_total_emitido += m_orig
         monedero_total_aplicado += m_aplicado_cn
