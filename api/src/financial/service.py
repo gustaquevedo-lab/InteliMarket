@@ -819,8 +819,9 @@ async def create_bank_transaction(
     if not account:
         raise ValueError("Cuenta bancaria no encontrada.")
 
+    cid = (data.company_id if getattr(data, "company_id", None) else None) or (uuid.UUID(company_id) if company_id else account.company_id)
     bt = BankTransaction(
-        company_id=uuid.UUID(company_id),
+        company_id=cid,
         bank_account_id=uuid.UUID(bank_account_id),
         fecha=data.fecha,
         tipo=data.tipo,
@@ -837,7 +838,7 @@ async def create_bank_transaction(
     # Si se especificó una comisión bancaria adicional asociada al movimiento
     if data.comision_adicional and data.comision_adicional > Decimal("0"):
         comision_bt = BankTransaction(
-            company_id=uuid.UUID(company_id),
+            company_id=cid,
             bank_account_id=uuid.UUID(bank_account_id),
             fecha=data.fecha,
             tipo="debito",
@@ -869,12 +870,18 @@ async def create_bank_transfer(
     if data.origen_account_id == data.destino_account_id:
         raise ValueError("La cuenta origen y destino no pueden ser la misma.")
 
-    cid = uuid.UUID(company_id)
-    res_origen = await db.execute(select(BankAccount).where(BankAccount.id == data.origen_account_id, BankAccount.company_id == cid))
+    cid = (data.company_id if getattr(data, "company_id", None) else None) or (uuid.UUID(company_id) if company_id else None)
+    res_origen = await db.execute(
+        select(BankAccount).where(
+            BankAccount.id == data.origen_account_id,
+            *( [BankAccount.company_id == cid] if cid else [] )
+        )
+    )
     acc_origen = res_origen.scalar_one_or_none()
     if not acc_origen:
         raise ValueError("Cuenta bancaria de origen no encontrada.")
 
+    cid = cid or acc_origen.company_id
     res_destino = await db.execute(select(BankAccount).where(BankAccount.id == data.destino_account_id, BankAccount.company_id == cid))
     acc_destino = res_destino.scalar_one_or_none()
     if not acc_destino:

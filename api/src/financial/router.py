@@ -1,5 +1,6 @@
 """Financial API router — AP, banking, cash flow, budgets, payment runs, dashboards"""
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
@@ -31,6 +32,18 @@ from api.src.financial.schemas import (
     SettleValesAndPayRequest,
 )
 from api.src.financial import service
+
+
+logger = logging.getLogger(__name__)
+DEFAULT_COMPANY_ID = "00000000-0000-0000-0000-000000000010"
+
+
+def _resolve_company_id(company_id: str | None = None, user: dict | None = None) -> str:
+    if company_id and str(company_id).strip() and str(company_id).strip() != "None":
+        return str(company_id).strip()
+    if user and isinstance(user, dict):
+        return user.get("company_id") or DEFAULT_COMPANY_ID
+    return DEFAULT_COMPANY_ID
 
 
 router = APIRouter(prefix="/api/v1/financial", tags=["financial"], dependencies=[Depends(require_auth)])
@@ -170,23 +183,27 @@ async def create_bank_account(body: BankAccountCreate, db: AsyncSession = Depend
 
 
 @router.get("/banks", response_model=list[BankAccountResponse])
-async def list_bank_accounts(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
-    return await service.list_bank_accounts(db, company_id)
+async def list_bank_accounts(company_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    cid = _resolve_company_id(company_id, user)
+    return await service.list_bank_accounts(db, cid)
 
 
 @router.get("/banks/dashboard", response_model=dict)
-async def get_bank_dashboard(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
-    return await service.get_bank_dashboard(db, company_id)
+async def get_bank_dashboard(company_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    cid = _resolve_company_id(company_id, user)
+    return await service.get_bank_dashboard(db, cid)
 
 
 @router.get("/banks/cash-position", response_model=dict)
-async def get_cash_position(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
-    return await service.get_cash_position(db, company_id)
+async def get_cash_position(company_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    cid = _resolve_company_id(company_id, user)
+    return await service.get_cash_position(db, cid)
 
 
 @router.get("/banks/outstanding-items", response_model=dict)
-async def get_outstanding_items(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
-    return await service.get_outstanding_items(db, company_id)
+async def get_outstanding_items(company_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    cid = _resolve_company_id(company_id, user)
+    return await service.get_outstanding_items(db, cid)
 
 
 # ── Reportes PDF (Bancos Fase 7) ────────────────────────────────────────────
@@ -250,7 +267,7 @@ async def export_top_suppliers_pdf(
 
 @router.get("/banks/transactions", response_model=list[BankTransactionResponse])
 async def list_all_bank_transactions(
-    company_id: str = Query(),
+    company_id: str | None = Query(None),
     categoria: str | None = Query(None),
     conciliado: bool | None = Query(None),
     desde: date | None = Query(None),
@@ -258,6 +275,7 @@ async def list_all_bank_transactions(
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
     """Movimientos bancarios de todas las cuentas de la empresa, sin filtrar por cuenta.
 
@@ -265,16 +283,23 @@ async def list_all_bank_transactions(
     de registro, y "transactions" caía en ese account_id (ValueError: badly
     formed hexadecimal UUID string) cuando este endpoint estaba más abajo.
     """
-    return await service.list_bank_transactions(db, company_id, None, conciliado, desde, hasta, categoria, limit, offset)
+    cid = _resolve_company_id(company_id, user)
+    return await service.list_bank_transactions(db, cid, None, conciliado, desde, hasta, categoria, limit, offset)
 
 
 @router.get("/banks/balance-corrections", response_model=list[BankBalanceCorrectionResponse])
-async def list_balance_corrections(company_id: str = Query(), estado: str | None = Query("pendiente"), db: AsyncSession = Depends(get_db)):
+async def list_balance_corrections(
+    company_id: str | None = Query(None),
+    estado: str | None = Query("pendiente"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
     """Registrada antes de /banks/{account_id} — mismo problema de orden de
     rutas que /banks/transactions: "balance-corrections" caía en account_id
     (ValueError: badly formed hexadecimal UUID string) cuando este endpoint
     estaba más abajo, junto con los otros endpoints de Bancos Fase 5."""
-    return await service.list_balance_corrections(db, company_id, estado)
+    cid = _resolve_company_id(company_id, user)
+    return await service.list_balance_corrections(db, cid, estado)
 
 
 @router.get("/banks/{account_id}", response_model=BankAccountResponse)
@@ -304,7 +329,7 @@ async def delete_bank_account(account_id: str, db: AsyncSession = Depends(get_db
 @router.get("/banks/{account_id}/transactions", response_model=list[BankTransactionResponse])
 async def list_bank_transactions(
     account_id: str,
-    company_id: str = Query(),
+    company_id: str | None = Query(None),
     conciliado: bool | None = Query(None),
     desde: date | None = Query(None),
     hasta: date | None = Query(None),
@@ -312,29 +337,35 @@ async def list_bank_transactions(
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
-    return await service.list_bank_transactions(db, company_id, account_id, conciliado, desde, hasta, categoria, limit, offset)
+    cid = _resolve_company_id(company_id, user)
+    return await service.list_bank_transactions(db, cid, account_id, conciliado, desde, hasta, categoria, limit, offset)
 
 
 @router.post("/banks/{account_id}/import", response_model=list[BankTransactionResponse])
 async def import_bank_statement(
     account_id: str,
-    company_id: str = Query(),
     body: BankTransactionImport = ...,
+    company_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
-    return await service.import_bank_statement(db, company_id, account_id, body.transactions)
+    cid = _resolve_company_id(company_id, user)
+    return await service.import_bank_statement(db, cid, account_id, body.transactions)
 
 
 @router.post("/banks/{account_id}/transactions", response_model=BankTransactionResponse, status_code=status.HTTP_201_CREATED)
 async def create_bank_transaction(
     account_id: str,
     body: BankTransactionCreate,
-    company_id: str = Query(),
+    company_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
+    cid = _resolve_company_id(company_id or (str(body.company_id) if body.company_id else None), user)
     try:
-        return await service.create_bank_transaction(db, company_id, account_id, body)
+        return await service.create_bank_transaction(db, cid, account_id, body)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -345,11 +376,13 @@ async def create_bank_transaction(
 @router.post("/banks/transfer", status_code=status.HTTP_201_CREATED)
 async def create_bank_transfer(
     body: BankTransferCreate,
-    company_id: str = Query(),
+    company_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
+    cid = _resolve_company_id(company_id or (str(body.company_id) if body.company_id else None), user)
     try:
-        return await service.create_bank_transfer(db, company_id, body)
+        return await service.create_bank_transfer(db, cid, body)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -360,11 +393,13 @@ async def create_bank_transfer(
 @router.delete("/banks/transactions/{transaction_id}")
 async def delete_bank_transaction(
     transaction_id: str,
-    company_id: str = Query(),
+    company_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
+    cid = _resolve_company_id(company_id, user)
     try:
-        success = await service.delete_bank_transaction(db, company_id, transaction_id)
+        success = await service.delete_bank_transaction(db, cid, transaction_id)
         return {"success": success, "mensaje": "Movimiento bancario eliminado y saldo revertido."}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -3336,7 +3336,7 @@ export const api = {
       delete: (id: string) => client.delete(`/v1/financial/banks/${id}`),
       transactions: (id: string, params?: { conciliado?: boolean; desde?: string; hasta?: string; categoria?: string; limit?: number }) => client.get<BankTransaction[]>(`/v1/financial/banks/${id}/transactions`, { company_id: COMPANY_ID, ...params } as any),
       allTransactions: (params?: { conciliado?: boolean; desde?: string; hasta?: string; categoria?: string; limit?: number }) => client.get<BankTransaction[]>("/v1/financial/banks/transactions", { company_id: COMPANY_ID, ...params } as any),
-      import: (id: string, data: any) => client.post<{ detail: string }>(`/v1/financial/banks/${id}/import`, data),
+      import: (id: string, data: any) => client.post<{ detail: string }>(`/v1/financial/banks/${id}/import?company_id=${COMPANY_ID}`, data),
       verifyBalance: (id: string) => client.post<BankAccount>(`/v1/financial/banks/${id}/verify-balance`),
       requestCorrection: (id: string, data: { saldo_propuesto: number; motivo: string }) => client.post<{ success: boolean; request_id: string }>(`/v1/financial/banks/${id}/request-correction`, data),
       previewImportFile: (id: string, file: File, mes: number, anio: number) => {
@@ -3350,9 +3350,9 @@ export const api = {
         return requestMultipart<{ sheet_matched: string; total_detectadas: number; nuevas: number; duplicadas: number; saldo_actual: number }>(`/v1/financial/banks/${id}/import-file`, fd)
       },
       createTransaction: (bankId: string, data: any) =>
-        client.post<BankTransaction>(`/v1/financial/banks/${bankId}/transactions`, { company_id: COMPANY_ID, ...data }),
+        client.post<BankTransaction>(`/v1/financial/banks/${bankId}/transactions?company_id=${COMPANY_ID}`, { company_id: COMPANY_ID, ...data }),
       createTransfer: (data: any) =>
-        client.post<{ success: boolean; origen_tx_id: string; destino_tx_id: string; comision_tx_id?: string; origen_saldo_nuevo: number; destino_saldo_nuevo: number; mensaje: string }>("/v1/financial/banks/transfer", { company_id: COMPANY_ID, ...data }),
+        client.post<{ success: boolean; origen_tx_id: string; destino_tx_id: string; comision_tx_id?: string; origen_saldo_nuevo: number; destino_saldo_nuevo: number; mensaje: string }>(`/v1/financial/banks/transfer?company_id=${COMPANY_ID}`, { company_id: COMPANY_ID, ...data }),
       deleteTransaction: (id: string) =>
         client.delete<{ success: boolean; mensaje: string }>(`/v1/financial/banks/transactions/${id}?company_id=${COMPANY_ID}`),
     },

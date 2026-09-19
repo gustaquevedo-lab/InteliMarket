@@ -196,6 +196,7 @@ class BankTransactionCreate(BaseModel):
     contraparte: Optional[str] = None
     categoria: str = "otros"
     comision_adicional: Optional[Decimal] = Field(default=None, ge=0)
+    company_id: Optional[UUID] = None
 
 
 class BankTransferCreate(BaseModel):
@@ -207,6 +208,7 @@ class BankTransferCreate(BaseModel):
     referencia: Optional[str] = None
     descripcion: Optional[str] = None
     comision: Optional[Decimal] = Field(default=Decimal("0"), ge=0)
+    company_id: Optional[UUID] = None
 
 
 class BankTransactionImport(BaseModel):
