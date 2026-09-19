@@ -466,15 +466,44 @@ async def get_pnl_data(
         )
         .select_from(Expense)
         .outerjoin(ExpenseCategory, ExpenseCategory.id == Expense.category_id)
-        .where(Expense.company_id == company_id, Expense.fecha_gasto >= desde, Expense.fecha_gasto <= hasta)
+        .where(
+            Expense.company_id == company_id,
+            Expense.anulado == False,
+            Expense.es_pago_proveedor == False,
+            Expense.fecha_gasto >= desde,
+            Expense.fecha_gasto <= hasta
+        )
         .group_by(ExpenseCategory.nombre)
         .order_by(sa_func.sum(Expense.monto).desc())
     )
     gastos = [{"nombre": nombre, "monto": float(monto or 0)} for nombre, monto in r.all()]
     total_gastos = sum(g["monto"] for g in gastos)
 
+    # Resultados Financieros: Diferencia de Cambio en Liquidaciones y Pagos a Proveedores
+    from api.src.financial.models import SupplierPaymentOrder
+    r_dif = await db.execute(
+        select(sa_func.coalesce(sa_func.sum(SupplierPaymentOrder.diferencia_cambio), 0))
+        .where(
+            SupplierPaymentOrder.company_id == company_id,
+            SupplierPaymentOrder.fecha_pago >= desde,
+            SupplierPaymentOrder.fecha_pago <= hasta,
+            SupplierPaymentOrder.estado != "anulado"
+        )
+    )
+    # diff_cambio_total > 0 representa sobrecosto pagado (pérdida cambiaria), < 0 representa ahorro (ganancia cambiaria)
+    diff_val = float(r_dif.scalar() or 0)
+    dif_cambio_neta = -diff_val
+
     resultado_bruto = total_ventas - total_costo
-    resultado_neto = resultado_bruto - total_gastos
+    resultado_operativo = resultado_bruto - total_gastos
+    resultado_neto = resultado_operativo + dif_cambio_neta
+
+    resultados_financieros = []
+    if dif_cambio_neta != 0:
+        resultados_financieros.append({
+            "nombre": "Ganancia por Diferencia de Cambio" if dif_cambio_neta > 0 else "Pérdida por Diferencia de Cambio",
+            "monto": dif_cambio_neta
+        })
 
     return {
         "periodo": f"{desde.strftime('%d/%m/%Y')} — {hasta.strftime('%d/%m/%Y')}",
@@ -485,6 +514,9 @@ async def get_pnl_data(
         "resultado_bruto": resultado_bruto,
         "gastos": gastos,
         "total_gastos": total_gastos,
+        "resultado_operativo": resultado_operativo,
+        "resultados_financieros": resultados_financieros,
+        "diferencia_cambio_neta": dif_cambio_neta,
         "resultado_neto": resultado_neto,
     }
 

@@ -375,6 +375,13 @@ def generate_pnl_pdf(company: dict, pnl: dict, generated_by: str = "") -> bytes:
     rows.append(("Total Gastos", _fmt_gs(pnl.get("total_gastos", 0)), True))
     elements.append(_totals_table(rows))
 
+    res_financieros = pnl.get("resultados_financieros", [])
+    if res_financieros:
+        elements.append(Spacer(1, 4))
+        elements.append(Paragraph("Resultados Financieros (Diferencia de Cambio)", styles["SectionTitle"]))
+        fin_rows = [(f["nombre"], _fmt_gs(f["monto"]), True) for f in res_financieros]
+        elements.append(_totals_table(fin_rows))
+
     elements.append(Spacer(1, 8))
     resultado = pnl.get("resultado_neto", 0)
     color = GREEN if resultado >= 0 else RED
