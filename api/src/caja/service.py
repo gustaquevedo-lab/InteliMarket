@@ -4366,7 +4366,10 @@ async def list_emitted_notas_credito(
 ) -> list[dict]:
     """Lista las Notas de Crédito emitidas en el sistema para facilitar la reclasificación
     de comprobantes en Tesorería y cuadre de caja."""
-    cid = uuid.UUID(company_id)
+    try:
+        cid = company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
+    except Exception:
+        return []
 
     query = (
         select(
