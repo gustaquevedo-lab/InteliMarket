@@ -7064,7 +7064,7 @@ export default function POSPage() {
       // Generar el UUID único de la venta aquí en el cliente. Este ID acompaña
       // a la venta tanto en el envío online como en la cola offline (IndexedDB),
       // asegurando que ante caídas de red o reintentos NUNCA se duplique.
-      const clientSaleId = crypto.randomUUID()
+      const clientSaleId = generarUUIDLocal()
 
       const saleBasePayload = {
         id: clientSaleId,
