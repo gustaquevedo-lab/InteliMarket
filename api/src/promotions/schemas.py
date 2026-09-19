@@ -15,8 +15,9 @@ class PromotionCreate(BaseModel):
     valor_maximo: Optional[Decimal] = None
     # venta | costo -- solo aplica a tipo=porcentaje
     base_calculo_pct: Optional[str] = "venta"
-    # 0-99: fuerza los ultimos 2 digitos del precio final calculado, ej. 77 -> Gs. 12.977
+    # 0-999: fuerza los ultimos digitos del precio final calculado, ej. 950 -> Gs. 12.950, 77 -> Gs. 12.977
     terminacion_psicologica: Optional[int] = None
+    precios_por_producto: Optional[dict[str, Any]] = None
 
     # producto | categoria | carrito | marca
     aplica_a: str = "producto"
@@ -104,6 +105,7 @@ class PromotionUpdate(BaseModel):
     valor_maximo: Optional[Decimal] = None
     base_calculo_pct: Optional[str] = None
     terminacion_psicologica: Optional[int] = None
+    precios_por_producto: Optional[dict[str, Any]] = None
     aplica_a: Optional[str] = None
     producto_ids: Optional[list[str]] = None
     categoria_ids: Optional[list[str]] = None
@@ -161,6 +163,7 @@ class PromotionResponse(BaseModel):
     valor_maximo: Optional[float] = None
     base_calculo_pct: Optional[str] = "venta"
     terminacion_psicologica: Optional[int] = None
+    precios_por_producto: Optional[Any] = None
     aplica_a: str
     producto_ids: Optional[Any] = None
     categoria_ids: Optional[Any] = None

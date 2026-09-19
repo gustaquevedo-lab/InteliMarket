@@ -56,20 +56,36 @@ async def _sync_balanza_si_aplica(db: AsyncSession, promo: Promotion) -> None:
             logger.warning("Auto PLU sync (promo precio_fijo_oferta) fallo para producto %s: %s", prod.id, e)
 
 
-def _aplicar_terminacion_psicologica(precio: Decimal, terminacion: Optional[int]) -> Decimal:
-    """Fuerza los ultimos 2 digitos de `precio` a `terminacion` (0-99), redondeando
-    hacia abajo (ej. terminacion=77 sobre Gs. 13.000 da Gs. 12.977). No aplica si
-    terminacion es None."""
-    if terminacion is None:
+def _aplicar_terminacion_psicologica(
+    precio: Decimal,
+    terminacion: Optional[int],
+    base_calculo_pct: str = "venta",
+    costo: Optional[Decimal] = None
+) -> Decimal:
+    """Ajusta `precio` a la terminación psicológica deseada (ej. 950 -> Gs. 12.950, 77 -> Gs. 12.977).
+    Soporta terminaciones de 2 dígitos (módulo 100) y de 3 dígitos (módulo 1000).
+    Si base_calculo_pct == 'costo', asegura no quedar por debajo del costo de adquisición."""
+    if terminacion is None or terminacion < 0:
         return precio
-    t = Decimal(max(0, min(99, terminacion)))
-    base = (precio // 100) * 100
+    t = Decimal(terminacion)
+    modulo = Decimal(1000 if terminacion >= 100 else 100)
+    base = (precio // modulo) * modulo
     candidato = base + t
-    if candidato > precio:
-        candidato -= 100
-    if candidato < t:
-        candidato = t
-    return candidato
+
+    if base_calculo_pct == "costo" and costo and costo > Decimal("0"):
+        if candidato < costo:
+            candidato += modulo
+        elif abs(candidato - precio) > (modulo / Decimal("2")):
+            alt = candidato - modulo if candidato > precio else candidato + modulo
+            if alt >= costo and abs(alt - precio) < abs(candidato - precio):
+                candidato = alt
+    else:
+        if candidato > precio:
+            candidato -= modulo
+        if candidato < t:
+            candidato = t
+
+    return max(Decimal("0"), candidato)
 
 
 def calcular_precio_promocional(
@@ -80,23 +96,27 @@ def calcular_precio_promocional(
     costo_unitario_referencia: Optional[Decimal] = None,
     base_calculo_pct: str = "venta",
     terminacion_psicologica: Optional[int] = None,
+    precio_producto_especifico: Optional[Decimal] = None,
 ) -> Decimal:
     """Unico lugar donde se calcula el precio final de una promocion -- usado
     tanto por el motor de catalogo (resolve_product_promotions) como por el
     motor de caja (calculate_applicable) para que ambos vean siempre el mismo
-    numero, incluyendo el redondeo psicologico."""
+    numero, incluyendo el redondeo psicologico y precios especificos por producto."""
+    if precio_producto_especifico is not None and precio_producto_especifico > Decimal("0"):
+        return round(precio_producto_especifico)
+
     precio_promo = precio_regular
 
     if tipo == "precio_fijo_oferta" and precio_fijo_promocional:
         precio_promo = round(precio_fijo_promocional)
-    elif tipo == "porcentaje" and valor:
-        pct = max(Decimal("0"), min(valor, Decimal("100"))) / Decimal("100")
+    elif tipo == "porcentaje" and valor is not None:
+        pct = max(Decimal("0"), valor) / Decimal("100")
         if base_calculo_pct == "costo" and costo_unitario_referencia and costo_unitario_referencia > 0:
-            # El % define un margen objetivo sobre el costo, no un descuento
-            # sobre el precio de venta -- precio = costo * (1 + %).
+            # Markup objetivo sobre el costo: precio = costo * (1 + markup%)
             precio_promo = round(costo_unitario_referencia * (Decimal("1") + pct))
         else:
-            precio_promo = round(precio_regular * (Decimal("1") - pct))
+            pct_desc = min(pct, Decimal("1"))
+            precio_promo = round(precio_regular * (Decimal("1") - pct_desc))
     elif tipo == "monto_fijo" and valor:
         precio_promo = max(Decimal("0"), round(precio_regular - valor))
     elif tipo == "dos_por_uno":
@@ -118,7 +138,9 @@ def calcular_precio_promocional(
     elif tipo in ("combo_pack", "combo_precio") and precio_fijo_promocional:
         precio_promo = round(precio_fijo_promocional)
 
-    precio_promo = _aplicar_terminacion_psicologica(precio_promo, terminacion_psicologica)
+    precio_promo = _aplicar_terminacion_psicologica(
+        precio_promo, terminacion_psicologica, base_calculo_pct, costo_unitario_referencia
+    )
     return precio_promo
 
 
@@ -161,6 +183,7 @@ async def create_promotion(db: AsyncSession, company_id: str, data: PromotionCre
         valor_maximo=data.valor_maximo,
         base_calculo_pct=data.base_calculo_pct or "venta",
         terminacion_psicologica=data.terminacion_psicologica,
+        precios_por_producto=data.precios_por_producto,
         aplica_a=data.aplica_a,
         producto_ids=[uuid.UUID(p) for p in (data.producto_ids or [])] if data.producto_ids else None,
         categoria_ids=[uuid.UUID(c) for c in (data.categoria_ids or [])] if data.categoria_ids else None,
@@ -433,8 +456,10 @@ async def resolve_product_promotions(
     # promo por categoria nunca mostraba el precio tachado aca, aunque en
     # caja si se descontaba. Se busca la categoria real del producto para
     # que ambos motores vean lo mismo.
-    categoria_id_res = await db.execute(select(Product.categoria_id).where(Product.id == pid))
-    categoria_id = categoria_id_res.scalar_one_or_none()
+    prod_row_res = await db.execute(select(Product.categoria_id, Product.costo_promedio, Product.ultimo_costo).where(Product.id == pid))
+    prod_row = prod_row_res.first()
+    categoria_id = prod_row.categoria_id if prod_row else None
+    prod_costo = (prod_row.costo_promedio or prod_row.ultimo_costo) if prod_row else None
 
     condiciones_aplica = [
         Promotion.producto_ids.contains([pid]),
@@ -496,16 +521,24 @@ async def resolve_product_promotions(
                 dias_txt = ", ".join([nombres_dias[d] for d in p.dias_semana if d < len(nombres_dias)])
                 mensaje_dias = f"Válido: {dias_txt}"
 
-        # Calcular precio promocional
+        # Calcular precio promocional (revisando si existe precio específico asignado)
+        precio_especifico = None
+        if p.precios_por_producto and isinstance(p.precios_por_producto, dict):
+            p_val = p.precios_por_producto.get(str(pid))
+            if p_val is not None:
+                precio_especifico = Decimal(str(p_val))
+
+        costo_unit = prod_costo if (prod_costo and prod_costo > 0) else p.costo_unitario_referencia
         precio_regular = Decimal(str(current_price))
         precio_promo = calcular_precio_promocional(
             tipo=p.tipo,
             precio_regular=precio_regular,
             valor=p.valor,
             precio_fijo_promocional=p.precio_fijo_promocional,
-            costo_unitario_referencia=p.costo_unitario_referencia,
+            costo_unitario_referencia=costo_unit,
             base_calculo_pct=p.base_calculo_pct or "venta",
             terminacion_psicologica=p.terminacion_psicologica,
+            precio_producto_especifico=precio_especifico,
         )
 
         if precio_promo < precio_regular and es_activo_hoy and es_en_horario:
@@ -969,6 +1002,12 @@ async def calculate_applicable(
                     if total_regular_linea > p.precio_fijo_promocional:
                         descuento_item = total_regular_linea - p.precio_fijo_promocional
             else:
+                precio_especifico = None
+                if p.precios_por_producto and isinstance(p.precios_por_producto, dict):
+                    p_val = p.precios_por_producto.get(str(it.producto_id))
+                    if p_val is not None:
+                        precio_especifico = Decimal(str(p_val))
+
                 precio_promo_unitario = calcular_precio_promocional(
                     tipo=p.tipo,
                     precio_regular=it.precio_unitario,
@@ -977,6 +1016,7 @@ async def calculate_applicable(
                     costo_unitario_referencia=p.costo_unitario_referencia,
                     base_calculo_pct=p.base_calculo_pct or "venta",
                     terminacion_psicologica=p.terminacion_psicologica,
+                    precio_producto_especifico=precio_especifico,
                 )
                 if precio_promo_unitario < it.precio_unitario:
                     descuento_item = (it.precio_unitario - precio_promo_unitario) * qty_promo

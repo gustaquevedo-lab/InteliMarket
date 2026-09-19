@@ -135,6 +135,8 @@ class ExpenseCreate(BaseModel):
 class ExpenseUpdate(BaseModel):
     category_id: Optional[str] = None
     cost_center_id: Optional[str] = None
+    fund_id: Optional[str] = None
+    rendicion_id: Optional[str] = None
     monto: Optional[Decimal] = None
     descripcion: Optional[str] = None
     proveedor: Optional[str] = None

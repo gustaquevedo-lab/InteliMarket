@@ -51,6 +51,10 @@ class Promotion(Base):
     # calculado coincidan con este valor (0-99), ej. 77 -> Gs. 12.977. Aplica
     # sobre el precio ya calculado por cualquier mecánica. Null = sin ajuste.
     terminacion_psicologica = Column(Integer, nullable=True)
+
+    # Precios específicos por producto para campañas multiproducto o reglas por lote
+    # Formato: { "<producto_id>": precio_promocional_calculado_o_editado }
+    precios_por_producto = Column(JSON, nullable=True)
     
     # Aprobaciones de Gerencia
     # borrador | pendiente_aprobacion_gerencia | activa | pausada | finalizada_por_stock | finalizada_por_fecha

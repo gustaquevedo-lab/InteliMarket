@@ -597,6 +597,12 @@ async def annotate_products_with_promos(db: AsyncSession, company_id: str, produ
             calc_base = pv if pr.tipo in volume_types else pr_val
 
             prod_cost = getattr(p, "costo_promedio", None) or getattr(p, "ultimo_costo", None) or pr.costo_unitario_referencia
+            precio_especifico = None
+            if getattr(pr, "precios_por_producto", None) and isinstance(pr.precios_por_producto, dict):
+                p_val = pr.precios_por_producto.get(str(p.id))
+                if p_val is not None:
+                    precio_especifico = Decimal(str(p_val))
+
             calc_p = calcular_precio_promocional(
                 tipo=pr.tipo,
                 precio_regular=calc_base,
@@ -605,6 +611,7 @@ async def annotate_products_with_promos(db: AsyncSession, company_id: str, produ
                 costo_unitario_referencia=prod_cost,
                 base_calculo_pct=pr.base_calculo_pct or "venta",
                 terminacion_psicologica=pr.terminacion_psicologica,
+                precio_producto_especifico=precio_especifico,
             )
 
             # Regla de oro comercial:

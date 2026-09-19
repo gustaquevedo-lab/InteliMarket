@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react"
 import {
   XCircle, CheckCircle2, AlertTriangle, Loader2, Receipt,
   Building2, Landmark, Check, Ban, Download, FileText,
-  DollarSign, ArrowRight, Eye, ShieldAlert, FileCheck, Tag, Sparkles
+  DollarSign, ArrowRight, Eye, ShieldAlert, FileCheck, Tag, Sparkles, Unlink
 } from "lucide-react"
 import { api, type PettyCashRendicion, type Expense, type PettyCashFund, type BankAccount } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -121,6 +121,19 @@ export const RendicionAuditModal: React.FC<Props> = ({
     }))
     setRejectPromptId(null)
     setRejectMotivo("")
+  }
+
+  const handleUnlinkExpense = async (expId: string) => {
+    if (!rendicionId) return
+    if (!confirm("¿Desea desvincular este comprobante de la rendición? El gasto no se eliminará del sistema, pero saldrá de este expediente y se recalcularán los totales.")) return
+    try {
+      await api.expenses.rendiciones.unlinkExpense(rendicionId, expId)
+      toast.success("Comprobante Desvinculado", "El gasto ha sido retirado de este expediente.")
+      await fetchDetail()
+      onSuccess()
+    } catch (err: any) {
+      toast.error("Error al desvincular comprobante", err.message)
+    }
   }
 
   const handleSaveAudit = async () => {
@@ -429,6 +442,14 @@ export const RendicionAuditModal: React.FC<Props> = ({
                                 }`}
                               >
                                 <Ban className="w-3 h-3" /> Rechazar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleUnlinkExpense(exp.id)}
+                                className="px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors"
+                                title="Desvincular de esta rendición (el gasto no se borra)"
+                              >
+                                <Unlink className="w-3 h-3" /> Quitar
                               </button>
                             </div>
                           )}

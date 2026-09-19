@@ -3198,6 +3198,7 @@ export const api = {
       create: (data: { fund_id: string; expense_ids: string[]; efectivo_remanente_contado: number; observaciones?: string }) => client.post<{ success: boolean; rendicion_id: string; numero_rendicion: string; total_presentado: number; diferencia_arqueo: number }>("/v1/petty-cash-funds/rendiciones", data),
       audit: (id: string, data: { items: { expense_id: string; estado: string; motivo?: string }[]; observaciones?: string }) => client.post<{ success: boolean; rendicion_id: string; total_aprobado: number; total_rechazado: number; estado: string }>(`/v1/petty-cash-funds/rendiciones/${id}/audit`, data),
       replenish: (id: string, data: { medio_reposicion: string; caja_boveda_id?: string; bank_account_id?: string; comprobante_pago_ref?: string; observaciones?: string }) => client.post<{ success: boolean; rendicion_id: string; monto_repuesto: number; medio_reposicion: string; estado: string }>(`/v1/petty-cash-funds/rendiciones/${id}/replenish`, data),
+      unlinkExpense: (rendicionId: string, expenseId: string) => client.post<{ success: boolean; rendicion_id: string; expense_id: string; message: string }>(`/v1/petty-cash-funds/rendiciones/${rendicionId}/expenses/${expenseId}/unlink`),
       downloadPdf: (id: string, nro?: string) => downloadAuthenticated(`/v1/petty-cash-funds/rendiciones/${id}/export.pdf`, {}, `expediente_${nro || id.slice(0, 8)}.pdf`),
     },
     get: (id: string) => client.get<Expense>(`/v1/expenses/${id}`),

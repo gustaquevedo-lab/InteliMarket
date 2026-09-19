@@ -906,15 +906,76 @@ async def list_expenses(
 
 
 
+async def recalculate_rendicion(db: AsyncSession, rendicion_id: uuid.UUID | str):
+    rid = uuid.UUID(str(rendicion_id))
+    rend = await db.get(PettyCashRendicion, rid)
+    if not rend:
+        return
+    q_all = select(Expense).where(
+        Expense.rendicion_id == rid,
+        Expense.company_id == rend.company_id,
+        Expense.anulado == False,
+    )
+    expenses = list((await db.execute(q_all)).scalars().all())
+
+    tot_presentado = sum(Decimal(str(e.monto)) for e in expenses)
+    aprobados = [e for e in expenses if e.auditoria_estado != "rechazado"]
+    rechazados = [e for e in expenses if e.auditoria_estado == "rechazado"]
+
+    rend.total_comprobantes_presentados = tot_presentado
+    rend.total_comprobantes_aprobados = sum(Decimal(str(e.monto)) for e in aprobados)
+    rend.total_comprobantes_rechazados = sum(Decimal(str(e.monto)) for e in rechazados)
+    rend.total_gravado_10 = sum(Decimal(str(e.gravado_10 or 0)) for e in aprobados)
+    rend.total_gravado_5 = sum(Decimal(str(e.gravado_5 or 0)) for e in aprobados)
+    rend.total_exentas = sum(Decimal(str(e.exentas or 0)) for e in aprobados)
+    rend.total_iva_10 = sum(Decimal(str(e.iva_10 or 0)) for e in aprobados)
+    rend.total_iva_5 = sum(Decimal(str(e.iva_5 or 0)) for e in aprobados)
+    rend.total_inversion_activos = sum(Decimal(str(e.monto)) for e in aprobados if e.es_inversion)
+    rend.total_gasto_operativo = sum(Decimal(str(e.monto)) for e in aprobados if not e.es_inversion)
+    rend.diferencia_arqueo = (Decimal(str(rend.efectivo_remanente_contado or 0)) + tot_presentado) - Decimal(str(rend.monto_fondo_autorizado))
+
+
 async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate) -> Expense | None:
     exp = await get_expense(db, expense_id)
     if not exp:
         return None
 
+    old_rendicion_id = exp.rendicion_id
     if exp.rendicion_id is not None:
-        raise ValueError("Operación denegada: Este comprobante ya está incluido en un expediente de rendición de cuentas.")
+        rend = await db.get(PettyCashRendicion, exp.rendicion_id)
+        if rend and rend.estado == "pagada":
+            raise ValueError("Operación denegada: Este comprobante forma parte de una rendición que ya ha sido pagada y cerrada.")
 
     update_data = data.model_dump(exclude_unset=True)
+
+    # Permitir cambiar o desvincular de fondo
+    if "fund_id" in update_data:
+        new_fid_str = update_data.pop("fund_id")
+        new_fid = uuid.UUID(new_fid_str) if new_fid_str else None
+        if new_fid != exp.fund_id:
+            if exp.fund_id and not exp.anulado:
+                old_f = await get_fund(db, str(exp.fund_id))
+                if old_f:
+                    old_f.saldo_actual = Decimal(str(old_f.saldo_actual)) + Decimal(str(exp.monto))
+            if new_fid and not exp.anulado:
+                new_f = await get_fund(db, str(new_fid))
+                if new_f:
+                    new_f.saldo_actual = Decimal(str(new_f.saldo_actual)) - Decimal(str(exp.monto))
+            exp.fund_id = new_fid
+
+    # Permitir desvincular o mover de rendición
+    new_rend_to_recalc = None
+    if "rendicion_id" in update_data:
+        new_rid_str = update_data.pop("rendicion_id")
+        new_rid = uuid.UUID(new_rid_str) if new_rid_str else None
+        if new_rid != exp.rendicion_id:
+            if new_rid is not None:
+                new_rend = await db.get(PettyCashRendicion, new_rid)
+                if new_rend and new_rend.estado == "pagada":
+                    raise ValueError("No se puede asignar el comprobante a una rendición que ya fue pagada.")
+                new_rend_to_recalc = new_rid
+            exp.rendicion_id = new_rid
+
     nuevo_monto = update_data.get("monto")
     if nuevo_monto is not None and exp.fund_id:
         delta = Decimal(str(nuevo_monto)) - Decimal(str(exp.monto))
@@ -931,9 +992,22 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
                     observaciones=f"Ajuste por edición de monto de gasto: {exp.descripcion}",
                 ))
 
+    # Convertir UUIDs
+    for field in ("cost_center_id", "category_id"):
+        if field in update_data and update_data[field]:
+            update_data[field] = uuid.UUID(update_data[field])
+
     for field, value in update_data.items():
         if value is not None:
             setattr(exp, field, value)
+
+    await db.flush()
+
+    if old_rendicion_id:
+        await recalculate_rendicion(db, old_rendicion_id)
+    if new_rend_to_recalc and new_rend_to_recalc != old_rendicion_id:
+        await recalculate_rendicion(db, new_rend_to_recalc)
+
     await db.commit()
     await db.refresh(exp)
     return exp
@@ -944,8 +1018,11 @@ async def delete_expense(db: AsyncSession, expense_id: str) -> bool:
     if not exp:
         return False
 
+    old_rend_id = exp.rendicion_id
     if exp.rendicion_id is not None:
-        raise ValueError("Operación denegada: Este comprobante ya está incluido en un expediente de rendición de cuentas.")
+        rend = await db.get(PettyCashRendicion, exp.rendicion_id)
+        if rend and rend.estado == "pagada":
+            raise ValueError("Operación denegada: Este comprobante forma parte de una rendición que ya ha sido pagada y cerrada.")
 
     if exp.fund_id and exp.estado != "rechazado" and not exp.anulado:
         fund = await get_fund(db, str(exp.fund_id))
@@ -959,8 +1036,46 @@ async def delete_expense(db: AsyncSession, expense_id: str) -> bool:
             ))
 
     await db.delete(exp)
+    await db.flush()
+    if old_rend_id:
+        await recalculate_rendicion(db, old_rend_id)
     await db.commit()
     return True
+
+
+async def unlink_expense_from_rendicion(
+    db: AsyncSession, company_id: str, rendicion_id: str, expense_id: str, user_id: str
+) -> dict:
+    cid = uuid.UUID(company_id)
+    rid = uuid.UUID(rendicion_id)
+    eid = uuid.UUID(expense_id)
+
+    rend = await db.get(PettyCashRendicion, rid)
+    if not rend or rend.company_id != cid:
+        raise ValueError("Rendición no encontrada")
+    if rend.estado == "pagada":
+        raise ValueError("No se pueden quitar comprobantes de una rendición que ya fue pagada")
+
+    exp_res = await db.execute(
+        select(Expense).where(Expense.id == eid, Expense.rendicion_id == rid, Expense.company_id == cid)
+    )
+    exp = exp_res.scalar_one_or_none()
+    if not exp:
+        raise ValueError("El comprobante no pertenece a esta rendición")
+
+    exp.rendicion_id = None
+    exp.auditoria_estado = "pendiente"
+    await db.flush()
+
+    await recalculate_rendicion(db, rid)
+    await db.commit()
+
+    return {
+        "success": True,
+        "rendicion_id": str(rid),
+        "expense_id": str(eid),
+        "message": "Comprobante desvinculado de la rendición exitosamente",
+    }
 
 
 async def approve_expense(db: AsyncSession, expense_id: str, user_id: str, tenant_id: str) -> dict:

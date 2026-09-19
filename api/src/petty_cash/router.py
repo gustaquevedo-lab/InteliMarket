@@ -181,6 +181,19 @@ async def replenish_rendicion_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@funds_router.post("/rendiciones/{rendicion_id}/expenses/{expense_id}/unlink", response_model=dict)
+async def unlink_expense_from_rendicion_endpoint(
+    rendicion_id: str,
+    expense_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        return await service.unlink_expense_from_rendicion(db, user["company_id"], rendicion_id, expense_id, user.get("id"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @funds_router.get("/rendiciones/{rendicion_id}/export.pdf")
 async def export_rendicion_pdf_endpoint(
     rendicion_id: str,
