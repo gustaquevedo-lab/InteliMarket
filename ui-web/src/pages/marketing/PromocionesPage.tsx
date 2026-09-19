@@ -23,6 +23,7 @@ interface SelectedPromoProduct {
   precio_promocional: number
   costo: number
   precio_regular: number
+  precio_editado_manualmente?: boolean
 }
 
 const TIER_ORIGEN_COLORS: Record<string, { bg: string; text: string; border: string }> = {
@@ -137,6 +138,14 @@ export default function PromocionesPage() {
   const [selectedBatchProducts, setSelectedBatchProducts] = useState<Map<string, SelectedPromoProduct>>(new Map())
   const [simulatedVolume, setSimulatedVolume] = useState<number>(100)
   const [saving, setSaving] = useState(false)
+
+  // Gestión interactiva y reglas en lote sobre la lista de productos seleccionados
+  const [selectedInBatch, setSelectedInBatch] = useState<Set<string>>(new Set())
+  const [batchRuleTipo, setBatchRuleTipo] = useState<"markup_costo" | "descuento_pct" | "precio_fijo" | "monto_fijo">("markup_costo")
+  const [batchRuleValor, setBatchRuleValor] = useState<number | "">(7)
+  const [batchRuleTerminacion, setBatchRuleTerminacion] = useState<string>("none")
+  const [batchRuleCustomTerminacion, setBatchRuleCustomTerminacion] = useState<number | "">("")
+  const [searchInSelectedList, setSearchInSelectedList] = useState("")
 
   // Filtrado de proveedores: Solo comerciales / mercadería para la venta (excluyendo servicios públicos o gastos)
   const sellableSuppliers = useMemo(() => {
@@ -267,6 +276,18 @@ export default function PromocionesPage() {
       itemsBajoCosto
     }
   }, [selectedBatchProducts, simulatedVolume, volumeMode, newFinanciamiento, newOrigen, newPorcentajeNcCosto, newPctAporteProveedor, newPctAporteTienda])
+
+  // Filtrado de productos en la lista de seleccionados para búsqueda rápida
+  const filteredSelectedProducts = useMemo(() => {
+    const items = Array.from(selectedBatchProducts.values())
+    if (!searchInSelectedList.trim()) return items
+    const q = searchInSelectedList.toLowerCase().trim()
+    return items.filter(it =>
+      (it.product.nombre || "").toLowerCase().includes(q) ||
+      (it.product.codigo_barra && it.product.codigo_barra.toLowerCase().includes(q)) ||
+      (it.product.sku && it.product.sku.toLowerCase().includes(q))
+    )
+  }, [selectedBatchProducts, searchInSelectedList])
 
   // Formulario Nota de Crédito
   const [ncNumero, setNcNumero] = useState("")
@@ -445,13 +466,24 @@ export default function PromocionesPage() {
     } else {
       precio = Math.round(precioRegular * 0.85)
     }
+
     if (terminacion !== "") {
-      const t = Math.max(0, Math.min(99, Number(terminacion)))
-      const base = Math.floor(precio / 100) * 100
-      let candidato = base + t
-      if (candidato > precio) candidato -= 100
-      if (candidato < t) candidato = t
-      precio = candidato
+      const t = Number(terminacion)
+      if (!isNaN(t) && t >= 0) {
+        const modulo = t >= 100 ? 1000 : 100
+        const base = Math.floor(precio / modulo) * modulo
+        let candidato = base + t
+        if (candidato > precio) {
+          candidato -= modulo
+        }
+        // En markup sobre costo, no permitir que el redondeo psicológico baje del costo
+        if (baseCalculo === "costo" && costo > 0 && candidato < costo) {
+          candidato += modulo
+        }
+        if (candidato > 0) {
+          precio = candidato
+        }
+      }
     }
     return precio
   }
@@ -462,6 +494,11 @@ export default function PromocionesPage() {
       const next = new Map(prev)
       if (next.has(p.id)) {
         next.delete(p.id)
+        setSelectedInBatch(bPrev => {
+          const bNext = new Set(bPrev)
+          bNext.delete(p.id)
+          return bNext
+        })
       } else {
         const costo = Number(p.costo_promedio || 0)
         const regular = Number(p.precio_venta || 0)
@@ -470,14 +507,15 @@ export default function PromocionesPage() {
           product: p,
           costo,
           precio_regular: regular,
-          precio_promocional: promoPrice
+          precio_promocional: promoPrice,
+          precio_editado_manualmente: false
         })
       }
       return next
     })
   }
 
-  // Seleccionar todos los visibles
+  // Seleccionar todos los visibles del catálogo
   const selectAllVisible = () => {
     setSelectedBatchProducts(prev => {
       const next = new Map(prev)
@@ -490,7 +528,8 @@ export default function PromocionesPage() {
             product: p,
             costo,
             precio_regular: regular,
-            precio_promocional: promoPrice
+            precio_promocional: promoPrice,
+            precio_editado_manualmente: false
           })
         }
       })
@@ -501,6 +540,159 @@ export default function PromocionesPage() {
   // Deseleccionar todos
   const clearSelection = () => {
     setSelectedBatchProducts(new Map())
+    setSelectedInBatch(new Set())
+  }
+
+  // Modificar precio promocional directamente en un producto de la lista
+  const handleUpdateItemPromoPrice = (productId: string, newPrice: number) => {
+    setSelectedBatchProducts(prev => {
+      const next = new Map(prev)
+      const current = next.get(productId)
+      if (current) {
+        next.set(productId, {
+          ...current,
+          precio_promocional: Math.max(0, Math.round(newPrice)),
+          precio_editado_manualmente: true
+        })
+      }
+      return next
+    })
+  }
+
+  // Reestablecer un solo producto a la regla general
+  const handleResetItemPromoPrice = (productId: string) => {
+    setSelectedBatchProducts(prev => {
+      const next = new Map(prev)
+      const current = next.get(productId)
+      if (current) {
+        const promoPrice = calcularPrecioPromocional(
+          newTipo,
+          current.precio_regular,
+          current.costo,
+          newBulkValorPct,
+          newBulkMontoFijo,
+          newBulkPrecioFijo,
+          newBaseCalculoPct,
+          newTerminacionPsicologica
+        )
+        next.set(productId, {
+          ...current,
+          precio_promocional: promoPrice,
+          precio_editado_manualmente: false
+        })
+      }
+      return next
+    })
+  }
+
+  // Reestablecer todos los productos a la regla general
+  const handleResetAllToGeneral = () => {
+    setSelectedBatchProducts(prev => {
+      const next = new Map()
+      prev.forEach((item, id) => {
+        const promoPrice = calcularPrecioPromocional(
+          newTipo,
+          item.precio_regular,
+          item.costo,
+          newBulkValorPct,
+          newBulkMontoFijo,
+          newBulkPrecioFijo,
+          newBaseCalculoPct,
+          newTerminacionPsicologica
+        )
+        next.set(id, {
+          ...item,
+          precio_promocional: promoPrice,
+          precio_editado_manualmente: false
+        })
+      })
+      return next
+    })
+    toast.success("Precios Reestablecidos", "Todos los productos han sido recalculados con la regla general de la campaña")
+  }
+
+  // Checkbox de selección dentro del listado de productos elegidos
+  const toggleSelectInBatch = (productId: string) => {
+    setSelectedInBatch(prev => {
+      const next = new Set(prev)
+      if (next.has(productId)) {
+        next.delete(productId)
+      } else {
+        next.add(productId)
+      }
+      return next
+    })
+  }
+
+  // Seleccionar / Deseleccionar todos los que coinciden en el listado seleccionado
+  const toggleSelectAllInBatch = (targetIds: string[]) => {
+    setSelectedInBatch(prev => {
+      const allSelected = targetIds.length > 0 && targetIds.every(id => prev.has(id))
+      const next = new Set(prev)
+      if (allSelected) {
+        targetIds.forEach(id => next.delete(id))
+      } else {
+        targetIds.forEach(id => next.add(id))
+      }
+      return next
+    })
+  }
+
+  // Aplicar regla de precios en lote a los productos seleccionados con checkbox
+  const handleApplyBatchRuleToSelected = () => {
+    if (selectedInBatch.size === 0) {
+      toast.warning("Sin selección", "Marque la casilla de los productos a los que desea aplicar la regla de precios")
+      return
+    }
+
+    const val = Number(batchRuleValor) || 0
+    let termNum: number | "" = ""
+    if (batchRuleTerminacion === "custom") {
+      termNum = batchRuleCustomTerminacion !== "" ? Number(batchRuleCustomTerminacion) : ""
+    } else if (batchRuleTerminacion !== "none") {
+      termNum = Number(batchRuleTerminacion)
+    }
+
+    setSelectedBatchProducts(prev => {
+      const next = new Map(prev)
+      selectedInBatch.forEach(id => {
+        const item = next.get(id)
+        if (!item) return
+        let newPrice = item.precio_promocional
+
+        if (batchRuleTipo === "markup_costo") {
+          const cost = item.costo > 0 ? item.costo : item.precio_regular
+          newPrice = Math.round(cost * (1 + val / 100))
+        } else if (batchRuleTipo === "descuento_pct") {
+          newPrice = Math.round(item.precio_regular * (1 - val / 100))
+        } else if (batchRuleTipo === "precio_fijo") {
+          newPrice = val
+        } else if (batchRuleTipo === "monto_fijo") {
+          newPrice = Math.max(0, item.precio_regular - val)
+        }
+
+        // Aplicar terminación psicológica si se especificó
+        if (termNum !== "") {
+          const modulo = termNum >= 100 ? 1000 : 100
+          const base = Math.floor(newPrice / modulo) * modulo
+          let cand = base + termNum
+          if (cand > newPrice) cand -= modulo
+          if (batchRuleTipo === "markup_costo" && item.costo > 0 && cand < item.costo) {
+            cand += modulo
+          }
+          if (cand > 0) newPrice = cand
+        }
+
+        next.set(id, {
+          ...item,
+          precio_promocional: newPrice,
+          precio_editado_manualmente: true
+        })
+      })
+      return next
+    })
+
+    toast.success("Regla Aplicada", `Se actualizó el precio promocional de ${selectedInBatch.size} producto(s) seleccionados`)
   }
 
   // Aplicar regla masiva a todos los seleccionados
@@ -509,21 +701,26 @@ export default function PromocionesPage() {
       const next = new Map()
       prev.forEach((item, id) => {
         const newPromoPrice = calcularPrecioPromocional(newTipo, item.precio_regular, item.costo, newBulkValorPct, newBulkMontoFijo, newBulkPrecioFijo, newBaseCalculoPct, newTerminacionPsicologica)
-        next.set(id, { ...item, precio_promocional: newPromoPrice })
+        next.set(id, { ...item, precio_promocional: newPromoPrice, precio_editado_manualmente: false })
       })
       return next
     })
+    toast.success("Precios Recalculados", "Se actualizaron todos los productos según la regla de la campaña")
   }
 
   // Sincronización Reactiva en Tiempo Real:
   // Al modificar tipo de oferta, % OFF, precio fijo, terminación psicológica, etc.,
-  // se recalculan instantáneamente los precios de todos los productos seleccionados y el simulador.
+  // se recalculan instantáneamente los precios de todos los productos seleccionados (excepto los editados manualmente).
   useEffect(() => {
     if (selectedBatchProducts.size === 0) return
     setSelectedBatchProducts(prev => {
       let changed = false
       const next = new Map()
       prev.forEach((item, id) => {
+        if (item.precio_editado_manualmente) {
+          next.set(id, item)
+          return
+        }
         const newPromoPrice = calcularPrecioPromocional(
           newTipo,
           item.precio_regular,
@@ -700,6 +897,7 @@ export default function PromocionesPage() {
     setNewDiasSemana(promo.dias_semana && promo.dias_semana.length > 0 ? promo.dias_semana : [0, 1, 2, 3, 4, 5, 6])
     // Precargar productos seleccionados a partir de productos_detalle
     const prodsDetalle = (promo as any).productos_detalle as Array<{ id: string; nombre: string; sku?: string; codigo_barra?: string }> | undefined
+    const savedPrecios = (promo as any).precios_por_producto as Record<string, number> | undefined
     const batchMap = new Map<string, SelectedPromoProduct>()
     if (prodsDetalle && prodsDetalle.length > 0) {
       const costoRef = (promo.costo_unitario_referencia as number | undefined) ?? 0
@@ -709,25 +907,30 @@ export default function PromocionesPage() {
         const localProd = allCatalogProducts.find(p => p.id === det.id)
         const costo = localProd ? Number(localProd.costo_promedio || 0) : costoRef
         const precioReg = localProd ? Number(localProd.precio_venta || 0) : 0
-        const precioPromo = precioPromoRef || calcularPrecioPromocional(
-          promo.tipo,
-          precioReg,
-          costo,
-          promo.valor ?? "",
-          "",
-          promo.precio_fijo_promocional ?? "",
-          (promo.base_calculo_pct as "venta" | "costo") ?? "venta",
-          promo.terminacion_psicologica ?? ""
-        )
+        const hasSavedPrice = savedPrecios && savedPrecios[det.id] !== undefined
+        const precioPromo = hasSavedPrice
+          ? Number(savedPrecios[det.id])
+          : (precioPromoRef || calcularPrecioPromocional(
+              promo.tipo,
+              precioReg,
+              costo,
+              promo.valor ?? "",
+              "",
+              promo.precio_fijo_promocional ?? "",
+              (promo.base_calculo_pct as "venta" | "costo") ?? "venta",
+              promo.terminacion_psicologica ?? ""
+            ))
         batchMap.set(det.id, {
           product: localProd || ({ id: det.id, nombre: det.nombre, sku: det.sku, codigo_barra: det.codigo_barra } as any),
           costo,
           precio_regular: precioReg,
-          precio_promocional: precioPromo
+          precio_promocional: precioPromo,
+          precio_editado_manualmente: hasSavedPrice
         })
       })
     }
     setSelectedBatchProducts(batchMap)
+    setSelectedInBatch(new Set())
     setEditingPromo(promo)
     setViewingPromo(null)
     setShowCreateModal(true)
@@ -836,6 +1039,13 @@ export default function PromocionesPage() {
         payload.horario_hasta = newHorarioHasta
       }
 
+      // Guardar mapa de precios por producto para soportar reglas individuales y en lote
+      const preciosPorProducto: Record<string, number> = {}
+      itemsList.forEach(it => {
+        preciosPorProducto[it.product.id] = it.precio_promocional
+      })
+      payload.precios_por_producto = preciosPorProducto
+
       let savedPromo: Promotion
       if (editingPromo) {
         savedPromo = await api.promotions.update(editingPromo.id, payload)
@@ -848,6 +1058,7 @@ export default function PromocionesPage() {
       setEditingPromo(null)
       setNewActivo(true)
       setSelectedBatchProducts(new Map())
+      setSelectedInBatch(new Set())
       setNewNombre("")
       setNewDesc("")
       loadData()
@@ -2021,70 +2232,177 @@ export default function PromocionesPage() {
                             />
                           </div>
                         ) : (
-                          <div>
-                            <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
-                              {newTipo === "precio_fijo_oferta" || newTipo === "combo_pack"
-                                ? "Precio Fijo de Oferta Común (Gs.):"
-                                : newTipo === "monto_fijo"
-                                ? "Descuento Fijo por Unidad (Gs.):"
-                                : "Porcentaje de Descuento (% OFF):"}
-                            </label>
-                            <input
-                              type="number"
-                              min={0}
-                              max={newTipo === "porcentaje" ? 100 : undefined}
-                              value={
-                                newTipo === "precio_fijo_oferta" || newTipo === "combo_pack"
-                                  ? newBulkPrecioFijo
-                                  : newTipo === "monto_fijo"
-                                  ? newBulkMontoFijo
-                                  : newBulkValorPct
-                              }
-                              onChange={e => {
-                                const v = e.target.value === "" ? "" : Number(e.target.value)
-                                if (newTipo === "precio_fijo_oferta" || newTipo === "combo_pack") setNewBulkPrecioFijo(v)
-                                else if (newTipo === "monto_fijo") setNewBulkMontoFijo(v)
-                                else setNewBulkValorPct(v)
-                              }}
-                              placeholder={
-                                newTipo === "precio_fijo_oferta" || newTipo === "combo_pack"
-                                  ? "Ej: 37477"
-                                  : newTipo === "monto_fijo"
-                                  ? "Ej: 5000"
-                                  : "Ej: 20"
-                              }
-                              className="w-full text-xs font-mono font-black p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400"
-                            />
+                          <div className="space-y-2">
+                            {newTipo === "porcentaje" && (
+                              <div>
+                                <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                                  Base de Cálculo del Precio:
+                                </label>
+                                <div className="grid grid-cols-2 gap-1.5 p-1 bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700">
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewBaseCalculoPct("costo")}
+                                    className={`py-1 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                                      newBaseCalculoPct === "costo"
+                                        ? "bg-emerald-600 text-white shadow-sm"
+                                        : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800"
+                                    }`}
+                                  >
+                                    <span>🌾 Markup s/ Costo</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewBaseCalculoPct("venta")}
+                                    className={`py-1 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                                      newBaseCalculoPct === "venta"
+                                        ? "bg-emerald-600 text-white shadow-sm"
+                                        : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800"
+                                    }`}
+                                  >
+                                    <span>🏷️ % Descuento s/ Venta</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className="font-bold text-gray-700 dark:text-gray-300">
+                                  {newTipo === "precio_fijo_oferta" || newTipo === "combo_pack"
+                                    ? "Precio Fijo de Oferta Común (Gs.):"
+                                    : newTipo === "monto_fijo"
+                                    ? "Descuento Fijo por Unidad (Gs.):"
+                                    : newBaseCalculoPct === "costo"
+                                    ? "Markup sobre Costo Promedio (%):"
+                                    : "Porcentaje de Descuento (% OFF s/ Venta):"}
+                                </label>
+                                {newTipo === "porcentaje" && newBaseCalculoPct === "costo" && (
+                                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+                                    Precio = Costo + {newBulkValorPct || 0}%
+                                  </span>
+                                )}
+                              </div>
+
+                              <input
+                                type="number"
+                                min={0}
+                                max={newTipo === "porcentaje" && newBaseCalculoPct === "venta" ? 100 : undefined}
+                                value={
+                                  newTipo === "precio_fijo_oferta" || newTipo === "combo_pack"
+                                    ? newBulkPrecioFijo
+                                    : newTipo === "monto_fijo"
+                                    ? newBulkMontoFijo
+                                    : newBulkValorPct
+                                }
+                                onChange={e => {
+                                  const v = e.target.value === "" ? "" : Number(e.target.value)
+                                  if (newTipo === "precio_fijo_oferta" || newTipo === "combo_pack") setNewBulkPrecioFijo(v)
+                                  else if (newTipo === "monto_fijo") setNewBulkMontoFijo(v)
+                                  else setNewBulkValorPct(v)
+                                }}
+                                placeholder={
+                                  newTipo === "precio_fijo_oferta" || newTipo === "combo_pack"
+                                    ? "Ej: 37477"
+                                    : newTipo === "monto_fijo"
+                                    ? "Ej: 5000"
+                                    : newBaseCalculoPct === "costo"
+                                    ? "Ej: 7 (Costo + 7%)"
+                                    : "Ej: 15 (15% OFF)"
+                                }
+                                className="w-full text-xs font-mono font-black p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400"
+                              />
+
+                              {/* Chips de acceso rápido */}
+                              {newTipo === "porcentaje" && (
+                                <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                                  <span className="text-[10px] text-gray-400 font-semibold mr-1">Rápidos:</span>
+                                  {(newBaseCalculoPct === "costo" ? [5, 7, 10, 12, 15, 20, 25] : [5, 10, 15, 20, 25, 30, 50]).map(val => (
+                                    <button
+                                      key={val}
+                                      type="button"
+                                      onClick={() => setNewBulkValorPct(val)}
+                                      className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold cursor-pointer transition ${
+                                        newBulkValorPct === val
+                                          ? "bg-emerald-600 text-white"
+                                          : "bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/50"
+                                      }`}
+                                    >
+                                      {newBaseCalculoPct === "costo" ? `+${val}%` : `-${val}%`}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>
 
-                      {newTipo === "porcentaje" && (
-                        <div>
-                          <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Base de Cálculo:</label>
-                          <select
-                            value={newBaseCalculoPct}
-                            onChange={e => setNewBaseCalculoPct(e.target.value as "venta" | "costo")}
-                            disabled={selectionMode === "category"}
-                            className="w-full text-xs p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold disabled:opacity-50"
-                          >
-                            <option value="venta">S/ Precio Venta</option>
-                            <option value="costo">S/ Costo Promedio</option>
-                          </select>
+                      {/* Terminación Psicológica de Precios */}
+                      <div className="col-span-2 space-y-1.5 pt-1 border-t border-gray-200 dark:border-slate-700/60">
+                        <div className="flex items-center justify-between">
+                          <label className="font-bold text-gray-700 dark:text-gray-300 text-xs">
+                            🎯 Terminación Psicológica de Precios:
+                          </label>
+                          {newTerminacionPsicologica !== "" && (
+                            <button
+                              type="button"
+                              onClick={() => setNewTerminacionPsicologica("")}
+                              className="text-[10px] text-gray-400 hover:text-red-500 font-bold cursor-pointer"
+                            >
+                              ✕ Quitar ajuste
+                            </button>
+                          )}
                         </div>
-                      )}
 
-                      <div>
-                        <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Terminación Psicológica:</label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={99}
-                          value={newTerminacionPsicologica}
-                          onChange={e => setNewTerminacionPsicologica(e.target.value === "" ? "" : Math.max(0, Math.min(99, Number(e.target.value))))}
-                          placeholder="Ej: 77 (precios en ...977)"
-                          className="w-full text-xs font-mono font-bold p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-                        />
+                        {/* Chips de terminaciones más usadas en supermercados paraguayos */}
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {[
+                            { label: "Exacto (Sin ajuste)", value: "" },
+                            { label: "...950", value: 950 },
+                            { label: "...900", value: 900 },
+                            { label: "...990", value: 990 },
+                            { label: "...500", value: 500 },
+                            { label: "...50", value: 50 },
+                            { label: "...90", value: 90 },
+                            { label: "...99", value: 99 },
+                          ].map(t => {
+                            const isSelected = String(newTerminacionPsicologica) === String(t.value)
+                            return (
+                              <button
+                                key={t.label}
+                                type="button"
+                                onClick={() => setNewTerminacionPsicologica(t.value === "" ? "" : Number(t.value))}
+                                className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold cursor-pointer transition ${
+                                  isSelected
+                                    ? "bg-indigo-600 text-white shadow-sm"
+                                    : "bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                                }`}
+                              >
+                                {t.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-0.5">
+                          <input
+                            type="number"
+                            min={0}
+                            max={999}
+                            value={newTerminacionPsicologica}
+                            onChange={e => {
+                              const val = e.target.value === "" ? "" : Math.max(0, Math.min(999, Number(e.target.value)))
+                              setNewTerminacionPsicologica(val)
+                            }}
+                            placeholder="Personalizado (ej: 950, 900, 99)..."
+                            className="w-full text-xs font-mono font-bold p-1.5 rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                          />
+                        </div>
+                        <p className="text-[10px] text-gray-400">
+                          {newBaseCalculoPct === "costo"
+                            ? "🔒 En markup sobre costo, el precio redondeado nunca bajará del costo unitario."
+                            : "Redondea hacia abajo al valor psicológico más cercano."}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -2545,58 +2863,273 @@ export default function PromocionesPage() {
                     )}
                   </div>
 
-                  {/* BANDEJA DE ITEMS SELECCIONADOS CON PRECIO RECALCULADO EN TIEMPO REAL */}
-                  <div className="space-y-1.5 shrink-0">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-[11px] font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Precios Resultantes para la Campaña ({selectedBatchProducts.size} items seleccionados):</span>
-                      </span>
-                      {selectedBatchProducts.size === 0 && (
-                        <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
-                          Seleccioná al menos un producto arriba
+                  {/* BANDEJA DE ITEMS SELECCIONADOS CON EDICIÓN INTERACTIVA Y REGLAS EN LOTE */}
+                  <div className="space-y-2 shrink-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="font-extrabold text-gray-900 dark:text-white">
+                          Precios de la Campaña ({selectedBatchProducts.size} productos):
                         </span>
-                      )}
+                        {selectedBatchProducts.size > 0 && Array.from(selectedBatchProducts.values()).some(it => it.precio_editado_manualmente) && (
+                          <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/20">
+                            Precios personalizados
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {selectedBatchProducts.size > 5 && (
+                          <div className="relative">
+                            <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                              type="text"
+                              value={searchInSelectedList}
+                              onChange={e => setSearchInSelectedList(e.target.value)}
+                              placeholder="Filtrar en lista..."
+                              className="text-[11px] pl-7 pr-2 py-1 rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 w-36"
+                            />
+                            {searchInSelectedList && (
+                              <button
+                                type="button"
+                                onClick={() => setSearchInSelectedList("")}
+                                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-[10px]"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {selectedBatchProducts.size > 0 && Array.from(selectedBatchProducts.values()).some(it => it.precio_editado_manualmente) && (
+                          <button
+                            type="button"
+                            onClick={handleResetAllToGeneral}
+                            className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-1 rounded-lg border border-amber-500/20 font-bold cursor-pointer transition flex items-center gap-1"
+                            title="Descartar ediciones manuales y recalcular según la regla general"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                            <span>Restaurar Todos</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="h-28 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700 text-xs shadow-inner">
+                    {/* BARRA DE ACCIÓN EN LOTE SOBRE LA LISTA DE SELECCIONADOS */}
+                    {selectedBatchProducts.size > 0 && (
+                      <div className="p-2.5 bg-gradient-to-r from-indigo-500/5 via-purple-500/5 to-emerald-500/5 dark:bg-slate-800/80 rounded-xl border border-indigo-200/60 dark:border-slate-700 space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleSelectAllInBatch(filteredSelectedProducts.map(it => it.product.id))}
+                              className="text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 hover:text-indigo-600 cursor-pointer"
+                            >
+                              {filteredSelectedProducts.length > 0 && filteredSelectedProducts.every(it => selectedInBatch.has(it.product.id)) ? (
+                                <CheckSquare className="w-4 h-4 text-indigo-600" />
+                              ) : (
+                                <Square className="w-4 h-4 text-gray-400" />
+                              )}
+                              <span>Marcar Todos ({filteredSelectedProducts.length})</span>
+                            </button>
+                            <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-950/60 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-900/50">
+                              {selectedInBatch.size} marcados
+                            </span>
+                          </div>
+
+                          <div className="text-[10px] text-gray-400">
+                            Aplicar regla de precios a los marcados:
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                          {/* Selector de Tipo de Regla */}
+                          <div className="sm:col-span-4">
+                            <select
+                              value={batchRuleTipo}
+                              onChange={e => setBatchRuleTipo(e.target.value as any)}
+                              className="w-full text-xs p-1.5 rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                            >
+                              <option value="markup_costo">🌾 Markup % sobre Costo</option>
+                              <option value="descuento_pct">🏷️ % Descuento s/ Regular</option>
+                              <option value="precio_fijo">💵 Precio Fijo Común (Gs.)</option>
+                              <option value="monto_fijo">➖ Descuento Fijo (Gs. off)</option>
+                            </select>
+                          </div>
+
+                          {/* Input de Valor */}
+                          <div className="sm:col-span-2">
+                            <input
+                              type="number"
+                              min={0}
+                              value={batchRuleValor}
+                              onChange={e => setBatchRuleValor(e.target.value === "" ? "" : Number(e.target.value))}
+                              placeholder={batchRuleTipo === "markup_costo" ? "7" : batchRuleTipo === "descuento_pct" ? "15" : "Gs."}
+                              className="w-full text-xs font-mono font-bold p-1.5 rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-center"
+                            />
+                          </div>
+
+                          {/* Terminación Psicológica para la regla */}
+                          <div className="sm:col-span-3">
+                            <select
+                              value={batchRuleTerminacion}
+                              onChange={e => setBatchRuleTerminacion(e.target.value)}
+                              className="w-full text-xs p-1.5 rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-medium"
+                            >
+                              <option value="none">🎯 Sin redondeo (Exacto)</option>
+                              <option value="950">🎯 Terminar en ...950</option>
+                              <option value="900">🎯 Terminar en ...900</option>
+                              <option value="990">🎯 Terminar en ...990</option>
+                              <option value="500">🎯 Terminar en ...500</option>
+                              <option value="99">🎯 Terminar en ...99</option>
+                              <option value="custom">🎯 Personalizado...</option>
+                            </select>
+                          </div>
+
+                          {/* Botón de Aplicación */}
+                          <div className="sm:col-span-3">
+                            <button
+                              type="button"
+                              onClick={handleApplyBatchRuleToSelected}
+                              disabled={selectedInBatch.size === 0}
+                              className="w-full py-1.5 px-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-lg text-xs font-bold shadow-sm cursor-pointer transition flex items-center justify-center gap-1"
+                            >
+                              <Zap className="w-3.5 h-3.5" />
+                              <span>Aplicar ({selectedInBatch.size})</span>
+                            </button>
+                          </div>
+
+                          {batchRuleTerminacion === "custom" && (
+                            <div className="sm:col-span-12 flex items-center gap-2 pt-1">
+                              <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300 whitespace-nowrap">
+                                Terminación personalizada:
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                max={999}
+                                value={batchRuleCustomTerminacion}
+                                onChange={e => setBatchRuleCustomTerminacion(e.target.value === "" ? "" : Number(e.target.value))}
+                                placeholder="Ej: 950, 99..."
+                                className="w-32 text-xs font-mono font-bold p-1 rounded border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* LISTA DESPLAZABLE CON PRECIOS EDITABLES POR PRODUCTO */}
+                    <div className="min-h-[140px] max-h-[250px] overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700 text-xs shadow-inner">
                       {selectedBatchProducts.size === 0 ? (
-                        <div className="h-full flex items-center justify-center text-gray-400 text-xs italic">
-                          Ningún producto seleccionado todavía. Hacé clic en los productos del catálogo arriba.
+                        <div className="p-8 flex flex-col items-center justify-center text-gray-400 text-xs italic gap-1">
+                          <Package className="w-6 h-6 text-gray-300 dark:text-slate-600" />
+                          <span>Ningún producto seleccionado todavía. Hacé clic en los productos del catálogo arriba.</span>
+                        </div>
+                      ) : filteredSelectedProducts.length === 0 ? (
+                        <div className="p-6 text-center text-gray-400 text-xs">
+                          No hay productos que coincidan con "{searchInSelectedList}"
                         </div>
                       ) : (
-                        Array.from(selectedBatchProducts.values()).map(item => {
+                        filteredSelectedProducts.map(item => {
                           if (!item || !item.product) return null
                           const regular = Number(item.precio_regular || 0)
                           const promo = Number(item.precio_promocional || 0)
                           const costo = Number(item.costo || 0)
                           const esBajoCosto = promo < costo
+                          const isCheckedInBatch = selectedInBatch.has(item.product.id)
+                          const markupCosto = costo > 0 ? ((promo - costo) / costo) * 100 : 0
+                          const descRegular = regular > 0 ? ((regular - promo) / regular) * 100 : 0
+
                           return (
-                            <div key={item.product.id} className="p-2 flex items-center justify-between gap-2">
-                              <div className="truncate min-w-0">
-                                <span className="font-bold text-gray-900 dark:text-white truncate block">{item.product.nombre}</span>
-                                <div className="text-[10px] text-gray-400 font-mono flex items-center gap-2 flex-wrap">
-                                  <span>Reg: {formatPYG(regular)}</span>
-                                  <span>Costo: {formatPYG(costo)}</span>
+                            <div
+                              key={item.product.id}
+                              className={`p-2 flex items-center justify-between gap-2.5 transition ${
+                                isCheckedInBatch ? "bg-indigo-50/40 dark:bg-indigo-950/20" : "hover:bg-gray-50/70 dark:hover:bg-slate-800/40"
+                              }`}
+                            >
+                              {/* Checkbox y Nombre */}
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSelectInBatch(item.product.id)}
+                                  className="cursor-pointer text-gray-400 hover:text-indigo-600 shrink-0"
+                                  title={isCheckedInBatch ? "Desmarcar para regla en lote" : "Marcar para regla en lote"}
+                                >
+                                  {isCheckedInBatch ? (
+                                    <CheckSquare className="w-4 h-4 text-indigo-600" />
+                                  ) : (
+                                    <Square className="w-4 h-4 text-gray-300 dark:text-slate-600" />
+                                  )}
+                                </button>
+
+                                <div className="truncate min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-bold text-gray-900 dark:text-white truncate block">
+                                      {item.product.nombre}
+                                    </span>
+                                    {item.precio_editado_manualmente && (
+                                      <span className="text-[9px] font-bold text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-950/60 px-1.5 py-0.2 rounded border border-purple-200 dark:border-purple-900/50 flex items-center gap-0.5">
+                                        <span>✏️ Manual</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleResetItemPromoPrice(item.product.id)}
+                                          className="text-purple-600 hover:text-purple-900 ml-0.5"
+                                          title="Volver al cálculo general de la campaña"
+                                        >
+                                          ↺
+                                        </button>
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="text-[10px] text-gray-400 font-mono flex items-center gap-2 flex-wrap mt-0.5">
+                                    <span>Cód: {item.product.codigo_barra || item.product.sku || "S/N"}</span>
+                                    <span>Reg: {formatPYG(regular)}</span>
+                                    <span>Costo: {formatPYG(costo)}</span>
+                                  </div>
                                 </div>
                               </div>
 
-                              <div className="flex items-center gap-2.5 shrink-0">
-                                <div className="text-right">
-                                  <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 text-xs">
-                                    {formatPYG(promo)}
-                                  </span>
-                                  {esBajoCosto && (
-                                    <span className="text-[9px] font-bold text-red-600 block leading-none">Bajo Costo</span>
-                                  )}
+                              {/* Input de Precio Promocional y Badges de Rentabilidad */}
+                              <div className="flex items-center gap-2 shrink-0">
+                                <div className="flex flex-col items-end">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] text-gray-400 font-mono">Gs.</span>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      value={item.precio_promocional}
+                                      onChange={e => handleUpdateItemPromoPrice(item.product.id, Number(e.target.value))}
+                                      className="w-24 text-right font-mono font-black text-xs px-2 py-1 rounded-lg border border-emerald-500/40 bg-emerald-50/50 dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 focus:ring-2 focus:ring-emerald-500/30"
+                                      title="Modificar precio promocional individual para este producto"
+                                    />
+                                  </div>
+
+                                  <div className="flex items-center gap-1 mt-0.5">
+                                    {esBajoCosto ? (
+                                      <span className="text-[9px] font-bold text-red-600 dark:text-red-400">
+                                        ⚠️ Bajo Costo (-{Math.round(((costo - promo) / (costo || 1)) * 100)}%)
+                                      </span>
+                                    ) : costo > 0 ? (
+                                      <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400">
+                                        +{markupCosto.toFixed(1)}% s/costo
+                                      </span>
+                                    ) : (
+                                      <span className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400">
+                                        -{descRegular.toFixed(1)}% s/reg
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
+
                                 <button
                                   type="button"
                                   onClick={() => toggleSelectProduct(item.product)}
-                                  className="text-red-400 hover:text-red-600 p-0.5 cursor-pointer"
+                                  className="text-red-400 hover:text-red-600 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer transition"
                                   title="Quitar de la promoción"
                                 >
-                                  <X className="w-3.5 h-3.5" />
+                                  <X className="w-4 h-4" />
                                 </button>
                               </div>
                             </div>

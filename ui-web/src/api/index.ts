@@ -1006,6 +1006,7 @@ export interface Promotion {
   valor_maximo?: number
   base_calculo_pct?: string
   terminacion_psicologica?: number
+  precios_por_producto?: Record<string, number>
   aplica_a: string
   producto_ids?: string[]
   categoria_ids?: string[]
