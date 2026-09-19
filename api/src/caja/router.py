@@ -153,6 +153,23 @@ async def resume_session(session_id: str, body: CashSessionResume, db: AsyncSess
     return {"success": True, "id": str(result.id), "estado": result.estado, "register_id": str(result.register_id)}
 
 
+@router.get("/cash-sessions/notas-credito-emitidas")
+async def list_emitted_notas_credito(
+    search: str | None = Query(None),
+    session_id: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_emitted_notas_credito(
+        db,
+        company_id=user["company_id"],
+        search=search,
+        session_id=session_id,
+        limit=limit,
+    )
+
+
 @router.get("/cash-sessions/{session_id}")
 async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
     result = await service.get_session_with_summary(db, session_id)
@@ -1005,22 +1022,6 @@ async def delete_payment_adjustment(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-
-@router.get("/cash-sessions/notas-credito-emitidas")
-async def list_emitted_notas_credito(
-    search: str | None = Query(None),
-    session_id: str | None = Query(None),
-    limit: int = Query(50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
-    user=Depends(require_auth),
-):
-    return await service.list_emitted_notas_credito(
-        db,
-        company_id=user["company_id"],
-        search=search,
-        session_id=session_id,
-        limit=limit,
-    )
 
 
 
