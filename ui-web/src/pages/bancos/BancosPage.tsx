@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo } from "react"
 import { api, type BankAccount } from "../../api"
 import { formatPYG, getTodayAsuncion } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 import { useToast } from "../../context/ToastContext"
+
 import {
   Plus, Loader2, Landmark, CheckCircle, XCircle, Upload, Wand2, AlertTriangle,
   Settings2, ShieldCheck, ShieldAlert, FileDown, Search, ArrowUpRight,
@@ -1784,7 +1786,13 @@ export default function BancosPage() {
             <div className="p-6 space-y-3">
               <div>
                 <label className="label-field">Monto Mínimo de Alerta (Gs.)</label>
-                <input className="input-field font-mono" type="number" value={umbralModal.valor} onChange={e => setUmbralModal({ ...umbralModal, valor: e.target.value })} placeholder="Ej: 50000000" />
+                <CurrencyInput
+                  currency="PYG"
+                  className="input-field font-mono text-right"
+                  value={umbralModal.valor}
+                  onChangeValue={(num, formatted) => setUmbralModal({ ...umbralModal, valor: String(num) })}
+                  placeholder="Ej: 50.000.000"
+                />
               </div>
             </div>
             <div className="p-6 border-t flex justify-end gap-3">
@@ -1806,7 +1814,12 @@ export default function BancosPage() {
             <div className="p-6 space-y-3">
               <div>
                 <label className="label-field">Saldo Correcto (según extracto)</label>
-                <input className="input-field font-mono" type="number" value={correctionModal.saldo_propuesto} onChange={e => setCorrectionModal({ ...correctionModal, saldo_propuesto: e.target.value })} />
+                <CurrencyInput
+                  currency="PYG"
+                  className="input-field font-mono text-right"
+                  value={correctionModal.saldo_propuesto}
+                  onChangeValue={(num, formatted) => setCorrectionModal({ ...correctionModal, saldo_propuesto: String(num) })}
+                />
               </div>
               <div>
                 <label className="label-field">Motivo de la corrección</label>
@@ -1840,7 +1853,7 @@ export default function BancosPage() {
                 <div><label className="label-field">Tipo de Cuenta</label><select className="input-field" value={bankForm.tipo} onChange={e => setBankForm({ ...bankForm, tipo: e.target.value })}><option value="corriente">Cuenta Corriente</option><option value="ahorro">Caja de Ahorro</option></select></div>
                 <div><label className="label-field">Moneda</label><select className="input-field" value={bankForm.moneda} onChange={e => setBankForm({ ...bankForm, moneda: e.target.value })}><option value="PYG">PYG (Guaraní)</option><option value="USD">USD (Dólar)</option></select></div>
               </div>
-              <div><label className="label-field">Saldo Inicial</label><input className="input-field font-mono" type="number" value={bankForm.saldo_inicial} onChange={e => setBankForm({ ...bankForm, saldo_inicial: e.target.value })} /></div>
+              <div><label className="label-field">Saldo Inicial</label><CurrencyInput currency={bankForm.moneda === "USD" ? "USD" : "PYG"} className="input-field font-mono text-right" value={bankForm.saldo_inicial} onChangeValue={(num, formatted) => setBankForm({ ...bankForm, saldo_inicial: String(num) })} /></div>
               <div><label className="label-field">Titular de la Cuenta</label><input className="input-field" placeholder="Ej: Extra Supermercado S.A." value={bankForm.titular} onChange={e => setBankForm({ ...bankForm, titular: e.target.value })} /></div>
             </div>
             <div className="p-6 border-t flex justify-end gap-3">
@@ -1906,7 +1919,7 @@ export default function BancosPage() {
               </div>
               <div>
                 <label className="label-field">Umbral de Saldo Mínimo (Alerta)</label>
-                <input className="input-field font-mono" type="number" placeholder="Ej: 10000000" value={editBankForm.saldo_minimo_alerta} onChange={e => setEditBankForm({ ...editBankForm, saldo_minimo_alerta: e.target.value })} />
+                <CurrencyInput currency="PYG" className="input-field font-mono text-right" placeholder="Ej: 10.000.000" value={editBankForm.saldo_minimo_alerta} onChangeValue={(num, formatted) => setEditBankForm({ ...editBankForm, saldo_minimo_alerta: String(num) })} />
               </div>
               <div className="flex items-center gap-2 pt-2">
                 <input
@@ -2043,7 +2056,7 @@ export default function BancosPage() {
                 </select>
               </div>
               <div><label className="label-field">Beneficiario / Proveedor *</label><input className="input-field" placeholder="Razón social o nombre" value={chequeForm.beneficiario} onChange={e => setChequeForm({ ...chequeForm, beneficiario: e.target.value })} /></div>
-              <div><label className="label-field">Monto (Gs.) *</label><input className="input-field font-mono" type="number" placeholder="Ej: 15000000" value={chequeForm.monto} onChange={e => setChequeForm({ ...chequeForm, monto: e.target.value })} /></div>
+              <div><label className="label-field">Monto (Gs.) *</label><CurrencyInput currency="PYG" placeholder="Ej: 15.000.000" className="input-field font-mono text-right" value={chequeForm.monto} onChangeValue={(num, formatted) => setChequeForm({ ...chequeForm, monto: String(num) })} /></div>
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="label-field">Fecha de Emisión</label><input className="input-field" type="date" value={chequeForm.fecha_emision} onChange={e => setChequeForm({ ...chequeForm, fecha_emision: e.target.value })} /></div>
                 <div><label className="label-field">Fecha de Cobro / Venc.</label><input className="input-field" type="date" value={chequeForm.fecha_pago} onChange={e => setChequeForm({ ...chequeForm, fecha_pago: e.target.value })} /></div>

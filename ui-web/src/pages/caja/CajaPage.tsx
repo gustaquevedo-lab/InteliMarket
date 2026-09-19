@@ -23,6 +23,7 @@ import {
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatBRL, formatUSD, formatDateTime, getTodayAsuncion, getAsuncionDateStr, parseAsuncionDateStr } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 
 // Sesiones del sistema legacy anterior (Supermer) o pruebas accidentales
 const LEGACY_SESSION_IDS = new Set([
@@ -4267,11 +4268,11 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
             <div className="space-y-3 text-xs">
               <div>
                 <label className="input-label">Monto Contado por Supervisor (PYG)</label>
-                <input
-                  type="number"
-                  className="input-field font-mono font-bold text-sm text-emerald-600"
+                <CurrencyInput
+                  currency="PYG"
+                  className="input-field font-mono font-bold text-sm text-emerald-600 text-right"
                   value={montoConfirmado}
-                  onChange={e => setMontoConfirmado(e.target.value)}
+                  onChangeValue={(num, formatted) => setMontoConfirmado(String(num))}
                 />
               </div>
 
@@ -4332,11 +4333,11 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
             <div className="space-y-3 text-xs">
               <div>
                 <label className="input-label">Monto a Retirar a Bóveda (PYG)</label>
-                <input
-                  type="number"
-                  className="input-field font-mono font-bold text-sm text-amber-600"
+                <CurrencyInput
+                  currency="PYG"
+                  className="input-field font-mono font-bold text-sm text-amber-600 text-right"
                   value={cashDropMonto}
-                  onChange={e => setCashDropMonto(e.target.value)}
+                  onChangeValue={(num, formatted) => setCashDropMonto(String(num))}
                 />
               </div>
 
@@ -4464,22 +4465,22 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
             <div className="space-y-3 text-xs">
               <div>
                 <label className="input-label">Umbral de Alerta Cash Drop (PYG)</label>
-                <input
-                  type="number"
-                  className="input-field font-mono font-bold"
+                <CurrencyInput
+                  currency="PYG"
+                  className="input-field font-mono font-bold text-right"
                   value={thresholdValue}
-                  onChange={e => setThresholdValue(e.target.value)}
+                  onChangeValue={(num, formatted) => setThresholdValue(String(num))}
                 />
                 <p className="text-[11px] text-gray-400 mt-1">Alerta al supervisor cuando el efectivo en gaveta supera este monto.</p>
               </div>
 
               <div>
                 <label className="input-label">Diferencia Máxima Tolerada en Cierre (PYG)</label>
-                <input
-                  type="number"
-                  className="input-field font-mono font-bold"
+                <CurrencyInput
+                  currency="PYG"
+                  className="input-field font-mono font-bold text-right"
                   value={diferenciaToleradaValue}
-                  onChange={e => setDiferenciaToleradaValue(e.target.value)}
+                  onChangeValue={(num, formatted) => setDiferenciaToleradaValue(String(num))}
                 />
                 <p className="text-[11px] text-gray-400 mt-1">Descuadre a partir del cual el arqueo se marca para revisión de auditoría.</p>
               </div>
@@ -5118,23 +5119,20 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                               </span>
                               <div>
                                 <label className="text-[9px] text-slate-300 font-bold block mb-0.5">Efectivo Guaraníes (₲):</label>
-                                <input
-                                  type="text"
-                                  value={editDeclaradoPyg ? Number(editDeclaradoPyg.replace(/\D/g, "")).toLocaleString("es-PY") : ""}
-                                  onChange={e => {
-                                    const digits = e.target.value.replace(/\D/g, "")
-                                    setEditDeclaradoPyg(digits)
-                                  }}
+                                <CurrencyInput
+                                  currency="PYG"
+                                  value={editDeclaradoPyg}
+                                  onChangeValue={(num, formatted) => setEditDeclaradoPyg(String(num))}
                                   placeholder="0"
                                   className="w-full bg-slate-900 border border-indigo-500/60 rounded px-2 py-1 text-xs font-mono font-bold text-white text-right outline-none focus:ring-1 focus:ring-indigo-400"
                                 />
                               </div>
                               <div>
                                 <label className="text-[9px] text-slate-300 font-bold block mb-0.5">Efectivo Reales (R$):</label>
-                                <input
-                                  type="text"
+                                <CurrencyInput
+                                  currency="BRL"
                                   value={editDeclaradoBrl}
-                                  onChange={e => setEditDeclaradoBrl(e.target.value)}
+                                  onChangeValue={(num, formatted) => setEditDeclaradoBrl(String(num))}
                                   placeholder="0.00"
                                   className="w-full bg-slate-900 border border-amber-500/60 rounded px-2 py-1 text-xs font-mono font-bold text-amber-300 text-right outline-none focus:ring-1 focus:ring-amber-400"
                                 />

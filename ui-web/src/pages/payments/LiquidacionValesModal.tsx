@@ -7,7 +7,9 @@ import {
 } from "lucide-react"
 import { api } from "../../api"
 import { formatPYG, formatDate } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 import { useToast } from "../../context/ToastContext"
+
 
 interface UnbilledReception {
   id: string
@@ -594,13 +596,12 @@ export default function LiquidacionValesModal({
                     Monto Total de la Factura (₲) *
                   </label>
                   <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min="1"
+                    <CurrencyInput
                       required
+                      currency="PYG"
                       value={montoFacturaFinal}
-                      onChange={e => setMontoFacturaManual(Number(e.target.value) || 0)}
-                      className="w-full p-2 text-xs font-mono font-black text-emerald-600 dark:text-emerald-400 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl"
+                      onChangeValue={(num) => setMontoFacturaManual(num || 0)}
+                      className="w-full p-2 text-xs font-mono font-black text-emerald-600 dark:text-emerald-400 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-right"
                     />
                     {montoFacturaManual !== null && montoFacturaManual !== totalEntregasCalculado && (
                       <button
@@ -876,13 +877,13 @@ export default function LiquidacionValesModal({
 
               <div>
                 <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Monto del Vale (₲) *</label>
-                <input
-                  type="number"
-                  min="1"
-                  placeholder="Ej: 450000"
+                <CurrencyInput
+                  required
+                  currency="PYG"
+                  placeholder="Ej: 450.000"
                   value={newManualMonto}
-                  onChange={e => setNewManualMonto(e.target.value)}
-                  className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-mono font-bold"
+                  onChangeValue={(num, formatted) => setNewManualMonto(String(num))}
+                  className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-mono font-bold text-right"
                 />
               </div>
 

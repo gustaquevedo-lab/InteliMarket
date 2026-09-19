@@ -14,7 +14,9 @@ import {
 } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, getTodayAsuncion } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 import { useAuth } from "../../context/AuthContext"
+
 import { RendicionCreateModal } from "./RendicionCreateModal"
 import { RendicionAuditModal } from "./RendicionAuditModal"
 import { ExpensePaymentModal } from "./ExpensePaymentModal"
@@ -2501,17 +2503,13 @@ export default function ExpensesPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Monto Total (PYG) *</label>
-                  <input
-                    type="number"
-                    step="any"
+                  <CurrencyInput
                     required
-                    placeholder="ej: 150000"
-                    className="input-field w-full text-xs font-mono font-bold"
+                    currency="PYG"
+                    placeholder="ej: 150.000"
+                    className="input-field w-full text-xs font-mono font-bold text-right"
                     value={form.monto}
-                    onChange={e => {
-                      const val = e.target.value
-                      setForm({ ...form, monto: val })
-                    }}
+                    onChangeValue={(num, formatted) => setForm({ ...form, monto: String(num) })}
                   />
                 </div>
 
@@ -2743,32 +2741,32 @@ export default function ExpensesPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                   <div>
                     <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">IVA 10% (PYG)</label>
-                    <input
-                      type="number"
-                      placeholder="ej: 13636"
-                      className="input-field w-full text-xs font-mono text-emerald-600 font-bold"
+                    <CurrencyInput
+                      currency="PYG"
+                      placeholder="ej: 13.636"
+                      className="input-field w-full text-xs font-mono text-emerald-600 font-bold text-right"
                       value={form.iva_10}
-                      onChange={e => setForm({ ...form, iva_10: e.target.value })}
+                      onChangeValue={(num, formatted) => setForm({ ...form, iva_10: String(num) })}
                     />
                   </div>
                   <div>
                     <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">IVA 5% (PYG)</label>
-                    <input
-                      type="number"
+                    <CurrencyInput
+                      currency="PYG"
                       placeholder="ej: 0"
-                      className="input-field w-full text-xs font-mono text-teal-600 font-bold"
+                      className="input-field w-full text-xs font-mono text-teal-600 font-bold text-right"
                       value={form.iva_5}
-                      onChange={e => setForm({ ...form, iva_5: e.target.value })}
+                      onChangeValue={(num, formatted) => setForm({ ...form, iva_5: String(num) })}
                     />
                   </div>
                   <div>
                     <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">Exentas (PYG)</label>
-                    <input
-                      type="number"
+                    <CurrencyInput
+                      currency="PYG"
                       placeholder="ej: 0"
-                      className="input-field w-full text-xs font-mono"
+                      className="input-field w-full text-xs font-mono text-right"
                       value={form.exentas}
-                      onChange={e => setForm({ ...form, exentas: e.target.value })}
+                      onChangeValue={(num, formatted) => setForm({ ...form, exentas: String(num) })}
                     />
                   </div>
                 </div>
@@ -2927,24 +2925,24 @@ export default function ExpensesPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Monto Autorizado (PYG) *</label>
-                  <input
-                    type="number"
+                  <CurrencyInput
                     required
-                    placeholder="ej: 1000000"
-                    className="input-field w-full text-xs font-mono font-bold"
+                    currency="PYG"
+                    placeholder="ej: 1.000.000"
+                    className="input-field w-full text-xs font-mono font-bold text-right"
                     value={fundForm.monto_autorizado}
-                    onChange={e => setFundForm({ ...fundForm, monto_autorizado: e.target.value })}
+                    onChangeValue={(num, formatted) => setFundForm({ ...fundForm, monto_autorizado: String(num) })}
                   />
                 </div>
 
                 <div>
                   <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Límite Máximo por Gasto (PYG)</label>
-                  <input
-                    type="number"
-                    placeholder="ej: 200000"
-                    className="input-field w-full text-xs font-mono"
+                  <CurrencyInput
+                    currency="PYG"
+                    placeholder="ej: 200.000"
+                    className="input-field w-full text-xs font-mono text-right"
                     value={fundForm.monto_maximo_por_gasto}
-                    onChange={e => setFundForm({ ...fundForm, monto_maximo_por_gasto: e.target.value })}
+                    onChangeValue={(num, formatted) => setFundForm({ ...fundForm, monto_maximo_por_gasto: String(num) })}
                   />
                 </div>
               </div>
@@ -3085,12 +3083,13 @@ export default function ExpensesPage() {
             <form onSubmit={handleReplenish} className="space-y-4 text-xs">
               <div>
                 <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Monto de Reposición (PYG) *</label>
-                <input
-                  type="number"
+                <CurrencyInput
                   required
-                  className="input-field w-full text-xs font-mono font-bold"
+                  currency="PYG"
+                  placeholder="ej: 1.000.000"
+                  className="input-field w-full text-xs font-mono font-bold text-right"
                   value={replenishForm.monto}
-                  onChange={e => setReplenishForm({ ...replenishForm, monto: e.target.value })}
+                  onChangeValue={(num, formatted) => setReplenishForm({ ...replenishForm, monto: String(num) })}
                 />
               </div>
 
@@ -3193,13 +3192,13 @@ export default function ExpensesPage() {
                   <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
                     Monto Real Contado en Billetes/Monedas (PYG) *
                   </label>
-                  <input
-                    type="number"
+                  <CurrencyInput
                     required
-                    placeholder="ej: 850000"
-                    className="input-field w-full text-xs font-mono font-bold"
+                    currency="PYG"
+                    placeholder="ej: 850.000"
+                    className="input-field w-full text-xs font-mono font-bold text-right"
                     value={countForm.monto_contado}
-                    onChange={e => setCountForm({ ...countForm, monto_contado: e.target.value })}
+                    onChangeValue={(num, formatted) => setCountForm({ ...countForm, monto_contado: String(num) })}
                   />
                 </div>
 
@@ -3305,13 +3304,13 @@ export default function ExpensesPage() {
                 <p className="text-[11px] text-gray-400 mb-2">
                   Gastos con monto menor o igual se aprueban automáticamente sin requerir intervención de supervisión.
                 </p>
-                <input
-                  type="number"
+                <CurrencyInput
                   required
-                  placeholder="ej: 100000"
-                  className="input-field w-full text-xs font-mono font-bold"
+                  currency="PYG"
+                  placeholder="ej: 100.000"
+                  className="input-field w-full text-xs font-mono font-bold text-right"
                   value={approvalThresholdForm}
-                  onChange={e => setApprovalThresholdForm(e.target.value)}
+                  onChangeValue={(num, formatted) => setApprovalThresholdForm(String(num))}
                 />
               </div>
 
@@ -3322,13 +3321,13 @@ export default function ExpensesPage() {
                 <p className="text-[11px] text-gray-400 mb-2">
                   Diferencias menores a este valor no disparan alerta roja de desvío en los arqueos.
                 </p>
-                <input
-                  type="number"
+                <CurrencyInput
                   required
-                  placeholder="ej: 5000"
-                  className="input-field w-full text-xs font-mono font-bold"
+                  currency="PYG"
+                  placeholder="ej: 5.000"
+                  className="input-field w-full text-xs font-mono font-bold text-right"
                   value={toleranciaArqueoForm}
-                  onChange={e => setToleranciaArqueoForm(e.target.value)}
+                  onChangeValue={(num, formatted) => setToleranciaArqueoForm(String(num))}
                 />
               </div>
 
@@ -3388,12 +3387,12 @@ export default function ExpensesPage() {
 
               <div>
                 <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Presupuesto Mensual Máximo (PYG)</label>
-                <input
-                  type="number"
-                  placeholder="ej: 3000000"
-                  className="input-field w-full text-xs font-mono font-bold"
+                <CurrencyInput
+                  currency="PYG"
+                  placeholder="ej: 3.000.000"
+                  className="input-field w-full text-xs font-mono font-bold text-right"
                   value={catForm.presupuesto_mensual}
-                  onChange={e => setCatForm({ ...catForm, presupuesto_mensual: e.target.value })}
+                  onChangeValue={(num, formatted) => setCatForm({ ...catForm, presupuesto_mensual: String(num) })}
                 />
               </div>
 

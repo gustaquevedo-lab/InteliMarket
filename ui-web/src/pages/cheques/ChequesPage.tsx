@@ -9,6 +9,7 @@ import { api } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatCurrency, getTodayAsuncion } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 
 type ChequeTab = "cartera" | "emitidos" | "depositados" | "rechazados" | "dashboard"
 type ChequeTipo = "recibido" | "emitido"
@@ -574,7 +575,14 @@ export default function ChequesPage() {
 
                 <div>
                   <label className="label-sm">Monto *</label>
-                  <input required type="number" step="1" className="input text-xs font-mono font-bold" value={form.monto} onChange={e => setForm(f => ({ ...f, monto: e.target.value }))} placeholder="Ej: 5000000" />
+                  <CurrencyInput
+                    required
+                    currency={form.moneda === "USD" ? "USD" : "PYG"}
+                    className="input text-xs font-mono font-bold"
+                    value={form.monto}
+                    onChangeValue={(num, formatted) => setForm(f => ({ ...f, monto: String(num) }))}
+                    placeholder={form.moneda === "USD" ? "0.00" : "Ej: 5.000.000"}
+                  />
                 </div>
                 <div>
                   <label className="label-sm">Moneda</label>

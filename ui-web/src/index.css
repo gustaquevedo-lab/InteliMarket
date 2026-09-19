@@ -236,3 +236,15 @@
 /* OCULTAR BARRAS DE SCROLL EN NAVS TÁCTILES (PWA) */
 .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* ELIMINAR FLECHAS / SPINNERS EN TODOS LOS INPUTS NUMÉRICOS (WEB Y ELECTRON) */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+

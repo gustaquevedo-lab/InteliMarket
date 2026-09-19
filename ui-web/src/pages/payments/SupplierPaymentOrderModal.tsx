@@ -6,7 +6,9 @@ import {
 } from "lucide-react"
 import { api, SupplierPaymentOrder } from "../../api"
 import { formatPYG, formatDate } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 import { useToast } from "../../context/ToastContext"
+
 
 interface InvoiceToPay {
   id: string
@@ -462,13 +464,10 @@ export default function SupplierPaymentOrderModal({
                             {formatPYG(inv.saldo_pendiente)}
                           </td>
                           <td className="p-2 text-right">
-                            <input
-                              type="number"
-                              min="1"
-                              max={inv.saldo_pendiente}
+                            <CurrencyInput
+                              currency="PYG"
                               value={monto_aplicado}
-                              onChange={e => {
-                                const val = Number(e.target.value) || 0
+                              onChangeValue={(val) => {
                                 setSelectedInvoicesMap(prev => ({
                                   ...prev,
                                   [inv.id]: { ...prev[inv.id], monto_aplicado: val }
@@ -478,13 +477,10 @@ export default function SupplierPaymentOrderModal({
                             />
                           </td>
                           <td className="p-2 text-right">
-                            <input
-                              type="number"
-                              min="0"
-                              max={inv.saldo_pendiente - monto_aplicado}
+                            <CurrencyInput
+                              currency="PYG"
                               value={monto_retencion}
-                              onChange={e => {
-                                const val = Number(e.target.value) || 0
+                              onChangeValue={(val) => {
                                 setSelectedInvoicesMap(prev => ({
                                   ...prev,
                                   [inv.id]: { ...prev[inv.id], monto_retencion: val }
@@ -674,12 +670,12 @@ export default function SupplierPaymentOrderModal({
                       {/* IMPORTE PYG */}
                       <div>
                         <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Importe en Guaraníes (₲) *</label>
-                        <input
-                          type="number"
+                        <CurrencyInput
                           required
-                          min="1"
+                          currency="PYG"
                           value={d.monto}
-                          onChange={e => updateDisbursementRow(index, { monto: Number(e.target.value) || 0 })}
+                          onChangeValue={(num) => updateDisbursementRow(index, { monto: num })}
+                          placeholder="0"
                           className="w-full p-2 text-xs font-mono font-black text-rose-600 dark:text-rose-400 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-right"
                         />
                       </div>
@@ -928,12 +924,11 @@ export default function SupplierPaymentOrderModal({
                                       <label className="text-[10px] font-bold text-amber-800 dark:text-amber-300 uppercase block mb-1">
                                         Monto Nominal Total del Cheque Físico (₲) *
                                       </label>
-                                      <input
-                                        type="number"
-                                        min={d.monto}
+                                      <CurrencyInput
+                                        currency="PYG"
                                         value={d.monto_total_cheque || d.monto}
-                                        onChange={e => updateDisbursementRow(index, { monto_total_cheque: Number(e.target.value) || d.monto })}
-                                        className="w-full p-2 text-xs font-mono font-black text-amber-700 dark:text-amber-400 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 rounded-xl"
+                                        onChangeValue={(num) => updateDisbursementRow(index, { monto_total_cheque: num || d.monto })}
+                                        className="w-full p-2 text-xs font-mono font-black text-amber-700 dark:text-amber-400 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 rounded-xl text-right"
                                       />
                                     </div>
                                     <div className="flex items-center text-[11px] text-amber-700 dark:text-amber-400 font-medium">

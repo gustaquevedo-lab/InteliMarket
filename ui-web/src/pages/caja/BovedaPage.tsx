@@ -9,6 +9,7 @@ import {
 import { api, downloadAuthenticated, type BankAccount, type BankTransaction, type VaultDashboard, type VaultEntry } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatDateTime, getTodayAsuncion } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 
 const downloadPdf = (endpoint: string, filename: string) => downloadAuthenticated(endpoint, undefined, filename)
 
@@ -1559,18 +1560,14 @@ export default function BovedaPage() {
                 <label className="input-label font-bold text-slate-700 dark:text-slate-300 mb-1 block">
                   Monto a Depositar en Banco (PYG) *
                 </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2.5 font-bold font-mono text-slate-400">₲</span>
-                  <input
-                    type="number"
-                    value={amountDepositMonto}
-                    onChange={(e) => setAmountDepositMonto(e.target.value)}
-                    placeholder="Ej: 5000000"
-                    min="1"
-                    max={saldoBovedaPYG}
-                    className="w-full pl-8 pr-3 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-mono font-bold text-slate-900 dark:text-white outline-none focus:border-emerald-500"
-                  />
-                </div>
+                <CurrencyInput
+                  currency="PYG"
+                  prefix="₲"
+                  value={amountDepositMonto}
+                  onChangeValue={(num, formatted) => setAmountDepositMonto(String(num))}
+                  placeholder="Ej: 5.000.000"
+                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-mono font-bold text-slate-900 dark:text-white outline-none focus:border-emerald-500 text-right"
+                />
                 {amountDepositMonto && Number(amountDepositMonto) > 0 && (
                   <p className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400 mt-1 font-semibold">
                     Equivale a: {formatPYG(Number(amountDepositMonto))}

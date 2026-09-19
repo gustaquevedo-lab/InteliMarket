@@ -17,7 +17,7 @@ import { useAuth } from "../../context/AuthContext"
 import { useTheme } from "../../context/ThemeContext"
 import { useToast } from "../../context/ToastContext"
 import { useOffline } from "../../context/OfflineContext"
-import { formatPYG } from "../../utils/format"
+import { formatPYG, formatInputDecimal, parseInputDecimal } from "../../utils/format"
 import { DEFAULT_RECEIPT_CONFIG } from "../../constants/receiptDefaults"
 import { loadCachedPOSData, persistPOSCatalog } from "../../utils/posOfflineSync"
 import { offlineDB } from "../../utils/offlineDB"
@@ -3454,12 +3454,7 @@ export default function POSPage() {
       return
     }
     const parseForeignCurr = (v: string): number => {
-      const c = v.trim()
-      if (!c) return 0
-      if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(c)) return parseFloat(c.replace(/\./g, "").replace(",", ".")) || 0
-      if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(c)) return parseFloat(c.replace(/,/g, "")) || 0
-      if (/^\d{1,3}\.\d{3}$/.test(c)) return parseFloat(c.replace(/\./g, "")) || 0
-      return parseFloat(c.replace(/,/g, ".")) || 0
+      return parseInputDecimal(v)
     }
     const contado = parseInt(montoCierreReal.replace(/\D/g, "") || "0", 10)
     const contadoUsd = parseForeignCurr(montoCierreUsd)
@@ -15167,8 +15162,8 @@ export default function POSPage() {
                             type="text"
                             inputMode="decimal"
                             value={montoCierreUsd}
-                            onChange={(e) => setMontoCierreUsd(e.target.value.replace(/[^0-9.,]/g, ""))}
-                            placeholder="0.00"
+                            onChange={(e) => setMontoCierreUsd(formatInputDecimal(e.target.value).formatted)}
+                            placeholder="0,00"
                             className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-posMono tabular-nums font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500 text-right"
                           />
                         </div>
@@ -15178,8 +15173,8 @@ export default function POSPage() {
                             type="text"
                             inputMode="decimal"
                             value={montoCierreBrl}
-                            onChange={(e) => setMontoCierreBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
-                            placeholder="0.00"
+                            onChange={(e) => setMontoCierreBrl(formatInputDecimal(e.target.value).formatted)}
+                            placeholder="0,00"
                             className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-posMono tabular-nums font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500 text-right"
                           />
                         </div>

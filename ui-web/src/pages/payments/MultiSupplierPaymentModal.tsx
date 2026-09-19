@@ -6,7 +6,9 @@ import {
 } from "lucide-react"
 import { api } from "../../api"
 import { formatPYG, formatDate } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 import { useToast } from "../../context/ToastContext"
+
 
 interface InvoiceItem {
   id: string
@@ -443,14 +445,12 @@ export default function MultiSupplierPaymentModal({
             </div>
 
             <div className="flex items-center gap-3 w-full sm:w-auto">
-              <div className="flex items-center bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700 rounded-xl px-3 py-1.5 shadow-inner">
+              <div className="flex items-center bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700 rounded-xl px-3 py-1 shadow-inner">
                 <span className="text-slate-400 font-bold mr-2 text-xs">₲ / R$</span>
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
+                <CurrencyInput
+                  currency="PYG"
                   value={globalTipoCambioBRL}
-                  onChange={e => handleApplyGlobalTipoCambio(Number(e.target.value) || 1)}
+                  onChangeValue={(num) => handleApplyGlobalTipoCambio(num || 1)}
                   className="w-24 font-mono font-black text-emerald-700 dark:text-emerald-400 text-sm bg-transparent outline-none text-right"
                 />
               </div>
@@ -561,13 +561,12 @@ export default function MultiSupplierPaymentModal({
                               </td>
                               <td className="p-2 text-right">
                                 <div className="inline-flex items-center justify-end">
-                                  <input
-                                    type="number"
-                                    min="0.01"
-                                    step={group.moneda === "BRL" ? "0.01" : "1"}
+                                  <CurrencyInput
+                                    currency={group.moneda === "BRL" ? "BRL" : "PYG"}
+                                    allowDecimals={group.moneda === "BRL"}
                                     value={inv.monto_moneda}
-                                    onChange={e => handleUpdateInvoiceMonto(group.supplier_id, inv.invoice_id, Number(e.target.value) || 0)}
-                                    className="w-28 text-right p-1 font-mono font-bold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white"
+                                    onChangeValue={(num) => handleUpdateInvoiceMonto(group.supplier_id, inv.invoice_id, num)}
+                                    className="w-28 text-right p-1 font-mono font-bold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white text-xs"
                                   />
                                 </div>
                               </td>

@@ -6,7 +6,9 @@ import {
 } from "lucide-react"
 import { api, type Expense, type BankAccount, type PettyCashFund } from "../../api"
 import { formatPYG, getTodayAsuncion } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 import { useToast } from "../../context/ToastContext"
+
 
 interface Props {
   isOpen: boolean
@@ -394,16 +396,15 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
                         {/* Monto Asignado */}
                         <div>
                           <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                            Monto a Desembolsar Gs.
+                            Monto a Desembolsar Gs. *
                           </label>
-                          <input
-                            type="number"
-                            min="1"
-                            step="1"
+                          <CurrencyInput
                             required
+                            currency="PYG"
                             value={row.monto}
-                            onChange={e => updateDisbursementRow(idx, { monto: e.target.value })}
-                            className="w-full text-xs font-extrabold px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-emerald-400 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                            onChangeValue={(num) => updateDisbursementRow(idx, { monto: String(num) })}
+                            placeholder="0"
+                            className="w-full text-xs font-extrabold px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-emerald-400 focus:ring-2 focus:ring-emerald-500 focus:outline-none text-right font-mono"
                           />
                         </div>
 

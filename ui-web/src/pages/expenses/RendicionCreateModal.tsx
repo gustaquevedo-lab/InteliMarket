@@ -6,6 +6,7 @@ import {
 import { api, type PettyCashFund, type Expense } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 
 interface Props {
   isOpen: boolean
@@ -194,14 +195,13 @@ export const RendicionCreateModal: React.FC<Props> = ({
                 <label className="text-[10px] text-slate-400 block font-bold mb-1">
                   2. EFECTIVO FÍSICO EN GAVETA *
                 </label>
-                <input
-                  type="number"
-                  step="any"
+                <CurrencyInput
                   required
+                  currency="PYG"
                   placeholder="Ingrese monto contado"
-                  className="input-field w-full text-xs font-mono font-extrabold text-emerald-600"
+                  className="input-field w-full text-xs font-mono font-extrabold text-emerald-600 text-right"
                   value={efectivoContado}
-                  onChange={e => setEfectivoContado(e.target.value)}
+                  onChangeValue={(num, formatted) => setEfectivoContado(String(num))}
                 />
               </div>
 
