@@ -289,6 +289,39 @@ export default function CajaPage() {
   const [savingAdjustment, setSavingAdjustment] = useState(false)
   const [deletingAdjustmentId, setDeletingAdjustmentId] = useState<string | null>(null)
 
+  // ── Selector de Notas de Crédito para Reclasificación ──
+  const [ncSelectorOpen, setNcSelectorOpen] = useState(false)
+  const [ncList, setNcList] = useState<any[]>([])
+  const [loadingNcList, setLoadingNcList] = useState(false)
+  const [ncSearch, setNcSearch] = useState("")
+
+  const handleOpenNcSelector = async () => {
+    setNcSelectorOpen(true)
+    setLoadingNcList(true)
+    try {
+      const res = await api.caja.paymentAdjustments.listNotasCredito({
+        limit: 80,
+      })
+      setNcList(res || [])
+    } catch (err: any) {
+      toast.error("Error al cargar NCs", err?.message || "No se pudieron obtener las Notas de Crédito.")
+    } finally {
+      setLoadingNcList(false)
+    }
+  }
+
+  const handleSelectNc = (nc: any) => {
+    setAdjDestinoCanal("NOTA_CREDITO")
+    const monto = nc.total_gs || Math.round(nc.total || 0)
+    setAdjMontoGs(monto)
+    setAdjMontoGsStr(monto.toLocaleString("es-PY"))
+    setAdjNroComprobante(nc.numero || "")
+    setAdjTicketNumero(nc.sale_numero || nc.sale_numero_interno || "")
+    setAdjMotivo(`Nota de Crédito #${nc.numero} aplicada a Venta ${nc.sale_numero || ''} (${nc.motivo || 'Devolución'})`)
+    setNcSelectorOpen(false)
+    toast.success("Nota de Crédito Asignada", `NC #${nc.numero} por ₲ ${monto.toLocaleString("es-PY")}`)
+  }
+
   const handleOpenAdjustmentModal = () => {
     setAdjOrigenCanal("EFECTIVO")
     setAdjDestinoCanal("TRANSFERENCIA")
@@ -6638,7 +6671,8 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                       <option value="BANCARD_QR">Bancard QR</option>
                       <option value="DINELCO_QR">Dinelco QR</option>
                     </optgroup>
-                    <optgroup label="📄 Documentos de Valor">
+                    <optgroup label="📄 Documentos de Valor y Devoluciones">
+                      <option value="NOTA_CREDITO">📑 Nota de Crédito (NC) / Devolución</option>
                       <option value="CHEQUES">Cheques / Vales</option>
                       <option value="EXTRA_CLUB">Extra Club / Crédito</option>
                       <option value="OTROS">Otros Medios</option>
@@ -6648,9 +6682,19 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Monto del Comprobante (Guaraníes ₲) *
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Monto del Comprobante (Guaraníes ₲) *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleOpenNcSelector}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50 transition shadow-sm"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Estirar de NCs Emitidas</span>
+                  </button>
+                </div>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -6766,6 +6810,117 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Selector de Notas de Crédito ── */}
+      {ncSelectorOpen && (
+        <div className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-600 flex items-center justify-center border border-indigo-300 dark:border-indigo-700/50">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white">Seleccionar Nota de Crédito Emitida</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Estirar datos oficiales de NC para imputar a la reclasificación
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setNcSelectorOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por Nro. NC, ticket, cajero o motivo..."
+                  value={ncSearch}
+                  onChange={(e) => setNcSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+
+            <div className="p-3 overflow-y-auto flex-1 divide-y divide-slate-100 dark:divide-slate-800/60">
+              {loadingNcList ? (
+                <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400">
+                  <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
+                  <p className="text-xs">Cargando Notas de Crédito emitidas...</p>
+                </div>
+              ) : ncList.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 text-xs">
+                  No se encontraron Notas de Crédito registradas.
+                </div>
+              ) : (
+                ncList
+                  .filter((nc) => {
+                    if (!ncSearch) return true
+                    const s = ncSearch.toLowerCase()
+                    return (
+                      (nc.numero || "").toLowerCase().includes(s) ||
+                      (nc.motivo || "").toLowerCase().includes(s) ||
+                      (nc.sale_numero || "").toLowerCase().includes(s) ||
+                      (nc.cajero_nombre || "").toLowerCase().includes(s) ||
+                      (nc.caja_nombre || "").toLowerCase().includes(s)
+                    )
+                  })
+                  .map((nc) => (
+                    <div
+                      key={nc.id}
+                      onClick={() => handleSelectNc(nc)}
+                      className="py-2.5 px-3 rounded-xl hover:bg-indigo-50 dark:hover:bg-indigo-950/30 cursor-pointer transition flex items-center justify-between gap-3 group"
+                    >
+                      <div className="space-y-0.5 flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800/40">
+                            {nc.numero}
+                          </span>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                            {nc.fecha}
+                          </span>
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                            • {nc.caja_nombre || 'Caja'} ({nc.cajero_nombre || 'Cajero'})
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-700 dark:text-slate-300 font-medium truncate">
+                          {nc.motivo}
+                        </p>
+                        <p className="text-[11px] text-slate-400">
+                          Venta Origen: #{nc.sale_numero || nc.sale_numero_interno || 'N/A'} (Total ₲ {Math.round(nc.sale_total || 0).toLocaleString("es-PY")})
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400">
+                          ₲ {Math.round(nc.total || 0).toLocaleString("es-PY")}
+                        </p>
+                        <span className="inline-block mt-0.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 group-hover:underline">
+                          Seleccionar ➔
+                        </span>
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+
+            <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setNcSelectorOpen(false)}
+                className="px-4 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}

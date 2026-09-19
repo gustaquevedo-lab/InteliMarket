@@ -54,6 +54,7 @@ PAYMENT_CHANNEL_DEFINITIONS = [
     ("EXTRA_CLUB", "Extra Club", "credito", "award"),
     ("TRANSFERENCIA", "Transferencia Bancaria", "transferencia", "landmark"),
     ("CHEQUES", "Cheques / Vales", "cheque", "file-check"),
+    ("NOTA_CREDITO", "Nota de Crédito (NC)", "nota_credito", "file-text"),
     ("OTROS", "Otros Medios", "otros", "file-text"),
 ]
 
@@ -95,6 +96,8 @@ CHANNEL_TO_INSTRUMENT_TYPE = {
 
     "CHEQUES": ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-check", 5),
     "VALES": ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-check", 5),
+    "NOTA_CREDITO": ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-text", 5),
+    "NC": ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-text", 5),
     "OTROS": ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-check", 5),
 
     "EFECTIVO_PYG": ("EFECTIVO", "Efectivo Físico en Gaveta", "banknote", 6),
@@ -512,43 +515,10 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
             await db.refresh(user_sess)
             return user_sess
 
-        # 2. BLINDAJE ANTI-DUPLICACIÓN: Si el usuario cerró un turno HOY (fecha local Asunción),
-        # pero la entrega a Tesorería sigue PENDIENTE (no se confirmó el dinero en bóveda):
-        # Reabrir la sesión de la jornada y aplicar rotación nómada. Esto evita duplicar
-        # fondos de apertura (₲ 500.000 / R$ 300) y fragmentar el arqueo en múltiples cajas.
-        hoy_asuncion = datetime.now(TZ_ASUNCION).date()
-        recent_closed_session = await db.execute(
-            select(CashSession)
-            .join(CashHandoff, CashHandoff.session_id == CashSession.id)
-            .where(CashSession.user_id == user_id)
-            .where(CashSession.estado == "cerrada")
-            .where(CashHandoff.estado == "pendiente")
-            .order_by(CashSession.fecha_apertura.desc())
-            .limit(1)
-        )
-        closed_sess = recent_closed_session.scalar_one_or_none()
-        if closed_sess:
-            sess_fecha_py = _to_asuncion_tz(closed_sess.fecha_apertura)
-            if sess_fecha_py and sess_fecha_py.date() == hoy_asuncion:
-                # Reabrir la sesión de hoy
-                closed_sess.estado = "abierta"
-                closed_sess.fecha_cierre = None
-                closed_sess.monto_cierre = None
-                hora_py = datetime.now(TZ_ASUNCION).strftime("%Y-%m-%d %H:%M:%S")
-                nota_reapertura = f"[{hora_py}] 🔄 Reanudación de jornada del día (evita fragmentación de arqueo)"
-                if register_id and closed_sess.register_id != register_id:
-                    nota_reapertura += f" y rotación nómada a Caja {register_id}"
-                    closed_sess.register_id = register_id
-                closed_sess.observaciones = f"{closed_sess.observaciones}\n{nota_reapertura}" if closed_sess.observaciones else nota_reapertura
-                
-                # Eliminar el handoff y cash_count provisorios creados en el cierre prematuro
-                await db.execute(delete(CashHandoff).where(CashHandoff.session_id == closed_sess.id))
-                await db.execute(delete(CashCount).where(CashCount.session_id == closed_sess.id))
-                await db.flush()
-                await db.refresh(closed_sess)
-                return closed_sess
+        # 2. Si ya cerró su turno hoy, las sesiones cerradas NUNCA deben reabrirse automáticamente
+        # para no destruir ni invalidar el arqueo físico de caja impreso por el cajero.
 
-    # 3. Si no tiene turno previo de hoy, crear una sesión INDEPENDIENTE y limpia para este cajero
+    # 3. Crear una sesión INDEPENDIENTE y limpia para este cajero
     user_res = await db.execute(select(User).where(User.id == user_id)) if user_id else None
     user_obj = user_res.scalar_one_or_none() if user_res else None
     user_rol = (user_obj.rol if user_obj else "").lower()
@@ -4385,6 +4355,87 @@ async def delete_payment_adjustment(db: AsyncSession, adjustment_id: str, sessio
     await db.delete(adj)
     await db.commit()
     return True
+
+
+async def list_emitted_notas_credito(
+    db: AsyncSession,
+    company_id: str,
+    search: str | None = None,
+    session_id: str | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """Lista las Notas de Crédito emitidas en el sistema para facilitar la reclasificación
+    de comprobantes en Tesorería y cuadre de caja."""
+    cid = uuid.UUID(company_id)
+
+    query = (
+        select(
+            NotaCreditoDebito.id,
+            NotaCreditoDebito.numero,
+            NotaCreditoDebito.motivo,
+            NotaCreditoDebito.total,
+            NotaCreditoDebito.created_at,
+            NotaCreditoDebito.estado,
+            Sale.id.label("sale_id"),
+            Sale.numero.label("sale_numero"),
+            Sale.numero_interno.label("sale_numero_interno"),
+            Sale.total.label("sale_total"),
+            Sale.fecha.label("sale_fecha"),
+            CashSession.id.label("session_id"),
+            CashSession.cajero_nombre,
+            CashRegister.nombre.label("caja_nombre"),
+        )
+        .select_from(NotaCreditoDebito)
+        .join(Sale, Sale.id == NotaCreditoDebito.sale_id)
+        .outerjoin(CashSession, CashSession.id == Sale.session_id)
+        .outerjoin(CashRegister, CashRegister.id == CashSession.register_id)
+        .where(
+            NotaCreditoDebito.company_id == cid,
+            NotaCreditoDebito.tipo.ilike("%credito%"),
+        )
+        .order_by(NotaCreditoDebito.created_at.desc())
+        .limit(limit)
+    )
+
+    if session_id:
+        try:
+            query = query.where(Sale.session_id == uuid.UUID(session_id))
+        except Exception:
+            pass
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    items = []
+    for r in rows:
+        dt_py = _to_asuncion_tz(r.created_at)
+        fecha_str = dt_py.strftime("%d/%m/%Y %H:%M") if dt_py else ""
+
+        if search:
+            s_low = search.lower()
+            text_pool = f"{r.numero or ''} {r.motivo or ''} {r.sale_numero or ''} {r.sale_numero_interno or ''} {r.cajero_nombre or ''} {r.caja_nombre or ''}".lower()
+            if s_low not in text_pool:
+                continue
+
+        items.append({
+            "id": str(r.id),
+            "numero": r.numero,
+            "motivo": r.motivo or "Devolución / Nota de Crédito",
+            "total": float(r.total or 0),
+            "total_gs": int(r.total or 0),
+            "fecha": fecha_str,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "estado": r.estado,
+            "sale_id": str(r.sale_id) if r.sale_id else None,
+            "sale_numero": r.sale_numero,
+            "sale_numero_interno": r.sale_numero_interno,
+            "sale_total": float(r.sale_total or 0),
+            "session_id": str(r.session_id) if r.session_id else None,
+            "cajero_nombre": r.cajero_nombre or "Cajero POS",
+            "caja_nombre": r.caja_nombre or "Caja POS",
+        })
+
+    return items
 
 
 
