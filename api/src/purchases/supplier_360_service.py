@@ -231,11 +231,12 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
 
     invoices_list = []
     for inv in invoices:
-        saldo = _dec_to_float(inv.saldo_pendiente if inv.saldo_pendiente is not None else inv.total)
+        es_cancelada = (inv.estado or "").lower() == "cancelada"
+        saldo = 0.0 if es_cancelada else _dec_to_float(inv.saldo_pendiente if inv.saldo_pendiente is not None else inv.total)
         total = _dec_to_float(inv.total)
         f_venc = inv.fecha_vencimiento
         dias_vencido = (today - f_venc).days if f_venc else 0
-        es_vencida = dias_vencido > 0 and saldo > 0
+        es_vencida = dias_vencido > 0 and saldo > 0 and not es_cancelada
 
         # NCs vinculadas a esta factura
         inv_apps = apps_by_invoice.get(inv.id, [])
@@ -248,7 +249,11 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
         en_lote_pago = lote_info is not None
 
         # Fases de Pago
-        if saldo <= 0:
+        if es_cancelada:
+            fase_pago = "liquidada"
+            fase_pago_label = "Fase 4: Anulada / Cancelada"
+            fase_pago_color = "slate"
+        elif saldo <= 0:
             fase_pago = "liquidada"
             fase_pago_label = "Fase 4: Liquidada / Cancelada 100%"
             fase_pago_color = "emerald"
@@ -269,7 +274,7 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
             fase_pago_label = f"Fase 1: Crédito Vigente ({abs(dias_vencido)}d rest.)"
             fase_pago_color = "blue"
 
-        if saldo > 0:
+        if saldo > 0 and not es_cancelada:
             total_deuda_facturas += saldo
             facturas_pendientes_count += 1
             if es_vencida:
@@ -596,6 +601,21 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
     ).distinct()
     p_inv_res = await db.execute(q_prod_inv)
     for p in p_inv_res.scalars().all():
+        if p.id not in products_map:
+            products_map[p.id] = p
+
+    # También productos asociados históricamente a órdenes de compra del proveedor
+    q_prod_po = select(Product).join(
+        PurchaseOrderItem, PurchaseOrderItem.product_id == Product.id
+    ).join(
+        PurchaseOrder, PurchaseOrder.id == PurchaseOrderItem.purchase_order_id
+    ).where(
+        PurchaseOrder.company_id == company_id,
+        PurchaseOrder.supplier_id == supplier_id,
+        Product.activo == True,
+    ).distinct()
+    p_po_res = await db.execute(q_prod_po)
+    for p in p_po_res.scalars().all():
         if p.id not in products_map:
             products_map[p.id] = p
 

@@ -433,7 +433,8 @@ async def sync_accounts_payable(db: AsyncSession, company_id: str, since: date |
     for r in rows:
         supplier_id = await _resolve_pessoa(db, company_id, r["ID_PESSOA"], "supplier")
         cancelado = bool(r["BO_CANCELADO"])
-        saldo = Decimal(str(r["VL_APAGAR"])).quantize(Decimal("1"))
+        # Facturas canceladas en el legado no tienen saldo pendiente de pago
+        saldo = Decimal("0") if cancelado else Decimal(str(r["VL_APAGAR"])).quantize(Decimal("1"))
         estado = _ap_estado(saldo, cancelado)
 
         existing_id = await _get_mapped_target(db, company_id, "fin_conta_pagar", r["ID_CONTA_PAGAR"])
@@ -1806,25 +1807,9 @@ async def sync_extra_club_numeros(db: AsyncSession, company_id: str, since: date
 # de saldo propia — con 35 filas no se justifica un modelo nuevo.
 
 async def sync_supplier_balances(db: AsyncSession, company_id: str, since: date | None) -> int:
-    rows = await _fetch("SELECT * FROM fin_saldo_fornecedor WHERE VL_SALDO != 0")
-
-    count = 0
-    for r in rows:
-        supplier_id = await _resolve_pessoa(db, company_id, r["ID_PESSOA"], "supplier")
-        moneda = MONEDA_MAP.get(r["ID_MOEDA"], "PYG")
-        saldo = Decimal(str(r["VL_SALDO"]))
-
-        result = await db.execute(select(Supplier).where(Supplier.id == supplier_id))
-        supplier = result.scalar_one()
-        nota = f"Saldo legado ({moneda}): {saldo}"
-        if supplier.notas and "Saldo legado" not in supplier.notas:
-            supplier.notas = f"{supplier.notas} | {nota}"
-        else:
-            supplier.notas = nota
-        count += 1
-
-    await db.flush()
-    return count
+    # fin_saldo_fornecedor es una tabla histórica en desuso del legado (solo ~10 filas desactualizadas).
+    # No sobrescribir notas del proveedor para evitar discrepancias visuales con el AP real.
+    return 0
 
 
 # ── Órdenes de Compra y Recepciones (est_ordem_compra / est_recepcao_ordem_compra) ──
