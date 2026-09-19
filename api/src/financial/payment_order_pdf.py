@@ -325,6 +325,11 @@ def generate_payment_order_receipt_pdf(
                 detalle = f"NC N° {d.get('numero_nc') or 'S/N'}"
                 origen = "Saldo a favor"
                 plazo = "Compensación"
+            elif fp == "diferencia_cambio":
+                fp_label = "Diferencia de Cambio"
+                detalle = d.get("observaciones") or "Ajuste por diferencia de cambio en liquidación"
+                origen = "Lote Agrupado"
+                plazo = "Ajuste"
             else:
                 fp_label = fp.title()
                 detalle = d.get("observaciones") or "-"
@@ -363,12 +368,20 @@ def generate_payment_order_receipt_pdf(
     story.append(Spacer(1, 4 * mm))
 
     # ── 5. OBSERVACIONES & RESUMEN FINANCIERO ─────────────────────────────────
+    diff_cambio = Decimal(str(order.get("diferencia_cambio") or 0))
+    diff_line = ""
+    if diff_cambio != Decimal("0"):
+        diff_prefix = "+" if diff_cambio > 0 else ""
+        diff_tipo = "SOBRECOSTO" if diff_cambio > 0 else "GANANCIA"
+        diff_line = f"<br/><b>DIF. CAMBIO ({diff_tipo}):</b> ₲ {diff_prefix}{_format_gs(diff_cambio)}"
+
     resumen_data = [
         [
             Paragraph(f"<b>OBSERVACIONES:</b><br/>{observaciones}", styles["CellText"]),
             Paragraph(
                 f"<b>TOTAL FACTURAS:</b> ₲ {_format_gs(order.get('monto_total', total_aplicado))}<br/>"
-                f"<b>RETENCIONES:</b> ₲ {_format_gs(order.get('monto_retenido', total_retenciones))}<br/>"
+                f"<b>RETENCIONES:</b> ₲ {_format_gs(order.get('monto_retenido', total_retenciones))}"
+                f"{diff_line}<br/>"
                 f"<b><font size=9 color='#0F172A'>TOTAL NETO A PAGAR: ₲ {_format_gs(order.get('monto_neto', total_aplicado - total_retenciones))}</font></b>",
                 styles["CellRight"]
             )

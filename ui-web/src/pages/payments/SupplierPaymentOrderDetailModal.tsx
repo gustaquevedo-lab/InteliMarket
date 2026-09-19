@@ -72,7 +72,9 @@ export default function SupplierPaymentOrderDetailModal({
         </div>
 
         {/* METADATOS RÁPIDOS */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-slate-100/70 dark:bg-slate-850/50 border-b border-slate-200 dark:border-slate-800 text-xs">
+        <div className={`grid gap-3 p-4 bg-slate-100/70 dark:bg-slate-850/50 border-b border-slate-200 dark:border-slate-800 text-xs ${
+          Number(order.diferencia_cambio || 0) !== 0 ? "grid-cols-2 sm:grid-cols-5" : "grid-cols-2 sm:grid-cols-4"
+        }`}>
           <div>
             <span className="text-[10px] uppercase font-bold text-slate-400 block">Fecha Emisión</span>
             <span className="font-mono font-bold text-slate-700 dark:text-slate-200">{formatDate(order.fecha_emision)}</span>
@@ -85,6 +87,16 @@ export default function SupplierPaymentOrderDetailModal({
             <span className="text-[10px] uppercase font-bold text-slate-400 block">Recibo Proveedor</span>
             <span className="font-mono font-bold text-slate-700 dark:text-slate-200">{order.recibo_proveedor || "Sin registrar"}</span>
           </div>
+          {Number(order.diferencia_cambio || 0) !== 0 && (
+            <div>
+              <span className="text-[10px] uppercase font-bold text-slate-400 block">Dif. de Cambio</span>
+              <span className={`font-mono font-bold ${
+                Number(order.diferencia_cambio) > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
+              }`}>
+                {Number(order.diferencia_cambio) > 0 ? `+${formatPYG(order.diferencia_cambio)}` : formatPYG(order.diferencia_cambio)}
+              </span>
+            </div>
+          )}
           <div>
             <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Neto</span>
             <span className="font-mono font-black text-rose-600 dark:text-rose-400">{formatPYG(order.monto_neto)}</span>
@@ -176,6 +188,11 @@ export default function SupplierPaymentOrderDetailModal({
                     badgeColor = "bg-indigo-500/10 text-indigo-600 border-indigo-500/20"
                     label = `Nota de Crédito N° ${d.numero_nc || "S/N"}`
                     sub = "Compensación de saldo a favor"
+                  } else if (fp === "diferencia_cambio") {
+                    const isPos = Number(d.monto_pyg || d.monto) >= 0
+                    badgeColor = isPos ? "bg-amber-500/10 text-amber-600 border-amber-500/20" : "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                    label = isPos ? "Sobrecosto / Dif. Cambio (+)" : "Ganancia / Dif. Cambio (-)"
+                    sub = d.observaciones || "Ajuste por diferencia cambiaria en lote agrupado"
                   }
 
                   return (

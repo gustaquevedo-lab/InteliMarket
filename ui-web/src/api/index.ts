@@ -983,6 +983,7 @@ export interface SupplierPaymentOrder {
   monto_total: number;
   monto_retenido: number;
   monto_neto: number;
+  diferencia_cambio?: number;
   observaciones?: string | null;
   recibo_proveedor?: string | null;
   created_at?: string;

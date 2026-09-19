@@ -129,6 +129,10 @@ class ExpenseCreate(BaseModel):
     es_inversion: Optional[bool] = False
     vida_util_meses: Optional[int] = None
     categoria_activo: Optional[str] = None
+    # Clasificación Mercaderías / Cuentas por Pagar
+    es_pago_proveedor: Optional[bool] = False
+    supplier_id: Optional[str] = None
+    supplier_invoice_id: Optional[str] = None
     notas: Optional[str] = None
 
 
@@ -154,6 +158,9 @@ class ExpenseUpdate(BaseModel):
     es_inversion: Optional[bool] = None
     vida_util_meses: Optional[int] = None
     categoria_activo: Optional[str] = None
+    es_pago_proveedor: Optional[bool] = None
+    supplier_id: Optional[str] = None
+    supplier_invoice_id: Optional[str] = None
     fecha_gasto: Optional[date] = None
     notas: Optional[str] = None
 
@@ -238,6 +245,10 @@ class ExpenseResponse(BaseModel):
     fixed_asset_id: Optional[UUID] = None
     vida_util_meses: Optional[int] = None
     categoria_activo: Optional[str] = None
+    # Clasificación Mercaderías / Cuentas por Pagar
+    es_pago_proveedor: bool = False
+    supplier_id: Optional[UUID] = None
+    supplier_invoice_id: Optional[UUID] = None
     # Auditoría
     auditoria_estado: Optional[str] = "pendiente"
     auditoria_motivo: Optional[str] = None

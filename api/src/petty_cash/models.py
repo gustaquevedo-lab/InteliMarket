@@ -198,6 +198,11 @@ class Expense(Base):
     vida_util_meses = Column(Integer)
     categoria_activo = Column(String(100))
 
+    # Clasificación Mercadería vs Gasto Operativo (Cuentas por Pagar)
+    es_pago_proveedor = Column(Boolean, nullable=False, default=False)
+    supplier_id = Column(UUID(as_uuid=True), index=True)
+    supplier_invoice_id = Column(UUID(as_uuid=True), ForeignKey("supplier_invoices.id", ondelete="SET NULL"), index=True)
+
     # Auditoría comprobante por comprobante
     auditoria_estado = Column(String(20), default="pendiente")  # pendiente | aprobado | observado | rechazado
     auditoria_motivo = Column(Text)

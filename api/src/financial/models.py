@@ -78,6 +78,7 @@ class SupplierInvoicePayment(Base):
     referencia = Column(String(100))
     comprobante_url = Column(String(500))
     bank_account_id = Column(UUID(as_uuid=True))
+    petty_cash_fund_id = Column(UUID(as_uuid=True), ForeignKey("petty_cash_funds.id", ondelete="SET NULL"), nullable=True)
     estado = Column(String(20), default="pendiente")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -358,6 +359,7 @@ class SupplierPaymentOrder(Base):
     monto_total = Column(Numeric(15, 0), nullable=False, default=0)
     monto_retenido = Column(Numeric(15, 0), nullable=False, default=0)
     monto_neto = Column(Numeric(15, 0), nullable=False, default=0)
+    diferencia_cambio = Column(Numeric(15, 0), default=0)
     observaciones = Column(Text, nullable=True)
     recibo_proveedor = Column(String(100), nullable=True)  # Número de recibo oficial emitido por el proveedor
     created_by = Column(UUID(as_uuid=True), nullable=True)

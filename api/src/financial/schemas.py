@@ -90,6 +90,7 @@ class SupplierInvoicePaymentCreate(BaseModel):
     referencia: Optional[str] = None
     comprobante_url: Optional[str] = None
     bank_account_id: Optional[UUID] = None
+    petty_cash_fund_id: Optional[UUID] = None
 
 
 class SupplierInvoicePaymentResponse(BaseModel):
@@ -102,6 +103,7 @@ class SupplierInvoicePaymentResponse(BaseModel):
     referencia: Optional[str] = None
     comprobante_url: Optional[str] = None
     bank_account_id: Optional[UUID] = None
+    petty_cash_fund_id: Optional[UUID] = None
     estado: str
     created_at: datetime
 
@@ -559,6 +561,7 @@ class MultiSupplierBatchItem(BaseModel):
     tipo_cambio: Decimal = Decimal("1")
     monto_moneda: Decimal
     monto_pyg: Decimal
+    diferencia_cambio: Optional[Decimal] = Decimal("0")
     allocations: list[PaymentOrderAllocationCreate]
 
 
@@ -578,6 +581,7 @@ class MultiSupplierPaymentBatchCreate(BaseModel):
     fecha_cheque_vencimiento: Optional[date] = None
     es_cheque_diferido: bool = False
     monto_total_desembolso_pyg: Decimal  # Monto total del cheque/transferencia matriz
+    diferencia_cambio_total: Optional[Decimal] = Decimal("0")
     items: list[MultiSupplierBatchItem]
 
 
@@ -677,6 +681,7 @@ class SupplierPaymentOrderResponse(BaseModel):
     monto_total: Decimal
     monto_retenido: Decimal
     monto_neto: Decimal
+    diferencia_cambio: Optional[Decimal] = Decimal("0")
     observaciones: Optional[str] = None
     recibo_proveedor: Optional[str] = None
     created_at: datetime

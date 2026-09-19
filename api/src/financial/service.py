@@ -180,6 +180,7 @@ async def register_payment(db: AsyncSession, invoice_id: str, data: SupplierInvo
         referencia=data.referencia,
         comprobante_url=data.comprobante_url,
         bank_account_id=data.bank_account_id,
+        petty_cash_fund_id=data.petty_cash_fund_id,
         estado="conciliado",
     )
     db.add(payment)
@@ -212,6 +213,52 @@ async def register_payment(db: AsyncSession, invoice_id: str, data: SupplierInvo
         account = account_result.scalar_one_or_none()
         if account:
             account.saldo_actual -= monto
+
+    # Desembolso mediante Fondo Fijo / Caja Chica
+    if data.petty_cash_fund_id or data.payment_method == "fondo_fijo":
+        fund_id_val = data.petty_cash_fund_id
+        if fund_id_val:
+            from api.src.petty_cash.models import PettyCashFund, PettyCashFundMovement, Expense
+            fund_res = await db.execute(select(PettyCashFund).where(PettyCashFund.id == fund_id_val))
+            fund = fund_res.scalar_one_or_none()
+            if fund:
+                saldo_anterior = fund.saldo_actual
+                fund.saldo_actual -= monto
+                mov = PettyCashFundMovement(
+                    fund_id=fund.id,
+                    tipo="gasto",
+                    monto=monto,
+                    saldo_anterior=saldo_anterior,
+                    saldo_nuevo=fund.saldo_actual,
+                    referencia_type="supplier_invoice_payment",
+                    referencia_id=payment.id,
+                    observaciones=f"Pago a proveedor Factura {invoice.numero_factura} ({data.referencia or ''})",
+                )
+                db.add(mov)
+
+                sup_nombre = getattr(invoice, "supplier_nombre", None)
+                if not sup_nombre and invoice.supplier_id:
+                    sup_q = await db.execute(select(Supplier.razon_social).where(Supplier.id == invoice.supplier_id))
+                    sup_nombre = sup_q.scalar_one_or_none()
+
+                expense = Expense(
+                    company_id=invoice.company_id,
+                    fund_id=fund.id,
+                    monto=monto,
+                    descripcion=f"Pago a proveedor Factura {invoice.numero_factura}",
+                    proveedor=sup_nombre or f"Factura {invoice.numero_factura}",
+                    numero_factura=invoice.numero_factura,
+                    tipo_comprobante="FACTURA_CONTADO",
+                    tipo_pago="efectivo",
+                    fecha_gasto=data.fecha_pago or _today(),
+                    estado="pagado",
+                    es_pago_proveedor=True,
+                    supplier_id=invoice.supplier_id,
+                    supplier_invoice_id=invoice.id,
+                    forma_pago_resumen="Fondo Fijo",
+                    fecha_pago=data.fecha_pago or _today(),
+                )
+                db.add(expense)
 
     await db.flush()
     await db.refresh(payment)
@@ -3445,6 +3492,7 @@ async def list_supplier_payment_orders(
             "monto_total": float(o.monto_total),
             "monto_retenido": float(o.monto_retenido),
             "monto_neto": float(o.monto_neto),
+            "diferencia_cambio": float(o.diferencia_cambio or 0),
             "observaciones": o.observaciones,
             "recibo_proveedor": o.recibo_proveedor,
             "created_at": o.created_at.isoformat() if o.created_at else None,
@@ -3568,6 +3616,7 @@ async def get_supplier_payment_order_detail(
         "monto_total": float(o.monto_total),
         "monto_retenido": float(o.monto_retenido),
         "monto_neto": float(o.monto_neto),
+        "diferencia_cambio": float(o.diferencia_cambio or 0),
         "observaciones": o.observaciones,
         "recibo_proveedor": o.recibo_proveedor,
         "created_at": o.created_at.isoformat() if o.created_at else None,
@@ -3665,12 +3714,13 @@ async def create_multi_supplier_payment_batch(
             )
         total_items_pyg += Decimal(str(item.monto_pyg))
 
-    diff_total = abs(total_items_pyg - total_desembolso_declarado)
-    if diff_total > Decimal("100"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"El desembolso total declarado (₲ {total_desembolso_declarado:,.0f}) no coincide con la suma de los proveedores (₲ {total_items_pyg:,.0f}). Diferencia: ₲ {diff_total:,.0f}"
-        )
+    if total_desembolso_declarado <= Decimal("0"):
+        raise HTTPException(status_code=400, detail="El monto total de desembolso debe ser mayor a 0.")
+
+    # Diferencia de cambio total entre el instrumento emitido/desembolsado y la deuda neta de facturas:
+    # diff_cambio_total > 0: El cheque/desembolso es MAYOR a la deuda (sobrecosto o pérdida por cotización cambiaria)
+    # diff_cambio_total < 0: El cheque/desembolso es MENOR a la deuda (ganancia o descuento por cotización cambiaria)
+    diff_cambio_total = total_desembolso_declarado - total_items_pyg
 
     fp = (payload.forma_pago or "").lower().strip()
     fecha_pago_efectiva = payload.fecha_pago or _today()
@@ -3693,10 +3743,10 @@ async def create_multi_supplier_payment_batch(
             )
             consumed_monto = consumed_res.scalar_one() or Decimal("0")
             disponible = Decimal(str(cheque_obj.monto or 0)) - consumed_monto
-            if total_items_pyg > disponible:
+            if total_desembolso_declarado > disponible:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Saldo insuficiente en cheque N° {cheque_obj.numero}. Total: ₲ {cheque_obj.monto:,.0f} | Disponible: ₲ {disponible:,.0f} | Requerido por lote: ₲ {total_items_pyg:,.0f}"
+                    detail=f"Saldo insuficiente en cheque N° {cheque_obj.numero}. Total: ₲ {cheque_obj.monto:,.0f} | Disponible: ₲ {disponible:,.0f} | Requerido por lote: ₲ {total_desembolso_declarado:,.0f}"
                 )
 
             db.add(ChequeHistorial(
@@ -3705,7 +3755,7 @@ async def create_multi_supplier_payment_batch(
                 estado_nuevo=cheque_obj.estado,
                 user_id=uuid.UUID(user_id) if user_id else None,
                 user_nombre=user_nombre or "Finanzas",
-                notas=f"Asignado a Lote Multi-Proveedor ({len(payload.items)} proveedores) por ₲ {total_items_pyg:,.0f}",
+                notas=f"Asignado a Lote Multi-Proveedor ({len(payload.items)} prov.) por ₲ {total_desembolso_declarado:,.0f} (Facturas: ₲ {total_items_pyg:,.0f}, Dif. Cambio: ₲ {diff_cambio_total:+,.0f})",
             ))
         else:
             if not payload.numero_cheque:
@@ -3731,7 +3781,7 @@ async def create_multi_supplier_payment_batch(
                 diferido=es_dif,
                 estado="pendiente",
                 concepto=f"Lote Multi-Proveedor / Brasil ({len(payload.items)} proveedores)",
-                notas=payload.observaciones or "Cheque único por compra de divisas / pago agrupado",
+                notas=payload.observaciones or f"Cheque por compra de divisas / pago agrupado (Dif. Cambio: ₲ {diff_cambio_total:+,.0f})",
                 created_by=uuid.UUID(user_id) if user_id else None,
             )
             db.add(cheque_obj)
@@ -3743,7 +3793,7 @@ async def create_multi_supplier_payment_batch(
                 estado_nuevo="pendiente",
                 user_id=uuid.UUID(user_id) if user_id else None,
                 user_nombre=user_nombre or "Finanzas",
-                notas=f"Emitido en Lote Multi-Proveedor ({len(payload.items)} proveedores) por ₲ {total_desembolso_declarado:,.0f}",
+                notas=f"Emitido en Lote Multi-Proveedor ({len(payload.items)} prov.) por ₲ {total_desembolso_declarado:,.0f} (Dif. Cambio: ₲ {diff_cambio_total:+,.0f})",
             ))
 
     elif fp == "transferencia":
@@ -3851,7 +3901,9 @@ async def create_multi_supplier_payment_batch(
             ))
 
     # 3. Iterar cada proveedor y generar su OP individual
+    sum_dif_asignada = Decimal("0")
     created_orders = []
+
     for idx, item in enumerate(payload.items):
         sup_res = await db.execute(select(Supplier).where(Supplier.id == item.supplier_id, Supplier.company_id == cid))
         sup = sup_res.scalar_one_or_none()
@@ -3863,8 +3915,22 @@ async def create_multi_supplier_payment_batch(
         monto_moneda = Decimal(str(item.monto_moneda))
         tc = Decimal(str(item.tipo_cambio or 1))
 
-        total_ret = sum(Decimal(str(a.monto_retencion or 0)) for a in item.allocations)
+        # Calcular la diferencia de cambio imputada para este proveedor
+        if getattr(item, "diferencia_cambio", None) is not None and item.diferencia_cambio != Decimal("0"):
+            diff_item = Decimal(str(item.diferencia_cambio))
+        elif diff_cambio_total != Decimal("0") and total_items_pyg > Decimal("0"):
+            if idx == len(payload.items) - 1:
+                diff_item = diff_cambio_total - sum_dif_asignada
+            else:
+                diff_item = (diff_cambio_total * monto_item_pyg / total_items_pyg).quantize(Decimal("1"))
+                sum_dif_asignada += diff_item
+        else:
+            diff_item = Decimal("0")
 
+        total_ret = sum(Decimal(str(a.monto_retencion or 0)) for a in item.allocations)
+        monto_disb_pyg = monto_item_pyg + diff_item
+
+        dif_obs = f" [Dif. Cambio: ₲ {diff_item:+,.0f}]" if diff_item != Decimal("0") else ""
         op = SupplierPaymentOrder(
             company_id=cid,
             supplier_id=sup.id,
@@ -3876,7 +3942,8 @@ async def create_multi_supplier_payment_batch(
             monto_total=monto_item_pyg + total_ret,
             monto_retenido=total_ret,
             monto_neto=monto_item_pyg,
-            observaciones=f"[Lote Multi-Proveedor / Brasil] {item.observaciones or payload.observaciones or ''}".strip(),
+            diferencia_cambio=diff_item,
+            observaciones=f"[Lote Multi-Proveedor / Brasil]{dif_obs} {item.observaciones or payload.observaciones or ''}".strip(),
             recibo_proveedor=item.recibo_proveedor,
             created_by=uuid.UUID(user_id) if user_id else None,
         )
@@ -3928,7 +3995,7 @@ async def create_multi_supplier_payment_batch(
             monto=monto_moneda,
             moneda=item.moneda or "PYG",
             tipo_cambio=tc,
-            monto_pyg=monto_item_pyg,
+            monto_pyg=monto_disb_pyg,
             bank_account_id=payload.bank_account_id if fp == "transferencia" else (cheque_obj.bank_account_id if cheque_obj else None),
             referencia_transferencia=payload.referencia_transferencia if fp == "transferencia" else None,
             cheque_id=cheque_obj.id if cheque_obj else None,
@@ -3938,9 +4005,23 @@ async def create_multi_supplier_payment_batch(
             fecha_cheque_vencimiento=cheque_obj.fecha_pago if cheque_obj else None,
             es_cheque_diferido=cheque_obj.diferido if cheque_obj else False,
             titular_cheque=cheque_obj.beneficiario if cheque_obj else None,
-            observaciones=f"Lote Multi-Proveedor {item.observaciones or ''}".strip(),
+            observaciones=f"Lote Multi-Proveedor{f' (Imputación Cheque: ₲ {monto_disb_pyg:,.0f}, Dif. Cambio: ₲ {diff_item:+,.0f})' if diff_item != Decimal('0') else ''} {item.observaciones or ''}".strip(),
         )
         db.add(disb)
+
+        # Si hubo diferencia de cambio, registrar renglón complementario de Diferencia de Cambio
+        if diff_item != Decimal("0"):
+            disb_dif = SupplierPaymentOrderDisbursement(
+                payment_order_id=op.id,
+                forma_pago="diferencia_cambio",
+                monto=abs(diff_item),
+                moneda="PYG",
+                tipo_cambio=Decimal("1"),
+                monto_pyg=diff_item,
+                observaciones=f"Diferencia de Cambio Imputada ({'Sobrecosto / Pérdida Cambiaria' if diff_item > 0 else 'Ganancia Cambiaria Favorable'})",
+            )
+            db.add(disb_dif)
+
         created_orders.append({
             "order_id": str(op.id),
             "numero_orden": op.numero_orden,
@@ -3948,6 +4029,7 @@ async def create_multi_supplier_payment_batch(
             "supplier_nombre": sup.razon_social,
             "monto_pyg": float(monto_item_pyg),
             "monto_moneda": float(monto_moneda),
+            "diferencia_cambio": float(diff_item),
             "moneda": item.moneda,
         })
 
@@ -3958,6 +4040,8 @@ async def create_multi_supplier_payment_batch(
         "message": f"Se procesó con éxito el Lote Multi-Proveedor con {len(created_orders)} órdenes de pago.",
         "forma_pago": fp,
         "total_pyg": float(total_desembolso_declarado),
+        "total_facturas_pyg": float(total_items_pyg),
+        "diferencia_cambio_total": float(diff_cambio_total),
         "cheque_id": str(cheque_obj.id) if cheque_obj else None,
         "numero_cheque": cheque_obj.numero if cheque_obj else None,
         "orders": created_orders,

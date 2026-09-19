@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from "react"
 import {
   X, Check, AlertTriangle, Plus, Trash2, CreditCard,
   Building2, Wallet, FileText, Calendar, CheckCircle2,
-  DollarSign, Layers, Loader2, Globe, ArrowRight, Info
+  DollarSign, Layers, Loader2, Globe, ArrowRight, Info,
+  ArrowRightLeft
 } from "lucide-react"
 import { api } from "../../api"
 import { formatPYG, formatDate } from "../../utils/format"
@@ -76,6 +77,9 @@ export default function MultiSupplierPaymentModal({
   const [fechaChequeEmision, setFechaChequeEmision] = useState(new Date().toISOString().split("T")[0])
   const [fechaChequeVencimiento, setFechaChequeVencimiento] = useState(new Date().toISOString().split("T")[0])
   const [esChequeDiferido, setEsChequeDiferido] = useState(false)
+
+  // Desembolso nominal personalizado y diferencia de cambio
+  const [customMontoDesembolso, setCustomMontoDesembolso] = useState<number | null>(null)
 
   // Transferencia
   const [transferBankAccountId, setTransferBankAccountId] = useState("")
@@ -294,6 +298,14 @@ export default function MultiSupplierPaymentModal({
     }
   }, [groups])
 
+  // Desembolso efectivo final y cálculo de diferencia de cambio
+  const montoDesembolsoFinal = customMontoDesembolso !== null ? customMontoDesembolso : summary.totalPyg
+  const diferenciaCambio = montoDesembolsoFinal - summary.totalPyg
+
+  const selectedCheque = useMemo(() => {
+    return availableCheques.find(c => c.id === selectedChequeId)
+  }, [availableCheques, selectedChequeId])
+
   // Procesar lote multi-proveedor
   const handleSubmitBatch = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -303,8 +315,8 @@ export default function MultiSupplierPaymentModal({
       return
     }
 
-    if (summary.totalPyg <= 0) {
-      toast.error("Importe Inválido", "El monto total a pagar debe ser mayor a 0.")
+    if (summary.totalPyg <= 0 || montoDesembolsoFinal <= 0) {
+      toast.error("Importe Inválido", "El monto de facturas y desembolso deben ser mayores a 0.")
       return
     }
 
@@ -315,9 +327,11 @@ export default function MultiSupplierPaymentModal({
           toast.error("Seleccione Cheque", "Debe seleccionar el cheque emitido a vincular.")
           return
         }
-        const ch = availableCheques.find(c => c.id === selectedChequeId)
-        if (ch && ch.saldo_disponible < summary.totalPyg) {
-          toast.error("Saldo Insuficiente en Cheque", `El cheque N° ${ch.numero} solo dispone de ${formatPYG(ch.saldo_disponible)}. Requerido: ${formatPYG(summary.totalPyg)}`)
+        if (selectedCheque && selectedCheque.saldo_disponible < montoDesembolsoFinal) {
+          toast.error(
+            "Saldo Insuficiente en Cheque",
+            `El cheque N° ${selectedCheque.numero} solo dispone de ${formatPYG(selectedCheque.saldo_disponible)}. Requerido: ${formatPYG(montoDesembolsoFinal)}`
+          )
           return
         }
       } else {
@@ -335,8 +349,8 @@ export default function MultiSupplierPaymentModal({
     }
 
     // Validar bóveda
-    if (formaPago === "boveda" && vaultBalance < summary.totalPyg) {
-      toast.error("Saldo Bóveda Insuficiente", `Bóveda Central solo dispone de ${formatPYG(vaultBalance)}. Requerido: ${formatPYG(summary.totalPyg)}`)
+    if (formaPago === "boveda" && vaultBalance < montoDesembolsoFinal) {
+      toast.error("Saldo Bóveda Insuficiente", `Bóveda Central solo dispone de ${formatPYG(vaultBalance)}. Requerido: ${formatPYG(montoDesembolsoFinal)}`)
       return
     }
 
@@ -359,10 +373,21 @@ export default function MultiSupplierPaymentModal({
         fecha_cheque_emision: formaPago === "cheque" && !useExistingCheque ? fechaChequeEmision : undefined,
         fecha_cheque_vencimiento: formaPago === "cheque" && !useExistingCheque ? (esChequeDiferido ? fechaChequeVencimiento : fechaChequeEmision) : undefined,
         es_cheque_diferido: formaPago === "cheque" && !useExistingCheque ? esChequeDiferido : false,
-        monto_total_desembolso_pyg: summary.totalPyg,
-        items: groups.map(g => {
+        monto_total_desembolso_pyg: montoDesembolsoFinal,
+        diferencia_cambio_total: diferenciaCambio,
+        items: groups.map((g, idx) => {
           const groupMontoPyg = g.invoices.reduce((s, i) => s + i.monto_pyg, 0)
           const groupMontoMoneda = g.invoices.reduce((s, i) => s + i.monto_moneda, 0)
+
+          // Prorrateo exacto de la diferencia de cambio por proveedor
+          const diffItem = summary.totalPyg > 0
+            ? (idx === groups.length - 1
+                ? diferenciaCambio - groups.slice(0, idx).reduce((acc, prevG) => {
+                    const pPyg = prevG.invoices.reduce((s, i) => s + i.monto_pyg, 0)
+                    return acc + Math.round((diferenciaCambio * pPyg) / summary.totalPyg)
+                  }, 0)
+                : Math.round((diferenciaCambio * groupMontoPyg) / summary.totalPyg))
+            : 0
 
           return {
             supplier_id: g.supplier_id,
@@ -372,6 +397,7 @@ export default function MultiSupplierPaymentModal({
             tipo_cambio: g.tipo_cambio,
             monto_moneda: groupMontoMoneda,
             monto_pyg: groupMontoPyg,
+            diferencia_cambio: diffItem,
             allocations: g.invoices.map(inv => ({
               invoice_id: inv.invoice_id,
               monto_aplicado: inv.monto_pyg,
@@ -481,9 +507,17 @@ export default function MultiSupplierPaymentModal({
                 <p className="mt-1">Agregá proveedores con el botón superior.</p>
               </div>
             ) : (
-              groups.map((group) => {
+              groups.map((group, gIdx) => {
                 const groupTotalPyg = group.invoices.reduce((s, i) => s + i.monto_pyg, 0)
                 const groupTotalMoneda = group.invoices.reduce((s, i) => s + i.monto_moneda, 0)
+                const difProv = summary.totalPyg > 0
+                  ? (gIdx === groups.length - 1
+                      ? diferenciaCambio - groups.slice(0, gIdx).reduce((acc, prevG) => {
+                          const pPyg = prevG.invoices.reduce((s, i) => s + i.monto_pyg, 0)
+                          return acc + Math.round((diferenciaCambio * pPyg) / summary.totalPyg)
+                        }, 0)
+                      : Math.round((diferenciaCambio * groupTotalPyg) / summary.totalPyg))
+                  : 0
 
                 return (
                   <div
@@ -532,6 +566,13 @@ export default function MultiSupplierPaymentModal({
                           <p className="font-black text-slate-900 dark:text-white text-xs font-mono">
                             {formatPYG(groupTotalPyg)}
                           </p>
+                          {diferenciaCambio !== 0 && (
+                            <p className={`text-[10px] font-mono font-bold mt-0.5 ${
+                              difProv > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
+                            }`}>
+                              Dif: {difProv > 0 ? `+${formatPYG(difProv)}` : formatPYG(difProv)}
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -686,116 +727,189 @@ export default function MultiSupplierPaymentModal({
                 </div>
 
                 {useExistingCheque ? (
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
-                      Seleccionar Cheque Emitido con Saldo Remanente *
-                    </label>
-                    {availableCheques.length === 0 ? (
-                      <p className="text-xs text-amber-500 p-2 bg-amber-50 dark:bg-amber-950/30 rounded-lg">
-                        No hay cheques emitidos con saldo disponible actualmente. Seleccioná "Emitir Nuevo Cheque Matriz".
-                      </p>
-                    ) : (
-                      <select
-                        value={selectedChequeId}
-                        onChange={e => setSelectedChequeId(e.target.value)}
-                        className="w-full p-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold"
-                        required
-                      >
-                        <option value="">Seleccione cheque...</option>
-                        {availableCheques.map(c => (
-                          <option key={c.id} value={c.id}>
-                            Cheque N° {c.numero} ({c.banco_emisor}) — Titular: {c.beneficiario} | Disponible: {formatPYG(c.saldo_disponible)} (Total: {formatPYG(c.monto_total)}) - Venc: {formatDate(c.fecha_pago)}
-                          </option>
-                        ))}
-                      </select>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                        Seleccionar Cheque Emitido con Saldo Remanente *
+                      </label>
+                      {availableCheques.length === 0 ? (
+                        <p className="text-xs text-amber-500 p-2 bg-amber-50 dark:bg-amber-950/30 rounded-lg">
+                          No hay cheques emitidos con saldo disponible actualmente. Seleccioná "Emitir Nuevo Cheque Matriz".
+                        </p>
+                      ) : (
+                        <select
+                          value={selectedChequeId}
+                          onChange={e => setSelectedChequeId(e.target.value)}
+                          className="w-full p-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold"
+                          required
+                        >
+                          <option value="">Seleccione cheque...</option>
+                          {availableCheques.map(c => (
+                            <option key={c.id} value={c.id}>
+                              Cheque N° {c.numero} ({c.banco_emisor}) — Titular: {c.beneficiario} | Disponible: {formatPYG(c.saldo_disponible)} (Total: {formatPYG(c.monto_total)}) - Venc: {formatDate(c.fecha_pago)}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+
+                    {selectedCheque && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-slate-100/70 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                            Saldo Disponible en Cheque N° {selectedCheque.numero}
+                          </label>
+                          <div className="p-2 text-xs font-mono font-bold bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+                            {formatPYG(selectedCheque.saldo_disponible)} <span className="text-[10px] text-slate-400 font-normal">(Total: {formatPYG(selectedCheque.monto_total)})</span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">
+                              Monto a Imputar de este Cheque (₲) *
+                            </label>
+                            {customMontoDesembolso !== null && (
+                              <button
+                                type="button"
+                                onClick={() => setCustomMontoDesembolso(null)}
+                                className="text-[10px] text-emerald-600 dark:text-emerald-400 hover:underline font-bold"
+                              >
+                                Igualar a Deuda ({formatPYG(summary.totalPyg)})
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <CurrencyInput
+                              currency="PYG"
+                              value={montoDesembolsoFinal}
+                              onChangeValue={(val) => setCustomMontoDesembolso(val)}
+                              className="flex-1 p-2 text-xs font-mono font-black bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700 rounded-lg text-slate-900 dark:text-white"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setCustomMontoDesembolso(selectedCheque.saldo_disponible)}
+                              className="px-2.5 py-2 text-[10px] font-bold bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 rounded-lg transition whitespace-nowrap"
+                              title="Aplicar todo el saldo disponible del cheque"
+                            >
+                              Todo el Saldo
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">N° de Cheque *</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="Ej: 0098421"
-                        value={numeroCheque}
-                        onChange={e => setNumeroCheque(e.target.value)}
-                        className="w-full p-2 text-xs font-mono font-bold bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Banco Emisor / Cuenta *</label>
-                      <select
-                        value={bancoChequeId}
-                        onChange={e => setBancoChequeId(e.target.value)}
-                        className="w-full p-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
-                        required
-                      >
-                        {bankAccounts.map(b => (
-                          <option key={b.id} value={b.id}>
-                            {b.banco} — Cuenta: {b.numero_cuenta}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Titular / Beneficiario *</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="Ej: Cambios Chaco S.A. o Al Portador"
-                        value={titularCheque}
-                        onChange={e => setTitularCheque(e.target.value)}
-                        className="w-full p-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Fecha Emisión</label>
-                      <input
-                        type="date"
-                        value={fechaChequeEmision}
-                        onChange={e => setFechaChequeEmision(e.target.value)}
-                        className="w-full p-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-mono"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Modalidad</label>
-                      <div className="flex items-center gap-3 pt-1">
-                        <label className="flex items-center gap-1 cursor-pointer">
-                          <input
-                            type="radio"
-                            checked={!esChequeDiferido}
-                            onChange={() => setEsChequeDiferido(false)}
-                          />
-                          <span>Al Día</span>
-                        </label>
-                        <label className="flex items-center gap-1 cursor-pointer">
-                          <input
-                            type="radio"
-                            checked={esChequeDiferido}
-                            onChange={() => setEsChequeDiferido(true)}
-                          />
-                          <span className="text-rose-500 font-bold">Diferido</span>
-                        </label>
-                      </div>
-                    </div>
-
-                    {esChequeDiferido && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                       <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Fecha Vencimiento *</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">N° de Cheque *</label>
                         <input
-                          type="date"
+                          type="text"
                           required
-                          value={fechaChequeVencimiento}
-                          onChange={e => setFechaChequeVencimiento(e.target.value)}
-                          className="w-full p-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-mono font-bold"
+                          placeholder="Ej: 0098421"
+                          value={numeroCheque}
+                          onChange={e => setNumeroCheque(e.target.value)}
+                          className="w-full p-2 text-xs font-mono font-bold bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
                         />
                       </div>
-                    )}
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Banco Emisor / Cuenta *</label>
+                        <select
+                          value={bancoChequeId}
+                          onChange={e => setBancoChequeId(e.target.value)}
+                          className="w-full p-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
+                          required
+                        >
+                          {bankAccounts.map(b => (
+                            <option key={b.id} value={b.id}>
+                              {b.banco} — Cuenta: {b.numero_cuenta}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Titular / Beneficiario *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Ej: Cambios Chaco S.A. o Al Portador"
+                          value={titularCheque}
+                          onChange={e => setTitularCheque(e.target.value)}
+                          className="w-full p-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase">Monto Nominal Cheque (₲) *</label>
+                          {customMontoDesembolso !== null && customMontoDesembolso !== summary.totalPyg && (
+                            <button
+                              type="button"
+                              onClick={() => setCustomMontoDesembolso(null)}
+                              className="text-[9px] text-emerald-600 dark:text-emerald-400 hover:underline font-bold"
+                            >
+                              Restablecer
+                            </button>
+                          )}
+                        </div>
+                        <CurrencyInput
+                          currency="PYG"
+                          value={montoDesembolsoFinal}
+                          onChangeValue={(val) => setCustomMontoDesembolso(val)}
+                          className="w-full p-2 text-xs font-mono font-black bg-slate-50 dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 rounded-xl text-slate-900 dark:text-white"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Fecha Emisión</label>
+                        <input
+                          type="date"
+                          value={fechaChequeEmision}
+                          onChange={e => setFechaChequeEmision(e.target.value)}
+                          className="w-full p-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-mono"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Modalidad</label>
+                        <div className="flex items-center gap-3 pt-1">
+                          <label className="flex items-center gap-1 cursor-pointer">
+                            <input
+                              type="radio"
+                              checked={!esChequeDiferido}
+                              onChange={() => setEsChequeDiferido(false)}
+                            />
+                            <span>Al Día</span>
+                          </label>
+                          <label className="flex items-center gap-1 cursor-pointer">
+                            <input
+                              type="radio"
+                              checked={esChequeDiferido}
+                              onChange={() => setEsChequeDiferido(true)}
+                            />
+                            <span className="text-rose-500 font-bold">Diferido</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {esChequeDiferido && (
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Fecha Vencimiento *</label>
+                          <input
+                            type="date"
+                            required
+                            value={fechaChequeVencimiento}
+                            onChange={e => setFechaChequeVencimiento(e.target.value)}
+                            className="w-full p-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-mono font-bold"
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -839,12 +953,88 @@ export default function MultiSupplierPaymentModal({
                   <p className="text-[11px] text-slate-400">Se registrará el egreso físico consolidado en el arqueo de bóveda</p>
                 </div>
                 <div className={`p-2.5 rounded-xl font-mono font-black text-sm ${
-                  vaultBalance >= summary.totalPyg ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-500"
+                  vaultBalance >= montoDesembolsoFinal ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-500"
                 }`}>
                   Disponible: {formatPYG(vaultBalance)}
                 </div>
               </div>
             )}
+
+            {/* TARJETA DE COTEJO Y DIFERENCIA DE CAMBIO EN VIVO */}
+            <div className={`p-4 rounded-2xl border transition-all ${
+              diferenciaCambio === 0
+                ? "bg-slate-100/60 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700"
+                : diferenciaCambio > 0
+                ? "bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200"
+                : "bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-200"
+            }`}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-xl ${
+                    diferenciaCambio === 0
+                      ? "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                      : diferenciaCambio > 0
+                      ? "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                      : "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                  }`}>
+                    <ArrowRightLeft className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-extrabold text-xs uppercase tracking-wider">
+                        Cotejo de Desembolso vs. Deuda Imputada
+                      </p>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                        diferenciaCambio === 0
+                          ? "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                          : diferenciaCambio > 0
+                          ? "bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30"
+                          : "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
+                      }`}>
+                        {diferenciaCambio === 0
+                          ? "Sin Diferencia"
+                          : diferenciaCambio > 0
+                          ? "Sobrecosto / Pérdida Cambiaria"
+                          : "Ganancia Cambiaria Favorable"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] opacity-80 mt-0.5">
+                      {diferenciaCambio === 0
+                        ? "El importe del desembolso coincide exactamente con las facturas a cancelar."
+                        : diferenciaCambio > 0
+                        ? `El desembolso supera la deuda por ₲ ${formatPYG(diferenciaCambio)}. Esta diferencia se imputará automáticamente como Diferencia de Cambio a los proveedores.`
+                        : `El desembolso es menor a la deuda por ₲ ${formatPYG(Math.abs(diferenciaCambio))}. Se registrará como una ganancia cambiaria favorable prorrateada.`}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 text-right">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Deuda Facturas</span>
+                    <span className="font-mono font-bold text-xs">{formatPYG(summary.totalPyg)}</span>
+                  </div>
+                  <span className="text-slate-400 font-bold text-xs">vs</span>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Desembolso Real</span>
+                    <span className="font-mono font-black text-xs text-emerald-600 dark:text-emerald-400">
+                      {formatPYG(montoDesembolsoFinal)}
+                    </span>
+                  </div>
+                  <div className="pl-3 border-l border-slate-300 dark:border-slate-700">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Dif. de Cambio</span>
+                    <span className={`font-mono font-black text-sm ${
+                      diferenciaCambio === 0
+                        ? "text-slate-500"
+                        : diferenciaCambio > 0
+                        ? "text-amber-600 dark:text-amber-400"
+                        : "text-emerald-600 dark:text-emerald-400"
+                    }`}>
+                      {diferenciaCambio > 0 ? `+${formatPYG(diferenciaCambio)}` : formatPYG(diferenciaCambio)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             {/* FECHA Y OBSERVACIONES */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
@@ -878,16 +1068,25 @@ export default function MultiSupplierPaymentModal({
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Consolidado a Desembolsar</p>
               <div className="flex items-center gap-3">
                 <span className="text-2xl font-black font-mono tracking-tight text-emerald-400">
-                  {formatPYG(summary.totalPyg)}
+                  {formatPYG(montoDesembolsoFinal)}
                 </span>
                 {summary.totalBrl > 0 && (
                   <span className="text-xs font-mono font-bold text-emerald-300 bg-emerald-950/60 px-2.5 py-1 rounded-lg border border-emerald-700/50">
                     R$ {summary.totalBrl.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 )}
+                {diferenciaCambio !== 0 && (
+                  <span className={`text-xs font-mono font-bold px-2.5 py-1 rounded-lg border ${
+                    diferenciaCambio > 0
+                      ? "bg-amber-950/60 text-amber-300 border-amber-700/50"
+                      : "bg-emerald-950/60 text-emerald-300 border-emerald-700/50"
+                  }`}>
+                    Dif: {diferenciaCambio > 0 ? `+${formatPYG(diferenciaCambio)}` : formatPYG(diferenciaCambio)}
+                  </span>
+                )}
               </div>
               <p className="text-[11px] text-slate-400">
-                Se generarán <strong>{groups.length} Órdenes de Pago individuales</strong> amortizando <strong>{summary.totalFacturas} facturas</strong>.
+                Se generarán <strong>{groups.length} Órdenes de Pago individuales</strong> amortizando <strong>{summary.totalFacturas} facturas</strong> por un total de <strong>{formatPYG(summary.totalPyg)}</strong>.
               </p>
             </div>
 
