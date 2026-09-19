@@ -3296,18 +3296,31 @@ export default function AccountsReceivablePage() {
       {/* MODAL: Cobro de Remisión por Empresa Vinculada */}
       {showPayRemissionModal && (
         <div className="modal-overlay" onClick={() => setShowPayRemissionModal(null)}>
-          <div className="modal-content max-w-lg" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <DollarSign className="w-5 h-5 text-emerald-500" />
-                Registrar Pago de Empresa Vinculada
-              </h3>
-              <p className="text-xs text-gray-500 mt-1">
-                Ingreso a tesorería de la transferencia o cheque emitido por la empresa para cancelar el lote remitido.
-              </p>
+          <div
+            className="modal-content max-w-lg w-full flex flex-col max-h-[90vh] shadow-2xl rounded-2xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="p-5 border-b shrink-0 flex items-center justify-between bg-white dark:bg-slate-900">
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <DollarSign className="w-5 h-5 text-emerald-500" />
+                  Registrar Pago de Empresa Vinculada
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Ingreso a tesorería de la transferencia o cheque emitido por la empresa para cancelar el lote remitido.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPayRemissionModal(null)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                title="Cerrar"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            <div className="p-6 space-y-4 text-xs">
+            <div className="p-5 space-y-4 text-xs overflow-y-auto flex-1">
               <div className="p-3.5 rounded-xl bg-slate-900 text-white space-y-1">
                 <div className="text-[10px] font-bold text-slate-400 uppercase">Lote de Remisión</div>
                 <div className="text-sm font-black text-indigo-400">{showPayRemissionModal.numero_remision} · {showPayRemissionModal.empresa_vinculada_nombre}</div>
@@ -3515,15 +3528,30 @@ export default function AccountsReceivablePage() {
               </div>
             </div>
 
-            <div className="p-6 border-t flex justify-end gap-3">
-              <button onClick={() => setShowPayRemissionModal(null)} className="btn-ghost text-xs">Cancelar</button>
-              <button
-                onClick={handlePayRemission}
-                disabled={payingRemission}
-                className="btn-primary bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2"
-              >
-                {payingRemission ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirmar Cobro de Empresa"}
-              </button>
+            <div className="p-4 border-t shrink-0 flex items-center justify-between bg-gray-50 dark:bg-slate-900/90 border-slate-200 dark:border-slate-800">
+              <span className="text-xs text-gray-500 font-medium">
+                {payRemForm.forma_pago === "cheque"
+                  ? (payRemForm.es_cheque_diferido ? "Cheque Diferido" : "Cheque al Día")
+                  : `Medio: ${payRemForm.forma_pago.replace('_', ' ').toUpperCase()}`}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPayRemissionModal(null)}
+                  className="btn-ghost text-xs px-3 py-2"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePayRemission}
+                  disabled={payingRemission}
+                  className="btn-primary bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 shadow-md transition"
+                >
+                  {payingRemission ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  <span>Confirmar Cobro de Empresa</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
