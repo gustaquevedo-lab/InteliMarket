@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
+import React, { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue } from "react"
 import { createPortal } from "react-dom"
 import {
   Search, ScanLine, ShoppingCart, Calculator, ClipboardList, Save, Loader2, Sun, Moon, Plus, Minus, Trash2, User, Pause, Play,
@@ -4794,22 +4794,36 @@ export default function POSPage() {
     { key: "LIMPIEZA", label: "🧼 Limpieza & Perfumería" },
   ]
 
+  // Indice de busqueda: el texto en minusculas de cada producto se calcula UNA
+  // vez por cambio de catalogo, no por cada tecla. Antes cada digito del lector
+  // reconstruia un Map y hacia toLowerCase/includes sobre los ~11.700 productos
+  // (~300ms por tecla en las cajas): el Enter del lector llegaba varios
+  // segundos tarde y el producto "no se agregaba".
+  const productSearchIndex = useMemo(
+    () => products.map((p) => ({ p, t: `${p.nombre || ""} ${p.codigo_barra || ""} ${p.sku || ""}`.toLowerCase() })),
+    [products],
+  )
+  const deferredSearch = useDeferredValue(search)
+
   const filteredProducts = useMemo(() => {
-    const query = search.trim().toLowerCase()
-    
+    const query = deferredSearch.trim().toLowerCase()
+
     if (query) {
       const tokens = query.split(/\s+/).filter(Boolean)
-      const pool = new Map<string, Product>()
-      for (const p of [...searchResults, ...products]) {
-        if (p && p.id && !pool.has(p.id)) {
-          pool.set(p.id, p)
-        }
-      }
-
-      return Array.from(pool.values()).filter((p) => {
+      const out: Product[] = []
+      const seen = new Set<string>()
+      for (const p of searchResults) {
+        if (out.length >= 45) break
+        if (!p || !p.id || seen.has(p.id)) continue
         const target = `${p.nombre || ""} ${p.codigo_barra || ""} ${p.sku || ""}`.toLowerCase()
-        return tokens.every((token) => target.includes(token))
-      }).slice(0, 45)
+        if (tokens.every((token) => target.includes(token))) { out.push(p); seen.add(p.id) }
+      }
+      for (const { p, t } of productSearchIndex) {
+        if (out.length >= 45) break
+        if (!p || !p.id || seen.has(p.id)) continue
+        if (tokens.every((token) => t.includes(token))) { out.push(p); seen.add(p.id) }
+      }
+      return out
     }
 
     if (selectedCategoryTab === "TOP") {
@@ -4922,7 +4936,7 @@ export default function POSPage() {
     }
 
     return products.slice(0, 30)
-  }, [search, selectedCategoryTab, products, searchResults, topProductSkus])
+  }, [deferredSearch, selectedCategoryTab, products, productSearchIndex, searchResults, topProductSkus])
 
   // ── CONTROL CRUZADO INTELIGENTE CON BALANZA DE CHECKOUT (CON DEBOUNCE DE ASENTAMIENTO) ──
   useEffect(() => {
