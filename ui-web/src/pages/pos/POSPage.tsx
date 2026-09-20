@@ -203,6 +203,12 @@ function patchEscposTicketCustomer(b64: string, name: string, doc: string): stri
 // cajas reales cargan por HTTP plano en la LAN (http://192.168.0.10:5173),
 // asi que ahi NO existe y tira TypeError. Mismo patron ya usado en
 // CustomersPage.tsx para el mismo problema.
+// Peso minimo (kg) para considerar que hay algo pesandose en la balanza. Las
+// balanzas de las cajas marcan ~0.020 kg en vacio (ruido/offset): con un umbral
+// de 0.015 el carbon se cobraba a 0.020 kg x Gs 10.500 = Gs 210. Por debajo de
+// este valor se pide el peso manual en vez de tomar la lectura de la balanza.
+const PESO_MIN_BALANZA_KG = 0.05
+
 function generarUUIDLocal(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID()
@@ -2929,7 +2935,7 @@ export default function POSPage() {
       }
       finalQty = quantityOverride
     } else if (isPesable) {
-      if (currentScaleWeight > 0.015) {
+      if (currentScaleWeight > PESO_MIN_BALANZA_KG) {
         finalQty = currentScaleWeight
       } else {
         setTargetWeighProduct(product)
@@ -3107,7 +3113,7 @@ export default function POSPage() {
 
   // ── AUTO-CONFIRMACIÓN INMEDIATA DEL PESAJE AL ESTABILIZAR EL PESO ─────────
   useEffect(() => {
-    if (showManualWeightModal && targetWeighProduct && currentScaleWeight > 0.015 && isScaleStable) {
+    if (showManualWeightModal && targetWeighProduct && currentScaleWeight > PESO_MIN_BALANZA_KG && isScaleStable) {
       const autoTimer = setTimeout(() => {
         addToCart(targetWeighProduct, currentScaleWeight)
         setShowManualWeightModal(false)
@@ -4953,7 +4959,7 @@ export default function POSPage() {
     const tol = getPesoTolerancia(etiquetaKg)
 
     // Si aún no hay peso en la balanza de checkout (> 15g), seguimos esperando que coloquen el producto
-    if (currentScaleWeight <= 0.015) {
+    if (currentScaleWeight <= PESO_MIN_BALANZA_KG) {
       if (scaleSettlingTimerRef.current) {
         clearTimeout(scaleSettlingTimerRef.current)
         scaleSettlingTimerRef.current = null
@@ -5003,7 +5009,7 @@ export default function POSPage() {
         scaleSettlingTimerRef.current = setTimeout(() => {
           scaleSettlingTimerRef.current = null
           const finalDiff = Math.abs(currentScaleWeight - etiquetaKg)
-          if (finalDiff > tol && currentScaleWeight > 0.015) {
+          if (finalDiff > tol && currentScaleWeight > PESO_MIN_BALANZA_KG) {
             api.inteliaudit.recordEvent({
               company_id: COMPANY_ID,
               user_id: user?.id,
@@ -5088,7 +5094,7 @@ export default function POSPage() {
         if (matchPesable) {
           const tol = getPesoTolerancia(weightKg)
           const diffKg = Math.abs(currentScaleWeight - weightKg)
-          const balanzaCoincideYa = isScaleStable && currentScaleWeight > 0.015 && diffKg <= tol
+          const balanzaCoincideYa = isScaleStable && currentScaleWeight > PESO_MIN_BALANZA_KG && diffKg <= tol
 
           if (balanzaCoincideYa) {
             // Si el producto ya está en la balanza del checkout y coincide, validar al instante
@@ -9101,7 +9107,7 @@ export default function POSPage() {
                 <span className="text-xl font-black font-posMono text-slate-900 dark:text-white">{weightPendingScale.etiquetaKg.toFixed(3)} KG</span>
               </div>
               <div className={`p-3 rounded-xl border text-center transition-colors ${
-                Math.abs(currentScaleWeight - weightPendingScale.etiquetaKg) <= getPesoTolerancia(weightPendingScale.etiquetaKg) && currentScaleWeight > 0.015
+                Math.abs(currentScaleWeight - weightPendingScale.etiquetaKg) <= getPesoTolerancia(weightPendingScale.etiquetaKg) && currentScaleWeight > PESO_MIN_BALANZA_KG
                   ? "bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400 font-black"
                   : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-black"
               }`}>
@@ -9111,13 +9117,13 @@ export default function POSPage() {
             </div>
             <div className="text-center mb-4">
               <span className={`text-[11px] font-bold px-3 py-1 rounded-full ${
-                currentScaleWeight <= 0.015
+                currentScaleWeight <= PESO_MIN_BALANZA_KG
                   ? "bg-amber-500/20 text-amber-600 dark:text-amber-400"
                   : Math.abs(currentScaleWeight - weightPendingScale.etiquetaKg) <= getPesoTolerancia(weightPendingScale.etiquetaKg)
                   ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-black animate-pulse"
                   : "bg-amber-500/20 text-amber-600 dark:text-amber-400"
               }`}>
-                {currentScaleWeight <= 0.015
+                {currentScaleWeight <= PESO_MIN_BALANZA_KG
                   ? "Coloque el producto en la balanza..."
                   : Math.abs(currentScaleWeight - weightPendingScale.etiquetaKg) <= getPesoTolerancia(weightPendingScale.etiquetaKg)
                   ? "✓ Peso verificado -- agregando..."
@@ -9262,21 +9268,21 @@ export default function POSPage() {
 
             {/* Display Reactivo de Balanza en Vivo */}
             <div className={`p-4 rounded-xl border mb-4 text-center transition-all ${
-              currentScaleWeight > 0.015
+              currentScaleWeight > PESO_MIN_BALANZA_KG
                 ? (isScaleStable ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 shadow-md" : "bg-amber-50 dark:bg-amber-950/40 border-amber-500 animate-pulse")
                 : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"
             }`}>
               <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest block">
-                {currentScaleWeight > 0.015
+                {currentScaleWeight > PESO_MIN_BALANZA_KG
                   ? (isScaleStable ? "✓ ESTABILIZADO · INSERTANDO AUTOMÁTICAMENTE..." : "PESANDO... ESTABILICE EL PRODUCTO")
                   : "COLOQUE EL PRODUCTO EN EL PLATO DE LA BALANZA"}
               </span>
               <div className="text-5xl font-black font-posMono tabular-nums text-emerald-600 dark:text-emerald-400 mt-1">
-                {currentScaleWeight > 0.015 ? currentScaleWeight.toFixed(3) : (manualWeightInput || "0.000")} <span className="text-lg text-slate-500 dark:text-slate-400">KG</span>
+                {currentScaleWeight > PESO_MIN_BALANZA_KG ? currentScaleWeight.toFixed(3) : (manualWeightInput || "0.000")} <span className="text-lg text-slate-500 dark:text-slate-400">KG</span>
               </div>
               {targetWeighProduct && (
                 <div className="text-sm font-posMono tabular-nums font-bold text-emerald-300 mt-1">
-                  Subtotal: {formatPYG(Math.round(((currentScaleWeight > 0.015 ? currentScaleWeight : parseFloat(manualWeightInput || "0")) * (Number(targetWeighProduct.precio_venta) || 0))))}
+                  Subtotal: {formatPYG(Math.round(((currentScaleWeight > PESO_MIN_BALANZA_KG ? currentScaleWeight : parseFloat(manualWeightInput || "0")) * (Number(targetWeighProduct.precio_venta) || 0))))}
                 </div>
               )}
             </div>
