@@ -8110,7 +8110,7 @@ export default function POSPage() {
                     if (res.synced > 0) {
                       toast.success("Sincronización Exitosa", `${res.synced} venta(s) enviadas al servidor.`)
                     } else if (res.failed > 0) {
-                      toast.warning("Sincronización Incompleta", `${res.failed} venta(s) pendientes. Verifique conexión.`)
+                      toast.warning("Venta pendiente rechazada", `${res.failed} venta(s) sin enviar. Motivo: ${(res as any).lastError || "Verifique conexión."}`)
                     }
                   } catch (e: any) {
                     toast.error("Error de sincronización", e?.message || "Servidor no alcanzable.")

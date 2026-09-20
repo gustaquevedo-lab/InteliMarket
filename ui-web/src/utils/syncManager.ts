@@ -144,12 +144,42 @@ export function getRetryDelay(retryCount: number): number {
   return Math.min(BASE_DELAY_MS * Math.pow(2, retryCount), 5 * 60 * 1000)
 }
 
-export async function syncPendingSales(onProgress?: (synced: number, total: number) => void): Promise<{ synced: number; failed: number }> {
+// Ventas que quedaron trabadas (status "syncing" porque la app se recargo en
+// medio del envio, "error" o retry_count agotado) se rescatan UNA vez por sesion
+// de la app: vuelven a "pending" y se reintentan. Si el servidor las vuelve a
+// rechazar quedan en "error" (con el mensaje) y no se reintentan en bucle.
+const ventasRescatadas = new Set<string>()
+
+async function rescatarVentasAtascadas(): Promise<void> {
+  try {
+    const todas = await offlineDB.pendingSales.getAll()
+    const ahora = Date.now()
+    for (const v of todas) {
+      if (!v || v.status === "synced") continue
+      const syncingViejo = v.status === "syncing" && ahora - new Date(v.last_retry).getTime() > 60000
+      const agotada = v.retry_count >= MAX_RETRIES
+      const enError = v.status === "error"
+      if ((syncingViejo || agotada || enError) && !ventasRescatadas.has(v.id)) {
+        ventasRescatadas.add(v.id)
+        await offlineDB.pendingSales.update({
+          ...v,
+          status: "pending" as const,
+          retry_count: 0,
+          next_retry: new Date(ahora).toISOString(),
+        })
+      }
+    }
+  } catch {}
+}
+
+export async function syncPendingSales(onProgress?: (synced: number, total: number) => void): Promise<{ synced: number; failed: number; lastError?: string }> {
+  await rescatarVentasAtascadas()
   const pending = await offlineDB.pendingSales.getPending()
   if (pending.length === 0) return { synced: 0, failed: 0 }
 
   let synced = 0
   let failed = 0
+  let lastError: string | undefined
 
   for (const sale of pending) {
     if (sale.retry_count >= MAX_RETRIES) continue
@@ -173,6 +203,7 @@ export async function syncPendingSales(onProgress?: (synced: number, total: numb
     } catch (err) {
       failed++
       const msg = err instanceof Error ? err.message : "Sync failed"
+      lastError = msg
       // Corte de red / servidor caido = transitorio, se reintenta con backoff.
       // Cualquier otra respuesta (ej. 400 "Linea de credito insuficiente") es un
       // rechazo de negocio: reintentar identico jamas va a funcionar, asi que se
@@ -198,7 +229,7 @@ export async function syncPendingSales(onProgress?: (synced: number, total: numb
   }
 
   if (onProgress) onProgress(synced, pending.length)
-  return { synced, failed }
+  return { synced, failed, lastError }
 }
 
 export async function syncPendingCupones(onProgress?: (synced: number, total: number) => void): Promise<{ synced: number; failed: number }> {
@@ -319,7 +350,9 @@ export function scheduleSyncRetry(onSyncComplete: () => void) {
     const cuponesSynced = cuponesResult.status === "fulfilled" ? cuponesResult.value.synced : 0
     const cuponesFailed = cuponesResult.status === "fulfilled" ? cuponesResult.value.failed : 0
 
-    if (salesSynced > 0 || salesFailed > 0 || cuponesSynced > 0 || cuponesFailed > 0) {
+    let quedanPendientes = false
+    try { quedanPendientes = (await offlineDB.pendingSales.getPending()).length > 0 } catch {}
+    if (salesSynced > 0 || salesFailed > 0 || cuponesSynced > 0 || cuponesFailed > 0 || quedanPendientes) {
       scheduleSyncRetry(onSyncComplete)
     }
     onSyncComplete()
