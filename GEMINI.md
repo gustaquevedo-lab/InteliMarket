@@ -28,3 +28,34 @@
    - **Cotejo No Efectivo:** Se corrobora físicamente la existencia y pertinencia de cada comprobante (Vouchers Bancard, Dinelco, QR, PIX, Extra Club, Transferencias, Cheques).
    - Ver especificación completa y fórmulas en [docs/REGLAS_ARQUEO_Y_CIERRE_CAJA.md](file:///Users/gustaquevedo/Library/CloudStorage/OneDrive-Personal/Dev/Intelimarket/docs/REGLAS_ARQUEO_Y_CIERRE_CAJA.md).
 
+7. **DESPLIEGUES ZERO-DOWNTIME Y COMANDOS DE DEPLOY (PROHIBIDO REINICIAR A CIEGAS EN PRODUCCIÓN):**
+   - **Frontend (UI / React / Vite):** Se despliega exclusivamente con:
+     ```bash
+     bash deploy-ui.sh
+     ```
+     Realiza build atómico y conmuta el enlace simbólico en `/var/www/intelimarket-ui/current`. Cero cortes para cajas.
+   - **Backend Producción (FastAPI):** Se despliega exclusivamente con:
+     ```bash
+     bash deploy-api.sh
+     ```
+     Aplica migraciones de Alembic y realiza un reinicio secuencial (rolling reload) del cluster dual de producción (puertos `8000` y `8002`) detrás de NGINX. Las cajas activas nunca sufren un 502 ni pérdida de conexión.
+   - **PROHIBICIÓN ESTRICTA:** Queda terminantemente prohibido ejecutar `systemctl restart intelimarket-api` a ciegas en horario de atención o levantar procesos `uvicorn` manuales fuera de systemd en producción.
+   - **Regla anti-desincronización de variables y modelos:** Toda nueva variable en `.env` debe registrarse en `api/src/config.py` (de lo contrario Settings tumba el API). Cualquier modelo que agregue columnas a la BD debe incluir y aplicar su migración de Alembic antes o en conjunto con el código.
+
+8. **ENTORNO SANDBOX / DESARROLLO VS PRODUCCIÓN:**
+   - **Producción (Sagrado):** Puertos `8000` / `8002` detrás de NGINX (`http://192.168.0.10:5173/api` y `http://100.83.91.76:8000`). Esquema `public` de PostgreSQL. Atiende a las cajas 2, 3, 4 y 5 de Extra Supermercado.
+   - **Sandbox (Desarrollo y Pruebas):** Cuando el usuario o la tarea pida "trabajar en sandbox" o desarrollar funciones experimentales:
+     * **API Sandbox:** Corre en el puerto `8001` (`http://100.83.91.76:8001` y `http://192.168.0.10:8001`).
+     * **Base de datos Sandbox:** Esquema `sandbox` (`DB_SEARCH_PATH=sandbox,public`).
+     * **Servicio Systemd:** `intelimarket-sandbox-api.service`. Reinicio con:
+       ```bash
+       sudo systemctl restart intelimarket-sandbox-api
+       ```
+       (Permitido con NOPASSWD en sudoers).
+     * **Regla estricta:** NUNCA sembrar datos de personas reales en el esquema sandbox.
+     * En sandbox se puede reiniciar libremente, experimentar con endpoints nuevos y probar sin ningún riesgo para la operación de las cajas físicas.
+
+9. **PRUEBAS AUTOMATIZADAS (PLAYWRIGHT Y WINRM):**
+   - **Playwright Local:** No depender del subagente interno del navegador si falla la descarga de binarios de Azure CDN. Utilizar el entorno de Playwright configurado en `tests-pos/` (`node tests-pos/...` o `npx playwright test`), el cual ya cuenta con Chromium instalado localmente y permite validar la interfaz del POS (`http://100.83.91.76:5173/pos`) generando capturas y aserciones.
+   - **Control de Cajas Físicas vía WinRM:** Para interactuar, diagnosticar o reiniciar las PCs de las Cajas 2, 3, 4 y 5 (Windows), utilizar el puerto 5985 desde la VM con el helper `/tmp/run_winrm.py` o tareas programadas interactivas.
+   - **Evidencia Obligatoria:** Todo cambio en la lógica del POS o del offline-first requiere evidencia real ejecutada (logs, capturas o queries SQL con servidor simulado/apagado) antes de ser considerado completado.
