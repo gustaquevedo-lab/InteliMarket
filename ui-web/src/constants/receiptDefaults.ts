@@ -129,7 +129,7 @@ export const DEFAULT_RECEIPT_CONFIG: ReceiptTemplateConfig = {
 
   habilitar_extra_club: true,
   puntos_por_mil_gs: 1,
-  mensaje_socio_club: "⭐ SOCIO EXTRA CLUB: Sumaste +150 Puntos. Saldo Total: 2.850 Puntos.",
+  mensaje_socio_club: "⭐ SOCIO EXTRA CLUB: Acumulás 1 Punto por cada Gs. 1.000 en tus compras.",
   mensaje_invitacion_club: "🎁 ¿Aún no eres socio Extra Club? Regístrate gratis en caja o en club.extrasuper.com.py y acumula puntos para canjear por premios y descuentos exclusivos.",
   mostrar_qr_club: true,
   qr_url_club: "https://club.extrasuper.com.py/registro",

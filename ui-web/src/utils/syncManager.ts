@@ -120,14 +120,13 @@ export async function getCachedCatalog(): Promise<{
   customers: CachedCustomer[]
   lastSync: string | null
 }> {
-  const [products, customers, state] = await Promise.all([
+  const [products, state] = await Promise.all([
     offlineDB.products.getAll(),
-    offlineDB.customers.getAll(),
     offlineDB.syncState.get(),
   ])
   return {
     products: products.filter(p => p.activo),
-    customers: customers.filter(c => c.activo),
+    customers: [], // Optimización: los clientes se buscan bajo demanda en offlineDB.customers.search
     lastSync: state?.last_full_sync || null,
   }
 }

@@ -553,7 +553,7 @@ export default function POSPage() {
   // (antes de que la venta se cree en el backend) para poder imprimir
   // "Sumaste X puntos" en el mismo comprobante, igual que ya se hace con
   // el bloque de firma de Extra Club.
-  const [loyaltyConfig, setLoyaltyConfig] = useState<{ activo: boolean; crear_en_venta: boolean; puntos_por_guarani: number } | null>(null)
+  const [loyaltyConfig, setLoyaltyConfig] = useState<any>(null)
   useEffect(() => {
     api.loyalty.getConfig(COMPANY_ID).then((cfg: any) => setLoyaltyConfig(cfg)).catch(() => {})
   }, [])
@@ -3434,6 +3434,9 @@ export default function POSPage() {
   }
 
   const handleOpenCierreModal = async () => {
+    if (pendingSalesCount > 0) {
+      toast.warning("Ventas Pendientes", `Hay ${pendingSalesCount} venta(s) guardadas localmente sin sincronizar. Sincronícelas antes de cerrar para asegurar el arqueo correcto.`)
+    }
     setShowCierreTurnoModal(true)
     setCierreTab("conteo")
     if (cashSessionId) {
@@ -5200,6 +5203,18 @@ export default function POSPage() {
       }
     } catch (err) {}
 
+    // 3.5 Fallback en IndexedDB local por código de barra o SKU (100% offline)
+    try {
+      const dbByBar = await offlineDB.products.getByBarcode(cleanCode)
+      const dbMatch = (dbByBar && dbByBar.length > 0) ? dbByBar[0] : (await offlineDB.products.getBySku(cleanCode))?.[0]
+      if (dbMatch) {
+        addToCart(dbMatch, qtyPrefix ?? undefined)
+        setSearch("")
+        searchInputRef.current?.focus()
+        return
+      }
+    } catch (dbErr) {}
+
     // 4. Si no existe coincidencia exacta de código, no adivinar ni agregar productos ajenos
     toast.warning("Producto no encontrado", `Código ${cleanCode} no está en catálogo.`)
     setLostDemandRows([{ producto: cleanCode, motivo: "sin_stock" }])
@@ -6842,13 +6857,31 @@ export default function POSPage() {
       const showIva = tpl.mostrar_liquidacion_iva !== false
       const showPagos = tpl.mostrar_desglose_pagos !== false
       const showClub = tpl.habilitar_extra_club !== false
-      // isClubMember antes se calculaba solo por "hay un cliente elegido"
-      // (cualquier venta con nombre de cliente salia rotulada "FACTURA
-      // CREDITO", incluso pagada en efectivo) -- ahora es especificamente
-      // "se pago con Extra Club", que es lo unico que realmente es credito.
+      // isClubMember determina si la condición fiscal de la factura es CRÉDITO (pago con Extra Club)
       const isClubMember = activeMethods.has("extra_club") && (!isMultiPayment || parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) > 0)
-      const msgSocio = tpl.mensaje_socio_club || `⭐ SOCIO EXTRA CLUB: Sumaste +${Math.round(totalPyg / 1000)} Puntos. Saldo Total: 2.850 Puntos.`
-      const msgInvitacion = tpl.mensaje_invitacion_club || "🎁 ¿Aún no eres socio Extra Club? Regístrate gratis en caja o en club.extrasuper.com.py y acumula puntos para canjear por premios y descuentos exclusivos."
+
+      // Identificación estricta de Socio Extra Club (por número de socio, independiente del medio de pago)
+      const isSocioExtraClub = Boolean(
+        customer.id !== DEFAULT_CUSTOMER.id &&
+        (customer as any)?.extra_club_numero &&
+        String((customer as any).extra_club_numero).trim() !== ""
+      )
+      const socioNumero = isSocioExtraClub ? String((customer as any).extra_club_numero).trim() : ""
+
+      // Reglas dinámicas de lealtad leídas desde loyaltyConfig (sin valores hardcodeados)
+      const divisorPyg = (loyaltyConfig?.puntos_por_guarani && loyaltyConfig.puntos_por_guarani > 0)
+        ? loyaltyConfig.puntos_por_guarani
+        : 1000
+      const promoActiva = Boolean((loyaltyConfig as any)?.promocion_activa && ((loyaltyConfig as any)?.multiplicador_promocional || 1) > 1)
+      const factorPromo = promoActiva ? Number((loyaltyConfig as any)?.multiplicador_promocional || 1) : 1.0
+      const promoNombre = promoActiva ? ((loyaltyConfig as any)?.promocion_nombre || "Campaña Especial") : null
+
+      const puntosBase = (isSocioExtraClub && loyaltyConfig?.activo !== false && loyaltyConfig?.crear_en_venta !== false)
+        ? Math.floor(totalPyg / divisorPyg)
+        : 0
+      const puntosEstimados = Math.floor(puntosBase * factorPromo)
+
+      const msgInvitacion = tpl.mensaje_invitacion_club || `🎁 ¿Aún no eres socio Extra Club? Regístrate gratis en caja y acumula 1 punto por cada Gs. ${divisorPyg.toLocaleString("es-PY")} en premios y beneficios exclusivos.`
       const showMarketing = tpl.habilitar_mensaje_marketing && tpl.mensaje_marketing
       const showCupon = tpl.habilitar_cupon_descuento && tpl.cupon_codigo
       const cuponCod = tpl.cupon_codigo || "EXTRA10OFF"
@@ -7099,28 +7132,22 @@ export default function POSPage() {
       let createdOfflineSaleId: string | null = null
       let saleCreatePromise: Promise<any> | null = null
       if (tpl.usar_numero_interno_venta) {
-        try {
-          // withTimeout: 10s para permitir cálculo fiscal completo sin falsos fallos en red local
-          const created = await withTimeout(api.sales.create(saleBasePayload as any), 10000)
-          numeroComprobante = created.numero || saleNumber
-          numeroInterno = (created as any).numero_interno || null
-          ventaYaCreadaSinRecibo = true
-          createdSaleId = created.id
-        } catch (apiErr: any) {
-          console.error("No se pudo registrar la venta para obtener el número interno, se reintenta en modo offline:", apiErr)
+        if (serverOnline && navigator.onLine) {
+          try {
+            // withTimeout: 8s para permitir cálculo fiscal completo sin falsos fallos en red local
+            const created = await withTimeout(api.sales.create(saleBasePayload as any), 8000)
+            numeroComprobante = created.numero || saleNumber
+            numeroInterno = (created as any).numero_interno || null
+            ventaYaCreadaSinRecibo = true
+            createdSaleId = created.id
+          } catch (apiErr: any) {
+            console.error("No se pudo registrar la venta para obtener el número interno, se reintenta en modo offline:", apiErr)
+          }
         }
       }
 
       // Formateo de Factura Térmica Dinámica (Calibrada al ancho y márgenes configurados en el Diseñador)
-      // Estimacion de puntos de fidelidad -- misma formula que usa el backend
-      // (piso de total/puntos_por_guarani), asi que coincide con lo que
-      // realmente se va a guardar. No aplica a Consumidor Final.
-      const puntosEstimados = (
-        customer.id !== DEFAULT_CUSTOMER.id &&
-        loyaltyConfig?.activo &&
-        loyaltyConfig?.crear_en_venta &&
-        loyaltyConfig?.puntos_por_guarani > 0
-      ) ? Math.floor(totalPyg / loyaltyConfig.puntos_por_guarani) : 0
+      // Puntos dinámicos ya calculados arriba (puntosEstimados) leyendo divisor y multiplicadores de loyaltyConfig.
 
       const receiptHtml = `
         <div style="font-family: '${font}', 'Consolas', 'Segoe UI', monospace; font-size: ${fontSize}px; line-height: ${interlineado}; margin: 0 auto; padding-left: ${margenIzqMm}mm; padding-right: ${margenDerMm}mm; box-sizing: border-box; width: 100%; max-width: ${anchoImprimibleMm}mm; color: #000;">
@@ -7310,12 +7337,6 @@ export default function POSPage() {
             </div>
           ` : ''}
 
-          ${puntosEstimados > 0 ? `
-            <div style="border-top: 1px dashed #000; margin-top: 5px; padding-top: 3px; font-size: 9.5px; text-align: center; font-weight: bold;">
-              ⭐ Sumaste ${puntosEstimados} puntos de fidelidad
-            </div>
-          ` : ''}
-
           ${showIva ? `
             <div style="border-top: 1px dashed #000; margin-top: 5px; padding-top: 3px; font-size: 9px;">
               <div style="font-weight: bold; margin-bottom: 2px;">LIQUIDACIÓN DEL IVA (Ley Nº 6380/19):</div>
@@ -7344,10 +7365,14 @@ export default function POSPage() {
           ` : ''}
 
           ${showClub ? `
-            <div style="border: 1px dashed #000; padding: 4px; margin: 5px 0; text-align: center; font-size: 9.5px;">
-              ${isClubMember ? `
-                <div style="font-weight: 900; font-size: 10px;">★ CLUB FIDELIDAD EXTRA ★</div>
-                <div style="margin-top: 2px;">${msgSocio}</div>
+            <div style="border: 1px dashed #000; padding: 5px; margin: 5px 0; text-align: center; font-size: 9.5px;">
+              ${isSocioExtraClub ? `
+                <div style="font-weight: 900; font-size: 10px; letter-spacing: 0.5px;">★ SOCIO EXTRA CLUB ★</div>
+                <div style="font-size: 8.5px; color: #333; margin-top: 1px;">Socio N°: <strong>${socioNumero}</strong></div>
+                <div style="font-size: 11px; font-weight: 900; margin-top: 3px;">⭐ Sumaste: +${fmtGs(puntosEstimados)} Puntos</div>
+                <div style="font-size: 8px; margin-top: 2px; color: #555;">
+                  ${promoActiva ? `🎉 Multiplicador Especial: ${promoNombre} (x${factorPromo})` : `(Política: 1 Punto por cada Gs. ${fmtGs(divisorPyg)})`}
+                </div>
               ` : `
                 <div style="font-weight: 900; font-size: 10px;">★ ÚNETE AL EXTRA CLUB ★</div>
                 <div style="margin-top: 2px; font-size: 8.5px;">${msgInvitacion}</div>
@@ -7397,8 +7422,8 @@ export default function POSPage() {
       // ticket -- antes se esperaba esta llamada antes de imprimir, lo que
       // sumaba al delay entre cobrar y que salga el ticket.
       if (!ventaYaCreadaSinRecibo) {
-        saleCreatePromise = withTimeout(api.sales.create({ ...saleBasePayload, recibo_html: receiptHtml } as any), 10000).catch(async (apiErr: any) => {
-          console.warn("[POS] API central no disponible o demorada, encolando venta offline en IndexedDB...", apiErr)
+        if (!serverOnline || !navigator.onLine) {
+          // Modo Offline Inmediato (0ms de espera): encolado directo en IndexedDB
           try {
             const offlineId = `off-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
             createdOfflineSaleId = offlineId
@@ -7414,10 +7439,32 @@ export default function POSPage() {
             toast.warning("Venta guardada en modo offline", "El ticket se imprimió y la venta se sincronizará automáticamente cuando vuelva la conexión.")
           } catch (dbErr) {
             console.error("Error guardando en pendingSales:", dbErr)
-            toast.error("Venta no guardada en el sistema", apiErr?.message || "Avisá a soporte.")
+            toast.error("Venta no guardada en el sistema", "Error de almacenamiento local. Avisá a soporte.")
           }
-          return null
-        })
+        } else {
+          // Modo Online: registro en segundo plano sin retrasar la salida del ticket
+          saleCreatePromise = withTimeout(api.sales.create({ ...saleBasePayload, recibo_html: receiptHtml } as any), 8000).catch(async (apiErr: any) => {
+            console.warn("[POS] API central no disponible o demorada, encolando venta offline en IndexedDB...", apiErr)
+            try {
+              const offlineId = `off-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+              createdOfflineSaleId = offlineId
+              await offlineDB.pendingSales.add({
+                id: offlineId,
+                data: { ...saleBasePayload, recibo_html: receiptHtml },
+                created_at: new Date().toISOString(),
+                status: "pending",
+                retry_count: 0,
+                last_retry: new Date().toISOString(),
+                next_retry: new Date().toISOString(),
+              })
+              toast.warning("Venta guardada en modo offline", "El ticket se imprimió y la venta se sincronizará automáticamente cuando vuelva la conexión.")
+            } catch (dbErr) {
+              console.error("Error guardando en pendingSales:", dbErr)
+              toast.error("Venta no guardada en el sistema", apiErr?.message || "Avisá a soporte.")
+            }
+            return null
+          })
+        }
       }
 
       // Si el cobro con tarjeta se verificó contra la transacción real de la
@@ -7650,12 +7697,7 @@ export default function POSPage() {
           t += ESCPOS_ALIGN_LEFT
         }
 
-        if (puntosEstimados > 0) {
-          t += escposDashes(W) + '\n'
-          t += ESCPOS_ALIGN_CENTER
-          t += ESCPOS_BOLD_ON + `Sumaste ${puntosEstimados} puntos de fidelidad` + ESCPOS_BOLD_OFF + '\n'
-          t += ESCPOS_ALIGN_LEFT
-        }
+
 
         if (showIva) {
           t += escposDashes(W) + '\n'
@@ -7668,9 +7710,15 @@ export default function POSPage() {
         if (showClub) {
           t += escposDashes(W) + '\n'
           t += ESCPOS_ALIGN_CENTER
-          if (isClubMember) {
-            t += ESCPOS_BOLD_ON + '* CLUB FIDELIDAD EXTRA *' + ESCPOS_BOLD_OFF + '\n'
-            t += escposWrapText(msgSocio, W)  // sin 'center': impresora ya centra
+          if (isSocioExtraClub) {
+            t += ESCPOS_BOLD_ON + '* SOCIO EXTRA CLUB *' + ESCPOS_BOLD_OFF + '\n'
+            t += `Socio Nro: ${socioNumero}\n`
+            t += ESCPOS_BOLD_ON + `Sumaste: +${fmtGs(puntosEstimados)} Pts.` + ESCPOS_BOLD_OFF + '\n'
+            if (promoActiva) {
+              t += escposWrapText(`Campana: ${promoNombre} (x${factorPromo})`, W)
+            } else {
+              t += `(1 pt = Gs. ${fmtGs(divisorPyg)})\n`
+            }
           } else {
             t += ESCPOS_BOLD_ON + '* UNITE AL EXTRA CLUB *' + ESCPOS_BOLD_OFF + '\n'
             t += escposWrapText(msgInvitacion, W)  // sin 'center'
@@ -8033,12 +8081,26 @@ export default function POSPage() {
               </span>
             )}
             {pendingSalesCount > 0 && (
-              <span
-                className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-blue-500/15 text-blue-500 border border-blue-500/40 shrink-0"
-                title="Ventas guardadas localmente, pendientes de sincronizar con el servidor."
+              <button
+                type="button"
+                onClick={async () => {
+                  toast.info("Sincronizando...", "Enviando ventas pendientes al servidor...")
+                  try {
+                    const res = await syncPendingSales()
+                    if (res.synced > 0) {
+                      toast.success("Sincronización Exitosa", `${res.synced} venta(s) enviadas al servidor.`)
+                    } else if (res.failed > 0) {
+                      toast.warning("Sincronización Incompleta", `${res.failed} venta(s) pendientes. Verifique conexión.`)
+                    }
+                  } catch (e: any) {
+                    toast.error("Error de sincronización", e?.message || "Servidor no alcanzable.")
+                  }
+                }}
+                className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-blue-500/15 text-blue-500 border border-blue-500/40 shrink-0 cursor-pointer hover:bg-blue-500/25 active:scale-95 transition-all"
+                title="Haga clic para forzar la sincronización de ventas pendientes con el servidor ahora."
               >
-                {pendingSalesCount} pend.
-              </span>
+                🔄 {pendingSalesCount} pend.
+              </button>
             )}
 
             {isSupervisorUser && (
