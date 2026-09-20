@@ -896,17 +896,16 @@ export default function PromocionesPage() {
     setNewHorarioHasta(promo.horario_hasta ? String(promo.horario_hasta).slice(0, 5) : "21:00")
     setNewDiasSemana(promo.dias_semana && promo.dias_semana.length > 0 ? promo.dias_semana : [0, 1, 2, 3, 4, 5, 6])
     // Precargar productos seleccionados a partir de productos_detalle
-    const prodsDetalle = (promo as any).productos_detalle as Array<{ id: string; nombre: string; sku?: string; codigo_barra?: string }> | undefined
+    const prodsDetalle = (promo as any).productos_detalle as Array<{ id: string; nombre: string; sku?: string; codigo_barra?: string; precio_venta?: number; costo_promedio?: number }> | undefined
     const savedPrecios = (promo as any).precios_por_producto as Record<string, number> | undefined
     const batchMap = new Map<string, SelectedPromoProduct>()
     if (prodsDetalle && prodsDetalle.length > 0) {
       const costoRef = (promo.costo_unitario_referencia as number | undefined) ?? 0
       const precioPromoRef = (promo.precio_fijo_promocional as number | undefined) ?? 0
       prodsDetalle.forEach(det => {
-        // Usar el catálogo local si está disponible para obtener precio y costo reales
-        const localProd = allCatalogProducts.find(p => p.id === det.id)
-        const costo = localProd ? Number(localProd.costo_promedio || 0) : costoRef
-        const precioReg = localProd ? Number(localProd.precio_venta || 0) : 0
+        // Usar precio_venta y costo_promedio devueltos directamente por el backend
+        const costo = det.costo_promedio != null ? Number(det.costo_promedio) : costoRef
+        const precioReg = det.precio_venta != null ? Number(det.precio_venta) : 0
         const hasSavedPrice = savedPrecios && savedPrecios[det.id] !== undefined
         const precioPromo = hasSavedPrice
           ? Number(savedPrecios[det.id])
@@ -920,12 +919,16 @@ export default function PromocionesPage() {
               (promo.base_calculo_pct as "venta" | "costo") ?? "venta",
               promo.terminacion_psicologica ?? ""
             ))
+        // Marcar como editado manualmente si: hay precio guardado por producto,
+        // O hay un precio de referencia > 0 (precio_fijo_oferta, etc.)
+        // Esto protege al useEffect de recalcular con precio_regular=0 cuando no hay datos
+        const esManual = hasSavedPrice || (precioPromoRef > 0 && !hasSavedPrice)
         batchMap.set(det.id, {
-          product: localProd || ({ id: det.id, nombre: det.nombre, sku: det.sku, codigo_barra: det.codigo_barra } as any),
+          product: { id: det.id, nombre: det.nombre, sku: det.sku, codigo_barra: det.codigo_barra } as any,
           costo,
           precio_regular: precioReg,
           precio_promocional: precioPromo,
-          precio_editado_manualmente: hasSavedPrice
+          precio_editado_manualmente: esManual
         })
       })
     }
@@ -993,7 +996,7 @@ export default function PromocionesPage() {
       }
 
       if (newTipo === "precio_fijo_oferta") {
-        payload.precio_fijo_promocional = newBulkPrecioFijo !== "" ? Number(newBulkPrecioFijo) : avgPromoPrice
+        payload.precio_fijo_promocional = newBulkPrecioFijo !== "" ? Number(newBulkPrecioFijo) : undefined
       } else if (newTipo === "porcentaje") {
         payload.valor = Number(newBulkValorPct)
         payload.base_calculo_pct = selectionMode === "category" ? "venta" : newBaseCalculoPct
@@ -1654,8 +1657,12 @@ export default function PromocionesPage() {
                   </div>
                   <div className="max-h-36 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-700/60 bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700">
                     {viewingPromo.producto_ids.map(pid => {
-                      const prodDetail = ((viewingPromo as any).productos_detalle as any[])?.find(p => p.id === pid)
+                      const prodDetail = ((viewingPromo as any).productos_detalle as any[])?.find((p: any) => p.id === pid)
                       const prod = prodDetail || allCatalogProducts.find(p => p.id === pid)
+                      // Precio promo individual: desde precios_por_producto, o precio_fijo_promocional general
+                      const savedPrecios = (viewingPromo as any).precios_por_producto as Record<string, number> | null
+                      const precioPromo = savedPrecios?.[pid] ?? savedPrecios?.[String(pid)]
+                        ?? (viewingPromo.precio_fijo_promocional ? Number(viewingPromo.precio_fijo_promocional) : null)
                       return (
                         <div key={pid} className="p-2 flex items-center justify-between gap-2 text-xs">
                           <div className="truncate min-w-0">
@@ -1665,12 +1672,20 @@ export default function PromocionesPage() {
                             <span className="text-[10px] text-gray-500 dark:text-gray-400 font-mono flex items-center gap-2 mt-0.5">
                               {prod?.sku && <span className="text-indigo-600 dark:text-indigo-400 font-semibold">SKU: {prod.sku}</span>}
                               {prod?.codigo_barra && <span>CB: {prod.codigo_barra}</span>}
-                              {prod?.costo_promedio ? <span>Costo: {formatPYG(Number(prod.costo_promedio))}</span> : null}
+                              {(prod as any)?.precio_venta && <span className="line-through text-gray-400">Reg: {formatPYG(Number((prod as any).precio_venta))}</span>}
                             </span>
                           </div>
-                          <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
-                            {prod?.precio_venta ? formatPYG(Number(prod.precio_venta)) : ""}
-                          </span>
+                          <div className="text-right shrink-0">
+                            {precioPromo != null && precioPromo > 0 ? (
+                              <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                {formatPYG(precioPromo)}
+                              </span>
+                            ) : viewingPromo.valor ? (
+                              <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                                -{viewingPromo.valor}%
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                       )
                     })}

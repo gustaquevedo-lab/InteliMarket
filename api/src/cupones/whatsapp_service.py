@@ -47,21 +47,42 @@ async def send_cupon_whatsapp_confirmation(
     cantidad_cupones: int,
     nombre_fantasia: str = "Extra Supermercado",
     template: Optional[str] = None,
-    sorteo_nombre: Optional[str] = None
+    sorteo_nombre: Optional[str] = None,
+    db: Any = None,
+    company_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Envía mensaje humanizado de confirmación de cupones vía Evolution API.
+    Envía mensaje humanizado de confirmación de cupones vía Evolution API,
+    resolviendo prioritariamente la plantilla oficial 'cupon.sorteo' configurada por el usuario.
     """
     plural_cupon = "cupón" if cantidad_cupones == 1 else "cupones"
     sorteo_txt = sorteo_nombre or "Gran Sorteo Aniversario Extra Supermercado"
 
-    if template and template.strip():
-        mensaje = template
-        mensaje = mensaje.replace("{{nombre}}", nombre.strip())
-        mensaje = mensaje.replace("{{cantidad}}", f"{cantidad_cupones} {plural_cupon}")
-        mensaje = mensaje.replace("{{sorteo}}", sorteo_txt)
-        mensaje = mensaje.replace("{{ticket}}", nro_ticket)
-        mensaje = mensaje.replace("{{empresa}}", nombre_fantasia)
+    resolved_template = template
+    if db and company_id:
+        try:
+            from uuid import UUID
+            from api.src.whatsapp.service import get_wa_template
+            official_tmpl = await get_wa_template(db, UUID(str(company_id)), "cupon.sorteo")
+            if official_tmpl and official_tmpl.strip():
+                resolved_template = official_tmpl
+        except Exception as e:
+            logger.warning(f"No se pudo consultar get_wa_template para cupones: {e}")
+
+    if resolved_template and resolved_template.strip():
+        from api.src.whatsapp.service import format_wa_template
+        mensaje = format_wa_template(
+            resolved_template,
+            nombre=nombre.strip(),
+            cliente=nombre.strip(),
+            cantidad=f"{cantidad_cupones} {plural_cupon}",
+            cupones_generados=str(cantidad_cupones),
+            sorteo=sorteo_txt,
+            campana_sorteo=sorteo_txt,
+            ticket=nro_ticket,
+            numero=nro_ticket,
+            empresa=nombre_fantasia,
+        )
     else:
         mensaje = (
             f"¡Hola *{nombre.strip()}*! 👋\n\n"

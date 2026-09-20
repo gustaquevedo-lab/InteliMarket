@@ -247,7 +247,9 @@ async def registrar_cupon(
                     cantidad_cupones=cupon_ticket.cantidad,
                     nombre_fantasia="Extra Supermercado",
                     template=cfg.whatsapp_mensaje_template,
-                    sorteo_nombre=cfg.sorteo_nombre
+                    sorteo_nombre=cfg.sorteo_nombre,
+                    db=db,
+                    company_id=company_id,
                 )
                 if res_wa.get("success"):
                     cupon_ticket.whatsapp_enviado = True
@@ -1218,15 +1220,17 @@ async def registrar_cupones_multiples(
                 nro_ticket=data.nro_ticket
             ):
                 try:
-                    res_wa = await send_cupon_whatsapp_confirmation(
-                        telefono=tel,
-                        nombre=nom,
-                        cantidad_cupones=t_cant,
-                        nro_ticket=nro_ticket,
-                        template=t_tmpl,
-                        sorteo_nombre=c_nombre
-                    )
                     async with async_session_factory() as bg_db:
+                        res_wa = await send_cupon_whatsapp_confirmation(
+                            telefono=tel,
+                            nombre=nom,
+                            cantidad_cupones=t_cant,
+                            nro_ticket=nro_ticket,
+                            template=t_tmpl,
+                            sorteo_nombre=c_nombre,
+                            db=bg_db,
+                            company_id=data.company_id,
+                        )
                         t_db = await bg_db.get(CuponTicket, t_id)
                         if t_db:
                             t_db.whatsapp_enviado = res_wa.get("success", False)

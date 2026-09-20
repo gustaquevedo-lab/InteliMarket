@@ -596,6 +596,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
 
     await _deduct_stock_for_sale(db, sale, data)
     puntos_ganados = await _award_loyalty_points(db, sale, data)
+    await _redeem_customer_offers(db, sale, data)
 
     await db.flush()
     await db.refresh(sale)
@@ -687,30 +688,74 @@ async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate)
 async def _award_loyalty_points(db: AsyncSession, sale: Sale, data: SaleCreate) -> int:
     if not data.customer_id:
         return 0
+    from api.src.customers.models import Customer
+    cust = await db.get(Customer, data.customer_id)
+    if not cust or not cust.extra_club_numero or not cust.extra_club_numero.strip():
+        # REGLA ESTRICTA: Solo quien es socio de Extra Club (con número de socio válido) acumula puntos.
+        return 0
     from api.src.loyalty import service as loyalty_service
     from api.src.loyalty.schemas import PointsCreate
     config = await loyalty_service.get_or_create_config(db, str(data.company_id))
-    if config.activo and config.crear_en_venta and config.puntos_por_guarani > 0:
-        # puntos_por_guarani se usa como divisor (guaranies necesarios por punto),
-        # no como multiplicador -- con guaranies reales, un multiplicador entero >=1
-        # da millones de puntos por venta. Nunca se habia conectado hasta ahora.
-        puntos = int(sale.total // config.puntos_por_guarani)
-        if puntos > 0:
-            await loyalty_service.earn_points(
-                db,
-                PointsCreate(
-                    company_id=data.company_id,
-                    customer_id=data.customer_id,
-                    tipo="ganado",
-                    puntos=puntos,
-                    referencia_tipo="sale",
-                    referencia_id=str(sale.id),
-                    descripcion=f"Compra {sale.numero}",
-                ),
-                config=config,
-            )
-            return puntos
+    if config.activo and config.crear_en_venta:
+        divisor = config.puntos_por_guarani if config.puntos_por_guarani > 0 else 1000
+        base_puntos = int(sale.total // divisor)
+        if base_puntos > 0:
+            # Multiplicador dinámico de campaña promocional
+            factor = 1.0
+            campana_desc = ""
+            if getattr(config, "promocion_activa", False):
+                mult_promo = float(getattr(config, "multiplicador_promocional", 1.0) or 1.0)
+                if mult_promo > 1.0:
+                    factor *= mult_promo
+                    p_name = getattr(config, "promocion_nombre", "") or "Promo ExtraClub"
+                    campana_desc = f" [{p_name} x{mult_promo:g}]"
+            
+            puntos = int(base_puntos * factor)
+            if puntos > 0:
+                await loyalty_service.earn_points(
+                    db,
+                    PointsCreate(
+                        company_id=data.company_id,
+                        customer_id=data.customer_id,
+                        tipo="ganado",
+                        puntos=puntos,
+                        referencia_tipo="sale",
+                        referencia_id=str(sale.id),
+                        descripcion=f"Compra {sale.numero} - {puntos} pts (Base: {base_puntos} pts @ Gs. {divisor:,}{campana_desc})",
+                    ),
+                    config=config,
+                )
+                return puntos
     return 0
+
+
+async def _redeem_customer_offers(db: AsyncSession, sale: Sale, data: SaleCreate) -> None:
+    """Marca como usadas las ofertas personalizadas del cliente para los productos adquiridos en la venta."""
+    if not data.customer_id:
+        return
+    from api.src.marketing.models import CustomerOffer
+
+    product_ids = [item.product_id for item in data.items if item.product_id]
+    if not product_ids:
+        return
+
+    now = datetime.now(timezone.utc)
+    stmt = (
+        select(CustomerOffer)
+        .where(
+            CustomerOffer.company_id == data.company_id,
+            CustomerOffer.customer_id == data.customer_id,
+            CustomerOffer.product_id.in_(product_ids),
+            CustomerOffer.usado == False,
+            or_(CustomerOffer.valido_hasta.is_(None), CustomerOffer.valido_hasta >= now),
+        )
+    )
+    res = await db.execute(stmt)
+    offers = res.scalars().all()
+    for off in offers:
+        off.usado = True
+        off.usado_at = now
+        logger.info(f"Oferta personalizada {off.id} redimida en venta {sale.numero} para cliente {data.customer_id}")
 
 
 async def finalize_approved_credit_sale(db: AsyncSession, request) -> Sale:

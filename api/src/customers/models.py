@@ -1,7 +1,7 @@
 """Customer model"""
 
 from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Text, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.sql import func
 
 from api.src.db import Base
@@ -36,6 +36,11 @@ class Customer(Base):
     es_agente_retencion = Column(Boolean, default=False, server_default=text("false"))
     regimen_retencion = Column(String(30), default="general", server_default=text("'general'"))
     porcentaje_retencion_iva = Column(Numeric(5, 2), default=30.00, server_default=text("30.00"))
+    idioma = Column(String(10), default="es", server_default=text("'es'"))
+    whatsapp_valido = Column(Boolean, default=True, server_default=text("true"))
+    arquetipo = Column(String(100))
+    tags = Column(ARRAY(String), default=list, server_default=text("'{}'::text[]"))
+    ia_analisis = Column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     activo = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

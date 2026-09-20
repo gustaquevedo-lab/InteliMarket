@@ -274,6 +274,25 @@ async def download_supervisor_apk():
     return {"error": "APK de Supervisor no encontrado"}
 
 
+@app.get("/download/deposito-apk")
+@app.get("/download/extra-deposito.apk")
+async def download_deposito_apk():
+    candidate_paths = [
+        Path("/home/intellihouse/intelimarket/downloads/extra-deposito.apk"),
+        Path("/home/intellihouse/intelimarket/ui-web-dist/downloads/extra-deposito.apk"),
+        Path("/home/intellihouse/intelimarket/ui-web/public/downloads/extra-deposito.apk"),
+    ]
+    for cp in candidate_paths:
+        if cp.exists():
+            return FileResponse(
+                path=str(cp),
+                filename="extra-deposito.apk",
+                media_type="application/vnd.android.package-archive",
+                headers={"Content-Disposition": "attachment; filename=extra-deposito.apk"}
+            )
+    return {"error": "APK de Depósito no encontrado"}
+
+
 @app.get("/download/salon-apk")
 @app.get("/download/extra-salon.apk")
 async def download_salon_apk():

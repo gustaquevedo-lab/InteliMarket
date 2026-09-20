@@ -77,9 +77,16 @@ async def _send_sale_wa(db: AsyncSession, sale, customer_phone: str | None, tipo
             puntos_val = res_pts.scalar() or 0
         except Exception:
             puntos_val = 0
-    puntos_int = int(puntos_val or 0)
-    puntos_str = f"{puntos_int:,}".replace(",", ".")
-    valor_monetario_str = f"{puntos_int * 100:,}".replace(",", ".")
+    g_x_p = 100
+    try:
+        from api.src.loyalty.models import LoyaltyConfig
+        l_cfg_res = await db.execute(select(LoyaltyConfig).where(LoyaltyConfig.company_id == sale.company_id))
+        l_cfg = l_cfg_res.scalar_one_or_none()
+        if l_cfg and l_cfg.guarani_por_punto:
+            g_x_p = int(l_cfg.guarani_por_punto)
+    except Exception:
+        pass
+    valor_monetario_str = f"{puntos_int * g_x_p:,}".replace(",", ".")
 
     # 5. Cupones de Sorteo generados
     cupones_gen = 0
@@ -132,6 +139,7 @@ async def _send_sale_wa(db: AsyncSession, sale, customer_phone: str | None, tipo
         "cupones_generados": str(cupones_gen),
         "cupones_totales": str(cupones_tot),
         "campana_sorteo": campana_sorteo,
+        "guarani_por_punto": str(g_x_p),
         **(extra or {}),
     }
     message = format_wa_template(template, **kwargs)
@@ -432,3 +440,20 @@ async def link_order(sale_id: str, body: SaleLinkOrder, db: AsyncSession = Depen
     if not result:
         raise HTTPException(status_code=404, detail="Venta o pedido no encontrado")
     return {"message": "Pedido vinculado", "sale_id": sale_id, "order_id": str(body.order_id)}
+
+
+@router.get("/sales/customer-offers/{customer_id}")
+async def get_active_customer_offers_for_pos(
+    customer_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Consulta ofertas 1-a-1 activas para aplicar en el POS al ingresar el documento del cliente."""
+    from api.src.customer360.service import get_customer_offers
+    try:
+        offers = await get_customer_offers(db, str(user["company_id"]), customer_id)
+        # Filtrar solo aquellas ofertas vigentes y no usadas
+        return [o for o in offers if o.get("is_active")]
+    except Exception as e:
+        return []
+

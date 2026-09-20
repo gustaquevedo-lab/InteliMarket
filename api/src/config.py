@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     evolution_api_key: str = "c616d81834c74317ad473380a10d35d84d6eacd08a7c467a6e7d79f29c0340d4"
     evolution_instance_name: str = "extra_supermercado"
 
+    # Ollama Local LLM (Servidor IntelliZapp dev-server)
+    ollama_base_url: str = "http://100.72.38.119:11434/v1"
+    ollama_model: str = "qwen2.5:7b"
+
     # Email
     smtp_host: str = ""
     smtp_port: int = 587

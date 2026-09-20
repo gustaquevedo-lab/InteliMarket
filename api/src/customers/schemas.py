@@ -32,6 +32,8 @@ class CustomerCreate(BaseModel):
     es_agente_retencion: bool = False
     regimen_retencion: Optional[str] = "general"
     porcentaje_retencion_iva: Optional[Decimal] = Decimal("30.00")
+    idioma: Optional[str] = "es"
+    whatsapp_valido: Optional[bool] = True
     activo: bool = True
 
 
@@ -56,6 +58,11 @@ class CustomerUpdate(BaseModel):
     es_agente_retencion: Optional[bool] = None
     regimen_retencion: Optional[str] = None
     porcentaje_retencion_iva: Optional[Decimal] = None
+    idioma: Optional[str] = None
+    whatsapp_valido: Optional[bool] = None
+    arquetipo: Optional[str] = None
+    tags: Optional[list[str]] = None
+    ia_analisis: Optional[dict] = None
     activo: Optional[bool] = None
     extra_club_numero: Optional[str] = None
     empresa_vinculada_nombre: Optional[str] = None
@@ -88,6 +95,11 @@ class CustomerResponse(BaseModel):
     es_agente_retencion: Optional[bool] = False
     regimen_retencion: Optional[str] = "general"
     porcentaje_retencion_iva: Optional[float] = 30.0
+    idioma: Optional[str] = "es"
+    whatsapp_valido: Optional[bool] = True
+    arquetipo: Optional[str] = None
+    tags: Optional[list[str]] = []
+    ia_analisis: Optional[dict] = {}
     activo: bool
     created_at: datetime
     updated_at: datetime

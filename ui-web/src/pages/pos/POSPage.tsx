@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue } from "react"
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { createPortal } from "react-dom"
 import {
   Search, ScanLine, ShoppingCart, Calculator, ClipboardList, Save, Loader2, Sun, Moon, Plus, Minus, Trash2, User, Pause, Play,
@@ -203,12 +203,6 @@ function patchEscposTicketCustomer(b64: string, name: string, doc: string): stri
 // cajas reales cargan por HTTP plano en la LAN (http://192.168.0.10:5173),
 // asi que ahi NO existe y tira TypeError. Mismo patron ya usado en
 // CustomersPage.tsx para el mismo problema.
-// Peso minimo (kg) para considerar que hay algo pesandose en la balanza. Las
-// balanzas de las cajas marcan ~0.020 kg en vacio (ruido/offset): con un umbral
-// de 0.015 el carbon se cobraba a 0.020 kg x Gs 10.500 = Gs 210. Por debajo de
-// este valor se pide el peso manual en vez de tomar la lectura de la balanza.
-const PESO_MIN_BALANZA_KG = 0.05
-
 function generarUUIDLocal(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID()
@@ -872,6 +866,15 @@ export default function POSPage() {
       return DEFAULT_CUSTOMER
     }
   })
+
+  // ── OFERTAS PERSONALIZADAS "TE EXTRAÑAMOS" DIRIGIDAS AL CLIENTE ──
+  const [activeCustomerOffers, setActiveCustomerOffers] = useState<any[]>([])
+  const [festiveOfferAlert, setFestiveOfferAlert] = useState<{
+    cliente: string
+    producto: string
+    precio: number
+    ahorro: number
+  } | null>(null)
 
   useEffect(() => {
     try {
@@ -2904,12 +2907,6 @@ export default function POSPage() {
       return
     }
 
-    // Producto sin precio: no se agrega al carrito (se vendia a Gs 0 sin aviso).
-    if (!(Number(product.precio_venta) > 0)) {
-      toast.error("PRODUCTO SIN PRECIO", `${product.nombre} (${product.sku || product.codigo_barra || "s/c"}) tiene precio 0. Avisá a administración para cargarlo; no se agregó al carrito.`)
-      return
-    }
-
     setLastScannedProduct(product)
 
     const isPesable = isPesableProduct(product)
@@ -2935,7 +2932,7 @@ export default function POSPage() {
       }
       finalQty = quantityOverride
     } else if (isPesable) {
-      if (currentScaleWeight > PESO_MIN_BALANZA_KG) {
+      if (currentScaleWeight > 0.015) {
         finalQty = currentScaleWeight
       } else {
         setTargetWeighProduct(product)
@@ -3094,13 +3091,63 @@ export default function POSPage() {
 
   // Cuando cambia el cliente de la venta (F9, o volver a Consumidor Final),
   // recalcular el precio de las lineas no pesables ya en el carrito contra
-  // la lista/asignacion del nuevo cliente.
+  // la lista/asignacion del nuevo cliente y cargar ofertas 1-a-1 activas.
   useEffect(() => {
     cart.forEach((item) => {
       if (!item.es_pesable) applyTieredPrice(item.product_id, item.quantity, customer.id)
     })
+
+    if (customer && customer.id && customer.id !== DEFAULT_CUSTOMER.id) {
+      api.sales.getCustomerOffers(customer.id)
+        .then((offers) => {
+          if (Array.isArray(offers)) {
+            setActiveCustomerOffers(offers)
+          } else {
+            setActiveCustomerOffers([])
+          }
+        })
+        .catch(() => setActiveCustomerOffers([]))
+    } else {
+      setActiveCustomerOffers([])
+      setFestiveOfferAlert(null)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customer.id])
+
+  // Aplicar ofertas personalizadas "Te Extrañamos" a los productos en el carrito
+  useEffect(() => {
+    if (!activeCustomerOffers || activeCustomerOffers.length === 0 || cart.length === 0) return
+
+    let cartUpdated = false
+    const newCart = cart.map((item) => {
+      const matchingOffer = activeCustomerOffers.find((o) => o.product_id === item.product_id)
+      if (matchingOffer && matchingOffer.precio_oferta && item.precio !== matchingOffer.precio_oferta) {
+        cartUpdated = true
+        setFestiveOfferAlert({
+          cliente: (customer as any).razon_social || customer.nombre || "Cliente",
+          producto: matchingOffer.producto_nombre || item.nombre,
+          precio: matchingOffer.precio_oferta,
+          ahorro: Math.max(0, (item.precio_base || item.precio) - matchingOffer.precio_oferta),
+        })
+        return {
+          ...item,
+          precio: matchingOffer.precio_oferta,
+          es_oferta_personalizada: true,
+          oferta_personalizada_titulo: matchingOffer.titulo || "Oferta Te Extrañamos",
+        }
+      }
+      return item
+    })
+
+    if (cartUpdated) {
+      setCart(newCart)
+      toast.success(
+        "🎉 ¡Oferta Personalizada Aplicada!",
+        `Descuento especial otorgado a ${(customer as any).razon_social || customer.nombre} en caja.`
+      )
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCustomerOffers, cart.length])
 
   // Iniciar/asegurar flujo de lectura serie continuo al abrir el modal de pesaje
   useEffect(() => {
@@ -3113,7 +3160,7 @@ export default function POSPage() {
 
   // ── AUTO-CONFIRMACIÓN INMEDIATA DEL PESAJE AL ESTABILIZAR EL PESO ─────────
   useEffect(() => {
-    if (showManualWeightModal && targetWeighProduct && currentScaleWeight > PESO_MIN_BALANZA_KG && isScaleStable) {
+    if (showManualWeightModal && targetWeighProduct && currentScaleWeight > 0.015 && isScaleStable) {
       const autoTimer = setTimeout(() => {
         addToCart(targetWeighProduct, currentScaleWeight)
         setShowManualWeightModal(false)
@@ -4800,36 +4847,22 @@ export default function POSPage() {
     { key: "LIMPIEZA", label: "🧼 Limpieza & Perfumería" },
   ]
 
-  // Indice de busqueda: el texto en minusculas de cada producto se calcula UNA
-  // vez por cambio de catalogo, no por cada tecla. Antes cada digito del lector
-  // reconstruia un Map y hacia toLowerCase/includes sobre los ~11.700 productos
-  // (~300ms por tecla en las cajas): el Enter del lector llegaba varios
-  // segundos tarde y el producto "no se agregaba".
-  const productSearchIndex = useMemo(
-    () => products.map((p) => ({ p, t: `${p.nombre || ""} ${p.codigo_barra || ""} ${p.sku || ""}`.toLowerCase() })),
-    [products],
-  )
-  const deferredSearch = useDeferredValue(search)
-
   const filteredProducts = useMemo(() => {
-    const query = deferredSearch.trim().toLowerCase()
-
+    const query = search.trim().toLowerCase()
+    
     if (query) {
       const tokens = query.split(/\s+/).filter(Boolean)
-      const out: Product[] = []
-      const seen = new Set<string>()
-      for (const p of searchResults) {
-        if (out.length >= 45) break
-        if (!p || !p.id || seen.has(p.id)) continue
+      const pool = new Map<string, Product>()
+      for (const p of [...searchResults, ...products]) {
+        if (p && p.id && !pool.has(p.id)) {
+          pool.set(p.id, p)
+        }
+      }
+
+      return Array.from(pool.values()).filter((p) => {
         const target = `${p.nombre || ""} ${p.codigo_barra || ""} ${p.sku || ""}`.toLowerCase()
-        if (tokens.every((token) => target.includes(token))) { out.push(p); seen.add(p.id) }
-      }
-      for (const { p, t } of productSearchIndex) {
-        if (out.length >= 45) break
-        if (!p || !p.id || seen.has(p.id)) continue
-        if (tokens.every((token) => t.includes(token))) { out.push(p); seen.add(p.id) }
-      }
-      return out
+        return tokens.every((token) => target.includes(token))
+      }).slice(0, 45)
     }
 
     if (selectedCategoryTab === "TOP") {
@@ -4942,7 +4975,7 @@ export default function POSPage() {
     }
 
     return products.slice(0, 30)
-  }, [deferredSearch, selectedCategoryTab, products, productSearchIndex, searchResults, topProductSkus])
+  }, [search, selectedCategoryTab, products, searchResults, topProductSkus])
 
   // ── CONTROL CRUZADO INTELIGENTE CON BALANZA DE CHECKOUT (CON DEBOUNCE DE ASENTAMIENTO) ──
   useEffect(() => {
@@ -4959,7 +4992,7 @@ export default function POSPage() {
     const tol = getPesoTolerancia(etiquetaKg)
 
     // Si aún no hay peso en la balanza de checkout (> 15g), seguimos esperando que coloquen el producto
-    if (currentScaleWeight <= PESO_MIN_BALANZA_KG) {
+    if (currentScaleWeight <= 0.015) {
       if (scaleSettlingTimerRef.current) {
         clearTimeout(scaleSettlingTimerRef.current)
         scaleSettlingTimerRef.current = null
@@ -5009,7 +5042,7 @@ export default function POSPage() {
         scaleSettlingTimerRef.current = setTimeout(() => {
           scaleSettlingTimerRef.current = null
           const finalDiff = Math.abs(currentScaleWeight - etiquetaKg)
-          if (finalDiff > tol && currentScaleWeight > PESO_MIN_BALANZA_KG) {
+          if (finalDiff > tol && currentScaleWeight > 0.015) {
             api.inteliaudit.recordEvent({
               company_id: COMPANY_ID,
               user_id: user?.id,
@@ -5094,7 +5127,7 @@ export default function POSPage() {
         if (matchPesable) {
           const tol = getPesoTolerancia(weightKg)
           const diffKg = Math.abs(currentScaleWeight - weightKg)
-          const balanzaCoincideYa = isScaleStable && currentScaleWeight > PESO_MIN_BALANZA_KG && diffKg <= tol
+          const balanzaCoincideYa = isScaleStable && currentScaleWeight > 0.015 && diffKg <= tol
 
           if (balanzaCoincideYa) {
             // Si el producto ya está en la balanza del checkout y coincide, validar al instante
@@ -7755,6 +7788,19 @@ export default function POSPage() {
           t += ESCPOS_ALIGN_LEFT
         }
 
+        const itemsWithPersonalPromo = cart.filter(i => (i as any).es_oferta_personalizada)
+        if (itemsWithPersonalPromo.length > 0) {
+          t += escposDashes(W) + '\n'
+          t += ESCPOS_ALIGN_CENTER
+          t += ESCPOS_BOLD_ON + '¡BENEFICIO EXCLUSIVO APLICADO!' + ESCPOS_BOLD_OFF + '\n'
+          itemsWithPersonalPromo.forEach(it => {
+            const promoTit = (it as any).oferta_personalizada_titulo || "Promo Te Extrañamos"
+            t += escposWrapText(`* ${promoTit}: ${escposStripAccents(it.nombre)}`, W) + '\n'
+          })
+          t += '¡Gracias por volver a Extra Supermercado!\n'
+          t += ESCPOS_ALIGN_LEFT
+        }
+
         if (showMarketing && tpl.mensaje_marketing) {
           t += ESCPOS_ALIGN_CENTER + ESCPOS_BOLD_ON + escposWrapText(tpl.mensaje_marketing, W) + ESCPOS_BOLD_OFF + ESCPOS_ALIGN_LEFT
         }
@@ -8116,7 +8162,7 @@ export default function POSPage() {
                     if (res.synced > 0) {
                       toast.success("Sincronización Exitosa", `${res.synced} venta(s) enviadas al servidor.`)
                     } else if (res.failed > 0) {
-                      toast.warning("Venta pendiente rechazada", `${res.failed} venta(s) sin enviar. Motivo: ${(res as any).lastError || "Verifique conexión."}`)
+                      toast.warning("Sincronización Incompleta", `${res.failed} venta(s) pendientes. Verifique conexión.`)
                     }
                   } catch (e: any) {
                     toast.error("Error de sincronización", e?.message || "Servidor no alcanzable.")
@@ -8475,6 +8521,41 @@ export default function POSPage() {
 
           {/* Panel de Totales y Liquidación */}
           <div className={`p-3 border-t space-y-2 shrink-0 ${bgInner}`}>
+            {/* 🎊 Bullicio Festivo: Banner de Oferta Personalizada 'Te Extrañamos' */}
+            {festiveOfferAlert && (
+              <div className="bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 border-2 border-yellow-300 text-white rounded-xl px-3 py-2.5 flex items-center justify-between shadow-lg shadow-rose-500/20 animate-bounce">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="text-xl animate-spin">🌟</span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[9px] font-black uppercase tracking-wider bg-yellow-300 text-slate-950 px-2 py-0.2 rounded-full shadow-xs">
+                        🎉 ¡OFERTA PERSONALIZADA APLICADA!
+                      </span>
+                      <span className="text-[10px] font-bold text-yellow-100 truncate">
+                        {festiveOfferAlert.cliente}
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-black tracking-tight text-white mt-0.5 truncate">
+                      {festiveOfferAlert.producto} · Precio Especial: Gs. {festiveOfferAlert.precio?.toLocaleString('es-PY')}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <button 
+                    onClick={() => setFestiveOfferAlert(null)}
+                    className="text-white/80 hover:text-white text-xs font-black px-1.5 py-0.5 rounded-lg bg-black/20 hover:bg-black/40 transition"
+                  >
+                    ✕
+                  </button>
+                  {festiveOfferAlert.ahorro > 0 && (
+                    <div className="text-[9px] font-extrabold text-yellow-200 mt-0.5">
+                      Ahorro: Gs. {festiveOfferAlert.ahorro?.toLocaleString('es-PY')}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Banner Destacado y Animado de Ahorro */}
             {totalAhorroPyg > 0 && (
               <div className="bg-gradient-to-r from-amber-500/20 via-emerald-500/20 to-amber-500/20 border-2 border-amber-500/50 rounded-xl px-3 py-2 flex items-center justify-between shadow-xs animate-pulse">
@@ -9107,7 +9188,7 @@ export default function POSPage() {
                 <span className="text-xl font-black font-posMono text-slate-900 dark:text-white">{weightPendingScale.etiquetaKg.toFixed(3)} KG</span>
               </div>
               <div className={`p-3 rounded-xl border text-center transition-colors ${
-                Math.abs(currentScaleWeight - weightPendingScale.etiquetaKg) <= getPesoTolerancia(weightPendingScale.etiquetaKg) && currentScaleWeight > PESO_MIN_BALANZA_KG
+                Math.abs(currentScaleWeight - weightPendingScale.etiquetaKg) <= getPesoTolerancia(weightPendingScale.etiquetaKg) && currentScaleWeight > 0.015
                   ? "bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400 font-black"
                   : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-black"
               }`}>
@@ -9117,13 +9198,13 @@ export default function POSPage() {
             </div>
             <div className="text-center mb-4">
               <span className={`text-[11px] font-bold px-3 py-1 rounded-full ${
-                currentScaleWeight <= PESO_MIN_BALANZA_KG
+                currentScaleWeight <= 0.015
                   ? "bg-amber-500/20 text-amber-600 dark:text-amber-400"
                   : Math.abs(currentScaleWeight - weightPendingScale.etiquetaKg) <= getPesoTolerancia(weightPendingScale.etiquetaKg)
                   ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-black animate-pulse"
                   : "bg-amber-500/20 text-amber-600 dark:text-amber-400"
               }`}>
-                {currentScaleWeight <= PESO_MIN_BALANZA_KG
+                {currentScaleWeight <= 0.015
                   ? "Coloque el producto en la balanza..."
                   : Math.abs(currentScaleWeight - weightPendingScale.etiquetaKg) <= getPesoTolerancia(weightPendingScale.etiquetaKg)
                   ? "✓ Peso verificado -- agregando..."
@@ -9268,21 +9349,21 @@ export default function POSPage() {
 
             {/* Display Reactivo de Balanza en Vivo */}
             <div className={`p-4 rounded-xl border mb-4 text-center transition-all ${
-              currentScaleWeight > PESO_MIN_BALANZA_KG
+              currentScaleWeight > 0.015
                 ? (isScaleStable ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 shadow-md" : "bg-amber-50 dark:bg-amber-950/40 border-amber-500 animate-pulse")
                 : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"
             }`}>
               <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest block">
-                {currentScaleWeight > PESO_MIN_BALANZA_KG
+                {currentScaleWeight > 0.015
                   ? (isScaleStable ? "✓ ESTABILIZADO · INSERTANDO AUTOMÁTICAMENTE..." : "PESANDO... ESTABILICE EL PRODUCTO")
                   : "COLOQUE EL PRODUCTO EN EL PLATO DE LA BALANZA"}
               </span>
               <div className="text-5xl font-black font-posMono tabular-nums text-emerald-600 dark:text-emerald-400 mt-1">
-                {currentScaleWeight > PESO_MIN_BALANZA_KG ? currentScaleWeight.toFixed(3) : (manualWeightInput || "0.000")} <span className="text-lg text-slate-500 dark:text-slate-400">KG</span>
+                {currentScaleWeight > 0.015 ? currentScaleWeight.toFixed(3) : (manualWeightInput || "0.000")} <span className="text-lg text-slate-500 dark:text-slate-400">KG</span>
               </div>
               {targetWeighProduct && (
                 <div className="text-sm font-posMono tabular-nums font-bold text-emerald-300 mt-1">
-                  Subtotal: {formatPYG(Math.round(((currentScaleWeight > PESO_MIN_BALANZA_KG ? currentScaleWeight : parseFloat(manualWeightInput || "0")) * (Number(targetWeighProduct.precio_venta) || 0))))}
+                  Subtotal: {formatPYG(Math.round(((currentScaleWeight > 0.015 ? currentScaleWeight : parseFloat(manualWeightInput || "0")) * (Number(targetWeighProduct.precio_venta) || 0))))}
                 </div>
               )}
             </div>

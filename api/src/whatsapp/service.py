@@ -455,13 +455,25 @@ OFFICIAL_SUPERMARKET_TEMPLATES = [
     {
         "name": "Ticket Digital POS + Puntos",
         "tipo": "venta.creada",
-        "content": "🛒 *¡Gracias por tu compra en Extra Supermercado Mayorista!*\n\n📄 Ticket Digital: *#{ticket}*\n💰 Total: *Gs. {monto}*\n⭐ Sumaste *{puntos} Puntos ExtraClub*.\n\n¡Te esperamos pronto en nuestras sucursales!",
+        "content": "🛒 *¡Gracias por tu compra en Extra Supermercado Mayorista!*\n\n📄 Ticket Digital: *#{ticket}*\n💰 Total: *Gs. {monto}*\n⭐ Puntos Sumados: *{puntos} Pts.*\n💳 ExtraClub Socio: *{socio_numero}*\n\n¡Te esperamos pronto en nuestras sucursales!",
         "active": True
     },
     {
         "name": "Agradecimiento + Cupones Sorteo + Opt-In",
         "tipo": "sorteo.optin",
         "content": "🛒 *¡Muchas gracias por tu compra en Extra Supermercado!*\nEsperamos que hayas tenido una excelente experiencia y te esperamos nuevamente muy pronto.\n\n🎟️ *¡Con esta compra generaste {cupones_generados} cupones para el sorteo '{campana_sorteo}'!*\nAcumulás un total de *{cupones_totales} cupones* registrados a tu nombre (Doc: {documento}).\n\n📲 *¿Querés recibir ofertas personalizadas, descuentos relámpago y promociones exclusivas en tu WhatsApp?*\n👉 *Respondé SÍ a este mensaje* para activar tus beneficios exclusivos y enterarte primero que nadie.",
+        "active": True
+    },
+    {
+        "name": "Cupón Oficial de Sorteo",
+        "tipo": "cupon.sorteo",
+        "content": "🎟️ *¡Tu Cupón Oficial de Sorteo — Extra Supermercado!*\n\n🎉 Registramos exitosamente tus *{cantidad}* para el *{sorteo}* con tu Ticket *#{ticket}* en *{empresa}*.\n👤 Titular: *{cliente}*\n\n🛒 ¡Muchas gracias por tu compra y mucha suerte! 🍀✨",
+        "active": True
+    },
+    {
+        "name": "Comprobante de Cobro / Pago Recibido",
+        "tipo": "pago.recibido",
+        "content": "💵 *Pago Recibido — Extra Supermercado*\n\nHola *{cliente}*, confirmamos la recepción de tu pago:\n💰 Monto abonado: *Gs. {monto}*\n📄 Factura / Recibo: *#{numero}*\n📅 Fecha: *{fecha}*\n\n¡Muchas gracias por tu confianza!",
         "active": True
     },
     {
@@ -473,25 +485,19 @@ OFFICIAL_SUPERMARKET_TEMPLATES = [
     {
         "name": "Invitación ExtraClub (No Socio)",
         "tipo": "extraclub.invitacion",
-        "content": "👋 ¡Hola {cliente}! Notamos que aún no formás parte de *ExtraClub*, el club de fidelidad de Extra Supermercado. ✨\n\n🎁 *Al ser socio ExtraClub:*\n• Acumulás puntos en cada compra que canjeás por dinero directo en caja (1 Punto = Gs. 100).\n• Participás automáticamente con cupones dobles en todos los sorteos del año.\n• Accedés a descuentos especiales exclusivos para miembros.\n\n¡Hacerte socio es 100% gratuito! Acercate al mostrador de Atención al Cliente en tu próxima visita o pedile al cajero al abonar.",
+        "content": "👋 ¡Hola {cliente}! Notamos que aún no contás con tu tarjeta *ExtraClub*, el programa oficial de fidelidad de Extra Supermercado. ✨\n\n🎁 *Beneficios exclusivos:*\n• Acumulás puntos en cada compra que canjeás directamente por dinero en caja al pagar.\n• Participás con cupones adicionales en todos los sorteos del año.\n• Accedés a precios preferenciales en artículos seleccionados.\n\n¡La adhesión es 100% gratuita! Pedile a tu cajero en tu próxima visita o respondenos a este mensaje.",
         "active": True
     },
     {
         "name": "Consulta Saldo de Puntos ExtraClub",
         "tipo": "extraclub.saldo",
-        "content": "⭐ *Tu Saldo ExtraClub — Extra Supermercado* ⭐\n\n👤 Titular: *{cliente}*\n💳 N° de Socio: *{socio_numero}*\n✨ Puntos Acumulados: *{puntos} Pts.*\n💰 Equivalente en Compras: *Gs. {valor_monetario}*\n\n🛒 _Podés canjear tus puntos directamente en línea de caja en tu próxima compra._ ¡Gracias por ser parte de la familia Extra!",
+        "content": "⭐ *Tu Saldo ExtraClub — Extra Supermercado* ⭐\n\n👤 Titular: *{cliente}*\n💳 N° de Socio: *{socio_numero}*\n✨ Puntos Disponibles: *{puntos} Pts.*\n💰 Equivalente en Compras: *Gs. {valor_monetario}*\n\n🛒 _Podés canjear tus puntos directamente en línea de caja en tu próxima compra._ ¡Gracias por ser parte de la familia Extra!",
         "active": True
     },
     {
         "name": "Catálogo de Premios de la Temporada",
         "tipo": "extraclub.premios",
-        "content": "🎁 *Catálogo de Premios de la Temporada — ExtraClub* 🏆\n\n¡Canjeá tus puntos por premios fabulosos o descuento directo en tus compras!\n\n☕ *1.500 Pts:* Pava Eléctrica Inox 1.8L\n🍳 *2.500 Pts:* Set de Sartenes Antiadherentes (2 piezas)\n🥪 *3.500 Pts:* Sandwichera Grill Antiadherente\n💨 *7.000 Pts:* Freidora de Aire Digital 4.5L\n🍲 *12.000 Pts:* Horno Eléctrico de Mesa 45L\n📺 *25.000 Pts:* Smart TV 43\" Full HD\n\n💡 *Descuento en Caja:* Recordá que también podés descontar tus puntos directamente de tu factura: *1 Punto = Gs. 100*.\nConsultá en Atención al Cliente o escribinos aquí para iniciar tu canje.",
-        "active": True
-    },
-    {
-        "name": "Cupón Oficial de Sorteo",
-        "tipo": "cupon.sorteo",
-        "content": "🎟️ *¡Tu Cupón Oficial de Sorteo Extra Supermercado!*\n\nCupón N°: *{cupon_numero}*\nCliente: *{cliente}* (Doc: {documento})\nPromoción: *{campana_sorteo}*\nFecha del Sorteo: *{fecha_sorteo}*\n\nGuardá este mensaje como comprobante oficial. ¡Mucha suerte!",
+        "content": "🎁 *Catálogo de Premios de la Temporada — ExtraClub* 🏆\n\n¡Canjeá tus puntos por premios fabulosos o descuento directo en tus compras!\n\n☕ *1.500 Pts:* Pava Eléctrica Inox 1.8L\n🍳 *2.500 Pts:* Set de Sartenes Antiadherentes\n🥪 *3.500 Pts:* Sandwichera Grill Antiadherente\n💨 *7.000 Pts:* Freidora de Aire Digital 4.5L\n🍲 *12.000 Pts:* Horno Eléctrico de Mesa 45L\n📺 *25.000 Pts:* Smart TV 43\" Full HD\n\n💡 _También podés descontar tus puntos directamente de tu factura al abonar en caja._ Consultá con Atención al Cliente.",
         "active": True
     },
     {
@@ -505,7 +511,31 @@ OFFICIAL_SUPERMARKET_TEMPLATES = [
         "tipo": "promocion.flash",
         "content": "🔥 *¡OFERTA RELÁMPAGO EXTRA SUPERMERCADO!* 🔥\n\n¡Solo por hoy o hasta agotar stock!\n🛒 *{oferta_titulo}*\n🏷️ Precio Oferta: *Gs. {precio_oferta}* (Antes: Gs. {precio_regular})\n💥 Descuento exclusivo para socios y clientes validados.\n\n¡Te esperamos en nuestro salón! Promoción válida con cualquier medio de pago.",
         "active": True
-    }
+    },
+    {
+        "name": "Delivery en Camino / Tránsito",
+        "tipo": "entrega.in_transit",
+        "content": "🛵 *¡Tu pedido de Extra Supermercado está en camino!*\n\n📦 Pedido: *#{numero}*\n📍 Destino: *{direccion}*\n👤 Repartidor: *{repartidor}*\n\n¡En breves momentos llegará a tu puerta!",
+        "active": True
+    },
+    {
+        "name": "Delivery Entregado",
+        "tipo": "entrega.delivered",
+        "content": "✅ *¡Pedido Entregado con Éxito!*\n\nHola *{cliente}*, tu pedido *#{numero}* ha sido entregado.\n¡Esperamos que disfrutes tus productos y gracias por preferir Extra Supermercado! 🛒",
+        "active": True
+    },
+    {
+        "name": "Pedido Recibido / Pendiente",
+        "tipo": "pedido.pendiente",
+        "content": "📄 *Pedido Registrado con Éxito — Extra Supermercado*\n\nHola *{cliente}*, recibimos tu pedido *#{numero}* por un total de *Gs. {total}*.\nPronto iniciaremos la preparación en tienda.",
+        "active": True
+    },
+    {
+        "name": "Pedido Listo para Retiro",
+        "tipo": "pedido.listo",
+        "content": "📦 *¡Tu Pedido está Listo! — Extra Supermercado*\n\nHola *{cliente}*, tu pedido *#{numero}* ya está empaquetado y listo para ser retirado en nuestro mostrador de Atención al Cliente.",
+        "active": True
+    },
 ]
 
 

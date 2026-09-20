@@ -140,6 +140,14 @@ async def get_chatbot_config(
                 "active": True,
             },
         ],
+        "mode": "ai_agent",  # "ai_agent" (Qwen 2.5 local) | "flow_legacy"
+        "ai_agent": {
+            "model": "qwen2.5:7b",
+            "custom_instructions": "",
+            "emphasis_promotions": "",
+            "cross_selling_active": True,
+            "cart_pdf_active": True,
+        },
     }
     merged = {**default_config, **bot_cfg}
     # Asegurar que keywords y custom_menu_options existan en el resultado
@@ -147,8 +155,48 @@ async def get_chatbot_config(
         merged["keywords"] = default_config["keywords"]
     if "custom_menu_options" not in merged:
         merged["custom_menu_options"] = default_config["custom_menu_options"]
+    if "mode" not in merged:
+        merged["mode"] = default_config["mode"]
+    if "ai_agent" not in merged:
+        merged["ai_agent"] = default_config["ai_agent"]
     merged["auto_reply"] = cfg.auto_reply if cfg else True
     return merged
+
+
+@router.get("/ai-agent/status")
+async def get_ai_agent_status(
+    user: dict = Depends(require_auth),
+):
+    """Verifica la conectividad y estado en tiempo real de Ollama (100.72.38.119:11434)."""
+    ollama_url = (getattr(settings, "ollama_base_url", None) or "http://100.72.38.119:11434/v1").rstrip("/")
+    base = ollama_url[:-3] if ollama_url.endswith("/v1") else ollama_url
+    start = datetime.now()
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            res = await client.get(f"{base}/api/tags")
+            latency_ms = int((datetime.now() - start).total_seconds() * 1000)
+            if res.status_code == 200:
+                data = res.json()
+                models = [m.get("name") for m in data.get("models", [])]
+                return {
+                    "online": True,
+                    "host": base,
+                    "latency_ms": latency_ms,
+                    "models": models,
+                    "active_model": getattr(settings, "ollama_model", "qwen2.5:7b"),
+                }
+            return {
+                "online": False,
+                "host": base,
+                "latency_ms": latency_ms,
+                "error": f"HTTP {res.status_code}",
+            }
+    except Exception as e:
+        return {
+            "online": False,
+            "host": base,
+            "error": str(e),
+        }
 
 
 @router.post("/toggle-auto-reply")
@@ -770,6 +818,80 @@ async def delete_template(
     return {"status": "ok"}
 
 
+@router.post("/templates/craft-ai")
+async def craft_template_with_ai(
+    body: dict,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Genera o refina el texto ideal para una plantilla de WhatsApp usando Qwen 2.5 en Ollama."""
+    tipo = str(body.get("tipo", "custom")).strip()
+    current_content = str(body.get("current_content", "")).strip()
+    prompt_instruction = str(body.get("prompt_instruction", "")).strip()
+    available_vars = body.get("available_variables", [])
+
+    vars_str = ", ".join([f"{{{v}}}" for v in available_vars]) if available_vars else "{cliente}, {ticket}, {monto}"
+
+    system_prompt = (
+        "Eres un Copywriter experto en Marketing Conversacional por WhatsApp para 'Extra Supermercado Mayorista' en Ciudad del Este, Paraguay.\n"
+        "Tu objetivo es redactar la plantilla oficial de WhatsApp perfecta para el propósito indicado.\n\n"
+        "REGLAS OBLIGATORIAS:\n"
+        f"1. Variables permitidas: {vars_str}. Conserva exactamente las variables que tengan sentido usando llaves simples como {{cliente}} o {{monto}}. NUNCA inventes variables que no existan.\n"
+        "2. Formato WhatsApp: Usa *negrita* para datos clave (montos, códigos, tickets), _cursiva_ para notas o aclaraciones secundarias, emojis visualmente atractivos y saltos de línea claros.\n"
+        "3. Tono: Cercano, muy educado, profesional y comercialmente persuasivo. La moneda es siempre Guaraníes (Gs.).\n"
+        "4. Respuesta limpia: Devuelve ÚNICAMENTE el texto final de la plantilla para WhatsApp, sin comillas envolventes ni explicaciones adicionales."
+    )
+
+    user_prompt = f"Tipo de plantilla: {tipo}\n"
+    if current_content:
+        user_prompt += f"Texto actual de referencia:\n\"\"\"\n{current_content}\n\"\"\"\n\n"
+    if prompt_instruction:
+        user_prompt += f"Instrucción del usuario:\n{prompt_instruction}\n"
+    else:
+        user_prompt += "Por favor redacta la versión ideal, atractiva y profesional para este evento del supermercado."
+
+    ollama_url = (getattr(settings, "ollama_base_url", None) or "http://100.72.38.119:11434/v1").rstrip("/")
+    active_model = getattr(settings, "ollama_model", "qwen2.5:7b-instruct")
+
+    crafted_text = ""
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            res = await client.post(
+                f"{ollama_url}/chat/completions",
+                json={
+                    "model": active_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0.4,
+                    "max_tokens": 600,
+                },
+            )
+            if res.status_code == 200:
+                data = res.json()
+                crafted_text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                # Limpiar posibles comillas o bloques markdown accidentales
+                if crafted_text.startswith("```") and crafted_text.endswith("```"):
+                    lines = crafted_text.splitlines()
+                    if len(lines) >= 2:
+                        crafted_text = "\n".join(lines[1:-1]).strip()
+            else:
+                logger.warning(f"[Craft AI] Ollama HTTP {res.status_code}: {res.text}")
+    except Exception as e:
+        logger.error(f"[Craft AI] Fallo al consultar Ollama: {e}")
+
+    if not crafted_text:
+        # Fallback inteligente si no hay conexión temporal con Ollama
+        crafted_text = current_content or f"🛒 *¡Hola {{cliente}}! Gracias por elegir Extra Supermercado.*\n\n📄 Ticket: *#{{ticket}}*\n💰 Total: *Gs. {{monto}}*\n\n¡Te esperamos pronto!"
+
+    return {
+        "status": "ok",
+        "crafted_content": crafted_text,
+        "model_used": active_model,
+    }
+
+
 @router.post("/webhook")
 async def webhook(
     request: Request,
@@ -965,16 +1087,31 @@ async def evolution_webhook(
             bot_cfg = t_cfg.get("chatbot", {})
             flow_cfg = bot_cfg.get("flow") or {}
 
-            # El bot responde si auto_reply está activo Y el flujo no está en pausa
+            # Modo de operación: "ai_agent" (default) o "flow_legacy"
+            mode = bot_cfg.get("mode", "ai_agent")
+
             flow_active = flow_cfg.get("active", True)
-            auto_reply_active = bot_cfg.get("auto_reply", False)
+            auto_reply_active = bot_cfg.get("auto_reply", True)
             should_reply = bool(auto_reply_active and flow_active)
 
+            # Verificar si la conversación está en modo atención humana (human_takeover)
+            session_data = conv.session_data or {}
+            if session_data.get("human_takeover"):
+                # Si el usuario pide explícitamente reactivar el bot
+                if content.strip().lower() in ["bot", "reactivar", "asistente", "menu"]:
+                    session_data["human_takeover"] = False
+                    conv.session_data = session_data
+                    conv.session_state = "idle"
+                    await db.commit()
+                    logger.info(f"[Evolution Webhook] Bot reactivado por cliente en '{clean_phone}'")
+                else:
+                    logger.info(f"[Evolution Webhook] Conversación '{clean_phone}' en ATENCIÓN HUMANA (bot en pausa)")
+                    should_reply = False
+
             if not should_reply:
-                logger.info(f"[Evolution Webhook] Chatbot en PAUSA para '{clean_phone}'. No se genera respuesta (auto_reply={auto_reply_active}, flow_active={flow_active})")
+                logger.info(f"[Evolution Webhook] Chatbot en PAUSA para '{clean_phone}'. (auto_reply={auto_reply_active}, flow_active={flow_active})")
             else:
                 from api.src.companies.models import Company
-                from api.src.whatsapp.chatbot import ChatbotEngine
                 comp_res = await db.execute(select(Company).where(Company.tenant_id == tenant.id).limit(1))
                 company = comp_res.scalar_one_or_none()
                 if not company:
@@ -982,27 +1119,88 @@ async def evolution_webhook(
                     company = comp_res.scalar_one_or_none()
 
                 if company:
-                    chatbot = ChatbotEngine(db, company.id)
-                    logger.info(f"[Evolution Webhook] Disparando motor de bot para '{clean_phone}' mensaje: '{content}'")
-                    resp_data = await chatbot.process_message(conv, content)
-                    if resp_data and resp_data.get("text"):
-                        logger.info(f"[Evolution Webhook] Despachando mensaje de flujo a '{clean_phone}'")
-                        await evolution_client.send_text_message(clean_phone, resp_data["text"])
+                    if mode == "ai_agent":
+                        from api.src.whatsapp.ai_agent import CustomerAIAgent
+                        import base64
 
-                        # Registrar mensaje saliente en la conversación del sistema
-                        outbound_msg = WhatsAppMessage(
-                            tenant_id=tenant.id,
-                            conversation_id=conv.id,
-                            direction=MessageDirection.outbound,
-                            content=resp_data["text"],
-                            message_id=f"bot-{datetime.now(timezone.utc).timestamp()}",
-                            status=MessageStatus.sent,
+                        ai_cfg = bot_cfg.get("ai_agent", {})
+                        custom_instructions = ai_cfg.get("custom_instructions", "")
+                        emphasis_promotions = ai_cfg.get("emphasis_promotions", "")
+
+                        agent = CustomerAIAgent(db, company.id, tenant.id)
+                        logger.info(f"[Evolution Webhook] Disparando Agente de IA (Qwen 2.5) para '{clean_phone}' mensaje: '{content}'")
+                        ai_res = await agent.process_message(
+                            conv,
+                            content,
+                            custom_instructions=custom_instructions,
+                            emphasis_promotions=emphasis_promotions,
                         )
-                        db.add(outbound_msg)
-                        conv.last_message_at = datetime.now(timezone.utc)
-                        if resp_data.get("next_state"):
-                            conv.session_state = resp_data["next_state"]
-                        await db.commit()
+
+                        # 1. Despachar texto si hay respuesta
+                        if ai_res and ai_res.get("text"):
+                            logger.info(f"[Evolution Webhook] Despachando texto de IA a '{clean_phone}'")
+                            await evolution_client.send_text_message(clean_phone, ai_res["text"])
+
+                            outbound_msg = WhatsAppMessage(
+                                tenant_id=tenant.id,
+                                conversation_id=conv.id,
+                                direction=MessageDirection.outbound,
+                                content=ai_res["text"],
+                                message_id=f"ai-{datetime.now(timezone.utc).timestamp()}",
+                                status=MessageStatus.sent,
+                            )
+                            db.add(outbound_msg)
+                            conv.last_message_at = datetime.now(timezone.utc)
+                            await db.commit()
+
+                        # 2. Despachar documento PDF si se generó un pedido
+                        if ai_res and ai_res.get("pdf_bytes"):
+                            pdf_fn = ai_res.get("pdf_filename") or "Presupuesto_ExtraSupermercado.pdf"
+                            b64_pdf = base64.b64encode(ai_res["pdf_bytes"]).decode("ascii")
+                            media_data = f"data:application/pdf;base64,{b64_pdf}"
+                            logger.info(f"[Evolution Webhook] Despachando PDF de pedido a '{clean_phone}': {pdf_fn}")
+
+                            await evolution_client.send_media_message(
+                                phone=clean_phone,
+                                media_url=media_data,
+                                caption=f"📄 Presupuesto oficial generado #{ai_res.get('order_code', '')}. ¡En instantes un asesor humano coordinará contigo!",
+                                file_name=pdf_fn,
+                                media_type="document",
+                            )
+
+                            pdf_msg = WhatsAppMessage(
+                                tenant_id=tenant.id,
+                                conversation_id=conv.id,
+                                direction=MessageDirection.outbound,
+                                content=f"[Documento Adjunto: {pdf_fn}]",
+                                message_id=f"ai-pdf-{datetime.now(timezone.utc).timestamp()}",
+                                status=MessageStatus.sent,
+                            )
+                            db.add(pdf_msg)
+                            await db.commit()
+
+                    else:
+                        # Modo legado por flujos y botones rígidos
+                        from api.src.whatsapp.chatbot import ChatbotEngine
+                        chatbot = ChatbotEngine(db, company.id)
+                        logger.info(f"[Evolution Webhook] Disparando motor de flujo clásico para '{clean_phone}'")
+                        resp_data = await chatbot.process_message(conv, content)
+                        if resp_data and resp_data.get("text"):
+                            await evolution_client.send_text_message(clean_phone, resp_data["text"])
+
+                            outbound_msg = WhatsAppMessage(
+                                tenant_id=tenant.id,
+                                conversation_id=conv.id,
+                                direction=MessageDirection.outbound,
+                                content=resp_data["text"],
+                                message_id=f"bot-{datetime.now(timezone.utc).timestamp()}",
+                                status=MessageStatus.sent,
+                            )
+                            db.add(outbound_msg)
+                            conv.last_message_at = datetime.now(timezone.utc)
+                            if resp_data.get("next_state"):
+                                conv.session_state = resp_data["next_state"]
+                            await db.commit()
         except Exception as bot_err:
             logger.error(f"[Evolution Webhook] Error en respuesta de chatbot: {bot_err}", exc_info=True)
 

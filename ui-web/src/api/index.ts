@@ -1741,6 +1741,7 @@ export const api = {
     cancel: (id: string) => client.post<void>(`/v1/sales/${id}/cancel`),
     items: (id: string) => client.get<SaleItem[]>(`/v1/sales/${id}/items`),
     getItems: (id: string) => client.get<SaleItem[]>(`/v1/sales/${id}/items`),
+    getCustomerOffers: (customerId: string) => client.get<any[]>(`/v1/sales/customer-offers/${customerId}`),
     addPayment: (id: string, data: { monto: number; metodo_pago_id?: string; payment_method_id?: string; referencia?: string }) => client.post<any>(`/v1/sales/${id}/payments`, data),
     linkQuote: (id: string, quoteId: string) => client.post<any>(`/v1/sales/${id}/link-quote`, { quote_id: quoteId }),
     linkOrder: (id: string, orderId: string) => client.post<any>(`/v1/sales/${id}/link-order`, { order_id: orderId }),
@@ -2114,6 +2115,12 @@ export const api = {
     createTemplate: (data: Partial<WhatsAppTemplate>) => client.post<WhatsAppTemplate>("/v1/whatsapp/templates", data),
     updateTemplate: (id: string, data: Partial<WhatsAppTemplate>) => client.put<WhatsAppTemplate>(`/v1/whatsapp/templates/${id}`, data),
     deleteTemplate: (id: string) => client.delete<void>(`/v1/whatsapp/templates/${id}`),
+    craftTemplateWithAi: (data: {
+      tipo: string
+      current_content?: string
+      prompt_instruction?: string
+      available_variables?: string[]
+    }) => client.post<{ status: string; crafted_content: string; model_used: string }>("/v1/whatsapp/templates/craft-ai", data),
     getStats: () => client.get<WhatsAppStats>("/v1/whatsapp/stats"),
     getChatbotConfig: () => client.get<{
       bot_name: string
@@ -2136,6 +2143,7 @@ export const api = {
     getBotFlow: () => client.get<{ status: string; flow: any }>("/v1/whatsapp/flow"),
     saveBotFlow: (flow: any) => client.put<{ status: string; flow: any }>("/v1/whatsapp/flow", { flow }),
     resetBotFlow: () => client.post<{ status: string; flow: any }>("/v1/whatsapp/flow/reset"),
+    getAiAgentStatus: () => client.get<{ online: boolean; host: string; latency_ms?: number; models?: string[]; active_model?: string; error?: string }>("/v1/whatsapp/ai-agent/status"),
   },
   crm: {
     listLeads: () => client.get<Lead[]>("/v1/crm/leads"),
@@ -3060,6 +3068,7 @@ export const api = {
     asignarNumeroSocio: (customerId: string) =>
       client.post<{ extra_club_numero: string; asignado_ahora: boolean }>(`/v1/loyalty/tarjetas/socios/${customerId}/numero`),
     estadoImpresoraTarjetas: () => client.get<any>("/v1/loyalty/tarjetas/impresora/estado"),
+    audit: (dryRun: boolean = true) => client.post<any>(`/v1/loyalty/audit?dry_run=${dryRun}`),
   },
   imports: {
     templates: () => client.get<ImportTemplate[]>("/v1/imports/templates"),
@@ -4128,6 +4137,11 @@ export const api = {
     notifyRecovery: (companyId: string, campaignId: string) => client.post<any>(`/v1/customer360/recovery/${campaignId}/notify`, { company_id: companyId }),
     redeemRecovery: (companyId: string, campaignId: string, data: any) => client.post<any>(`/v1/customer360/recovery/${campaignId}/redeem`, { ...data, company_id: companyId }),
     bulkCompute: (companyId: string) => client.post<any>("/v1/customer360/bulk-compute", { company_id: companyId }),
+    reanalyzeProfile: (customerId: string) => client.post<any>(`/v1/customer360/profile/${customerId}/reanalyze`),
+    updateTags: (customerId: string, tags: string[]) => client.patch<any>(`/v1/customer360/customers/${customerId}/tags`, { tags }),
+    updateArchetype: (customerId: string, arquetipo: string) => client.patch<any>(`/v1/customer360/customers/${customerId}/archetype`, { arquetipo }),
+    createOffer: (data: any) => client.post<any>("/v1/customer360/offers/create", data),
+    getCustomerOffers: (customerId: string) => client.get<any[]>(`/v1/customer360/customers/${customerId}/offers`),
   },
 
   // ===== Scan&Go =====

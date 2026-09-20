@@ -17,7 +17,8 @@ import {
   Bot, Play, Sparkles, Filter, Radio, ChevronRight, CheckCircle,
   Building, HelpCircle, RotateCcw, Megaphone, BellRing, Users,
   CheckCheck, AlertTriangle, GitFork, Sliders, Power,
-  Paperclip, Smile, Maximize2, Download, X, Image as ImageIcon
+  Paperclip, Smile, Maximize2, Download, X, Image as ImageIcon,
+  Cpu, ShoppingCart
 } from "lucide-react"
 import BotFlowBuilder, { type BotFlow } from "./BotFlowBuilder"
 
@@ -52,6 +53,150 @@ const COMMON_EMOJIS = [
   // Consultas & Estados
   "📞", "❓", "❗", "⚠️", "❌", "📄", "📋", "⭐",
 ]
+
+export const SYSTEM_TRIGGERS: Record<string, {
+  module: string
+  trigger: string
+  badge: string
+  sampleVars: Record<string, string>
+}> = {
+  "venta.creada": {
+    module: "Ventas / POS",
+    trigger: "Al confirmar venta en línea de caja / POS con teléfono del cliente registrado",
+    badge: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800",
+    sampleVars: {
+      cliente: "María González",
+      ticket: "001-002-0048291",
+      monto: "185.000",
+      puntos: "1.850",
+      socio_numero: "EX-9482",
+      fecha: "20/09/2026 18:30",
+    },
+  },
+  "sorteo.optin": {
+    module: "Sorteos & Cupones",
+    trigger: "Al finalizar compra que genera cupones para invitar al cliente a recibir ofertas",
+    badge: "bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border-purple-200 dark:border-purple-800",
+    sampleVars: {
+      cupones_generados: "3",
+      campana_sorteo: "Gran Sorteo Extra Supermercado",
+      cupones_totales: "12",
+      documento: "4.892.103",
+    },
+  },
+  "cupon.sorteo": {
+    module: "Sorteos & Cupones",
+    trigger: "Al registrarse o emitirse tickets para el sorteo oficial Extra Supermercado",
+    badge: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800",
+    sampleVars: {
+      cliente: "Carlos Benítez",
+      ticket: "002-001-0039102",
+      cantidad: "2 cupones",
+      sorteo: "Gran Sorteo Extra Supermercado",
+      empresa: "Extra Supermercado",
+    },
+  },
+  "pago.recibido": {
+    module: "Cuentas & Cobranzas",
+    trigger: "Al registrarse un cobro o abono a cuenta corriente de cliente",
+    badge: "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800",
+    sampleVars: {
+      cliente: "Distribuidora San José",
+      monto: "750.000",
+      numero: "REC-001928",
+      fecha: "20/09/2026",
+    },
+  },
+  "optin.confirmado": {
+    module: "Campañas & Marketing",
+    trigger: "Cuando el cliente responde 'SÍ' para validar su suscripción a ofertas",
+    badge: "bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300 border-teal-200 dark:border-teal-800",
+    sampleVars: {},
+  },
+  "extraclub.invitacion": {
+    module: "ExtraClub & Fidelidad",
+    trigger: "Envío o invitación a clientes que compran y aún no cuentan con membresía",
+    badge: "bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300 border-sky-200 dark:border-sky-800",
+    sampleVars: {
+      cliente: "Laura Duarte",
+    },
+  },
+  "extraclub.saldo": {
+    module: "ExtraClub & Fidelidad",
+    trigger: "Consulta de puntos acumulados y valor de canje en Guaraníes",
+    badge: "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800",
+    sampleVars: {
+      cliente: "Roberto Acosta",
+      socio_numero: "EX-5819",
+      puntos: "3.400",
+      valor_monetario: "340.000",
+    },
+  },
+  "extraclub.premios": {
+    module: "ExtraClub & Fidelidad",
+    trigger: "Consulta o envío del catálogo de premios canjeables de fidelidad",
+    badge: "bg-pink-100 text-pink-800 dark:bg-pink-950/60 dark:text-pink-300 border-pink-200 dark:border-pink-800",
+    sampleVars: {},
+  },
+  "cuota.recordatorio": {
+    module: "Cuentas & Cobranzas",
+    trigger: "Aviso de vencimiento de cuota de crédito o recordatorio preventivo",
+    badge: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border-rose-200 dark:border-rose-800",
+    sampleVars: {
+      cliente: "Comercial Guaraní",
+      monto: "1.200.000",
+      fecha: "25/09/2026",
+    },
+  },
+  "promocion.flash": {
+    module: "Campañas & Marketing",
+    trigger: "Disparo de oferta relámpago o descuento especial del día",
+    badge: "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300 border-red-200 dark:border-red-800",
+    sampleVars: {
+      oferta_titulo: "Tira de Costilla Premium",
+      precio_oferta: "32.900",
+      precio_regular: "45.000",
+    },
+  },
+  "entrega.in_transit": {
+    module: "Entregas & Delivery",
+    trigger: "Cuando el delivery sale en camino hacia el domicilio del cliente",
+    badge: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800",
+    sampleVars: {
+      numero: "DEL-8492",
+      direccion: "Avda. Monday esq. Toledo",
+      repartidor: "Juan Cardozo",
+    },
+  },
+  "entrega.delivered": {
+    module: "Entregas & Delivery",
+    trigger: "Al marcarse el pedido como entregado en destino",
+    badge: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800",
+    sampleVars: {
+      cliente: "Elena Vera",
+      numero: "DEL-8492",
+    },
+  },
+  "pedido.pendiente": {
+    module: "Ventas / POS",
+    trigger: "Al registrarse un nuevo pedido o presupuesto online",
+    badge: "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700",
+    sampleVars: {
+      cliente: "Marcos Medina",
+      numero: "PED-00481",
+      total: "450.000",
+    },
+  },
+  "pedido.listo": {
+    module: "Ventas / POS",
+    trigger: "Al marcarse el pedido listo para retiro en caja o mostrador",
+    badge: "bg-cyan-100 text-cyan-800 dark:bg-cyan-950/60 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800",
+    sampleVars: {
+      cliente: "Marcos Medina",
+      numero: "PED-00481",
+    },
+  },
+}
 
 interface GatewayStatus {
   success: boolean
@@ -121,12 +266,21 @@ export default function WhatsAppPage() {
   const [loadingChatbotConfig, setLoadingChatbotConfig] = useState<boolean>(false)
   const [savingChatbotConfig, setSavingChatbotConfig] = useState<boolean>(false)
 
-  // ── Bot Visual Flow State ──
-  const [botSubTab, setBotSubTab] = useState<"flow" | "settings">("flow")
+  // ── Bot Visual Flow & AI Agent State ──
+  const [botSubTab, setBotSubTab] = useState<"ai_agent" | "flow" | "settings">("ai_agent")
   const [botFlow, setBotFlow] = useState<BotFlow | null>(null)
   const [loadingFlow, setLoadingFlow] = useState<boolean>(false)
   const [savingFlow, setSavingFlow] = useState<boolean>(false)
   const [togglingAutoReply, setTogglingAutoReply] = useState<boolean>(false)
+  const [aiAgentStatus, setAiAgentStatus] = useState<{
+    online: boolean
+    host: string
+    latency_ms?: number
+    models?: string[]
+    active_model?: string
+    error?: string
+  } | null>(null)
+  const [loadingAiStatus, setLoadingAiStatus] = useState<boolean>(false)
 
   // Modales de Reglas de Palabras Clave y Menú Personalizado
   const [showKeywordModal, setShowKeywordModal] = useState<boolean>(false)
@@ -201,6 +355,11 @@ export default function WhatsAppPage() {
     active: true,
   })
   const [savingTemplate, setSavingTemplate] = useState<boolean>(false)
+  const [templateModuleFilter, setTemplateModuleFilter] = useState<string>("all")
+  const [craftingAi, setCraftingAi] = useState<boolean>(false)
+  const [aiInstruction, setAiInstruction] = useState<string>("")
+  const [showAiAssistant, setShowAiAssistant] = useState<boolean>(false)
+  const [previewMode, setPreviewMode] = useState<"variables" | "simulated">("simulated")
   const [convFilter, setConvFilter] = useState<"all" | "optin" | "unread">("all")
   const templateTextareaRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -469,11 +628,28 @@ export default function WhatsAppPage() {
   }
 
   // ── Chatbot Config & Simulator ──
+  const fetchAiAgentStatus = async () => {
+    setLoadingAiStatus(true)
+    try {
+      const res = await api.whatsapp.getAiAgentStatus()
+      setAiAgentStatus(res)
+    } catch (e: any) {
+      setAiAgentStatus({
+        online: false,
+        host: "http://100.72.38.119:11434",
+        error: e?.message || "No se pudo conectar con el servidor LLM",
+      })
+    } finally {
+      setLoadingAiStatus(false)
+    }
+  }
+
   const fetchChatbotConfig = async () => {
     setLoadingChatbotConfig(true)
     try {
       const cfg = await api.whatsapp.getChatbotConfig()
       if (cfg) setChatbotConfig(cfg)
+      fetchAiAgentStatus()
     } catch {
       // Usar defaults
     } finally {
@@ -941,6 +1117,82 @@ export default function WhatsAppPage() {
     } finally {
       setSavingTemplate(false)
     }
+  }
+
+  const handleToggleTemplateActive = async (tmpl: WhatsAppTemplate) => {
+    try {
+      const nextActive = tmpl.active === false ? true : false
+      await api.whatsapp.updateTemplate(tmpl.id, { active: nextActive })
+      setTemplates((prev) => prev.map((t) => (t.id === tmpl.id ? { ...t, active: nextActive } : t)))
+      toast.success(nextActive ? "Plantilla Activada" : "Plantilla Desactivada", tmpl.name)
+    } catch (err: any) {
+      toast.error("Error al cambiar estado", err?.message || "No se pudo actualizar")
+    }
+  }
+
+  const handleCraftWithAi = async (instruction?: string) => {
+    const promptToUse = instruction || aiInstruction
+    setCraftingAi(true)
+    try {
+      const availableVars = [
+        "cliente", "nombre", "ticket", "numero", "monto", "total",
+        "puntos", "socio_numero", "cupones_generados", "campana_sorteo",
+        "sorteo", "cupones_totales", "documento", "valor_monetario",
+        "fecha", "direccion", "repartidor", "oferta_titulo", "precio_oferta",
+        "precio_regular"
+      ]
+      const res = await api.whatsapp.craftTemplateWithAi({
+        tipo: templateForm.tipo,
+        current_content: templateForm.content,
+        prompt_instruction: promptToUse,
+        available_variables: availableVars,
+      })
+      if (res && res.crafted_content) {
+        setTemplateForm((prev) => ({ ...prev, content: res.crafted_content }))
+        toast.success("Mensaje redactado con IA", `Generado con éxito usando ${res.model_used || "Qwen 2.5"}`)
+        setAiInstruction("")
+      }
+    } catch (err: any) {
+      toast.error("Error al redactar con IA", err?.response?.data?.detail || err?.message || "Verificá la conexión con Ollama")
+    } finally {
+      setCraftingAi(false)
+    }
+  }
+
+  const renderSimulatedContent = (content: string, tipo: string) => {
+    if (!content) return ""
+    const meta = SYSTEM_TRIGGERS[tipo]
+    const sample: Record<string, string> = {
+      cliente: "María González",
+      nombre: "María González",
+      ticket: "001-002-0048291",
+      numero: "001-002-0048291",
+      monto: "185.000",
+      total: "185.000",
+      puntos: "1.850",
+      socio_numero: "EX-9482",
+      documento: "4.892.103",
+      valor_monetario: "185.000",
+      cupones_generados: "3",
+      cupones_totales: "12",
+      campana_sorteo: "Gran Sorteo Extra Supermercado",
+      sorteo: "Gran Sorteo Extra Supermercado",
+      empresa: "Extra Supermercado",
+      fecha: "20/09/2026 18:30",
+      direccion: "Avda. Monday c/ Toledo",
+      repartidor: "Juan Cardozo",
+      oferta_titulo: "Tira de Costilla Premium",
+      precio_oferta: "32.900",
+      precio_regular: "45.000",
+      ...(meta?.sampleVars || {}),
+    }
+
+    let res = content
+    Object.entries(sample).forEach(([k, v]) => {
+      const reg = new RegExp(`\\{{1,2}\\s*${k}\\s*\\}{1,2}`, "gi")
+      res = res.replace(reg, v)
+    })
+    return res
   }
 
   const handleDeleteTemplate = async (tmplId: string) => {
@@ -1824,15 +2076,18 @@ export default function WhatsAppPage() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setBotSubTab("flow")}
+                onClick={() => setBotSubTab("ai_agent")}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                  botSubTab === "flow"
-                    ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/20"
+                  botSubTab === "ai_agent"
+                    ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-500/25 ring-2 ring-emerald-400/40"
                     : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-750 border border-slate-200 dark:border-slate-700"
                 }`}
               >
-                <GitFork className="w-4 h-4" />
-                <span>Constructor Visual de Flujos (Botones, Listas & URLs)</span>
+                <Bot className="w-4 h-4 text-emerald-300" />
+                <span>Agente IA Conversacional (Qwen 2.5 7B)</span>
+                <span className="bg-emerald-500/30 text-emerald-100 text-[10px] px-1.5 py-0.5 rounded-full font-black uppercase tracking-wider">
+                  IntelliZapp Local
+                </span>
               </button>
               <button
                 type="button"
@@ -1844,7 +2099,7 @@ export default function WhatsAppPage() {
                 }`}
               >
                 <Sliders className="w-4 h-4" />
-                <span>Parámetros Generales, Horarios & FAQ</span>
+                <span>Horarios de Atención & FAQ General</span>
               </button>
             </div>
 
@@ -1873,14 +2128,287 @@ export default function WhatsAppPage() {
             </div>
           </div>
 
-          {botSubTab === "flow" && (
-            <BotFlowBuilder
-              flow={botFlow}
-              loading={loadingFlow}
-              saving={savingFlow}
-              onSave={handleSaveBotFlow}
-              onReset={handleResetBotFlow}
-            />
+          {botSubTab === "ai_agent" && (
+            <div className="space-y-6">
+              {/* 1. ESTADO DE SALUD DEL SERVIDOR OLLAMA / INTELLIZAPP */}
+              <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 border border-emerald-500/30 rounded-2xl p-5 shadow-xl shadow-emerald-950/20 text-white">
+                <div className="flex items-center justify-between flex-wrap gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center shadow-inner">
+                      <Cpu className="w-6 h-6 text-emerald-400 animate-pulse" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2.5">
+                        <h3 className="text-base font-black tracking-tight text-white">
+                          Motor de IA Local Qwen 2.5 7B Instruct
+                        </h3>
+                        {aiAgentStatus?.online ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-black bg-emerald-500/25 text-emerald-300 border border-emerald-400/30">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                            ONLINE ({aiAgentStatus.latency_ms || 45} ms)
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-black bg-rose-500/25 text-rose-300 border border-rose-400/30">
+                            <span className="w-2 h-2 rounded-full bg-rose-400" />
+                            OFFLINE / RECONECTANDO
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-300 mt-0.5">
+                        Alojado en servidor dedicado <code className="text-emerald-300 font-mono font-bold">intellihouse-dev (100.72.38.119:11434)</code> • Inferencia en CPU (16 vCPUs Xeon Gold / 21 GB RAM libres).
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={fetchAiAgentStatus}
+                      disabled={loadingAiStatus}
+                      className="px-3.5 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-emerald-500/30 text-xs font-bold text-slate-200 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loadingAiStatus ? "animate-spin" : ""}`} />
+                      <span>Verificar Estado</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4 pt-4 border-t border-emerald-500/20 text-xs">
+                  <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
+                    <span className="text-slate-400 block text-[10px] uppercase font-black tracking-wider">Modelo Activo</span>
+                    <span className="font-mono font-black text-emerald-300 text-sm">qwen2.5:7b-instruct</span>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">Bilingüe Español / Portugués nativo</span>
+                  </div>
+                  <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
+                    <span className="text-slate-400 block text-[10px] uppercase font-black tracking-wider">Aislamiento de Carga</span>
+                    <span className="font-bold text-white text-sm">0% Carga en Supermercado</span>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">Cajas físicas POS y BD 100% blindadas</span>
+                  </div>
+                  <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
+                    <span className="text-slate-400 block text-[10px] uppercase font-black tracking-wider">Herramientas Conectadas</span>
+                    <span className="font-bold text-teal-300 text-sm">Cotizaciones, Catálogo, ExtraClub, PDF</span>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">Consulta directa en PostgreSQL en tiempo real</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. CENTRO DE CONTROL DE DIRECTIVAS & REGLAS DE VENTA DEL AGENTE */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="lg:col-span-8 space-y-6">
+                  {/* Card: Directivas del Negocio */}
+                  <div className="bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                        <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                          Directivas e Instrucciones Adicionales del Negocio
+                        </h4>
+                      </div>
+                      <span className="text-[11px] font-bold text-slate-400">
+                        Se inyecta en caliente al System Prompt de Qwen 2.5
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                        Pautas operativas actuales para el Agente (Prompts y Énfasis)
+                      </label>
+                      <textarea
+                        rows={4}
+                        value={chatbotConfig?.ai_agent?.custom_instructions || ""}
+                        onChange={(e) => {
+                          const updated = {
+                            ...chatbotConfig,
+                            ai_agent: {
+                              ...(chatbotConfig?.ai_agent || {}),
+                              custom_instructions: e.target.value,
+                            },
+                          }
+                          setChatbotConfig(updated)
+                        }}
+                        placeholder="Ejemplo: 'Este fin de semana dar énfasis especial a los cortes de asado envasados al vacío. Recordar a los clientes brasileños que aceptamos PIX y Reales al cambio del día sin comisión extra. Si preguntan por horarios de feriado, abrimos de 07:30 a 20:00 hs.'"
+                        className="w-full text-xs p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-emerald-500 focus:outline-none leading-relaxed"
+                      />
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
+                        <span className="text-[10px] font-bold text-slate-400">Plantillas rápidas:</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const current = chatbotConfig?.ai_agent?.custom_instructions || ""
+                            const added = current ? `${current}\n• Enfatizar cortes parrilleros y sugerir carbón y mandioca para el asado.` : "• Enfatizar cortes parrilleros y sugerir carbón y mandioca para el asado."
+                            setChatbotConfig({
+                              ...chatbotConfig,
+                              ai_agent: { ...(chatbotConfig?.ai_agent || {}), custom_instructions: added }
+                            })
+                          }}
+                          className="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 hover:text-emerald-600 border border-slate-200 dark:border-slate-700"
+                        >
+                          🥩 Impulsar Asado Fin de Semana
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const current = chatbotConfig?.ai_agent?.custom_instructions || ""
+                            const added = current ? `${current}\n• Informar a los clientes en portugués que aceptamos PIX y reales en efectivo al cambio del día.` : "• Informar a los clientes en portugués que aceptamos PIX y reales en efectivo al cambio del día."
+                            setChatbotConfig({
+                              ...chatbotConfig,
+                              ai_agent: { ...(chatbotConfig?.ai_agent || {}), custom_instructions: added }
+                            })
+                          }}
+                          className="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 hover:text-emerald-600 border border-slate-200 dark:border-slate-700"
+                        >
+                          🇧🇷 Pagar en Reales / PIX
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                        Promociones u Ofertas a sugerir activamente hoy
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={chatbotConfig?.ai_agent?.emphasis_promotions || ""}
+                        onChange={(e) => {
+                          const updated = {
+                            ...chatbotConfig,
+                            ai_agent: {
+                              ...(chatbotConfig?.ai_agent || {}),
+                              emphasis_promotions: e.target.value,
+                            },
+                          }
+                          setChatbotConfig(updated)
+                        }}
+                        placeholder="Ejemplo: 'Tapa Cuadril a Gs. 55.000 el kilo. Fardo de cerveza Corona 6x330ml con 20% de descuento. 2x1 en galletitas dulces surtidas.'"
+                        className="w-full text-xs p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-emerald-500 focus:outline-none leading-relaxed"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Card: Funcionalidades Automáticas */}
+                  <div className="bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                      Módulos Comerciales y Acciones del Agente
+                    </h4>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                            <ShoppingCart className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="block text-xs font-bold text-slate-900 dark:text-white">Venta Cruzada Inteligente (Cross-Selling)</span>
+                            <span className="block text-[11px] text-slate-500 dark:text-slate-400">El agente sugiere carbón y bebidas si compran carne, salsas si compran fideos, etc.</span>
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={chatbotConfig?.ai_agent?.cross_selling_active !== false}
+                          onChange={(e) => {
+                            setChatbotConfig({
+                              ...chatbotConfig,
+                              ai_agent: { ...(chatbotConfig?.ai_agent || {}), cross_selling_active: e.target.checked }
+                            })
+                          }}
+                          className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-teal-500/10 flex items-center justify-center text-teal-600 dark:text-teal-400">
+                            <FileText className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="block text-xs font-bold text-slate-900 dark:text-white">Emisión de Presupuesto en PDF Premium (ReportLab)</span>
+                            <span className="block text-[11px] text-slate-500 dark:text-slate-400">Genera y envía automáticamente el comprobante de pedido con totales en Gs y R$ al WhatsApp del cliente.</span>
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={chatbotConfig?.ai_agent?.cart_pdf_active !== false}
+                          onChange={(e) => {
+                            setChatbotConfig({
+                              ...chatbotConfig,
+                              ai_agent: { ...(chatbotConfig?.ai_agent || {}), cart_pdf_active: e.target.checked }
+                            })
+                          }}
+                          className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                            <Users className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="block text-xs font-bold text-slate-900 dark:text-white">Derivación Automática a Asesor Humano</span>
+                            <span className="block text-[11px] text-slate-500 dark:text-slate-400">Pausa el bot al cerrar un pedido o cuando el cliente solicita hablar con una persona, notificando al operador.</span>
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={true}
+                          disabled={true}
+                          className="w-4 h-4 text-emerald-600 rounded cursor-not-allowed opacity-80"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Panel Lateral: Información Corporativa & Guardar */}
+                <div className="lg:col-span-4 space-y-6">
+                  <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
+                    <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                      Blindaje & Datos Corporativos
+                    </h4>
+                    <div className="space-y-2.5 text-xs text-slate-600 dark:text-slate-300">
+                      <div className="flex justify-between pb-1.5 border-b border-slate-200 dark:border-slate-800">
+                        <span className="text-slate-400">Razón Social:</span>
+                        <span className="font-bold text-slate-900 dark:text-white">GRUPO SANTA TERESA E.A.S.</span>
+                      </div>
+                      <div className="flex justify-between pb-1.5 border-b border-slate-200 dark:border-slate-800">
+                        <span className="text-slate-400">Nombre Fantasía:</span>
+                        <span className="font-bold text-slate-900 dark:text-white">Extra Supermercado</span>
+                      </div>
+                      <div className="flex justify-between pb-1.5 border-b border-slate-200 dark:border-slate-800">
+                        <span className="text-slate-400">RUC:</span>
+                        <span className="font-bold text-slate-900 dark:text-white">80150377-9</span>
+                      </div>
+                      <div className="flex justify-between pb-1.5 border-b border-slate-200 dark:border-slate-800">
+                        <span className="text-slate-400">Moneda Base:</span>
+                        <span className="font-bold text-slate-900 dark:text-white">Guaraníes (PYG)</span>
+                      </div>
+                      <div className="flex justify-between pb-1.5 border-b border-slate-200 dark:border-slate-800">
+                        <span className="text-slate-400">ExtraClub Regla:</span>
+                        <span className="font-bold text-emerald-600 dark:text-emerald-400">1 Punto = Gs. 100</span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-800/40 text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                        🔒 <b>Guardrail Activo:</b> El agente tiene prohibido divulgar costos de compra, márgenes de ganancia, contraseñas o nombres de proveedores mayoristas.
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSaveChatbotConfig()}
+                      disabled={savingChatbotConfig}
+                      className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition-all shadow-md shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {savingChatbotConfig ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Check className="w-4 h-4" />
+                      )}
+                      <span>Guardar Directivas del Agente IA</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
 
           {botSubTab === "settings" && (
@@ -2471,17 +2999,17 @@ export default function WhatsAppPage() {
         </div>
       )}
 
-      {/* ── TAB 6: PLANTILLAS OFICIALES ── */}
+      {/* ── TAB 6: PLANTILLAS OFICIALES & DISPARADORES ── */}
       {tab === "templates" && (
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
             <div>
               <div className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-emerald-500" />
-                <h2 className="text-base font-bold text-slate-900 dark:text-white">Plantillas Oficiales de WhatsApp</h2>
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">Plantillas Oficiales y Disparadores del Sistema</h2>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Plantillas para agradecimiento de compras, cupones de sorteo, opt-in promocional, ExtraClub y cobranzas.
+                Central de mensajes automáticos. Todo texto editado aquí es exactamente lo que el cliente recibe en su WhatsApp.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -2489,7 +3017,7 @@ export default function WhatsAppPage() {
                 onClick={handleSeedTemplates}
                 disabled={seedingTemplates}
                 className="btn-outline py-2 px-3 text-xs flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-                title="Restaura y sincroniza las 9 plantillas oficiales de Extra Supermercado"
+                title="Sincroniza y asegura las plantillas oficiales para todos los eventos del sistema"
               >
                 {seedingTemplates ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
@@ -2519,6 +3047,43 @@ export default function WhatsAppPage() {
             </div>
           </div>
 
+          {/* Filtros por Módulo de Negocio */}
+          <div className="flex flex-wrap items-center gap-2 bg-slate-50/80 dark:bg-slate-900/60 p-2.5 rounded-2xl border border-slate-200/60 dark:border-slate-800">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-2">Filtrar Módulo:</span>
+            {[
+              { id: "all", label: "Todas las Plantillas", icon: "🌐" },
+              { id: "Ventas / POS", label: "Ventas / POS", icon: "🛒" },
+              { id: "Sorteos & Cupones", label: "Sorteos & Cupones", icon: "🎟️" },
+              { id: "ExtraClub & Fidelidad", label: "ExtraClub & Fidelidad", icon: "⭐" },
+              { id: "Cuentas & Cobranzas", label: "Cuentas & Cobranzas", icon: "💳" },
+              { id: "Entregas & Delivery", label: "Entregas & Delivery", icon: "🛵" },
+              { id: "Campañas & Marketing", label: "Campañas & Marketing", icon: "📢" },
+            ].map((mod) => {
+              const isSelected = templateModuleFilter === mod.id
+              const count = templates.filter((t) => {
+                if (mod.id === "all") return true
+                return (t.tipo && SYSTEM_TRIGGERS[t.tipo]?.module === mod.id)
+              }).length
+              return (
+                <button
+                  key={mod.id}
+                  onClick={() => setTemplateModuleFilter(mod.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                    isSelected
+                      ? "bg-emerald-600 text-white shadow-xs font-bold"
+                      : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-emerald-400"
+                  }`}
+                >
+                  <span>{mod.icon}</span>
+                  <span>{mod.label}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${isSelected ? "bg-emerald-700 text-emerald-100" : "bg-slate-100 dark:bg-slate-700 text-slate-500"}`}>
+                    {count}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+
           {templatesLoading ? (
             <div className="py-20 text-center text-xs text-slate-400 flex flex-col items-center gap-2">
               <Loader2 className="w-6 h-6 animate-spin text-emerald-500" /> Cargando plantillas...
@@ -2540,90 +3105,118 @@ export default function WhatsAppPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {templates.map((tmpl) => {
-                const badgeColor =
-                  tmpl.tipo === "sorteo.optin"
-                    ? "bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800"
-                    : tmpl.tipo === "optin.confirmado"
-                    ? "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
-                    : tmpl.tipo === "extraclub.invitacion"
-                    ? "bg-sky-100 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800"
-                    : tmpl.tipo === "extraclub.saldo"
-                    ? "bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
-                    : tmpl.tipo === "extraclub.premios"
-                    ? "bg-pink-100 dark:bg-pink-950/60 text-pink-700 dark:text-pink-300 border-pink-200 dark:border-pink-800"
-                    : tmpl.tipo === "cupon.sorteo"
-                    ? "bg-orange-100 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800"
-                    : tmpl.tipo === "cuota.recordatorio"
-                    ? "bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800"
-                    : tmpl.tipo === "promocion.flash"
-                    ? "bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800"
-                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+              {templates
+                .filter((tmpl) => {
+                  if (templateModuleFilter === "all") return true
+                  return (tmpl.tipo && SYSTEM_TRIGGERS[tmpl.tipo]?.module === templateModuleFilter)
+                })
+                .map((tmpl) => {
+                  const meta = tmpl.tipo ? SYSTEM_TRIGGERS[tmpl.tipo] : undefined
+                  const badgeColor =
+                    meta?.badge ||
+                    "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
 
-                return (
-                  <div
-                    key={tmpl.id}
-                    className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow"
-                  >
-                    <div>
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <h3 className="font-bold text-slate-900 dark:text-white text-xs leading-tight">
-                          {tmpl.name}
-                        </h3>
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${badgeColor}`}
-                        >
-                          {tmpl.tipo}
-                        </span>
+                  return (
+                    <div
+                      key={tmpl.id}
+                      className={`bg-white dark:bg-slate-900 rounded-2xl p-5 border transition-all flex flex-col justify-between hover:shadow-md ${
+                        tmpl.active !== false
+                          ? "border-slate-200/80 dark:border-slate-800 shadow-sm"
+                          : "border-slate-200/40 dark:border-slate-800/40 opacity-70 bg-slate-50/50 dark:bg-slate-900/50"
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                              {meta?.module || "Sistema"}
+                            </span>
+                            <h3 className="font-bold text-slate-900 dark:text-white text-xs leading-tight mt-0.5">
+                              {tmpl.name}
+                            </h3>
+                          </div>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${badgeColor}`}
+                          >
+                            {tmpl.tipo}
+                          </span>
+                        </div>
+
+                        {/* Disparador del sistema */}
+                        {meta?.trigger && (
+                          <div className="mb-3 px-2.5 py-1.5 rounded-xl bg-slate-100/70 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 flex items-start gap-1.5 text-[10.5px]">
+                            <span className="text-amber-500 font-bold shrink-0">⚡ Disparador:</span>
+                            <span className="text-slate-600 dark:text-slate-400 leading-tight">
+                              {meta.trigger}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Vista previa mensaje */}
+                        <div className="relative group">
+                          <p className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-sans bg-slate-50 dark:bg-slate-800/60 p-3.5 rounded-xl border border-slate-100 dark:border-slate-800/80 text-[11px] leading-relaxed max-h-48 overflow-y-auto">
+                            {tmpl.content}
+                          </p>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(tmpl.content || "")
+                              toast.success("Copiado", "Texto copiado al portapapeles")
+                            }}
+                            className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm border border-slate-200 dark:border-slate-700 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity hover:text-emerald-600"
+                            title="Copiar texto"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="relative group">
-                        <p className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-sans bg-slate-50 dark:bg-slate-800/60 p-3.5 rounded-xl border border-slate-100 dark:border-slate-800/80 text-[11px] leading-relaxed max-h-48 overflow-y-auto">
-                          {tmpl.content}
-                        </p>
-                        <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(tmpl.content || "")
-                            toast.success("Copiado", "Texto copiado al portapapeles")
-                          }}
-                          className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm border border-slate-200 dark:border-slate-700 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity hover:text-emerald-600"
-                          title="Copiar texto"
-                        >
-                          <Copy className="w-3 h-3" />
-                        </button>
+
+                      {/* Footer de la tarjeta con Toggle y Acciones */}
+                      <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
+                        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={tmpl.active !== false}
+                            onChange={() => handleToggleTemplateActive(tmpl)}
+                            className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5"
+                          />
+                          <span
+                            className={`text-[11px] font-semibold ${
+                              tmpl.active !== false
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : "text-slate-400"
+                            }`}
+                          >
+                            {tmpl.active !== false ? "Activa" : "Desactivada"}
+                          </span>
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => {
+                              setEditingTemplate(tmpl)
+                              setTemplateForm({
+                                name: tmpl.name || "",
+                                tipo: tmpl.tipo || "custom",
+                                content: tmpl.content || "",
+                                active: tmpl.active !== false,
+                              })
+                              setShowTemplateModal(true)
+                            }}
+                            className="btn-outline py-1.5 px-3 text-xs flex items-center gap-1 text-slate-600 dark:text-slate-300 hover:text-emerald-600 font-semibold"
+                          >
+                            <Edit className="w-3.5 h-3.5" /> Editar
+                          </button>
+                          <button
+                            onClick={() => handleDeleteTemplate(tmpl.id)}
+                            className="btn-outline py-1.5 px-2 text-xs text-rose-600 hover:border-rose-300"
+                            title="Eliminar plantilla"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
-                      <span className="text-[10px] text-slate-400 font-mono">
-                        {tmpl.active !== false ? "🟢 Activa" : "⚪ Inactiva"}
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => {
-                            setEditingTemplate(tmpl)
-                            setTemplateForm({
-                              name: tmpl.name || "",
-                              tipo: tmpl.tipo || "custom",
-                              content: tmpl.content || "",
-                              active: tmpl.active !== false,
-                            })
-                            setShowTemplateModal(true)
-                          }}
-                          className="btn-outline py-1.5 px-3 text-xs flex items-center gap-1 text-slate-600 dark:text-slate-300 hover:text-emerald-600"
-                        >
-                          <Edit className="w-3.5 h-3.5" /> Editar
-                        </button>
-                        <button
-                          onClick={() => handleDeleteTemplate(tmpl.id)}
-                          className="btn-outline py-1.5 px-2 text-xs text-rose-600 hover:border-rose-300"
-                          title="Eliminar plantilla"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
             </div>
           )}
         </div>
@@ -2759,14 +3352,14 @@ export default function WhatsAppPage() {
         </Modal>
       )}
 
-      {/* ── MODAL: PLANTILLA ── */}
+      {/* ── MODAL: PLANTILLA CON ASISTENTE IA & PREVIEW REALISTA ── */}
       {showTemplateModal && (
         <Modal
           open={showTemplateModal}
           onClose={() => setShowTemplateModal(false)}
           title={editingTemplate ? "Editar Plantilla de WhatsApp" : "Nueva Plantilla de WhatsApp"}
         >
-          <form onSubmit={handleSaveTemplate} className="space-y-4">
+          <form onSubmit={handleSaveTemplate} className="space-y-4 max-h-[85vh] overflow-y-auto pr-1">
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Nombre de la Plantilla</label>
               <input
@@ -2789,15 +3382,20 @@ export default function WhatsAppPage() {
                   onChange={(e) => setTemplateForm({ ...templateForm, tipo: e.target.value })}
                   className="input text-xs"
                 >
+                  <option value="venta.creada">🛒 Ticket Digital POS + Puntos ExtraClub</option>
                   <option value="sorteo.optin">🎟️ Sorteo + Cupones + Opt-In (Recomendada)</option>
+                  <option value="cupon.sorteo">🎫 Cupón Oficial Individual de Sorteo</option>
+                  <option value="pago.recibido">💳 Cobro / Pago Recibido en Caja</option>
                   <option value="optin.confirmado">🎉 Confirmación Opt-In Validado</option>
-                  <option value="venta.creada">🛒 Ticket Digital POS + Puntos</option>
                   <option value="extraclub.invitacion">👋 Invitación ExtraClub (No Socio)</option>
                   <option value="extraclub.saldo">⭐ Consulta Saldo ExtraClub</option>
                   <option value="extraclub.premios">🎁 Catálogo Premios Temporada</option>
-                  <option value="cupon.sorteo">🎫 Cupón Oficial Individual</option>
                   <option value="cuota.recordatorio">🔔 Recordatorio Cuota Crédito</option>
                   <option value="promocion.flash">🔥 Promoción Flash / Oferta del Día</option>
+                  <option value="entrega.in_transit">🛵 Entrega en Camino (Delivery)</option>
+                  <option value="entrega.delivered">📦 Pedido Entregado en Destino</option>
+                  <option value="pedido.pendiente">⏳ Notificación Pedido Pendiente</option>
+                  <option value="pedido.listo">✅ Notificación Pedido Listo para Retiro</option>
                   <option value="custom">✏️ Personalizada / Otro</option>
                 </select>
               </div>
@@ -2811,17 +3409,101 @@ export default function WhatsAppPage() {
                   value={templateForm.tipo}
                   onChange={(e) => setTemplateForm({ ...templateForm, tipo: e.target.value })}
                   className="input text-xs font-mono"
-                  placeholder="ej: sorteo.optin"
+                  placeholder="ej: venta.creada"
                   required
                 />
               </div>
+            </div>
+
+            {/* Banner Disparador Vinculado */}
+            {SYSTEM_TRIGGERS[templateForm.tipo]?.trigger && (
+              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-start gap-2">
+                <Zap className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                <div className="text-xs">
+                  <span className="font-bold text-emerald-800 dark:text-emerald-300">
+                    Disparador Vinculado ({SYSTEM_TRIGGERS[templateForm.tipo]?.module}):
+                  </span>{" "}
+                  <span className="text-emerald-700 dark:text-emerald-400">
+                    {SYSTEM_TRIGGERS[templateForm.tipo]?.trigger}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* ASISTENTE IA PARA REDACTAR EL MENSAJE IDEAL */}
+            <div className="rounded-2xl p-4 bg-gradient-to-br from-purple-50 via-indigo-50/40 to-emerald-50 dark:from-purple-950/30 dark:via-indigo-950/20 dark:to-emerald-950/30 border border-purple-200/80 dark:border-purple-800/60 shadow-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-purple-600 text-white flex items-center justify-center shadow-xs">
+                    <Sparkles className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-purple-900 dark:text-purple-200">
+                      Asistente IA Copilot (Qwen 2.5)
+                    </h4>
+                    <p className="text-[10.5px] text-purple-700/80 dark:text-purple-300/70">
+                      Crea o pule el texto manteniendo intactas las variables dinámicas
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAiAssistant(!showAiAssistant)}
+                  className="text-xs font-semibold text-purple-700 dark:text-purple-300 hover:underline"
+                >
+                  {showAiAssistant ? "Ocultar" : "Mostrar Opciones"}
+                </button>
+              </div>
+
+              {showAiAssistant && (
+                <div className="space-y-2.5 pt-1">
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      "Más cálido y persuasivo",
+                      "Breve y conciso",
+                      "Destacar sorteo de cupones",
+                      "Enfocar en valor de puntos ExtraClub",
+                      "Traducir / Adaptar al Portugués",
+                    ].map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        onClick={() => handleCraftWithAi(chip)}
+                        disabled={craftingAi}
+                        className="px-2.5 py-1 rounded-lg text-[10.5px] font-medium bg-white/90 dark:bg-slate-900/90 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-700 hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors shadow-2xs"
+                      >
+                        ⚡ {chip}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={aiInstruction}
+                      onChange={(e) => setAiInstruction(e.target.value)}
+                      placeholder="Instrucción a la IA (ej: 'Agrégale un tono festivo y destaca que no tire el ticket')..."
+                      className="input text-xs flex-1 bg-white dark:bg-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCraftWithAi()}
+                      disabled={craftingAi || (!aiInstruction.trim() && !templateForm.content.trim())}
+                      className="btn-primary py-2 px-3.5 text-xs bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-1.5 shrink-0"
+                    >
+                      {craftingAi ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                      {craftingAi ? "Redactando..." : "Redactar"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Inserción asistida de variables */}
             <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-200/60 dark:border-slate-800">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-emerald-600" /> Insertar Variables Dinámicas al Mensaje:
+                  <Sparkles className="w-3 h-3 text-emerald-600" /> Insertar Variables Dinámicas:
                 </span>
                 <span className="text-[10px] text-slate-400">Clic para insertar en el cursor</span>
               </div>
@@ -2831,14 +3513,16 @@ export default function WhatsAppPage() {
                   { key: "ticket", label: "Ticket #" },
                   { key: "monto", label: "Monto Gs." },
                   { key: "puntos", label: "Puntos ExtraClub" },
+                  { key: "socio_numero", label: "N° Socio" },
+                  { key: "valor_monetario", label: "Equiv. Gs." },
                   { key: "cupones_generados", label: "Cupones Nuevos" },
                   { key: "campana_sorteo", label: "Campaña Sorteo" },
                   { key: "cupones_totales", label: "Cupones Totales" },
                   { key: "documento", label: "C.I. / RUC" },
-                  { key: "socio_numero", label: "N° Socio" },
-                  { key: "valor_monetario", label: "Equiv. Gs." },
                   { key: "fecha", label: "Fecha" },
                   { key: "cupon_numero", label: "N° Cupón" },
+                  { key: "sorteo", label: "Sorteo" },
+                  { key: "empresa", label: "Empresa" },
                   { key: "oferta_titulo", label: "Oferta Título" },
                   { key: "precio_oferta", label: "Precio Oferta" },
                   { key: "precio_regular", label: "Precio Regular" },
@@ -2873,19 +3557,48 @@ export default function WhatsAppPage() {
               </p>
             </div>
 
-            {/* Vista Previa Simulación WhatsApp */}
-            <div className="space-y-1">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                📱 Vista Previa en WhatsApp:
-              </span>
-              <div className="p-3.5 rounded-2xl bg-[#EFEAE2] dark:bg-[#0b141a] border border-slate-200 dark:border-slate-800 flex justify-start">
-                <div className="max-w-[85%] bg-white dark:bg-[#202c33] text-slate-900 dark:text-[#e9edef] rounded-2xl rounded-tl-none p-3 shadow-xs text-xs space-y-1.5 relative">
+            {/* Vista Previa Interactiva: Variables vs Simulación WhatsApp */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  📱 Vista Previa en Vivo:
+                </span>
+                <div className="flex rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewMode("simulated")}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition-all ${
+                      previewMode === "simulated"
+                        ? "bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-2xs font-bold"
+                        : "text-slate-500 hover:text-slate-700"
+                    }`}
+                  >
+                    Simulación con Datos Reales
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewMode("variables")}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition-all ${
+                      previewMode === "variables"
+                        ? "bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-2xs font-bold"
+                        : "text-slate-500 hover:text-slate-700"
+                    }`}
+                  >
+                    Variables Crudas
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-[#EFEAE2] dark:bg-[#0b141a] border border-slate-200 dark:border-slate-800 flex justify-start">
+                <div className="max-w-[90%] bg-white dark:bg-[#202c33] text-slate-900 dark:text-[#e9edef] rounded-2xl rounded-tl-none p-3.5 shadow-xs text-xs space-y-1.5 relative">
                   <div className="whitespace-pre-wrap leading-relaxed text-[11.5px] font-sans">
-                    {templateForm.content || "El mensaje previsualizado aparecerá aquí..."}
+                    {previewMode === "simulated"
+                      ? renderSimulatedContent(templateForm.content, templateForm.tipo) || "El mensaje simulado aparecerá aquí..."
+                      : templateForm.content || "El mensaje con variables aparecerá aquí..."}
                   </div>
                   <div className="flex items-center justify-end gap-1 text-[10px] text-slate-400 dark:text-slate-500 pt-0.5">
-                    <span>10:30</span>
-                    <CheckCheck className="w-3 h-3 text-sky-500" />
+                    <span>18:30</span>
+                    <CheckCheck className="w-3.5 h-3.5 text-sky-500" />
                   </div>
                 </div>
               </div>

@@ -15,6 +15,13 @@ class LoyaltyConfigCreate(BaseModel):
     cumpleanos_puntos: int = 200
     crear_en_venta: bool = True
     activo: bool = True
+    multiplicador_bronce: Decimal = Decimal("1.00")
+    multiplicador_plata: Decimal = Decimal("1.20")
+    multiplicador_oro: Decimal = Decimal("1.50")
+    multiplicador_vip: Decimal = Decimal("2.00")
+    promocion_activa: bool = False
+    promocion_nombre: Optional[str] = None
+    multiplicador_promocional: Decimal = Decimal("1.00")
 
 
 class LoyaltyConfigUpdate(BaseModel):
@@ -26,6 +33,13 @@ class LoyaltyConfigUpdate(BaseModel):
     cumpleanos_puntos: Optional[int] = None
     crear_en_venta: Optional[bool] = None
     activo: Optional[bool] = None
+    multiplicador_bronce: Optional[Decimal] = None
+    multiplicador_plata: Optional[Decimal] = None
+    multiplicador_oro: Optional[Decimal] = None
+    multiplicador_vip: Optional[Decimal] = None
+    promocion_activa: Optional[bool] = None
+    promocion_nombre: Optional[str] = None
+    multiplicador_promocional: Optional[Decimal] = None
 
 
 class LoyaltyConfigResponse(BaseModel):
@@ -39,6 +53,13 @@ class LoyaltyConfigResponse(BaseModel):
     cumpleanos_puntos: int
     crear_en_venta: bool
     activo: bool
+    multiplicador_bronce: Decimal = Decimal("1.00")
+    multiplicador_plata: Decimal = Decimal("1.20")
+    multiplicador_oro: Decimal = Decimal("1.50")
+    multiplicador_vip: Decimal = Decimal("2.00")
+    promocion_activa: bool = False
+    promocion_nombre: Optional[str] = None
+    multiplicador_promocional: Decimal = Decimal("1.00")
     created_at: datetime
     updated_at: datetime
 
@@ -76,6 +97,8 @@ class PointsBalance(BaseModel):
     customer_id: UUID
     total_puntos: int = 0
     puntos_por_vencer: int = 0
+    is_member: bool = True
+    extra_club_numero: Optional[str] = None
 
 
 class LoyaltyRewardCreate(BaseModel):
@@ -85,8 +108,16 @@ class LoyaltyRewardCreate(BaseModel):
     puntos_requeridos: int
     tipo_recompensa: str
     valor_recompensa: Optional[Decimal] = None
-    stock: Optional[int] = None
+    stock: Optional[int] = 0
     imagen_url: Optional[str] = None
+    supplier_id: Optional[UUID] = None
+    product_id: Optional[UUID] = None
+    warehouse_id: Optional[UUID] = None
+    patrocinador_nombre: Optional[str] = None
+    aporte_tipo: Optional[str] = "donacion_100"
+    unidades_pactadas: Optional[int] = 0
+    costo_referencial: Optional[Decimal] = None
+    notas: Optional[str] = None
 
 
 class LoyaltyRewardUpdate(BaseModel):
@@ -98,6 +129,14 @@ class LoyaltyRewardUpdate(BaseModel):
     stock: Optional[int] = None
     imagen_url: Optional[str] = None
     activo: Optional[bool] = None
+    supplier_id: Optional[UUID] = None
+    product_id: Optional[UUID] = None
+    warehouse_id: Optional[UUID] = None
+    patrocinador_nombre: Optional[str] = None
+    aporte_tipo: Optional[str] = None
+    unidades_pactadas: Optional[int] = None
+    costo_referencial: Optional[Decimal] = None
+    notas: Optional[str] = None
 
 
 class LoyaltyRewardResponse(BaseModel):
@@ -108,11 +147,53 @@ class LoyaltyRewardResponse(BaseModel):
     puntos_requeridos: int
     tipo_recompensa: str
     valor_recompensa: Optional[Decimal] = None
-    stock: Optional[int] = None
+    stock: Optional[int] = 0
     imagen_url: Optional[str] = None
     activo: bool
+    supplier_id: Optional[UUID] = None
+    product_id: Optional[UUID] = None
+    warehouse_id: Optional[UUID] = None
+    patrocinador_nombre: Optional[str] = None
+    aporte_tipo: Optional[str] = "donacion_100"
+    unidades_pactadas: Optional[int] = 0
+    costo_referencial: Optional[Decimal] = None
+    notas: Optional[str] = None
+    warehouse_nombre: Optional[str] = None
+    product_sku: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RewardStockEntryCreate(BaseModel):
+    cantidad: int
+    remision_proveedor: Optional[str] = None
+    costo_unitario: Optional[Decimal] = None
+    notas: Optional[str] = None
+
+
+class RewardRedeemCreate(BaseModel):
+    customer_id: UUID
+    company_id: UUID
+    cantidad: int = 1
+    notas: Optional[str] = None
+
+
+class RewardRedemptionResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    customer_id: UUID
+    reward_id: UUID
+    warehouse_id: Optional[UUID] = None
+    supplier_id: Optional[UUID] = None
+    puntos_canjeados: int
+    cantidad: int
+    comprobante_numero: Optional[str] = None
+    entregado_por: Optional[str] = None
+    notas: Optional[str] = None
+    created_at: datetime
 
     class Config:
         from_attributes = True

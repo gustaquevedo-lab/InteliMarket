@@ -5,8 +5,9 @@ import {
   Building2, User, LogIn, LogOut, Check, ChevronRight, Lock, Eye, EyeOff,
   Flame, Sparkles, Printer, Layers, Clock, ShieldAlert, Wifi,
   Lightbulb, Sun, Moon, CheckCheck, FileText, Download,
-  Hash, RotateCcw
+  Hash, RotateCcw, Barcode, FlipHorizontal, ArrowDownCircle, ExternalLink
 } from "lucide-react"
+import { BrowserMultiFormatReader, DecodeHintType, BarcodeFormat } from "@zxing/library"
 import { api, type PurchaseOrder, type Product } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -95,6 +96,14 @@ export default function DepositoRecepcionPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const scanLoopRef = useRef<number | null>(null)
+  const zxingReaderRef = useRef<BrowserMultiFormatReader | null>(null)
+  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
+  const [selectedCameraId, setSelectedCameraId] = useState<string>("")
+
+  // Acordeón y caché de ítems de órdenes en lista principal
+  const [expandedPOId, setExpandedPOId] = useState<string | null>(null)
+  const [poDetailsLoading, setPoDetailsLoading] = useState<Record<string, boolean>>({})
+  const [poDetailsCache, setPoDetailsCache] = useState<Record<string, any[]>>({})
 
   // ── BUFFER DEL ESCÁNER DE HARDWARE (PISTOLA LÁSER ZEBRA / HONEYWELL) ────────
   const barcodeBuffer = useRef("")
@@ -125,35 +134,78 @@ export default function DepositoRecepcionPage() {
     }
   }, [user, fetchOrders])
 
+  const toggleExpandPO = async (poId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (expandedPOId === poId) {
+      setExpandedPOId(null)
+      return
+    }
+    setExpandedPOId(poId)
+    if (!poDetailsCache[poId]) {
+      setPoDetailsLoading((prev) => ({ ...prev, [poId]: true }))
+      try {
+        const items = await api.purchases.getOrderItems(poId)
+        setPoDetailsCache((prev) => ({ ...prev, [poId]: items || [] }))
+      } catch {
+        setPoDetailsCache((prev) => ({ ...prev, [poId]: [] }))
+      } finally {
+        setPoDetailsLoading((prev) => ({ ...prev, [poId]: false }))
+      }
+    }
+  }
+
   // ---------------------------------------------------------------------------
-  // 2. INICIAR RECEPCIÓN DE UNA ORDEN
+  // 2. INICIAR RECEPCIÓN DE UNA ORDEN CON CÓDIGOS DE BARRA COMPLETOS
   // ---------------------------------------------------------------------------
   const handleSelectPO = async (po: PurchaseOrder) => {
     try {
       soundAlerts.playScanSuccess()
       setSelectedPO(po)
-      const fullPO = await api.purchases.getOrder(po.id!)
-      const initialDraft: ReceptionItemDraft[] = (fullPO.items || []).map((it) => {
+
+      // Cargar la cabecera completa y la lista de ítems detallada con códigos de barra de productos
+      const [fullPO, detailedItems] = await Promise.all([
+        api.purchases.getOrder(po.id!),
+        api.purchases.getOrderItems(po.id!).catch(() => []),
+      ])
+
+      const detailedMap = new Map<string, any>()
+      ;(detailedItems || []).forEach((d: any) => {
+        if (d.id) detailedMap.set(String(d.id), d)
+        if (d.product_id) detailedMap.set(String(d.product_id), d)
+      })
+
+      const initialDraft: ReceptionItemDraft[] = (fullPO.items || []).map((it: any) => {
         const cantOrdenada = Number(it.cantidad || 0)
-        const cantRecibidaPrevia = Number(it.recibido || (it as any).cantidad_recibida || 0)
+        const cantRecibidaPrevia = Number(it.recibido || it.cantidad_recibida || 0)
         const pendiente = Math.max(0, cantOrdenada - cantRecibidaPrevia)
         const defaultExpiry = new Date()
         defaultExpiry.setMonth(defaultExpiry.getMonth() + 6)
 
-        const prodId = (it as any).product_id || it.producto_id || (it as any).id || ""
-        const prodNombre = (it as any).producto?.nombre || (it as any).descripcion || (it as any).nombre || "Producto"
-        const prodCodigo = (it as any).producto?.codigo_barra || (it as any).codigo_barra || ""
-        const prodSku = (it as any).producto?.sku || (it as any).sku || ""
+        const prodId = String(it.product_id || it.producto_id || it.id || "")
+        const detail = detailedMap.get(String(it.id)) || detailedMap.get(prodId) || {}
+
+        const rawCode = detail.codigo_barra || it.codigo_barra || it.producto?.codigo_barra || ""
+        const cleanCode = rawCode === "—" ? "" : String(rawCode).trim()
+
+        const rawSku = detail.sku || it.sku || it.producto?.sku || ""
+        const cleanSku = rawSku === "—" ? "" : String(rawSku).trim()
+
+        const prodNombre =
+          detail.descripcion ||
+          it.descripcion ||
+          it.producto?.nombre ||
+          it.nombre ||
+          "Producto"
 
         return {
           product_id: prodId,
           nombre: prodNombre,
-          codigo_barra: prodCodigo,
-          sku: prodSku,
+          codigo_barra: cleanCode,
+          sku: cleanSku,
           cantidad_ordenada: cantOrdenada,
           cantidad_recibir: pendiente > 0 ? pendiente : 0,
           precio_unitario: Number(it.precio_unitario || 0),
-          lote: `L-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${String(prodId).slice(-3)}`,
+          lote: `L-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${String(prodId).slice(-4)}`,
           fecha_vencimiento: defaultExpiry.toISOString().split("T")[0],
           cantidad_rechazada: 0,
           motivo_rechazo: "Ninguno",
@@ -169,7 +221,7 @@ export default function DepositoRecepcionPage() {
       setViewState("receiving")
       window.scrollTo({ top: 0, behavior: "smooth" })
     } catch (err: any) {
-      toast.error("Error al cargar orden", err.message || "No se pudieron obtener los ítems.")
+      toast.error("Error al cargar orden", err.message || "No se pudieron obtener los ítems de la orden.")
     }
   }
 
@@ -197,12 +249,16 @@ export default function DepositoRecepcionPage() {
 
       // Vista 2: Si estamos en recepción activa y se escanea un producto
       if (viewState === "receiving") {
-        const matchIdx = itemsDraft.findIndex(
-          (it) =>
-            (it.codigo_barra && it.codigo_barra === cleanCode) ||
+        const cleanNoLeading = cleanCode.replace(/^0+/, "")
+        const matchIdx = itemsDraft.findIndex((it) => {
+          const itCode = (it.codigo_barra || "").trim()
+          const itCodeNoLeading = itCode.replace(/^0+/, "")
+          return (
+            (itCode && (itCode === cleanCode || (itCodeNoLeading && itCodeNoLeading === cleanNoLeading))) ||
             (it.sku && it.sku.toLowerCase() === cleanCode.toLowerCase()) ||
             it.product_id === cleanCode
-        )
+          )
+        })
 
         if (matchIdx !== -1) {
           soundAlerts.playScanSuccess()
@@ -262,44 +318,108 @@ export default function DepositoRecepcionPage() {
   }, [processScannedCode])
 
   // ---------------------------------------------------------------------------
-  // 4. CÁMARA & ESCANEO CON BARCODE DETECTOR
+  // 4. CÁMARA & ESCANEO CON MOTOR HÍBRIDO (ZXING + NATIVE BARCODE DETECTOR)
   // ---------------------------------------------------------------------------
-  const startCamera = async () => {
+  const startCamera = async (deviceId?: string) => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
-      })
+      stopCamera()
+
+      let videoDevices: MediaDeviceInfo[] = []
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        videoDevices = devices.filter((d) => d.kind === "videoinput")
+        setAvailableCameras(videoDevices)
+      } catch {}
+
+      let targetId = deviceId || selectedCameraId
+      if (!targetId && videoDevices.length > 0) {
+        const back = videoDevices.find((d) => /back|rear|trasera|environment/i.test(d.label))
+        targetId = back ? back.deviceId : videoDevices[videoDevices.length - 1].deviceId
+      }
+      if (targetId) setSelectedCameraId(targetId)
+
+      const constraints: MediaStreamConstraints = {
+        video: targetId
+          ? { deviceId: { exact: targetId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+          : { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
       streamRef.current = stream
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        videoRef.current.play()
+        videoRef.current.setAttribute("playsinline", "true")
+        await videoRef.current.play()
       }
       setCameraActive(true)
 
-      if ("BarcodeDetector" in window) {
-        const barcodeDetector = new (window as any).BarcodeDetector({
-          formats: ["ean_13", "ean_8", "code_128", "qr_code", "upc_a"],
-        })
+      // 1. Motor de decodificación universal ZXing (soporta EAN-13, EAN-8, UPC, Code128, etc.)
+      const hints = new Map()
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+        BarcodeFormat.EAN_13,
+        BarcodeFormat.EAN_8,
+        BarcodeFormat.UPC_A,
+        BarcodeFormat.UPC_E,
+        BarcodeFormat.CODE_128,
+        BarcodeFormat.CODE_39,
+        BarcodeFormat.ITF,
+        BarcodeFormat.QR_CODE,
+      ])
+      hints.set(DecodeHintType.TRY_HARDER, true)
 
-        const detectLoop = async () => {
-          if (!videoRef.current || videoRef.current.readyState < 2) {
-            scanLoopRef.current = requestAnimationFrame(detectLoop)
-            return
+      const reader = new BrowserMultiFormatReader(hints, 200)
+      zxingReaderRef.current = reader
+
+      reader.decodeFromStream(stream, videoRef.current!, (result) => {
+        if (result) {
+          const raw = result.getText()
+          const now = Date.now()
+          if (now - lastKeyTime.current > 1200 || raw !== barcodeBuffer.current) {
+            lastKeyTime.current = now
+            barcodeBuffer.current = raw
+            try {
+              navigator.vibrate?.([80])
+            } catch {}
+            processScannedCode(raw)
           }
-          try {
-            const barcodes = await barcodeDetector.detect(videoRef.current)
-            if (barcodes.length > 0) {
-              const raw = barcodes[0].rawValue
-              processScannedCode(raw)
-              await new Promise((r) => setTimeout(r, 1200))
-            }
-          } catch {}
-          scanLoopRef.current = requestAnimationFrame(detectLoop)
         }
-        scanLoopRef.current = requestAnimationFrame(detectLoop)
+      })
+
+      // 2. Aceleración por hardware con BarcodeDetector si está disponible en el navegador
+      if ("BarcodeDetector" in window) {
+        try {
+          const barcodeDetector = new (window as any).BarcodeDetector({
+            formats: ["ean_13", "ean_8", "code_128", "qr_code", "upc_a", "upc_e"],
+          })
+
+          const detectLoop = async () => {
+            if (!videoRef.current || videoRef.current.readyState < 2 || !streamRef.current) {
+              scanLoopRef.current = requestAnimationFrame(detectLoop)
+              return
+            }
+            try {
+              const barcodes = await barcodeDetector.detect(videoRef.current)
+              if (barcodes.length > 0) {
+                const raw = barcodes[0].rawValue
+                const now = Date.now()
+                if (now - lastKeyTime.current > 1200 || raw !== barcodeBuffer.current) {
+                  lastKeyTime.current = now
+                  barcodeBuffer.current = raw
+                  try {
+                    navigator.vibrate?.([80])
+                  } catch {}
+                  processScannedCode(raw)
+                }
+              }
+            } catch {}
+            scanLoopRef.current = requestAnimationFrame(detectLoop)
+          }
+          scanLoopRef.current = requestAnimationFrame(detectLoop)
+        } catch {}
       }
     } catch (err: any) {
-      toast.error("Error de cámara", "No se pudo acceder a la cámara trasera del dispositivo.")
+      toast.error("Error de cámara", "No se pudo acceder a la cámara. Verificá los permisos del dispositivo.")
     }
   }
 
@@ -308,9 +428,18 @@ export default function DepositoRecepcionPage() {
       cancelAnimationFrame(scanLoopRef.current)
       scanLoopRef.current = null
     }
+    if (zxingReaderRef.current) {
+      try {
+        zxingReaderRef.current.reset()
+      } catch {}
+      zxingReaderRef.current = null
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop())
       streamRef.current = null
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
     }
     setCameraActive(false)
     setTorchActive(false)
@@ -776,7 +905,21 @@ export default function DepositoRecepcionPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Descargar APK Nativo Android Extra Depósito */}
+            <a
+              href="/download/extra-deposito.apk"
+              download="extra-deposito.apk"
+              title="Descargar APK Nativo Android Extra Depósito"
+              className="px-2.5 py-1.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/25 active:scale-95 transition cursor-pointer flex items-center gap-1.5 text-xs font-black shadow-sm shrink-0"
+            >
+              <Download className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+              <span className="hidden sm:inline">DESCARGAR</span>
+              <span className="text-[10px] uppercase font-black tracking-wider bg-amber-500 text-slate-950 px-1.5 py-0.5 rounded-md">
+                APK
+              </span>
+            </a>
+
             {/* Toggle Modo Claro / Oscuro */}
             <button
               onClick={toggleTheme}
@@ -794,7 +937,7 @@ export default function DepositoRecepcionPage() {
               }}
               className={`p-2.5 rounded-2xl border transition-all ${
                 cameraActive
-                  ? "bg-red-500/20 border-red-500 text-red-600 dark:text-red-400"
+                  ? "bg-red-500/20 border-red-500 text-red-600 dark:text-red-400 shadow-md shadow-red-500/20"
                   : "bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-amber-500"
               }`}
               title="Alternar Cámara de Escaneo"
@@ -818,31 +961,57 @@ export default function DepositoRecepcionPage() {
           </div>
         </div>
 
-        {/* Visor de Cámara Flotante Compacto */}
+        {/* Visor de Cámara Flotante con ZXing & Selector de Cámara */}
         {cameraActive && (
-          <div className="mt-3 max-w-2xl mx-auto relative rounded-2xl overflow-hidden border-2 border-amber-500 bg-black aspect-video max-h-52 shadow-2xl">
+          <div className="mt-3 max-w-2xl mx-auto relative rounded-3xl overflow-hidden border-2 border-amber-500 bg-black aspect-video max-h-60 shadow-2xl">
             <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
+            
+            {/* Guía de enfoque con rayo de escaneo animado */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="w-56 h-28 border-2 border-dashed border-amber-400 rounded-2xl animate-pulse" />
+              <div className="w-64 h-32 border-2 border-dashed border-amber-400/90 rounded-2xl relative overflow-hidden flex flex-col justify-between p-2">
+                <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-amber-400 to-transparent animate-pulse" />
+                <span className="text-[10px] font-mono font-bold text-center text-amber-300/80 bg-black/40 px-2 py-0.5 rounded-full mx-auto">
+                  Enfocá el código de barras (EAN-13, EAN-8, UPC, Code 128)
+                </span>
+                <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-amber-400 to-transparent animate-pulse" />
+              </div>
             </div>
-            <div className="absolute bottom-2 right-2 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={toggleTorch}
-                className={`px-3 py-1.5 rounded-xl backdrop-blur-md text-xs font-bold flex items-center gap-1.5 ${
-                  torchActive ? "bg-amber-500 text-slate-950" : "bg-slate-900/80 text-white"
-                }`}
-              >
-                <Lightbulb className="w-3.5 h-3.5" />
-                {torchActive ? "Flash ON" : "Flash"}
-              </button>
-              <button
-                type="button"
-                onClick={stopCamera}
-                className="px-3 py-1.5 rounded-xl bg-red-600 text-white text-xs font-bold"
-              >
-                Cerrar
-              </button>
+
+            <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between pointer-events-auto">
+              {availableCameras.length > 1 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const idx = availableCameras.findIndex((c) => c.deviceId === selectedCameraId)
+                    const next = availableCameras[(idx + 1) % availableCameras.length]
+                    if (next) startCamera(next.deviceId)
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-slate-900/85 backdrop-blur-md text-white text-xs font-bold flex items-center gap-1.5 border border-white/20 active:scale-95 transition"
+                >
+                  <FlipHorizontal className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Girar Cámara</span>
+                </button>
+              ) : <div />}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={toggleTorch}
+                  className={`px-3 py-1.5 rounded-xl backdrop-blur-md text-xs font-bold flex items-center gap-1.5 transition ${
+                    torchActive ? "bg-amber-500 text-slate-950 font-black shadow-md" : "bg-slate-900/85 text-white border border-white/20"
+                  }`}
+                >
+                  <Lightbulb className="w-3.5 h-3.5" />
+                  {torchActive ? "Flash ON" : "Flash"}
+                </button>
+                <button
+                  type="button"
+                  onClick={stopCamera}
+                  className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 active:scale-95 text-white text-xs font-black shadow-md transition"
+                >
+                  Cerrar
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -912,19 +1081,30 @@ export default function DepositoRecepcionPage() {
               </button>
             </div>
 
-            {/* Banner de Ayuda con Escáner Láser */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-4 flex items-center gap-3.5 shadow-sm">
-              <div className="p-2.5 rounded-2xl bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">
-                <QrCode className="w-6 h-6" />
+            {/* Banner de Ayuda con Escáner Láser & Descarga APK */}
+            <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 rounded-2xl p-4 flex items-center justify-between gap-3 shadow-sm">
+              <div className="flex items-center gap-3.5">
+                <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-700 dark:text-amber-400 shrink-0">
+                  <Barcode className="w-6 h-6" />
+                </div>
+                <div className="text-xs sm:text-sm">
+                  <span className="font-extrabold text-slate-900 dark:text-white block text-sm sm:text-base">
+                    Pistola Láser & Cámara Activas
+                  </span>
+                  <span className="text-slate-600 dark:text-slate-400">
+                    Escaneá el código de la orden o abrí la cámara para verificar códigos de barra automáticamente.
+                  </span>
+                </div>
               </div>
-              <div className="text-xs sm:text-sm">
-                <span className="font-extrabold text-slate-900 dark:text-white block text-sm sm:text-base">
-                  Pistola Láser Lista
-                </span>
-                <span className="text-slate-500 dark:text-slate-400">
-                  Escaneá el código de barras de la orden de compra física para abrir la descarga al instante.
-                </span>
-              </div>
+              <a
+                href="/download/extra-deposito.apk"
+                download="extra-deposito.apk"
+                title="Bajar APK Nativo Android"
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-xs hover:bg-amber-400 transition shrink-0 shadow-md"
+              >
+                <Download className="w-4 h-4" />
+                <span>Instalar APK</span>
+              </a>
             </div>
 
             {/* Listado de Órdenes */}
@@ -954,41 +1134,114 @@ export default function DepositoRecepcionPage() {
                   No hay órdenes de compra pendientes para descargar.
                 </div>
               ) : (
-                filteredOrders.map((po) => (
-                  <div
-                    key={po.id}
-                    onClick={() => handleSelectPO(po)}
-                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-amber-500 dark:hover:border-amber-500 active:scale-[0.99] rounded-3xl p-5 transition-all cursor-pointer shadow-sm hover:shadow-md space-y-3"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <span className="font-mono text-sm font-black text-amber-600 dark:text-amber-400">
-                          {po.numero}
-                        </span>
-                        <h3 className="font-extrabold text-base sm:text-lg text-slate-900 dark:text-white line-clamp-1 mt-0.5">
-                          {po.supplier?.razon_social || "Proveedor"}
-                        </h3>
-                        <p className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 mt-0.5">
-                          RUC: {po.supplier?.ruc || "—"} · Fecha: {formatDate(po.fecha || "")}
-                        </p>
-                      </div>
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-mono font-black uppercase shrink-0 ${
-                        po.estado === "parcial"
-                          ? "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700"
-                          : "bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700"
-                      }`}>
-                        {po.estado}
-                      </span>
-                    </div>
+                filteredOrders.map((po) => {
+                  const isExpanded = expandedPOId === po.id
+                  const cachedItems = po.id ? poDetailsCache[po.id] : undefined
+                  const isLoadingItems = po.id ? poDetailsLoading[po.id] : false
 
-                    <div className="flex items-center justify-between text-sm pt-3 border-t border-slate-100 dark:border-slate-800/80 font-mono text-slate-600 dark:text-slate-400">
-                      <span>Total: <strong className="text-slate-900 dark:text-white font-black">{formatPYG(po.total || 0)}</strong></span>
-                      <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-extrabold text-sm">
-                        Descargar <ChevronRight className="w-4 h-4" />
-                      </span>
+                  return (
+                    <div
+                      key={po.id}
+                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-amber-500/80 rounded-3xl p-5 transition-all shadow-sm hover:shadow-md space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-sm font-black text-amber-600 dark:text-amber-400">
+                              {po.numero}
+                            </span>
+                            <span className="text-xs text-slate-400">·</span>
+                            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                              {formatDate(po.fecha || "")}
+                            </span>
+                          </div>
+                          <h3 className="font-black text-base sm:text-lg text-slate-900 dark:text-white mt-1 break-words">
+                            {po.supplier?.razon_social || "Proveedor"}
+                          </h3>
+                          <p className="text-xs sm:text-sm font-mono font-medium text-slate-500 dark:text-slate-400 mt-0.5">
+                            RUC: <strong className="text-slate-700 dark:text-slate-300">{po.supplier?.ruc || "—"}</strong>
+                          </p>
+                        </div>
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-mono font-black uppercase shrink-0 ${
+                          po.estado === "parcial"
+                            ? "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700"
+                            : "bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700"
+                        }`}>
+                          {po.estado}
+                        </span>
+                      </div>
+
+                      {/* Botón para previsualizar ítems y códigos de barra antes de descargar */}
+                      {po.id && (
+                        <div>
+                          <button
+                            type="button"
+                            onClick={(e) => toggleExpandPO(po.id!, e)}
+                            className="text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-amber-500 flex items-center gap-1.5 py-1 transition cursor-pointer"
+                          >
+                            <Package className="w-3.5 h-3.5 text-amber-500" />
+                            <span>{isExpanded ? "Ocultar Productos & Códigos" : "Ver Productos & Códigos de Barra"}</span>
+                            <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                          </button>
+
+                          {isExpanded && (
+                            <div className="mt-2.5 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-2">
+                              {isLoadingItems ? (
+                                <div className="text-xs text-slate-400 flex items-center gap-2 py-2">
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-500" />
+                                  Cargando detalle de productos y códigos...
+                                </div>
+                              ) : cachedItems && cachedItems.length > 0 ? (
+                                <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                                  {cachedItems.map((ci: any, cidx: number) => (
+                                    <div
+                                      key={`${ci.id || cidx}`}
+                                      className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800/80 text-xs flex items-center justify-between gap-2"
+                                    >
+                                      <div className="flex-1 min-w-0">
+                                        <div className="font-extrabold text-slate-900 dark:text-slate-100 break-words">
+                                          {ci.descripcion || ci.nombre || "Producto"}
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2 mt-1">
+                                          <span className="font-mono font-bold text-[11px] text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md inline-flex items-center gap-1">
+                                            <Barcode className="w-3 h-3" />
+                                            {ci.codigo_barra && ci.codigo_barra !== "—" ? ci.codigo_barra : "Sin EAN"}
+                                          </span>
+                                          {ci.sku && ci.sku !== "—" && (
+                                            <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                                              SKU: {ci.sku}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="text-right shrink-0 font-mono font-black text-slate-900 dark:text-white">
+                                        {ci.cantidad} {ci.unidad_medida || "UN"}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-slate-400 italic py-1">Sin ítems disponibles para previsualizar.</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between text-sm pt-3 border-t border-slate-100 dark:border-slate-800/80 font-mono text-slate-600 dark:text-slate-400">
+                        <span>Total: <strong className="text-slate-900 dark:text-white font-black">{formatPYG(po.total || 0)}</strong></span>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPO(po)}
+                          className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs sm:text-sm flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+                        >
+                          <span>Iniciar Descarga</span>
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  )
+                })
               )}
             </div>
           </>
@@ -1150,25 +1403,26 @@ export default function DepositoRecepcionPage() {
                 const isComplete = it.cantidad_recibir >= it.cantidad_ordenada && it.cantidad_ordenada > 0
                 const isExceeded = it.cantidad_recibir > it.cantidad_ordenada
                 const hasAveria = it.cantidad_rechazada > 0
+                const isPending = it.cantidad_recibir < it.cantidad_ordenada
 
                 return (
                   <div
                     key={`${it.product_id}-${idx}`}
                     id={`item-card-${targetIdx}`}
-                    className={`rounded-3xl border p-5 transition-all shadow-sm space-y-3.5 ${
+                    className={`rounded-3xl border p-5 transition-all shadow-sm space-y-4 ${
                       it.es_extraordinario
-                        ? "bg-indigo-50 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-500/40"
+                        ? "bg-indigo-50/70 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-500/40"
                         : hasAveria
-                        ? "bg-rose-50 dark:bg-rose-950/30 border-rose-300 dark:border-rose-500/40"
-                        : isComplete
-                        ? "bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-500/40"
+                        ? "bg-rose-50/80 dark:bg-rose-950/30 border-rose-300 dark:border-rose-500/40"
+                        : isComplete && !isExceeded
+                        ? "bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-500/40"
                         : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
                     }`}
                   >
-                    {/* Cabecera del Ítem con Tipografía Grande */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                    {/* Cabecera del Ítem con Nombre Completo y Etiquetas */}
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3.5">
+                      <div className="flex-1 space-y-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           {it.es_extraordinario && (
                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30">
                               <ShieldAlert className="w-3.5 h-3.5" /> FUERA DE ORDEN
@@ -1184,6 +1438,11 @@ export default function DepositoRecepcionPage() {
                               EXCEDENTE (+{it.cantidad_recibir - it.cantidad_ordenada})
                             </span>
                           )}
+                          {isPending && it.cantidad_recibir > 0 && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                              EN PROCESO ({it.cantidad_recibir}/{it.cantidad_ordenada})
+                            </span>
+                          )}
                           {hasAveria && (
                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-500/30">
                               <AlertTriangle className="w-3.5 h-3.5" /> AVERÍA: {it.cantidad_rechazada} UN.
@@ -1191,16 +1450,39 @@ export default function DepositoRecepcionPage() {
                           )}
                         </div>
 
-                        <h4 className="font-black text-base sm:text-lg text-slate-900 dark:text-white line-clamp-2 leading-snug">
+                        {/* Nombre del Producto 100% Completo sin truncamiento */}
+                        <h4 className="font-black text-base sm:text-lg text-slate-900 dark:text-white leading-snug break-words">
                           {it.nombre}
                         </h4>
-                        <p className="font-mono text-xs sm:text-sm font-bold text-slate-500 dark:text-slate-400 mt-1">
-                          {it.codigo_barra ? `EAN: ${it.codigo_barra}` : it.sku ? `SKU: ${it.sku}` : "Sin código"}
-                        </p>
+
+                        {/* Insignia Canónica de Código de Barras y SKU */}
+                        <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                          <div
+                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs sm:text-sm font-mono font-black border shadow-sm ${
+                              it.codigo_barra && it.codigo_barra !== "—"
+                                ? "bg-amber-500/15 border-amber-500/40 text-amber-900 dark:text-amber-200"
+                                : "bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-500"
+                            }`}
+                          >
+                            <Barcode className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span>{it.codigo_barra && it.codigo_barra !== "—" ? it.codigo_barra : "SIN CÓDIGO EAN"}</span>
+                          </div>
+
+                          {it.sku && it.sku !== "—" && (
+                            <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-mono font-bold bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+                              <Tag className="w-3.5 h-3.5 text-slate-400" />
+                              <span>SKU: {it.sku}</span>
+                            </div>
+                          )}
+
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                            Unitario: <strong className="font-mono text-slate-700 dark:text-slate-300">{formatPYG(it.precio_unitario || 0)}</strong>
+                          </span>
+                        </div>
                       </div>
 
-                      {/* Contador Táctil Ergonómico (Touch Targets de 44px+) */}
-                      <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-2xl p-1.5 shrink-0 shadow-inner">
+                      {/* Contador Táctil Ergonómico de 48px */}
+                      <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-2xl p-1.5 shrink-0 shadow-inner self-start">
                         <button
                           type="button"
                           onClick={() => {
@@ -1210,7 +1492,7 @@ export default function DepositoRecepcionPage() {
                               return next
                             })
                           }}
-                          className="w-11 h-11 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 active:scale-95 flex items-center justify-center font-black cursor-pointer shadow-sm"
+                          className="w-12 h-12 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 active:scale-95 flex items-center justify-center font-black cursor-pointer shadow-sm hover:bg-slate-50 dark:hover:bg-slate-750"
                           title="Restar 1 unidad"
                         >
                           <Minus className="w-5 h-5" />
@@ -1228,7 +1510,7 @@ export default function DepositoRecepcionPage() {
                               return next
                             })
                           }}
-                          className="w-14 text-center font-mono font-black text-lg sm:text-xl text-slate-900 dark:text-white bg-transparent outline-none"
+                          className="w-16 text-center font-mono font-black text-xl text-slate-900 dark:text-white bg-transparent outline-none"
                         />
 
                         <button
@@ -1242,7 +1524,7 @@ export default function DepositoRecepcionPage() {
                             })
                             setActiveItemIndex(targetIdx)
                           }}
-                          className="w-11 h-11 rounded-xl bg-amber-500 text-slate-950 active:scale-95 flex items-center justify-center font-black cursor-pointer shadow-md"
+                          className="w-12 h-12 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 active:scale-95 flex items-center justify-center font-black cursor-pointer shadow-md"
                           title="Sumar 1 unidad"
                         >
                           <Plus className="w-5 h-5" />
@@ -1250,12 +1532,51 @@ export default function DepositoRecepcionPage() {
                       </div>
                     </div>
 
-                    {/* Campos de Control: Lote & Vencimiento con Tipografía Clara */}
+                    {/* Botón de llenado rápido de cantidad ordenada */}
+                    {it.cantidad_ordenada > 0 && it.cantidad_recibir !== it.cantidad_ordenada && (
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            soundAlerts.playScanSuccess()
+                            setItemsDraft((prev) => {
+                              const next = [...prev]
+                              next[targetIdx].cantidad_recibir = it.cantidad_ordenada
+                              return next
+                            })
+                            toast.success("Cantidad asignada", `${it.cantidad_ordenada} un. marcadas como recibidas`)
+                          }}
+                          className="text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <CheckCheck className="w-3.5 h-3.5" />
+                          <span>Recibir cantidad completa ({it.cantidad_ordenada} un.)</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Campos de Control: Lote & Vencimiento con Atajos Rápidos */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
                       <div>
-                        <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 block mb-1">
-                          Lote de Fábrica *
-                        </label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                            Lote de Fábrica *
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const autoLote = `L-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${String(it.product_id).slice(-4)}`
+                              setItemsDraft((prev) => {
+                                const next = [...prev]
+                                next[targetIdx].lote = autoLote
+                                return next
+                              })
+                              toast.success("Lote asignado", autoLote)
+                            }}
+                            className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
+                          >
+                            Auto Lote
+                          </button>
+                        </div>
                         <input
                           type="text"
                           value={it.lote}
@@ -1270,10 +1591,39 @@ export default function DepositoRecepcionPage() {
                           className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-white font-mono font-bold focus:border-amber-500"
                         />
                       </div>
+
                       <div>
-                        <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 block mb-1">
-                          Fecha de Vencimiento *
-                        </label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                            Fecha Vencimiento *
+                          </label>
+                          <div className="flex items-center gap-1">
+                            {[
+                              { label: "+6m", months: 6 },
+                              { label: "+1a", months: 12 },
+                              { label: "+2a", months: 24 },
+                            ].map((preset) => (
+                              <button
+                                key={preset.label}
+                                type="button"
+                                onClick={() => {
+                                  const d = new Date()
+                                  d.setMonth(d.getMonth() + preset.months)
+                                  const iso = d.toISOString().split("T")[0]
+                                  setItemsDraft((prev) => {
+                                    const next = [...prev]
+                                    next[targetIdx].fecha_vencimiento = iso
+                                    return next
+                                  })
+                                }}
+                                className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-amber-500 hover:text-slate-950 transition cursor-pointer"
+                                title={`Sumar ${preset.months} meses`}
+                              >
+                                {preset.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                         <input
                           type="date"
                           value={it.fecha_vencimiento}
@@ -1373,7 +1723,7 @@ export default function DepositoRecepcionPage() {
                   <h3 className="font-black text-base text-slate-900 dark:text-white">
                     Registrar Avería / Rechazo
                   </h3>
-                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 line-clamp-1">
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 break-words mt-0.5">
                     {itemsDraft[averiaModalIndex]?.nombre}
                   </p>
                 </div>
@@ -1517,7 +1867,7 @@ export default function DepositoRecepcionPage() {
                 Buscando en catálogo...
               </div>
             ) : extraSearchResults.length > 0 && !selectedExtraProduct ? (
-              <div className="space-y-1.5 max-h-44 overflow-y-auto">
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                 {extraSearchResults.map((p) => (
                   <div
                     key={p.id}
@@ -1525,11 +1875,19 @@ export default function DepositoRecepcionPage() {
                       setSelectedExtraProduct(p)
                       setExtraSearchResults([])
                     }}
-                    className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-amber-500 cursor-pointer text-xs sm:text-sm"
+                    className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-amber-500 cursor-pointer text-xs sm:text-sm space-y-1.5 transition"
                   >
-                    <div className="font-bold text-slate-900 dark:text-white line-clamp-1">{p.nombre}</div>
-                    <div className="text-xs font-mono font-semibold text-slate-500 dark:text-slate-400">
-                      {p.codigo_barra ? `EAN: ${p.codigo_barra}` : p.sku ? `SKU: ${p.sku}` : "Sin código"}
+                    <div className="font-extrabold text-slate-900 dark:text-white break-words">{p.nombre}</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono font-bold text-[11px] text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md inline-flex items-center gap-1">
+                        <Barcode className="w-3 h-3" />
+                        {p.codigo_barra ? p.codigo_barra : "Sin EAN"}
+                      </span>
+                      {p.sku && (
+                        <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                          SKU: {p.sku}
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1538,19 +1896,22 @@ export default function DepositoRecepcionPage() {
 
             {/* Producto Seleccionado */}
             {selectedExtraProduct && (
-              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-extrabold text-amber-600 dark:text-amber-400 uppercase">
+              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <span className="text-[11px] font-black text-amber-700 dark:text-amber-400 uppercase tracking-wider block mb-0.5">
                     Producto Seleccionado
                   </span>
-                  <div className="font-extrabold text-sm text-slate-900 dark:text-white line-clamp-1">
+                  <div className="font-black text-sm text-slate-900 dark:text-white break-words">
                     {selectedExtraProduct.nombre}
+                  </div>
+                  <div className="font-mono font-bold text-xs text-slate-600 dark:text-slate-300 mt-1">
+                    Cód: {selectedExtraProduct.codigo_barra || selectedExtraProduct.sku || "Sin código"}
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setSelectedExtraProduct(null)}
-                  className="text-xs font-bold text-slate-500 hover:text-red-500 p-1"
+                  className="text-xs font-bold text-slate-500 hover:text-red-500 p-1 shrink-0"
                 >
                   Cambiar
                 </button>

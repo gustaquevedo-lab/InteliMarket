@@ -323,6 +323,23 @@ async def get_purchase_order_with_items(db: AsyncSession, po_id: str) -> Purchas
     order = result.scalar_one_or_none()
     if order:
         await _attach_suppliers(db, [order])
+        if order.items:
+            from api.src.products.models import Product
+            p_ids = [it.product_id for it in order.items if it.product_id]
+            if p_ids:
+                p_res = await db.execute(
+                    select(Product.id, Product.codigo_barra, Product.sku, Product.nombre, Product.unidad_medida)
+                    .where(Product.id.in_(p_ids))
+                )
+                p_map = {row.id: row for row in p_res.all()}
+                for it in order.items:
+                    prod = p_map.get(it.product_id)
+                    if prod:
+                        it.codigo_barra = prod.codigo_barra
+                        it.sku = prod.sku
+                        it.unidad_medida = prod.unidad_medida or "UN"
+                        if not it.descripcion:
+                            it.descripcion = prod.nombre
     return order
 
 

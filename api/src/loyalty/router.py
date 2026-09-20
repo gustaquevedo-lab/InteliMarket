@@ -8,6 +8,7 @@ from api.src.loyalty.schemas import (
     LoyaltyConfigCreate, LoyaltyConfigUpdate, LoyaltyConfigResponse,
     PointsCreate, PointsResponse, PointsBalance,
     LoyaltyRewardCreate, LoyaltyRewardUpdate, LoyaltyRewardResponse,
+    RewardStockEntryCreate, RewardRedeemCreate, RewardRedemptionResponse,
 )
 from api.src.loyalty import service
 
@@ -46,6 +47,20 @@ async def get_history(customer_id: str, company_id: str = Query(), limit: int = 
     return await service.get_history(db, customer_id, company_id, limit)
 
 
+@router.get("/deposito-premios")
+async def get_deposito_premios(company_id: str = Query(), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    """Retorna o aprovisiona el depósito dedicado DEP-PREMIOS para custodia de premios de fidelidad."""
+    wh = await service.ensure_premios_warehouse(db, company_id)
+    return {
+        "id": str(wh.id),
+        "codigo": wh.codigo,
+        "nombre": wh.nombre,
+        "tipo": wh.tipo,
+        "responsable": wh.responsable,
+        "descripcion": wh.descripcion,
+    }
+
+
 @router.post("/rewards", response_model=LoyaltyRewardResponse, status_code=status.HTTP_201_CREATED)
 async def create_reward(body: LoyaltyRewardCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth), _=Depends(require_permission("crm:campaigns"))):
     return await service.create_reward(db, body)
@@ -77,6 +92,67 @@ async def delete_reward(reward_id: str, db: AsyncSession = Depends(get_db), user
     deleted = await service.delete_reward(db, reward_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Recompensa no encontrada")
+
+
+@router.post("/rewards/{reward_id}/stock", response_model=LoyaltyRewardResponse)
+async def add_reward_stock(
+    reward_id: str,
+    body: RewardStockEntryCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("crm:campaigns")),
+):
+    """Ingresa stock al depósito de premios referenciando la donación o remisión del patrocinador."""
+    try:
+        user_id = getattr(user, "id", None)
+        return await service.add_reward_stock(
+            db,
+            reward_id=reward_id,
+            cantidad=body.cantidad,
+            remision_proveedor=body.remision_proveedor,
+            costo_unitario=body.costo_unitario,
+            notas=body.notas,
+            user_id=user_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/rewards/{reward_id}/canjear", response_model=RewardRedemptionResponse)
+async def redeem_reward(
+    reward_id: str,
+    body: RewardRedeemCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("crm:update")),
+):
+    """Canjea un premio a un socio: debita sus puntos, descuenta del stock de DEP-PREMIOS y emite comprobante."""
+    try:
+        user_name = getattr(user, "nombre", None) or getattr(user, "email", "Atención al Cliente")
+        user_id = getattr(user, "id", None)
+        return await service.redeem_reward(
+            db,
+            reward_id=reward_id,
+            customer_id=str(body.customer_id),
+            company_id=str(body.company_id),
+            cantidad=body.cantidad,
+            notas=body.notas,
+            user_name=user_name,
+            user_id=user_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/redemptions", response_model=list[RewardRedemptionResponse])
+async def list_redemptions(
+    company_id: str = Query(),
+    limit: int = Query(50),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Historial auditable de canjes de premios efectuados."""
+    return await service.list_redemptions(db, company_id, limit)
 
 
 @router.get("/solicitudes-tarjetas")
@@ -143,3 +219,17 @@ async def tarjetas_asignar_numero(
 @router.get("/tarjetas/impresora/estado")
 async def tarjetas_estado_impresora(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     return await service.estado_impresora_tarjetas(db, user["company_id"])
+
+
+@router.post("/audit")
+async def auditar_puntos(
+    dry_run: bool = Query(True, description="Si es true, solo reporta inconsistencias sin modificar datos"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("crm:update")),
+):
+    """Auditoría de puntos ExtraClub:
+    Verifica que solo clientes con ExtraClub (extra_club_numero) acumulen puntos.
+    Permite detectar y opcionalmente neutralizar puntos acumulados indebidamente por clientes sin tarjeta.
+    """
+    return await service.audit_loyalty_points(db, str(user["company_id"]), dry_run=dry_run)

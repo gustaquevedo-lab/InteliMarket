@@ -243,12 +243,22 @@ async def get_promotion(db: AsyncSession, promo_id: str) -> Promotion | None:
     if promo:
         if promo.producto_ids:
             prods_res = await db.execute(
-                select(Product.id, Product.nombre, Product.sku, Product.codigo_barra).where(
+                select(
+                    Product.id, Product.nombre, Product.sku, Product.codigo_barra,
+                    Product.precio_venta, Product.costo_promedio
+                ).where(
                     Product.id.in_(promo.producto_ids)
                 )
             )
             promo.productos_detalle = [
-                {"id": str(row[0]), "nombre": row[1], "sku": row[2], "codigo_barra": row[3]}
+                {
+                    "id": str(row[0]),
+                    "nombre": row[1],
+                    "sku": row[2],
+                    "codigo_barra": row[3],
+                    "precio_venta": float(row[4]) if row[4] is not None else 0,
+                    "costo_promedio": float(row[5]) if row[5] is not None else 0,
+                }
                 for row in prods_res.all()
             ]
         else:
@@ -298,7 +308,10 @@ async def list_promotions(
     prods_map: dict[str, dict] = {}
     if all_pids:
         prods_res = await db.execute(
-            select(Product.id, Product.nombre, Product.sku, Product.codigo_barra).where(
+            select(
+                Product.id, Product.nombre, Product.sku, Product.codigo_barra,
+                Product.precio_venta, Product.costo_promedio
+            ).where(
                 Product.id.in_(list(all_pids))
             )
         )
@@ -308,6 +321,8 @@ async def list_promotions(
                 "nombre": row[1],
                 "sku": row[2],
                 "codigo_barra": row[3],
+                "precio_venta": float(row[4]) if row[4] is not None else 0,
+                "costo_promedio": float(row[5]) if row[5] is not None else 0,
             }
 
     for p in promos:
