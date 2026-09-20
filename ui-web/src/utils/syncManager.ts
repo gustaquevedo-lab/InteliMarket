@@ -149,6 +149,7 @@ export function getRetryDelay(retryCount: number): number {
 // de la app: vuelven a "pending" y se reintentan. Si el servidor las vuelve a
 // rechazar quedan en "error" (con el mensaje) y no se reintentan en bucle.
 const ventasRescatadas = new Set<string>()
+const rechazosReportados = new Set<string>()
 
 async function rescatarVentasAtascadas(): Promise<void> {
   try {
@@ -210,6 +211,31 @@ export async function syncPendingSales(onProgress?: (synced: number, total: numb
       // aparta como "error" (NO se borra: queda guardada para revision) en vez de
       // martillar al servidor cada 10s para siempre.
       const transitorio = /failed to fetch|network|load failed|abort|timeout|reiniciando|HTTP 5\d\d|HTTP 408|HTTP 429/i.test(msg)
+      if (!transitorio && !rechazosReportados.has(sale.id)) {
+        // Avisa al servidor (auditoria) QUE venta y POR QUE fue rechazada, para
+        // que administracion la vea sin depender de que la cajera mire la caja.
+        rechazosReportados.add(sale.id)
+        try {
+          const d = sale.data as any
+          api.inteliaudit.recordEvent({
+            company_id: d?.company_id,
+            user_id: d?.user_id,
+            accion: "venta_offline_rechazada",
+            entidad: "venta_pendiente",
+            entidad_id: sale.id,
+            datos_nuevos: {
+              error: msg,
+              total: d?.total,
+              customer_id: d?.customer_id,
+              condicion: d?.condicion,
+              formas_pago: Array.isArray(d?.payments) ? d.payments.map((x: any) => `${x?.forma_pago}:${x?.monto}`) : undefined,
+              items: Array.isArray(d?.items) ? d.items.length : undefined,
+              creada: sale.created_at,
+              punto_emision: d?.punto_emision,
+            },
+          } as any).catch(() => {})
+        } catch {}
+      }
       await offlineDB.pendingSales.update({
         ...sale,
         status: transitorio ? ("pending" as const) : ("error" as const),
