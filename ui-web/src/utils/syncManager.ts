@@ -172,10 +172,20 @@ export async function syncPendingSales(onProgress?: (synced: number, total: numb
       synced++
     } catch (err) {
       failed++
+      const msg = err instanceof Error ? err.message : "Sync failed"
+      // Corte de red / servidor caido = transitorio, se reintenta con backoff.
+      // Cualquier otra respuesta (ej. 400 "Linea de credito insuficiente") es un
+      // rechazo de negocio: reintentar identico jamas va a funcionar, asi que se
+      // aparta como "error" (NO se borra: queda guardada para revision) en vez de
+      // martillar al servidor cada 10s para siempre.
+      const transitorio = /failed to fetch|network|load failed|abort|timeout|reiniciando|HTTP 5\d\d|HTTP 408|HTTP 429/i.test(msg)
       await offlineDB.pendingSales.update({
         ...sale,
-        status: "pending" as const,
-        error: err instanceof Error ? err.message : "Sync failed",
+        status: transitorio ? ("pending" as const) : ("error" as const),
+        retry_count: sale.retry_count + 1,
+        last_retry: new Date(now).toISOString(),
+        next_retry: new Date(now + getRetryDelay(sale.retry_count)).toISOString(),
+        error: msg,
       })
     }
   }

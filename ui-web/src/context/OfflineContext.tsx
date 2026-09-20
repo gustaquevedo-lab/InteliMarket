@@ -217,7 +217,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
 
   return (
     <OfflineContext.Provider value={{
-      isOnline, lastSync, pendingSalesCount: pendingSales.filter(s => s && s.status === "pending").length,
+      isOnline, lastSync, pendingSalesCount: pendingSales.filter(s => s && (s.status === "pending" || s.status === "error")).length,
       pendingSales, offlineCart, cachedProducts, cachedCustomers,
       saveCartOffline, addPendingSale,
       syncPendingSales: doSyncPendingSales,

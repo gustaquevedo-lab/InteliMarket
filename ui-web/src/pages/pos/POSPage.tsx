@@ -2898,6 +2898,12 @@ export default function POSPage() {
       return
     }
 
+    // Producto sin precio: no se agrega al carrito (se vendia a Gs 0 sin aviso).
+    if (!(Number(product.precio_venta) > 0)) {
+      toast.error("PRODUCTO SIN PRECIO", `${product.nombre} (${product.sku || product.codigo_barra || "s/c"}) tiene precio 0. Avisá a administración para cargarlo; no se agregó al carrito.`)
+      return
+    }
+
     setLastScannedProduct(product)
 
     const isPesable = isPesableProduct(product)
