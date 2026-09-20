@@ -253,15 +253,14 @@ async def get_purchase_order(db: AsyncSession, po_id: str) -> PurchaseOrder | No
 
 async def get_purchase_order_with_items(db: AsyncSession, po_id: str) -> PurchaseOrder | None:
     result = await db.execute(
-        select(PurchaseOrder).options(selectinload(PurchaseOrder.supplier)).where(PurchaseOrder.id == uuid.UUID(po_id))
-    )
-    order = result.scalar_one_or_none()
-    if order:
-        items_result = await db.execute(
-            select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == order.id)
+        select(PurchaseOrder)
+        .options(
+            selectinload(PurchaseOrder.supplier),
+            selectinload(PurchaseOrder.items)
         )
-        order.items = list(items_result.scalars().all())
-    return order
+        .where(PurchaseOrder.id == uuid.UUID(po_id))
+    )
+    return result.scalar_one_or_none()
 
 
 async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate) -> PurchaseOrder | None:

@@ -599,22 +599,26 @@ def sync_compras(pg, my, sup_code_map):
     last_id, _ = get_watermark(pg, "compras")
     with my.cursor() as cur:
         cur.execute(
-            "SELECT IDFACCOMPRAS, IDCODPROV, NUMFAC, FECHA, TIMBRADO FROM fac_compras "
+            "SELECT IDFACCOMPRAS, IDCODPROV, NUMFAC, FECHA, TIMBRADO, "
+            "(COALESCE(DEXENT, 0) + COALESCE(DGRAB, 0) + COALESCE(IVA, 0)) as tot, "
+            "(COALESCE(DEXENT, 0) + COALESCE(DGRAB, 0)) as subt "
+            "FROM fac_compras "
             "WHERE IDFACCOMPRAS > %s ORDER BY IDFACCOMPRAS", (last_id,))
         legacy_rows = cur.fetchall()
     if not legacy_rows:
         log("  compras: sin filas nuevas")
         return last_id
     max_id, rows = last_id, []
-    for (idfc, idprov, numfac, fecha, timbrado) in legacy_rows:
+    for (idfc, idprov, numfac, fecha, timbrado, tot, subt) in legacy_rows:
         max_id = max(max_id, idfc)
         cod = txt_keep(idprov, 20)
         sid = sup_code_map.get(cod, PLACEHOLDER_SUP_ID) if cod else PLACEHOLDER_SUP_ID
         obs = f"FACT={txt_keep(numfac) or ''} TIMB={txt_keep(timbrado) or ''}".strip()
         rows.append((uuid.uuid5(NS, f"comp:{idfc}"), COMPANY_ID, sid, f"C{idfc}"[:20],
-                     safe_dt(fecha) or datetime.now(), "recibido", "PYG", obs[:500]))
+                     safe_dt(fecha) or datetime.now(), "recibido", "PYG", obs[:500],
+                     money(tot), money(subt)))
     n = upsert(pg, "purchase_orders", ["id", "company_id", "supplier_id", "numero", "fecha",
-                                        "estado", "moneda", "observaciones"], rows)
+                                        "estado", "moneda", "observaciones", "total", "subtotal"], rows)
     log(f"  compras: {n} filas nuevas (IDFACCOMPRAS {last_id} -> {max_id})")
     set_watermark(pg, "compras", last_id=max_id)
     return max_id
