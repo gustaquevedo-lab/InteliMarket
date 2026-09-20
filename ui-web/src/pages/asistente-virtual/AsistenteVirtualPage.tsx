@@ -1,3 +1,4 @@
+import React, { useState, useEffect, useRef } from "react"
 import {
   BarChart3, MessageCircle, Ticket, BrainCircuit, Send, Plus, Search, Loader2,
   Zap, CheckCircle, XCircle, Clock, RefreshCcw, Bot, User, ThumbsUp, ThumbsDown,
@@ -283,10 +284,35 @@ function BrainTab() {
     }
   }
 
+  const [speakingMsgId, setSpeakingMsgId] = useState<number | null>(null)
+
   const playBase64Audio = (base64Audio: string, id?: number) => {
     if (!base64Audio) return
     const audioUrl = `data:audio/mp3;base64,${base64Audio}`
     playAudioUrl(audioUrl, id || Date.now())
+  }
+
+  const handleSpeakMessage = async (msg: any) => {
+    if (playingAudioId === msg.id) {
+      stopAudio()
+      return
+    }
+    if (msg.audio_base64) {
+      playBase64Audio(msg.audio_base64, msg.id)
+      return
+    }
+    try {
+      setSpeakingMsgId(msg.id)
+      const res = await api.asistenteVirtual.brainSpeak(msg.response || "", voice)
+      if (res?.audio_base64) {
+        setHistory(prev => prev.map(m => m.id === msg.id ? { ...m, audio_base64: res.audio_base64 } : m))
+        playBase64Audio(res.audio_base64, msg.id)
+      }
+    } catch (e) {
+      console.warn("Error synthesizing speech:", e)
+    } finally {
+      setSpeakingMsgId(null)
+    }
   }
 
   const handleSendQuery = async (textToSend?: string) => {
@@ -297,6 +323,11 @@ function BrainTab() {
     setLoading(true)
 
     const tempId = Date.now()
+    const formattedHistory = history.map(h => ({
+      role: h.isUser ? "user" : "model",
+      content: h.isUser ? (h.user_query || "") : (h.response || "")
+    }))
+
     setHistory(prev => [...prev, {
       id: tempId,
       user_query: textQuery,
@@ -310,7 +341,8 @@ function BrainTab() {
         user_name: userName,
         voice_preference: voice,
         model_preference: model,
-        generate_voice: true
+        generate_voice: false,
+        history: formattedHistory,
       })
 
       const botMsgId = Date.now()
@@ -657,15 +689,10 @@ function BrainTab() {
 
                       {/* Audio Controls & Metadata Badges */}
                       <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">
-                        {msg.audio_base64 && (
+                        {msg.response && (
                           <button
-                            onClick={() => {
-                              if (playingAudioId === msg.id) {
-                                stopAudio()
-                              } else {
-                                playBase64Audio(msg.audio_base64, msg.id)
-                              }
-                            }}
+                            onClick={() => handleSpeakMessage(msg)}
+                            disabled={speakingMsgId === msg.id}
                             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm ${
                               playingAudioId === msg.id
                                 ? "bg-rose-600 text-white animate-pulse"
@@ -677,10 +704,15 @@ function BrainTab() {
                                 <Square className="w-3.5 h-3.5 fill-current" />
                                 <span>Detener voz</span>
                               </>
+                            ) : speakingMsgId === msg.id ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span>Sintetizando...</span>
+                              </>
                             ) : (
                               <>
                                 <Volume2 className="w-3.5 h-3.5" />
-                                <span>Escuchar Voz</span>
+                                <span>{msg.audio_base64 ? "Escuchar voz" : "Escuchar"}</span>
                               </>
                             )}
                           </button>
@@ -990,7 +1022,7 @@ function ChatTab() {
             <button onClick={clearChat} className="text-xs text-gray-500 hover:text-gray-700">Nueva conversación</button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3">
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full text-gray-400">
                 <Bot className="w-12 h-12 mb-2" />
@@ -1013,7 +1045,6 @@ function ChatTab() {
                 <div className="bg-gray-100 rounded-xl px-3.5 py-2.5"><Spinner /></div>
               </div>
             )}
-            <div ref={endRef} />
           </div>
 
           <div className="p-3 border-t border-gray-100 dark:border-gray-700 flex gap-2">

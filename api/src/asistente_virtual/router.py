@@ -142,7 +142,7 @@ async def brain_chat(
     user_name = data.get("user_name") or user.get("nombre") or user.get("email", "").split("@")[0] or "Gustavo"
     voice_pref = data.get("voice_preference") or data.get("voice") or "es-AR-TomasNeural"
     model_pref = data.get("model_preference") or data.get("model") or "qwen2.5:7b"
-    gen_voice = data.get("generate_voice", True)
+    gen_voice = data.get("generate_voice", False)
 
     return await process_brain_chat(
         db,
@@ -155,6 +155,18 @@ async def brain_chat(
         generate_voice=gen_voice,
         history=data.get("history", []),
     )
+
+
+@router.post("/brain/speak")
+async def brain_speak(
+    data: dict,
+    user=Depends(require_auth),
+):
+    text = data.get("text", "")
+    voice = data.get("voice") or data.get("voice_preference") or "es-AR-TomasNeural"
+    from api.src.asistente_virtual.brain_engine import generate_speech_audio
+    audio_b64 = await generate_speech_audio(text, voice=voice)
+    return {"audio_base64": audio_b64}
 
 
 @router.post("/brain/voice")

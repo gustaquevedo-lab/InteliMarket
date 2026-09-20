@@ -125,28 +125,52 @@ from api.src.config import settings
 GEMINI_API_KEY = settings.gemini_api_key or os.getenv("GEMINI_API_KEY", "")
 
 
-async def query_gemini(prompt: str, system_prompt: str) -> Optional[str]:
-    """Llamada ultra rápida a Google Gemini Flash (<1.2s)."""
+async def query_gemini(prompt: str, system_prompt: str, history: Optional[List[Dict[str, str]]] = None) -> Optional[str]:
+    """Llamada ultra rápida a Google Gemini Flash (<1.2s) con system_instruction y soporte multi-turn."""
     if not GEMINI_API_KEY:
         return None
 
-    models = ["models/gemini-3.1-flash-lite", "models/gemini-3.5-flash", "models/gemini-3-flash-preview"]
+    # Modelos recomendados: gemini-3.1-flash-lite (<1.2s) y gemini-3.6-flash como fallback
+    models = ["models/gemini-3.1-flash-lite", "models/gemini-3.6-flash"]
+
+    # Formatear contenidos multi-turn
+    contents = []
+    if history:
+        for msg in history[-8:]:  # Últimos 8 turnos de contexto
+            role = "user" if msg.get("role") in ["user", "human"] else "model"
+            text_val = msg.get("content") or msg.get("text") or msg.get("response") or ""
+            if text_val and text_val.strip():
+                # Evitar roles consecutivos idénticos exigidos por la API de Gemini
+                if contents and contents[-1]["role"] == role:
+                    contents[-1]["parts"][0]["text"] += f"\n{text_val.strip()}"
+                else:
+                    contents.append({"role": role, "parts": [{"text": text_val.strip()}]})
+
+    # Asegurar que el primer turno sea user si hay historial previo
+    while contents and contents[0]["role"] != "user":
+        contents.pop(0)
+
+    # Agregar el prompt actual del usuario
+    if contents and contents[-1]["role"] == "user":
+        contents[-1]["parts"][0]["text"] += f"\n{prompt.strip()}"
+    else:
+        contents.append({"role": "user", "parts": [{"text": prompt.strip()}]})
+
+    payload = {
+        "system_instruction": {
+            "parts": [{"text": system_prompt}]
+        },
+        "contents": contents,
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 450
+        }
+    }
+
     for model_id in models:
         url = f"https://generativelanguage.googleapis.com/v1beta/{model_id}:generateContent?key={GEMINI_API_KEY}"
-        payload = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": f"{system_prompt}\n\n{prompt}"}]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.25,
-                "maxOutputTokens": 350
-            }
-        }
         try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 res = await client.post(url, json=payload)
                 if res.status_code == 200:
                     data = res.json()
@@ -158,6 +182,8 @@ async def query_gemini(prompt: str, system_prompt: str) -> Optional[str]:
                 elif res.status_code in [429, 503]:
                     logger.warning(f"Gemini {model_id} busy ({res.status_code}), trying next model...")
                     continue
+                else:
+                    logger.warning(f"Gemini {model_id} error {res.status_code}: {res.text[:120]}")
         except Exception as e:
             logger.warning(f"Gemini error on {model_id}: {e}")
             continue
@@ -269,32 +295,16 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
         except Exception as e:
             logger.error(f"Error delegating to commercial agent: {e}")
 
-    # 0.3 HISTORIA / ORIGEN / SOBRE CASA GONZALITO
-    if any(k in q_lower for k in ["historia", "origen", "orígenes", "quien es casa gonzalito", "que es casa gonzalito", "fundacion", "fundación", "trayectoria", "anos tiene", "años tiene"]):
+    # 0.3 HISTORIA / ORIGEN / SOBRE CASA GONZALITO (específico)
+    if any(k in q_lower for k in ["historia de casa gonzalito", "quien fundo casa gonzalito", "origen de casa gonzalito", "cuantos anos tiene casa gonzalito", "cuántos años tiene casa gonzalito", "trayectoria de casa gonzalito"]):
         return {
             "type": "historia",
             "data": {},
             "sql": None
         }
 
-    # 1. METAS PARESA / REBATE / CAJAS UNITARIAS (UC) / COCA-COLA
-    if re.search(r'\b(paresa|coca|coca-cola|coca cola|rebate|rebates|cajas unitarias|uc|fanta|sprite|monster|powerade)\b', q_lower):
-        return {
-            "type": "paresa_status",
-            "data": {
-                "total_mes_gs": 3380000000,
-                "total_mes_formateado": "Gs. 3.380 millones",
-                "uc_acumuladas": 98450,
-                "meta_uc": 113503,
-                "pct_alcanzado": 86.7,
-                "rebate_estimado_gs": 149173352,
-                "rebate_formateado": "Gs. 149,2 millones"
-            },
-            "sql": "SELECT ... FROM supplier_kpis / sales"
-        }
-
-    # 2. TOP CLIENTES / MAYORES CLIENTES / RANKING CLIENTES
-    if any(k in q_lower for k in ["top cliente", "mayor cliente", "mayores cliente", "ranking cliente", "mejores cliente", "principales cliente", "quien compra mas", "quienes compran mas", "mejores compradores"]):
+    # 1. TOP CLIENTES / MAYORES CLIENTES / RANKING CLIENTES
+    if any(k in q_lower for k in ["top cliente", "top clientes", "ranking de clientes", "mayores clientes", "principales clientes", "quienes compran mas", "mejores compradores mayoristas"]):
         sql = """
             SELECT 
                 c.razon_social as cliente,
@@ -326,8 +336,8 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
         except Exception as e:
             logger.error(f"Error executing top_clientes query: {e}")
 
-    # 3. TOP PROVEEDORES / MAYORES PROVEEDORES / COMPRAS POR PROVEEDOR
-    if any(k in q_lower for k in ["top proveedor", "mayor proveedor", "mayores proveedor", "ranking proveedor", "principales proveedor", "a quien compramos mas", "proveedores lideres"]):
+    # 2. TOP PROVEEDORES / MAYORES PROVEEDORES / COMPRAS POR PROVEEDOR
+    if any(k in q_lower for k in ["top proveedor", "top proveedores", "ranking de proveedores", "mayores proveedores", "principales proveedores", "a quien compramos mas"]):
         sql = """
             SELECT 
                 sp.razon_social as proveedor,
@@ -358,14 +368,14 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
         except Exception as e:
             logger.error(f"Error executing top_proveedores query: {e}")
 
-    # 4. VENTAS DE HOY / DEL MES / FACTURACIÓN GENERAL
-    if any(k in q_lower for k in ["cuanto vendimos", "ventas de hoy", "ventas del mes", "facturacion de hoy", "facturacion del mes", "cuanto se vendio", "facturacion", "ventas"]):
+    # 3. VENTAS DE HOY / DEL MES (DINÁMICAS SEGÚN CURRENT_DATE)
+    if any(k in q_lower for k in ["cuanto vendimos hoy", "ventas de hoy", "facturacion de hoy", "ventas del dia", "facturacion del dia", "resumen de ventas de hoy"]):
         sql = """
             SELECT 
-                COUNT(*) FILTER (WHERE s.fecha >= '2026-08-28 00:00:00' AND s.fecha <= '2026-08-28 23:59:59') as tickets_hoy,
-                COALESCE(SUM(s.total) FILTER (WHERE s.fecha >= '2026-08-28 00:00:00' AND s.fecha <= '2026-08-28 23:59:59'), 0) as total_hoy,
-                COUNT(*) FILTER (WHERE s.fecha >= '2026-08-01 00:00:00' AND s.fecha <= '2026-08-28 23:59:59') as tickets_mes,
-                COALESCE(SUM(s.total) FILTER (WHERE s.fecha >= '2026-08-01 00:00:00' AND s.fecha <= '2026-08-28 23:59:59'), 0) as total_mes
+                COUNT(*) FILTER (WHERE DATE(s.fecha) = CURRENT_DATE) as tickets_hoy,
+                COALESCE(SUM(s.total) FILTER (WHERE DATE(s.fecha) = CURRENT_DATE), 0) as total_hoy,
+                COUNT(*) FILTER (WHERE s.fecha >= DATE_TRUNC('month', CURRENT_DATE)) as tickets_mes,
+                COALESCE(SUM(s.total) FILTER (WHERE s.fecha >= DATE_TRUNC('month', CURRENT_DATE)), 0) as total_mes
             FROM sales s
             WHERE s.company_id = :cid
               AND s.estado <> 'cancelado';
@@ -388,8 +398,8 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
         except Exception as e:
             logger.error(f"Error executing ventas_resumen query: {e}")
 
-    # 5. PRODUCTOS MÁS VENDIDOS / TOP SKUS
-    if any(k in q_lower for k in ["mas vendido", "mas vendidos", "top producto", "top productos", "articulos lideres", "skus mas vendidos"]):
+    # 4. PRODUCTOS MÁS VENDIDOS / TOP SKUS
+    if any(k in q_lower for k in ["mas vendido", "mas vendidos", "top productos", "productos mas vendidos", "articulos lideres", "skus mas vendidos"]):
         sql = """
             SELECT 
                 p.nombre as producto,
@@ -402,7 +412,7 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
                 SELECT id FROM sales 
                 WHERE company_id = :cid 
                   AND estado <> 'cancelado' 
-                  AND fecha >= '2026-08-01 00:00:00'
+                  AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
             ) s ON si.sale_id = s.id
             GROUP BY p.id, p.nombre, p.sku
             ORDER BY total_gs DESC
@@ -423,9 +433,8 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
         except Exception as e:
             logger.error(f"Error executing top_productos query: {e}")
 
-    # 6. BÚSQUEDA DINÁMICA DE CLIENTE ESPECÍFICO (DEUDA, LÍMITE, SALDO)
-    if any(k in q_lower for k in ["cliente", "deuda", "saldo", "debe", "credito", "crédito", "limite", "límite"]):
-        # Buscar coincidencias de clientes
+    # 5. MAYORES DEUDORES / CLIENTES CON DEUDA (específico)
+    if any(k in q_lower for k in ["mayores deudores", "clientes con mas deuda", "clientes con mayor deuda", "ranking deudores", "quienes deben mas", "top deudores"]):
         sql_search = """
             SELECT c.razon_social, COALESCE(c.ruc, '—') as ruc,
                    COALESCE(ca.saldo_actual, 0) as saldo_deuda,
@@ -569,16 +578,15 @@ def build_conversational_voice_script(display_name: str, q_type: Optional[str], 
         suggestion = sug_match.group(1).strip()
 
     clean_lines = [l.strip() for l in written_response.split("\n") if l.strip() and not l.startswith("#") and not l.startswith("💡") and not l.startswith("•")]
-    intro_core = " ".join(clean_lines[:2]) if clean_lines else "estuve analizando la situación en el sistema"
-    if len(intro_core) > 260:
-        intro_core = intro_core[:260] + "..."
+    intro_core = " ".join(clean_lines[:2]) if clean_lines else "Aquí tenés los datos solicitados."
+    if len(intro_core) > 160:
+        intro_core = intro_core[:160].rsplit(" ", 1)[0] + "..."
 
-    spoken = f"Mira {display_name}, por lo que pude ver en los datos, esta es la situación: {intro_core}. "
-    spoken += "Fíjate en los detalles que te preparé en pantalla. "
+    spoken = intro_core
     if suggestion:
-        spoken += f"Creo que podríamos encarar esto de esta forma: {suggestion}."
-    else:
-        spoken += "Podemos avanzar con el plan que te dejé estructurado."
+        spoken += f". Sugerencia: {suggestion}"
+    if len(spoken) > 220:
+        spoken = spoken[:215].rsplit(" ", 1)[0] + "."
 
     return normalize_text_for_speech(spoken)
 
@@ -586,32 +594,32 @@ def build_conversational_voice_script(display_name: str, q_type: Optional[str], 
 # ─────────────────────────────────────────────────────────────────────────────
 # 🎙️ SÍNTESIS DE VOZ Y PIPELINE PRINCIPAL (CADENCIA HUMANA ULTRA NATURAL)
 # ─────────────────────────────────────────────────────────────────────────────
-async def generate_speech_audio(text_content: str, voice: str = "es-UY-MateoNeural") -> Optional[str]:
-    """Sintetiza voz con Edge TTS en cadencia humana natural conversacional."""
+async def generate_speech_audio(text_content: str, voice: str = "es-AR-TomasNeural") -> Optional[str]:
+    """Sintetiza voz con Edge TTS en cadencia humana natural y ultra rápida (<1.5s)."""
     cleaned = normalize_text_for_speech(text_content)
     if not cleaned:
         return None
     
-    chosen_voice = voice if voice and "Neural" in voice else "es-UY-MateoNeural"
+    chosen_voice = voice if voice and "Neural" in voice else "es-AR-TomasNeural"
     speech_text = cleaned
-    if len(speech_text) > 750:
-        last_period = speech_text[:750].rfind(". ")
-        if last_period > 150:
+    if len(speech_text) > 260:
+        last_period = speech_text[:260].rfind(". ")
+        if last_period > 100:
             speech_text = speech_text[:last_period + 1]
         else:
-            speech_text = speech_text[:750]
+            speech_text = speech_text[:260].rsplit(" ", 1)[0] + "."
 
     try:
         import edge_tts
         async def _synth():
-            communicate = edge_tts.Communicate(speech_text, chosen_voice, rate="+0%", pitch="+0Hz")
+            communicate = edge_tts.Communicate(speech_text, chosen_voice, rate="+5%", pitch="+0Hz")
             mp3_buffer = io.BytesIO()
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
                     mp3_buffer.write(chunk["data"])
             return base64.b64encode(mp3_buffer.getvalue()).decode("utf-8")
         
-        return await asyncio.wait_for(_synth(), timeout=7.0)
+        return await asyncio.wait_for(_synth(), timeout=4.0)
     except Exception as e:
         logger.warning(f"Voice generation skipped safely: {e}")
         return None
@@ -645,7 +653,8 @@ async def execute_ai_brain_pipeline(
     user_name: Optional[str] = "Gustavo",
     voice_preference: Optional[str] = "es-AR-TomasNeural",
     model_preference: str = DEFAULT_MODEL,
-    generate_voice: bool = True
+    generate_voice: bool = False,
+    history: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """Pipeline definitivo de Marco: 0% SQL visible, 100% datos reales, <1.5 segundos de latencia."""
     start_time = time.time()
@@ -656,13 +665,15 @@ async def execute_ai_brain_pipeline(
     if any(k in display_name.lower() for k in ["admin", "casa gonzalito", "casagonzalito", "usuario", "root"]):
         display_name = "Gustavo"
         
-    chosen_voice = voice_preference or "es-UY-MateoNeural"
+    chosen_voice = voice_preference or "es-AR-TomasNeural"
     q_lower = user_query.lower().strip()
     final_response = ""
     sql_executed = None
     data_preview = None
     q_type = None
     model_used = "Motor RAG Directo (PostgreSQL)"
+    has_prior_history = bool(history and len(history) > 0)
+    saludo_inicial = f"¡Hola {display_name}! " if not has_prior_history else ""
 
     # ── 0.5 INTER-AGENT DELEGATION: Gerente Comercial IA ──────────────────────
     if re.search(r'\b(gerente comercial|comercial|ventas|rentabilidad|comisiones|preventistas?)\b', q_lower) and re.search(r'\b(consultale|preguntale|pregúntale|habla|hablá|decile|planteale|pedile|opinión|diagnostico|diagnóstico|medidas)\b', q_lower):
@@ -689,12 +700,12 @@ async def execute_ai_brain_pipeline(
         q_type = fast_result.get("type")
         
         if q_type == "historia":
-            final_response = f"¡Hola {display_name}! **Casa Gonzalito** cuenta con **más de 50 años de trayectoria** como la distribuidora mayorista líder en la región de Amambay y norte de Paraguay.\n\nSomos el **distribuidor exclusivo en Amambay de PARESA (The Coca-Cola Company)** y trabajamos con los principales proveedores del país como Río Aquidabán, La Mercantil Guaraní, Lácteos Trébol y Trovato.\n\n💡 **Sugerencia de Marco:** Estoy listo para responderte sobre ventas del mes, estado de metas PARESA, ranking de clientes o compras a proveedores."
+            final_response = f"{saludo_inicial}**Casa Gonzalito** cuenta con **más de 50 años de trayectoria** como la distribuidora mayorista líder en la región de Amambay y norte de Paraguay.\n\nSomos el **distribuidor exclusivo en Amambay de PARESA (The Coca-Cola Company)** y trabajamos con los principales proveedores del país como Río Aquidabán, La Mercantil Guaraní, Lácteos Trébol y Trovato.\n\n💡 **Sugerencia de Marco:** Estoy listo para responderte sobre ventas del mes, estado de metas PARESA, ranking de clientes o compras a proveedores."
 
         elif q_type == "top_clientes":
             items = fast_result["data"]
             data_preview = items
-            final_response = f"¡Hola {display_name}! Aquí tenés el ranking de los **mayores clientes mayoristas** de Casa Gonzalito por volumen facturado:\n\n"
+            final_response = f"{saludo_inicial}Aquí tenés el ranking de los **mayores clientes mayoristas** de Casa Gonzalito por volumen facturado:\n\n"
             for i, c in enumerate(items, 1):
                 final_response += f"{i}. **{c['cliente']}** (RUC: `{c['ruc']}`) — **{c['total_formateado']}** ({c['facturas']} facturas)\n"
             final_response += f"\n💡 **Sugerencia de Marco:** *Muster S.A.* y *Guaraní Paraguay S.A.* concentran el mayor volumen de crédito. Te sugiero revisar los plazos de vencimiento semanal para asegurar la rotación de cobranzas."
@@ -702,25 +713,15 @@ async def execute_ai_brain_pipeline(
         elif q_type == "top_proveedores":
             items = fast_result["data"]
             data_preview = items
-            final_response = f"¡Con gusto, {display_name}! Nuestros **proveedores principales** por monto total de compras son:\n\n"
+            final_response = f"{saludo_inicial}Nuestros **proveedores principales** por monto total de compras son:\n\n"
             for i, p in enumerate(items, 1):
                 final_response += f"{i}. **{p['proveedor']}** — **{p['total_formateado']}** ({p['facturas']} facturas emitidas)\n"
             final_response += f"\n💡 **Sugerencia de Marco:** Mantener prioridad en la recepción de *PARESA* y *Río Aquidabán* para no comprometer el nivel de servicio en bebidas core."
 
-        elif q_type == "paresa_status":
-            d = fast_result["data"]
-            data_preview = [d]
-            final_response = f"Hola {display_name}, este es el estado de cumplimiento **PARESA** en el mes:\n\n"
-            final_response += f"• **Volumen Acumulado:** **{d['uc_acumuladas']:,} UC** de una meta de **{d['meta_uc']:,} UC** ({d['pct_alcanzado']}% alcanzado).\n".replace(",", ".")
-            final_response += f"• **Facturación Línea Bebidas:** **{d['total_mes_formateado']}**.\n"
-            final_response += f"• **Rebate Estimado Ganado (4.5%):** **{d['rebate_formateado']}**.\n\n"
-            faltan_uc = max(0, d['meta_uc'] - d['uc_acumuladas'])
-            final_response += f"💡 **Sugerencia de Marco:** Faltan **{faltan_uc:,} UC** para cerrar el tramo óptimo. Recomiendo empujar combos de Coca-Cola 2L y retornables en las rutas de preventa de esta semana.".replace(",", ".")
-
         elif q_type == "ventas_resumen":
             d = fast_result["data"]
             data_preview = [d]
-            final_response = f"Hola {display_name}, aquí tenés el resumen de ventas:\n\n"
+            final_response = f"{saludo_inicial}Aquí tenés el resumen de ventas:\n\n"
             final_response += f"• **Facturación de Hoy:** **{d['total_hoy_formateado']}** ({d['tickets_hoy']} facturas).\n"
             final_response += f"• **Acumulado del Mes:** **{d['total_mes_formateado']}** ({d['tickets_mes']} facturas).\n\n"
             final_response += f"💡 **Sugerencia de Marco:** El ritmo de ventas mantiene una tendencia positiva. Te sugiero monitorear el cierre de caja de la tarde para verificar cobranzas de rutas."
@@ -728,15 +729,23 @@ async def execute_ai_brain_pipeline(
         elif q_type == "clientes_deuda":
             items = fast_result["data"]
             data_preview = items
-            final_response = f"¡Hola {display_name}! Aquí tenés el estado de **cuentas corrientes y deudas de clientes**:\n\n"
+            final_response = f"{saludo_inicial}Aquí tenés el estado de **cuentas corrientes y deudas de clientes**:\n\n"
             for i, c in enumerate(items, 1):
                 final_response += f"{i}. **{c['cliente']}** (RUC: `{c['ruc']}`) — Deuda: **{c['saldo_formateado']}** (Límite: {c['limite_formateado']})\n"
             final_response += f"\n💡 **Sugerencia de Marco:** Te recomiendo priorizar la gestión de cobranza sobre los clientes que superen el 80% de su límite de crédito autorizado."
 
+        elif q_type == "top_productos":
+            items = fast_result["data"]
+            data_preview = items
+            final_response = f"{saludo_inicial}Aquí tenés el reporte de **productos más vendidos del mes**:\n\n"
+            for i, p in enumerate(items, 1):
+                final_response += f"{i}. **{p['producto']}** (`{p['sku']}`) — Cantidad: **{p['cantidad']} un.** (Total: {p['total_formateado']})\n"
+            final_response += f"\n💡 **Sugerencia de Marco:** Asegurar reposición continua de los SKUs líderes de alta rotación para evitar quiebres de inventario."
+
         elif q_type == "stock_resumen":
             items = fast_result["data"]
             data_preview = items
-            final_response = f"¡Hola {display_name}! Aquí tenés el reporte de **stock e inventario de productos**:\n\n"
+            final_response = f"{saludo_inicial}Aquí tenés el reporte de **stock e inventario de productos**:\n\n"
             for i, p in enumerate(items, 1):
                 final_response += f"{i}. **{p['producto']}** (`{p['sku']}`) — Stock: **{p['stock']} un.** (Precio: {p['precio_formateado']})\n"
             final_response += f"\n💡 **Sugerencia de Marco:** Revisa los artículos con stock menor a 50 unidades para emitir órdenes de compra preventivas a los proveedores."
@@ -756,30 +765,26 @@ async def execute_ai_brain_pipeline(
     # ── 2. DYNAMIC PATH: Google Gemini Flash (<1.2s) con Fallback a Ollama ───
     model_used = "Gemini Flash (Google Cloud)" if not final_response else (model_used if 'model_used' in locals() else "Motor RAG Directo (PostgreSQL)")
     if not final_response:
-        prompt = f"""Sos MARCO, el asesor operativo inteligente de Casa Gonzalito (distribuidora mayorista en Amambay, Paraguay).
-Te dirigís cordialmente a: {display_name}.
+        system_prompt = f"""Sos MARCO, el asesor operativo y comercial inteligente de Casa Gonzalito (distribuidora mayorista en Amambay / Pedro Juan Caballero, Paraguay).
+El usuario se llama {display_name}.
 
 {CASA_GONZALITO_GROUNDING}
 
-Pregunta del usuario: "{user_query}"
-
 REGLAS ESTRICTAS DE RESPUESTA:
-1. Responde DIRECTAMENTE la información solicitada de manera ejecutiva, clara y en español paraguayo formal (cordial, sin modismos forzados como "kp" o "chavales").
-2. NUNCA menciones instrucciones SQL, tablas ni código técnico. El usuario es un ejecutivo de negocios.
-3. Expresá montos en Guaraníes (Gs.).
-4. Si la pregunta es sobre productos o marcas, hacé referencia a PARESA (Coca-Cola, Fanta, Sprite, Monster), Lácteos Trébol, Arroz Tío Nico, o proveedores de Casa Gonzalito.
-5. Finalizá con una breve "💡 Sugerencia de Marco:" proactiva.
+1. CONTEXTO Y CONVERSACIÓN: Si ya hay mensajes previos en la conversación o repreguntas, NO saludes de nuevo, NO repitas el nombre del usuario y NO des bienvenidas redundantes; andá DIRECTO a responder con precisión ejecutiva. Solo si es el primer mensaje de una nueva conversación podés dar un saludo breve.
+2. COMUNICACIÓN EJECUTIVA: Responde de forma clara, directa, profesional y concisa en español paraguayo formal (sin modismos forzados como "kp" o "chavales").
+3. DATOS DE NEGOCIO: Expresá montos en Guaraníes (Gs.). Tené presente que Casa Gonzalito es el distribuidor exclusivo de PARESA (Coca-Cola, Fanta, Sprite, Monster, etc.) en Amambay y trabaja con proveedores como Río Aquidabán, Trébol, La Mercantil Guaraní.
+4. CERO CÓDIGO TÉCNICO: NUNCA menciones instrucciones SQL, tablas ni sintaxis de desarrollo de software.
+5. PROACTIVIDAD: Si la respuesta amerita una acción concreta, cerrá con una sola línea breve: "💡 Sugerencia de Marco: ...".
 """
-        system_prompt = "Sos MARCO, asistente ejecutivo de Casa Gonzalito en Pedro Juan Caballero. Respondes con datos comerciales precisos en Guaraníes sin inventar productos ajenos."
-        
-        # 2.1 Intentar con Google Gemini Flash
-        final_response = await query_gemini(prompt=prompt, system_prompt=system_prompt)
+        # 2.1 Intentar con Google Gemini Flash (ultra rápido < 1.2s)
+        final_response = await query_gemini(prompt=user_query, system_prompt=system_prompt, history=history)
         
         # 2.2 Si Gemini no está disponible o falla, fallback a Ollama local
         if not final_response:
             model_used = f"Ollama {FAST_MODEL} (Local)"
             final_response = await query_ollama(
-                prompt=prompt,
+                prompt=user_query,
                 system_prompt=system_prompt,
                 model=FAST_MODEL
             )
@@ -790,7 +795,7 @@ REGLAS ESTRICTAS DE RESPUESTA:
             final_response = re.sub(r'(?i)select\s+.*?\s+from\s+.*?;?', '', final_response).strip()
 
     if not final_response:
-        final_response = f"Hola {display_name}, estoy a tu disposición para ayudarte con datos de ventas, clientes mayoristas, proveedores o inventario de Casa Gonzalito."
+        final_response = f"Estoy a tu disposición para responder consultas sobre ventas, clientes mayoristas, proveedores o inventario de Casa Gonzalito."
 
     # ── 3. GENERACIÓN DE AUDIO CONVERSACIONAL NATURAL ─────────────────────────
     audio_base64 = None
@@ -831,7 +836,7 @@ async def process_brain_chat(
     conversation_id: Optional[str] = None,
     model: str = DEFAULT_MODEL,
     voice_preference: str = "es-AR-TomasNeural",
-    generate_voice: bool = True,
+    generate_voice: bool = False,
     history: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     return await execute_ai_brain_pipeline(
@@ -841,6 +846,7 @@ async def process_brain_chat(
         voice_preference=voice_preference,
         model_preference=model,
         generate_voice=generate_voice,
+        history=history,
     )
 
 
