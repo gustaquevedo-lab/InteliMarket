@@ -1,5 +1,5 @@
 const DB_NAME = "intelimarket_offline"
-const DB_VERSION = 6
+const DB_VERSION = 7
 const STORE_CART = "cart"
 const STORE_PENDING_SALES = "pending_sales"
 const STORE_PENDING_CUPONES = "pending_cupones"
@@ -40,16 +40,27 @@ function openDB(): Promise<IDBDatabase> {
         const store = request.transaction?.objectStore(STORE_PRODUCTS)
         if (store && !store.indexNames.contains("sku")) store.createIndex("sku", "sku", { unique: false })
         if (store && !store.indexNames.contains("codigo_barra")) store.createIndex("codigo_barra", "codigo_barra", { unique: false })
+        if (store && !store.indexNames.contains("nombre")) store.createIndex("nombre", "nombre", { unique: false })
       }
       if (!db.objectStoreNames.contains(STORE_CUSTOMERS)) {
         const store = db.createObjectStore(STORE_CUSTOMERS, { keyPath: "id" })
         store.createIndex("ruc", "ruc", { unique: false })
         store.createIndex("ci", "ci", { unique: false })
+        store.createIndex("nombre", "nombre", { unique: false })
         store.createIndex("extra_club_numero", "extra_club_numero", { unique: false })
       } else {
         const store = request.transaction?.objectStore(STORE_CUSTOMERS)
         if (store && !store.indexNames.contains("extra_club_numero")) {
           store.createIndex("extra_club_numero", "extra_club_numero", { unique: false })
+        }
+        if (store && !store.indexNames.contains("nombre")) {
+          store.createIndex("nombre", "nombre", { unique: false })
+        }
+        if (store && !store.indexNames.contains("ruc")) {
+          store.createIndex("ruc", "ruc", { unique: false })
+        }
+        if (store && !store.indexNames.contains("ci")) {
+          store.createIndex("ci", "ci", { unique: false })
         }
       }
       if (!db.objectStoreNames.contains(STORE_SYNC_STATE)) db.createObjectStore(STORE_SYNC_STATE, { keyPath: "id" })
@@ -160,6 +171,98 @@ async function getByIndex<T>(storeName: string, indexName: string, value: string
     return _limpiar(storeName, values, keys)
   } catch (e) {
     console.warn(`[offlineDB] Error getByIndex ${storeName}.${indexName}:`, e)
+    return []
+  }
+}
+
+// Búsqueda ultraligera y paginada con cursor en IndexedDB (RUC, CI, Nombre)
+// No carga 5.000 clientes a memoria; corta el cursor apenas reúne el límite.
+async function searchCustomers(query: string, limit = 20): Promise<any[]> {
+  const clean = query.trim().toLowerCase()
+  if (!clean) return []
+  try {
+    const db = await openDBOnce()
+    const tx = db.transaction(STORE_CUSTOMERS, "readonly")
+    const store = tx.objectStore(STORE_CUSTOMERS)
+
+    const results: any[] = []
+    const seenIds = new Set<string>()
+
+    const addIfNew = (item: any) => {
+      if (item && item.id && !seenIds.has(item.id)) {
+        seenIds.add(item.id)
+        results.push(item)
+      }
+    }
+
+    const digits = clean.replace(/\D/g, "")
+
+    // 1. Coincidencia por RUC si hay dígitos
+    if (digits.length >= 3 && store.indexNames.contains("ruc")) {
+      const idx = store.index("ruc")
+      const range = IDBKeyRange.bound(digits, digits + "\uffff")
+      await new Promise<void>((res) => {
+        const req = idx.openCursor(range)
+        req.onsuccess = () => {
+          const cursor = req.result
+          if (cursor && results.length < limit) {
+            addIfNew(cursor.value)
+            cursor.continue()
+          } else {
+            res()
+          }
+        }
+        req.onerror = () => res()
+      })
+    }
+
+    // 2. Coincidencia por CI si hay dígitos
+    if (digits.length >= 3 && results.length < limit && store.indexNames.contains("ci")) {
+      const idx = store.index("ci")
+      const range = IDBKeyRange.bound(digits, digits + "\uffff")
+      await new Promise<void>((res) => {
+        const req = idx.openCursor(range)
+        req.onsuccess = () => {
+          const cursor = req.result
+          if (cursor && results.length < limit) {
+            addIfNew(cursor.value)
+            cursor.continue()
+          } else {
+            res()
+          }
+        }
+        req.onerror = () => res()
+      })
+    }
+
+    // 3. Coincidencia por Nombre y Razón Social con cursor acotado
+    if (results.length < limit) {
+      const tokens = clean.split(/\s+/).filter(Boolean)
+      const targetIndex = store.indexNames.contains("nombre") ? store.index("nombre") : store
+      await new Promise<void>((res) => {
+        const req = targetIndex.openCursor()
+        req.onsuccess = () => {
+          const cursor = req.result
+          if (cursor && results.length < limit) {
+            const c = cursor.value
+            if (c) {
+              const text = `${c.nombre || ""} ${c.razon_social || ""} ${c.ruc || ""} ${c.ci || ""} ${c.telefono || ""}`.toLowerCase()
+              if (tokens.every((t) => text.includes(t))) {
+                addIfNew(c)
+              }
+            }
+            cursor.continue()
+          } else {
+            res()
+          }
+        }
+        req.onerror = () => res()
+      })
+    }
+
+    return results
+  } catch (e) {
+    console.warn("[offlineDB] Error searchCustomers:", e)
     return []
   }
 }
@@ -391,6 +494,8 @@ export const offlineDB = {
     getAll: () => getStore<any>(STORE_PRODUCTS),
     getBySku: (sku: string) => getByIndex<any>(STORE_PRODUCTS, "sku", sku),
     getByBarcode: (code: string) => getByIndex<any>(STORE_PRODUCTS, "codigo_barra", code),
+    put: (product: any) => putItem(STORE_PRODUCTS, product),
+    upsertMany: (products: any[]) => putMany(STORE_PRODUCTS, products),
     setAll: (products: any[]) => clearStore(STORE_PRODUCTS).then(() => putMany(STORE_PRODUCTS, products)),
     clear: () => clearStore(STORE_PRODUCTS),
   },
@@ -399,6 +504,9 @@ export const offlineDB = {
     getByRuc: (ruc: string) => getByIndex<any>(STORE_CUSTOMERS, "ruc", ruc),
     getByCI: (ci: string) => getByIndex<any>(STORE_CUSTOMERS, "ci", ci),
     getByExtraClub: (num: string) => getByIndex<any>(STORE_CUSTOMERS, "extra_club_numero", num),
+    search: (query: string, limit?: number) => searchCustomers(query, limit),
+    put: (customer: any) => putItem(STORE_CUSTOMERS, customer),
+    upsertMany: (customers: any[]) => putMany(STORE_CUSTOMERS, customers),
     setAll: (customers: any[]) => clearStore(STORE_CUSTOMERS).then(() => putMany(STORE_CUSTOMERS, customers)),
     clear: () => clearStore(STORE_CUSTOMERS),
   },

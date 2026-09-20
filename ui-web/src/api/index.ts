@@ -907,9 +907,10 @@ export interface EmailConfig { id: string; company_id?: string; smtp_host?: stri
 export interface EventStream { id: string; tipo?: string; mensaje?: string; datos?: Record<string, unknown>; timestamp?: string }
 export interface ImportTemplate { id: string; company_id?: string; nombre?: string; tipo?: string; columnas?: string[]; mapeo?: Record<string, string>; activo?: boolean; created_at?: string }
 export interface ImportResult { id: string; template_id?: string; estado?: string; total_registros?: number; exitosos?: number; errores?: number; detalle?: Record<string, unknown>[]; created_at?: string }
-export interface LoyaltyConfig { id: string; company_id: string; puntos_por_guarani: number; guarani_por_punto: number; vencimiento_dias: number; canje_minimo_puntos: number; bienvenida_puntos: number; cumpleanos_puntos: number; crear_en_venta: boolean; activo: boolean; created_at: string; updated_at: string }
+export interface LoyaltyConfig { id: string; company_id: string; puntos_por_guarani: number; guarani_por_punto: number; vencimiento_dias: number; canje_minimo_puntos: number; bienvenida_puntos: number; cumpleanos_puntos: number; crear_en_venta: boolean; activo: boolean; multiplicador_bronce?: number; multiplicador_plata?: number; multiplicador_oro?: number; multiplicador_vip?: number; promocion_activa?: boolean; promocion_nombre?: string; multiplicador_promocional?: number; created_at: string; updated_at: string }
 export interface LoyaltyPoints { id: string; company_id: string; customer_id: string; tipo: string; puntos: number; referencia_tipo?: string; referencia_id?: string; descripcion?: string; vence_en?: string; created_at: string }
-export interface LoyaltyReward { id: string; company_id: string; nombre: string; descripcion?: string; puntos_requeridos: number; tipo_recompensa: string; valor_recompensa?: number; stock?: number; imagen_url?: string; activo: boolean; created_at: string; updated_at: string }
+export interface LoyaltyReward { id: string; company_id: string; nombre: string; descripcion?: string; puntos_requeridos: number; tipo_recompensa: string; valor_recompensa?: number; stock?: number; imagen_url?: string; activo: boolean; supplier_id?: string; product_id?: string; warehouse_id?: string; patrocinador_nombre?: string; aporte_tipo?: string; unidades_pactadas?: number; costo_referencial?: number; notas?: string; warehouse_nombre?: string; product_sku?: string; created_at: string; updated_at: string }
+export interface LoyaltyRedemption { id: string; company_id: string; customer_id: string; reward_id: string; warehouse_id?: string; supplier_id?: string; puntos_canjeados: number; cantidad: number; comprobante_numero?: string; entregado_por?: string; notas?: string; created_at: string }
 export interface PortalCustomer { id: string; nombre?: string; email?: string; telefono?: string; saldo?: number; total_compras?: number; ultima_compra?: string; created_at?: string }
 export interface SecurityApiKey { id: string; company_id?: string; nombre?: string; key_hash?: string; scopes?: string[]; ultimo_uso?: string; activo?: boolean; created_at?: string; updated_at?: string }
 export interface Receipt { id: string; sale_id?: string; cdc?: string; numero?: string; fecha?: string; total?: number; moneda?: string; estado?: string; qr_url?: string; pdf_url?: string; created_at?: string }
@@ -1064,7 +1065,7 @@ export interface Promotion {
   monto_total_nc_comprometido?: number
   fecha_vencimiento_lote?: string
   // Productos detalle (enriquecido por el backend tras fetch)
-  productos_detalle?: Array<{ id: string; nombre: string; sku?: string; codigo_barra?: string }>
+  productos_detalle?: Array<{ id: string; nombre: string; sku?: string; codigo_barra?: string; precio_venta?: number; costo_promedio?: number }>
 }
 export interface PromotionUsage { id: string; promotion_id?: string; sale_id?: string; customer_id?: string; branch_id?: string; codigo_cupon?: string; descuento_aplicado?: number; items_aplicados?: string[]; created_at?: string }
 export interface MobileDashboard { recepciones_pendientes: number; inventarios_pendientes: number; sugerencias_pendientes: number; entregas_hoy: number }
@@ -1610,7 +1611,7 @@ export const api = {
     delete: (id: string) => client.delete<void>(`/v1/categories/${id}`),
   },
   products: {
-    list: (params?: { search?: string; categoria_id?: string; supplier_id?: string; activo?: boolean; tipo_producto?: string; include_inactive?: boolean; limit?: number; offset?: number }) => client.get<Product[]>(`/v1/companies/${COMPANY_ID}/products`, { search: params?.search, categoria_id: params?.categoria_id, supplier_id: params?.supplier_id, activo: params?.activo !== undefined ? params?.activo.toString() : undefined, tipo_producto: params?.tipo_producto, include_inactive: params?.include_inactive ? "true" : undefined, limit: params?.limit, offset: params?.offset }),
+    list: (params?: { search?: string; categoria_id?: string; supplier_id?: string; activo?: boolean; tipo_producto?: string; include_inactive?: boolean; updated_since?: string; limit?: number; offset?: number }) => client.get<Product[]>(`/v1/companies/${COMPANY_ID}/products`, { search: params?.search, categoria_id: params?.categoria_id, supplier_id: params?.supplier_id, activo: params?.activo !== undefined ? params?.activo.toString() : undefined, tipo_producto: params?.tipo_producto, include_inactive: params?.include_inactive ? "true" : undefined, updated_since: params?.updated_since, limit: params?.limit, offset: params?.offset }),
     get: (id: string) => client.get<Product>(`/v1/products/${id}`),
     getStats: () => client.get<ProductsStatsResponse>(`/v1/companies/${COMPANY_ID}/products/stats`),
     get360: (id: string) => client.get<Product360Response>(`/v1/products/${id}/360`),
@@ -1712,7 +1713,7 @@ export const api = {
     dashboard: () => client.get<any>("/v1/supermer/inventory/dashboard"),
   },
   customers: {
-    list: (params?: { search?: string; tipo?: string; activo?: boolean; exclude_proveedores?: boolean; limit?: number; offset?: number }) => client.get<Customer[]>(`/v1/companies/${COMPANY_ID}/customers`, params),
+    list: (params?: { search?: string; tipo?: string; activo?: boolean; exclude_proveedores?: boolean; updated_since?: string; limit?: number; offset?: number }) => client.get<Customer[]>(`/v1/companies/${COMPANY_ID}/customers`, params),
     get: (id: string) => client.get<Customer>(`/v1/customers/${id}`),
     get360: (id: string) => client.get<any>(`/v1/customer360/profile/${id}`),
     lookupRuc: (doc: string) => client.get<{ ruc: string; ci: string; dv: string; nombre: string; razon_social: string; telefono?: string; email?: string; encontrado_en_db: boolean; fuente: string }>(`/v1/customers/lookup-ruc/${doc}`),
@@ -3040,9 +3041,13 @@ export const api = {
     balance: (customerId: string, companyId: string) => client.get<{ customer_id: string; total_puntos: number; puntos_por_vencer: number }>(`/v1/loyalty/balance/${customerId}`, { company_id: companyId }),
     history: (customerId: string, companyId: string, limit?: number) => client.get<LoyaltyPoints[]>(`/v1/loyalty/history/${customerId}`, { company_id: companyId, limit: limit || 50 }),
     rewards: (companyId: string, activo?: boolean) => client.get<LoyaltyReward[]>("/v1/loyalty/rewards", { company_id: companyId, ...(activo !== undefined ? { activo: String(activo) } : {}) }),
-    createReward: (data: { company_id: string; nombre: string; puntos_requeridos: number; tipo_recompensa: string; descripcion?: string; valor_recompensa?: number; stock?: number; imagen_url?: string }) => client.post<LoyaltyReward>("/v1/loyalty/rewards", data),
+    createReward: (data: Partial<LoyaltyReward>) => client.post<LoyaltyReward>("/v1/loyalty/rewards", data),
     updateReward: (rewardId: string, data: Partial<LoyaltyReward>) => client.put<LoyaltyReward>(`/v1/loyalty/rewards/${rewardId}`, data),
     deleteReward: (rewardId: string) => client.delete<void>(`/v1/loyalty/rewards/${rewardId}`),
+    getPremiosWarehouse: (companyId: string) => client.get<{ id: string; codigo: string; nombre: string; tipo: string; responsable: string; descripcion: string }>("/v1/loyalty/deposito-premios", { company_id: companyId }),
+    addRewardStock: (rewardId: string, data: { cantidad: number; remision_proveedor?: string; costo_unitario?: number; notas?: string }) => client.post<LoyaltyReward>(`/v1/loyalty/rewards/${rewardId}/stock`, data),
+    redeemReward: (rewardId: string, data: { customer_id: string; company_id: string; cantidad?: number; notas?: string }) => client.post<LoyaltyRedemption>(`/v1/loyalty/rewards/${rewardId}/canjear`, data),
+    getRedemptions: (companyId: string, limit?: number) => client.get<LoyaltyRedemption[]>("/v1/loyalty/redemptions", { company_id: companyId, limit: limit || 50 }),
     solicitudesTarjetas: () => client.get<{ cola: any[] }>("/v1/loyalty/solicitudes-tarjetas"),
     marcarImpresa: (colaId: number) => client.post<any>(`/v1/loyalty/solicitudes-tarjetas/${colaId}/imprimir`),
     // Tarjetas Extra Club (Zebra ZC300)

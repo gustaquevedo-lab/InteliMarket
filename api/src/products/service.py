@@ -274,6 +274,7 @@ async def list_products(
     supplier_id: Optional[str] = None,
     tipo_producto: Optional[str] = None,
     include_inactive: bool = False,
+    updated_since: Optional[datetime] = None,
 ) -> list[Product]:
     try:
         c_uuid = UUID(company_id)
@@ -370,8 +371,12 @@ async def list_products(
                     single_conds.append(Product.codigo_barra == f"2000{scale_match.plu:03d}")
             query = query.where(or_(*single_conds))
 
-    # Filtrar productos con nombres válidos primero y activos con máxima prioridad
-    query = query.order_by(Product.activo.desc(), Product.nombre.asc()).limit(limit).offset(offset)
+    if updated_since is not None:
+        query = query.where(Product.updated_at >= updated_since)
+        query = query.order_by(Product.updated_at.asc()).limit(limit).offset(offset)
+    else:
+        # Filtrar productos con nombres válidos primero y activos con máxima prioridad
+        query = query.order_by(Product.activo.desc(), Product.nombre.asc()).limit(limit).offset(offset)
     result = await db.execute(query)
     products = list(result.scalars().all())
 

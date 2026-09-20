@@ -29,15 +29,28 @@ export async function restoreCart(): Promise<Array<{ id: string; nombre: string;
   return offlineDB.cart.getAll()
 }
 
-export async function syncFullCatalog(): Promise<{ products: number; customers: number; success: boolean }> {
+export async function syncFullCatalog(forceFull = false): Promise<{ products: number; customers: number; success: boolean }> {
   try {
-    // Descarga el catálogo completo (todos los SKUs) y clientes con líneas de crédito
+    const syncState = await offlineDB.syncState.get()
+    const lastSync = syncState?.last_full_sync
+    const hasLocalProducts = (await offlineDB.products.getAll()).length > 0
+
+    // Si ya hay catálogo local y no es forceFull, hacemos sincronización DELTA (solo novedades)
+    const isDelta = !forceFull && hasLocalProducts && !!lastSync
+
     const [products, customers] = await Promise.all([
-      api.products.list({ limit: 10000, activo: true }),
-      api.customers.list({ limit: 10000, activo: true }),
+      api.products.list({
+        limit: isDelta ? 2000 : 15000,
+        include_inactive: true,
+        updated_since: isDelta ? lastSync : undefined,
+      }),
+      api.customers.list({
+        limit: isDelta ? 2000 : 15000,
+        updated_since: isDelta ? lastSync : undefined,
+      }),
     ])
 
-    const cachedProducts: CachedProduct[] = products.map(p => ({
+    const cachedProducts: CachedProduct[] = (products || []).map(p => ({
       id: p.id,
       sku: p.sku,
       codigo_barra: p.codigo_barra ?? null,
@@ -52,7 +65,7 @@ export async function syncFullCatalog(): Promise<{ products: number; customers: 
       cached_at: new Date().toISOString(),
     }))
 
-    const cachedCustomers: CachedCustomer[] = customers.map(c => {
+    const cachedCustomers: CachedCustomer[] = (customers || []).map(c => {
       const limite = Number(c.credito_limite ?? c.limite_credito ?? 0)
       const usado = Number(c.credito_usado ?? c.saldo_pendiente ?? 0)
       return {
@@ -74,10 +87,17 @@ export async function syncFullCatalog(): Promise<{ products: number; customers: 
       }
     })
 
-    await Promise.all([
-      offlineDB.products.setAll(cachedProducts),
-      offlineDB.customers.setAll(cachedCustomers),
-    ])
+    if (isDelta) {
+      // Sincronización Delta: actualización rápida in-place sin borrar nada
+      if (cachedProducts.length > 0) await offlineDB.products.upsertMany(cachedProducts)
+      if (cachedCustomers.length > 0) await offlineDB.customers.upsertMany(cachedCustomers)
+    } else {
+      // Carga completa inicial
+      await Promise.all([
+        offlineDB.products.setAll(cachedProducts),
+        offlineDB.customers.setAll(cachedCustomers),
+      ])
+    }
 
     // No bloquea el resultado del sync de catalogo -- si falla (sin
     // conexion en este preciso instante) se mantiene el cache de PINs
@@ -89,7 +109,8 @@ export async function syncFullCatalog(): Promise<{ products: number; customers: 
     })
 
     return { products: cachedProducts.length, customers: cachedCustomers.length, success: true }
-  } catch {
+  } catch (e) {
+    console.warn("[syncManager] Error en syncFullCatalog:", e)
     return { products: 0, customers: 0, success: false }
   }
 }

@@ -21,7 +21,7 @@ import { formatPYG, formatInputDecimal, parseInputDecimal } from "../../utils/fo
 import { DEFAULT_RECEIPT_CONFIG } from "../../constants/receiptDefaults"
 import { loadCachedPOSData, persistPOSCatalog } from "../../utils/posOfflineSync"
 import { offlineDB } from "../../utils/offlineDB"
-import { syncPendingSales, syncPendingCupones } from "../../utils/syncManager"
+import { syncPendingSales, syncPendingCupones, syncFullCatalog } from "../../utils/syncManager"
 import { verifySupervisorPinLocal, syncSupervisorPins } from "../../utils/localAuth"
 import QRCode from "qrcode"
 
@@ -638,6 +638,7 @@ export default function POSPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [customerSearchResults, setCustomerSearchResults] = useState<Customer[]>([])
   const [searchingCustomers, setSearchingCustomers] = useState(false)
+  const customerSearchInputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(true)
   const [searchingServer, setSearchingServer] = useState(false)
   const [search, setSearch] = useState("")
@@ -894,6 +895,15 @@ export default function POSPage() {
   const [newCustTelefono, setNewCustTelefono] = useState("")
   const [lookupDvSuggested, setLookupDvSuggested] = useState<string | null>(null)
   const [customerHighlight, setCustomerHighlight] = useState(0)
+
+  // Foco garantizado en el input de búsqueda de clientes al abrir modal (F9)
+  useEffect(() => {
+    if (showCustomerModal) {
+      requestAnimationFrame(() => {
+        customerSearchInputRef.current?.focus()
+      })
+    }
+  }, [showCustomerModal])
 
 
   // Persistidas en localStorage -- antes vivían solo en memoria y una venta
@@ -2321,18 +2331,17 @@ export default function POSPage() {
   const [submitting, setSubmitting] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
-  // ── CARGA OFFLINE INSTANTÁNEA (INDEXEDDB) Y SINCRONIZACIÓN PERIÓDICA EN SEGUNDO PLANO ──
+  // ── CARGA OFFLINE INSTANTÁNEA (INDEXEDDB) Y SINCRONIZACIÓN DELTA EN SEGUNDO PLANO ──
   useEffect(() => {
     let isMounted = true
 
     async function syncCatalog(isInitial: boolean) {
       if (isInitial) {
-        // 1. Cargar inmediatamente de IndexedDB / localStorage (0ms, 100% offline)
+        // 1. Cargar inmediatamente de IndexedDB (0ms, 100% offline)
         try {
           const cached = await loadCachedPOSData()
           if (isMounted) {
             if (cached.cachedProducts.length > 0) setProducts(cached.cachedProducts)
-            if (cached.cachedCustomers.length > 0) setCustomers(cached.cachedCustomers)
             if (cached.cachedStaff.length > 0) setSupervisorStaffOptions(cached.cachedStaff)
           }
         } catch (e) {
@@ -2340,11 +2349,9 @@ export default function POSPage() {
         }
       }
 
-      // 2. Consulta en segundo plano al servidor central
+      // 2. Consulta en segundo plano de metadatos y sincronización delta
       try {
-        const [prodData, custData, whData, staffData, topData, stockData, packBarcodeData] = await Promise.allSettled([
-          api.products.list({ limit: 15000 }),
-          api.customers.list({ limit: 10000 }),
+        const [whData, staffData, topData, stockData, packBarcodeData] = await Promise.allSettled([
           api.warehouses.list(),
           api.auth.posAuthorizers(),
           api.reports.salesByProduct({ limit: 100 }),
@@ -2352,37 +2359,12 @@ export default function POSPage() {
           api.products.packBarcodes.list(),
         ])
 
-        let freshProds: Product[] = []
-        let freshCusts: Customer[] = []
-        let freshStaff: any[] = []
-
-        if (prodData.status === "fulfilled") {
-          const validProds = (prodData.value || []).filter(
-            (p: any) => p && p.nombre && p.nombre.trim() !== "..."
-          )
-          const combined = [...validProds, ...TOP_CATALOG_SEED as Product[]]
-          const map = new Map<string, Product>()
-          for (const item of combined) {
-            if (item.sku && !map.has(item.sku)) {
-              map.set(item.sku, item)
-            }
-          }
-          freshProds = Array.from(map.values())
-          if (isMounted) setProducts(freshProds)
-        }
-
-        if (custData.status === "fulfilled") {
-          freshCusts = (custData.value || []).map(normalizeCustomer)
-          if (isMounted) setCustomers(freshCusts)
-        }
-
         if (whData.status === "fulfilled" && isMounted) {
           setWarehouses((whData.value || []).filter((w: any) => w.activo !== false))
         }
 
-        if (staffData.status === "fulfilled") {
-          freshStaff = staffData.value?.staff || []
-          if (isMounted) setSupervisorStaffOptions(freshStaff)
+        if (staffData.status === "fulfilled" && isMounted) {
+          setSupervisorStaffOptions(staffData.value?.staff || [])
         }
 
         if (topData.status === "fulfilled" && isMounted) {
@@ -2405,9 +2387,13 @@ export default function POSPage() {
           setPackBarcodeMap(map)
         }
 
-        // 3. Persistir catálogo completo indexado en IndexedDB
-        if (freshProds.length > 0 || freshCusts.length > 0) {
-          persistPOSCatalog(freshProds, freshCusts, freshStaff)
+        // 3. Sincronización DELTA liviana (solo novedades desde el último sync)
+        const syncRes = await syncFullCatalog(false)
+        if (syncRes && syncRes.products > 0 && isMounted) {
+          const freshProds = await offlineDB.products.getAll()
+          if (freshProds && freshProds.length > 0 && isMounted) {
+            setProducts(freshProds as Product[])
+          }
         }
       } catch (err: any) {
         if (isInitial) {
@@ -2422,11 +2408,11 @@ export default function POSPage() {
     syncCatalog(true)
     syncPendingSales().catch(() => {})
 
-    // Sincronización silenciosa en background cada 2 minutos
+    // Sincronización Delta silenciosa cada 5 minutos
     const syncInterval = setInterval(() => {
       syncCatalog(false)
       syncPendingSales().catch(() => {})
-    }, 2 * 60 * 1000)
+    }, 5 * 60 * 1000)
 
     return () => {
       isMounted = false
@@ -2544,7 +2530,7 @@ export default function POSPage() {
     return () => clearTimeout(timer)
   }, [priceCheckSearch, showPriceCheckModal, products, packBarcodeMap])
 
-  // Búsqueda remota y en vivo de Clientes (F9) con debounce y consulta RUC
+  // Búsqueda remota y en vivo de Clientes (F9) con debounce, índices locales y consulta RUC
   useEffect(() => {
     if (!showCustomerModal) return
 
@@ -2558,10 +2544,19 @@ export default function POSPage() {
     const timer = setTimeout(async () => {
       setSearchingCustomers(true)
       try {
+        // 1. Intentar búsqueda remota en backend
         const res = await api.customers.list({ search: query, limit: 30 })
-        setCustomerSearchResults((res || []).map(normalizeCustomer))
+        const normalized = (res || []).map(normalizeCustomer)
 
-        // Si es número de cédula o RUC, intentar consultar el padrón
+        if (normalized.length > 0) {
+          setCustomerSearchResults(normalized)
+        } else {
+          // Si el servidor no devolvió coincidencias, buscar localmente en IndexedDB por índices RUC, CI, Nombre
+          const local = await offlineDB.customers.search(query, 30)
+          setCustomerSearchResults(local.map(normalizeCustomer))
+        }
+
+        // Si es número de cédula o RUC, intentar consultar el padrón adicional
         const digits = query.replace(/\D/g, "")
         if (digits.length >= 5) {
           try {
@@ -2587,10 +2582,17 @@ export default function POSPage() {
           } catch (e) {}
         }
       } catch (e) {
+        // Fallback Offline total: búsqueda indexada en IndexedDB (RUC, CI, Nombre)
+        try {
+          const local = await offlineDB.customers.search(query, 30)
+          setCustomerSearchResults(local.map(normalizeCustomer))
+        } catch (dbErr) {
+          console.warn("[POS] Error buscando clientes en IndexedDB offline:", dbErr)
+        }
       } finally {
         setSearchingCustomers(false)
       }
-    }, 250)
+    }, 150)
 
     return () => clearTimeout(timer)
   }, [customerSearch, showCustomerModal])
@@ -6071,18 +6073,13 @@ export default function POSPage() {
 
   // ── GESTIÓN Y CREACIÓN RÁPIDA DE CLIENTES (F9) CON RUC AUTOCALCULADO ────────
   const combinedCustomerList = useMemo(() => {
-    const list = customerSearch.trim() && customerSearchResults.length > 0
-      ? customerSearchResults
-      : customers
-
-    const query = customerSearch.trim().toLowerCase()
-    if (!query) return list
-
-    const tokens = query.split(/\s+/).filter(Boolean)
-    return list.filter(c => {
-      const text = `${c.nombre || ''} ${c.razon_social || ''} ${c.ruc || ''} ${c.ci || ''} ${(c as any).telefono || ''} ${(c as any).extra_club_numero || ''}`.toLowerCase()
-      return tokens.every(token => text.includes(token))
-    })
+    if (customerSearchResults.length > 0) {
+      return customerSearchResults.slice(0, 20)
+    }
+    if (!customerSearch.trim()) {
+      return customers.slice(0, 20)
+    }
+    return []
   }, [customerSearch, customerSearchResults, customers])
 
   // El índice 0 siempre es "Consumidor Final"; 1..N son los resultados de
@@ -6124,7 +6121,10 @@ export default function POSPage() {
       return
     }
 
-    const finalRuc = lookupDvSuggested || newCustRuc.trim() || undefined
+    let finalRuc = newCustRuc.trim()
+    if (lookupDvSuggested && !finalRuc.includes("-")) {
+      finalRuc = `${finalRuc}-${lookupDvSuggested}`
+    }
 
     try {
       const createdRaw = await api.customers.create({
@@ -6139,6 +6139,7 @@ export default function POSPage() {
 
       if (created) {
         setCustomers(prev => [created, ...prev])
+        offlineDB.customers.put(created).catch(() => {})
         setCustomer(created)
         setShowCreateCustomerForm(false)
         setShowCustomerModal(false)
@@ -6180,6 +6181,7 @@ export default function POSPage() {
       } as any)
       const created = normalizeCustomer(createdRaw)
       setCustomers(prev => [created, ...prev])
+      offlineDB.customers.put(created).catch(() => {})
       setCustomer(created)
       setShowCustomerModal(false)
       toast.success("Cliente Creado y Asignado", `${created.nombre} (${created.ruc || created.ci || 'CI'})`)
@@ -12754,6 +12756,7 @@ export default function POSPage() {
               <div className="flex items-center gap-2 mb-3">
                 <div className="relative flex-1">
                   <input
+                    ref={customerSearchInputRef}
                     type="text"
                     value={customerSearch}
                     onChange={(e) => setCustomerSearch(e.target.value)}

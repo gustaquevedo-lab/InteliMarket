@@ -1,6 +1,7 @@
 """Product and category API router"""
 
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -122,6 +123,7 @@ async def list_products_direct(
     activo: bool | None = Query(None),
     tipo_producto: str | None = Query(None),
     include_inactive: bool = Query(False),
+    updated_since: datetime | None = Query(None),
     limit: int = Query(100, le=20000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -129,6 +131,7 @@ async def list_products_direct(
     products = await service.list_products(
         db, company_id, categoria_id, search, activo, limit, offset,
         supplier_id=supplier_id, tipo_producto=tipo_producto, include_inactive=include_inactive,
+        updated_since=updated_since,
     )
     await annotate_products_with_promos(db, company_id, products)
     return products
@@ -143,6 +146,7 @@ async def list_products(
     activo: bool | None = Query(None),
     tipo_producto: str | None = Query(None),
     include_inactive: bool = Query(False),
+    updated_since: datetime | None = Query(None),
     limit: int = Query(100, le=20000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -150,6 +154,7 @@ async def list_products(
     products = await service.list_products(
         db, company_id, categoria_id, search, activo, limit, offset,
         supplier_id=supplier_id, tipo_producto=tipo_producto, include_inactive=include_inactive,
+        updated_since=updated_since,
     )
     await annotate_products_with_promos(db, company_id, products)
     return products

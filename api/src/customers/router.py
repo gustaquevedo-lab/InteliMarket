@@ -1,5 +1,6 @@
 """Customer API router"""
 
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,11 +28,12 @@ async def list_customers(
     activo: bool | None = Query(None),
     tipo: str | None = Query(None),
     exclude_proveedores: bool = Query(False),
+    updated_since: datetime | None = Query(None),
     limit: int = Query(10000, le=50000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_customers(db, company_id, search, activo, tipo, exclude_proveedores, limit, offset)
+    return await service.list_customers(db, company_id, search, activo, tipo, exclude_proveedores, limit, offset, updated_since=updated_since)
 
 
 @router.get("/customers/{customer_id}", response_model=CustomerResponse)

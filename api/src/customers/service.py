@@ -1,6 +1,7 @@
 """Customer service"""
 
 import re
+from datetime import datetime
 
 from sqlalchemy import select, or_, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +34,7 @@ async def list_customers(
     exclude_proveedores: bool = False,
     limit: int = 10000,
     offset: int = 0,
+    updated_since: datetime | None = None,
 ) -> list[Customer]:
     query = select(Customer).where(Customer.company_id == company_id)
     if search:
@@ -78,7 +80,11 @@ async def list_customers(
         query = query.where(Customer.tipo == tipo)
     elif exclude_proveedores:
         query = query.where(or_(Customer.tipo != "proveedor", Customer.tipo.is_(None)))
-    query = query.order_by(Customer.razon_social.asc().nulls_last()).limit(limit).offset(offset)
+    if updated_since is not None:
+        query = query.where(Customer.updated_at >= updated_since).order_by(Customer.updated_at.asc())
+    else:
+        query = query.order_by(Customer.razon_social.asc().nulls_last())
+    query = query.limit(limit).offset(offset)
     result = await db.execute(query)
     return list(result.scalars().all())
 
