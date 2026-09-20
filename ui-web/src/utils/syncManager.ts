@@ -33,10 +33,15 @@ export async function syncFullCatalog(forceFull = false): Promise<{ products: nu
   try {
     const syncState = await offlineDB.syncState.get()
     const lastSync = syncState?.last_full_sync
-    const hasLocalProducts = (await offlineDB.products.getAll()).length > 0
+    const localProducts = await offlineDB.products.getAll()
+    const hasLocalProducts = localProducts.length > 0
+    // Autocuracion: versiones anteriores guardaban productos SIN precio_venta
+    // (solo `precio`), y el POS lee precio_venta -> precio 0 en caja. Si el
+    // cache local tiene alguno asi, se fuerza carga completa que lo reemplaza.
+    const cacheSinPrecioVenta = localProducts.some((p: any) => p && p.precio_venta === undefined)
 
     // Si ya hay catálogo local y no es forceFull, hacemos sincronización DELTA (solo novedades)
-    const isDelta = !forceFull && hasLocalProducts && !!lastSync
+    const isDelta = !forceFull && hasLocalProducts && !!lastSync && !cacheSinPrecioVenta
 
     const [products, customers] = await Promise.all([
       api.products.list({
@@ -51,6 +56,10 @@ export async function syncFullCatalog(forceFull = false): Promise<{ products: nu
     ])
 
     const cachedProducts: CachedProduct[] = (products || []).map(p => ({
+      // Se conserva el producto completo (precio_venta, precio_promo,
+      // en_promocion, precio_regular, escalas...): el POS usa este mismo
+      // objeto como Product, no solo `precio`.
+      ...p,
       id: p.id,
       sku: p.sku,
       codigo_barra: p.codigo_barra ?? null,
