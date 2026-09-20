@@ -1,7 +1,7 @@
 /** Offline sync manager — catalog caching, retry queue, crash recovery */
 
 import { offlineDB, type CachedProduct, type CachedCustomer, type PendingSale, type CachedReceipt } from "./offlineDB"
-import { api } from "../api"
+import { api, COMPANY_ID } from "../api"
 import { syncSupervisorPins } from "./localAuth"
 
 const CART_SAVE_INTERVAL = 5000
@@ -218,12 +218,14 @@ export async function syncPendingSales(onProgress?: (synced: number, total: numb
         try {
           const d = sale.data as any
           api.inteliaudit.recordEvent({
-            company_id: d?.company_id,
+            company_id: d?.company_id || COMPANY_ID,
             user_id: d?.user_id,
             accion: "venta_offline_rechazada",
             entidad: "venta_pendiente",
-            entidad_id: sale.id,
+            // sale.id NO es UUID (ej. "off-1758...-ab12c"): entidad_id es uuid
+            // en audit_logs, asi que va dentro de datos_nuevos.
             datos_nuevos: {
+              id_local: sale.id,
               error: msg,
               total: d?.total,
               customer_id: d?.customer_id,
