@@ -296,7 +296,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
                         continue
 
             logger.warning(
-                "IDEMPOTENCIA ANTI-DUPLICADOS: Venta idéntica prevenida en sesión/caja (total=%s, items=%d). "
+                "IDEMPOTENCIA ANTI-DUPLICADOS: Venta idéntica prevenida en sesión %s (total=%s, items=%d). "
                 "Retornando venta original ya confirmada: %s (id=%s)",
                 cand.session_id, cand.total, len(data.items), cand.numero, cand.id
             )
