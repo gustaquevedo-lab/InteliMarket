@@ -198,6 +198,7 @@ export default function SalonOperacionesPwaPage() {
 
   // ── ESTADOS DE PRODUCCIÓN REAL CONECTADOS AL BACKEND ──
   // 1. CARNICERÍA & DESPOSTE
+  const [subSectorCarniceria, setSubSectorCarniceria] = useState<"desposte" | "templates" | "rendimiento">("desposte")
   const [butcheryTemplates, setButcheryTemplates] = useState<any[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("")
   const [despostePesoEntrada, setDespostePesoEntrada] = useState<number>(240)
@@ -206,8 +207,15 @@ export default function SalonOperacionesPwaPage() {
   const [desposteNotas, setDesposteNotas] = useState<string>("")
   const [ejecutandoDesposte, setEjecutandoDesposte] = useState(false)
   const [resultadoDesposte, setResultadoDesposte] = useState<any>(null)
+  const [showDesposteResultModal, setShowDesposteResultModal] = useState(false)
   const [butcheryOrders, setButcheryOrders] = useState<any[]>([])
+  const [yieldReport, setYieldReport] = useState<any[]>([])
   const [loadingCarniceria, setLoadingCarniceria] = useState(false)
+
+  // Formulario nueva plantilla carnicería
+  const [showTemplateModal, setShowTemplateModal] = useState(false)
+  const [savingTemplate, setSavingTemplate] = useState(false)
+  const [templateForm, setTemplateForm] = useState({ nombre: "", especie: "Vacuno Novillo", peso_promedio_kg: "250", descripcion: "" })
 
   // 2. PANADERÍA & ROTISERÍA
   const [panSubSector, setPanSubSector] = useState<"panaderia" | "rotiseria" | "calculadora">("panaderia")
@@ -219,6 +227,11 @@ export default function SalonOperacionesPwaPage() {
   const [bakeryProdVenc, setBakeryProdVenc] = useState<string>("")
   const [bakeryProdNotas, setBakeryProdNotas] = useState<string>("")
   const [registrandoBakery, setRegistrandoBakery] = useState(false)
+
+  // Formulario nueva receta panadería
+  const [showBakeryRecipeModal, setShowBakeryRecipeModal] = useState(false)
+  const [savingBakeryRecipe, setSavingBakeryRecipe] = useState(false)
+  const [bakeryRecipeForm, setBakeryRecipeForm] = useState({ nombre: "", rendimiento_piezas: "50", costo_estimado: "120000", tiempo_preparacion_min: "45", descripcion: "" })
 
   const [rotiseriaRecipes, setRotiseriaRecipes] = useState<any[]>([])
   const [rotiseriaPlanes, setRotiseriaPlanes] = useState<any[]>([])
@@ -234,6 +247,11 @@ export default function SalonOperacionesPwaPage() {
   const [aplicandoAutoMarkdownRoti, setAplicandoAutoMarkdownRoti] = useState(false)
   const [loadingPanaderia, setLoadingPanaderia] = useState(false)
 
+  // Formulario nueva receta rotisería
+  const [showRotiRecipeModal, setShowRotiRecipeModal] = useState(false)
+  const [savingRotiRecipe, setSavingRotiRecipe] = useState(false)
+  const [rotiRecipeForm, setRotiRecipeForm] = useState({ nombre: "", costo_estimado: "35000", tiempo_preparacion_min: "60", descripcion: "" })
+
   // Calculadora Panadero Rápida
   const [harinaKg, setHarinaKg] = useState<number>(25)
   const [hidratPct, setHidratPct] = useState<number>(60)
@@ -242,10 +260,12 @@ export default function SalonOperacionesPwaPage() {
   const [grasaPct, setGrasaPct] = useState<number>(3)
 
   // 3. VERDULERÍA & HORTIFRUTI FRESCOS
-  const [verduraSubSector, setVerduraSubSector] = useState<"frescura" | "lotes" | "markdown">("frescura")
+  const [verduraSubSector, setVerduraSubSector] = useState<"frescura" | "lotes" | "markdown" | "scorecards">("frescura")
   const [produceDash, setProduceDash] = useState<any>(null)
   const [receiveBatches, setReceiveBatches] = useState<any[]>([])
   const [freshnessAudits, setFreshnessAudits] = useState<any[]>([])
+  const [scorecards, setScorecards] = useState<any[]>([])
+  const [generandoScorecards, setGenerandoScorecards] = useState(false)
   const [loadingVerduleria, setLoadingVerduleria] = useState(false)
 
   // Formulario Auditoría de Frescura
@@ -292,6 +312,7 @@ export default function SalonOperacionesPwaPage() {
   const [repoUrgencia, setRepoUrgencia] = useState<"alta" | "normal">("alta")
 
   // ── ESTADOS DE HACCP REAL CONECTADOS AL BACKEND ──
+  const [haccpSubTab, setHaccpSubTab] = useState<"monitoreo" | "acciones" | "planes" | "reporte">("monitoreo")
   const [haccpDash, setHaccpDash] = useState<any>(null)
   const [haccpPlanes, setHaccpPlanes] = useState<any[]>([])
   const [selectedHaccpPlanId, setSelectedHaccpPlanId] = useState<string>("")
@@ -303,7 +324,14 @@ export default function SalonOperacionesPwaPage() {
   const [haccpAcciones, setHaccpAcciones] = useState<any[]>([])
   const [resolviendoAccionId, setResolviendoAccionId] = useState<string | null>(null)
   const [haccpRecentLogs, setHaccpRecentLogs] = useState<any[]>([])
+  const [haccpReport, setHaccpReport] = useState<any>(null)
+  const [loadingReport, setLoadingReport] = useState(false)
   const [loadingHaccp, setLoadingHaccp] = useState(false)
+
+  // Formulario nuevo plan HACCP
+  const [showNewPlanModal, setShowNewPlanModal] = useState(false)
+  const [savingNewPlan, setSavingNewPlan] = useState(false)
+  const [newPlanForm, setNewPlanForm] = useState({ nombre: "", area: "Carnicería", descripcion: "" })
 
   // ── LOGIN RÁPIDO PWA ──
   const { login } = useAuth()
@@ -417,9 +445,10 @@ export default function SalonOperacionesPwaPage() {
   const loadCarniceriaData = useCallback(async () => {
     setLoadingCarniceria(true)
     try {
-      const [tmplRes, ordsRes] = await Promise.allSettled([
+      const [tmplRes, ordsRes, yldRes] = await Promise.allSettled([
         api.supermer.butchery.templates.list(),
         api.supermer.butchery.orders(),
+        api.supermer.butchery.yieldReport(),
       ])
       if (tmplRes.status === "fulfilled" && Array.isArray(tmplRes.value)) {
         setButcheryTemplates(tmplRes.value)
@@ -429,6 +458,9 @@ export default function SalonOperacionesPwaPage() {
       }
       if (ordsRes.status === "fulfilled" && Array.isArray(ordsRes.value)) {
         setButcheryOrders(ordsRes.value)
+      }
+      if (yldRes.status === "fulfilled" && Array.isArray(yldRes.value)) {
+        setYieldReport(yldRes.value)
       }
     } catch (err) {
       console.warn("Error al cargar carnicería:", err)
@@ -476,14 +508,16 @@ export default function SalonOperacionesPwaPage() {
   const loadVerduleriaData = useCallback(async () => {
     setLoadingVerduleria(true)
     try {
-      const [dashRes, recRes, audRes] = await Promise.allSettled([
+      const [dashRes, recRes, audRes, scRes] = await Promise.allSettled([
         api.supermer.produce.dashboard(),
         api.supermer.produce.receiveBatches.list(),
         api.supermer.produce.freshness.list(),
+        api.supermer.produce.scorecards.list(),
       ])
       if (dashRes.status === "fulfilled") setProduceDash(dashRes.value)
       if (recRes.status === "fulfilled" && Array.isArray(recRes.value)) setReceiveBatches(recRes.value)
       if (audRes.status === "fulfilled" && Array.isArray(audRes.value)) setFreshnessAudits(audRes.value)
+      if (scRes.status === "fulfilled" && Array.isArray(scRes.value)) setScorecards(scRes.value)
     } catch (err) {
       console.warn("Error al cargar verdulería:", err)
     } finally {
@@ -1086,6 +1120,7 @@ export default function SalonOperacionesPwaPage() {
       soundAlerts.playScanSuccess()
       if (navigator.vibrate) navigator.vibrate([60, 80])
       setResultadoDesposte(res)
+      setShowDesposteResultModal(true)
       toast.success("✅ Desposte Registrado", `Se generaron ${res?.cortes?.length || 0} cortes ingresados a stock oficial.`)
       setDesposteNotas("")
       loadCarniceriaData()
@@ -1093,6 +1128,36 @@ export default function SalonOperacionesPwaPage() {
       toast.error("Error al ejecutar desposte", err?.message || "No se pudo conectar con el servidor.")
     } finally {
       setEjecutandoDesposte(false)
+    }
+  }
+
+  // ── ACCIÓN: CREAR NUEVA PLANTILLA DE CORTES EN CARNICERÍA ──
+  const handleSaveButcheryTemplate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!templateForm.nombre.trim()) {
+      toast.warning("Nombre Requerido", "Ingresá el nombre de la plantilla de cortes.")
+      return
+    }
+    setSavingTemplate(true)
+    try {
+      const created = await api.supermer.butchery.templates.create({
+        nombre: templateForm.nombre.trim(),
+        especie: templateForm.especie,
+        peso_promedio_kg: parseFloat(templateForm.peso_promedio_kg || "0"),
+        descripcion: templateForm.descripcion,
+        activa: true,
+        cuts: [],
+      })
+      soundAlerts.playScanSuccess()
+      toast.success("Plantilla Creada", `Plantilla "${templateForm.nombre}" guardada en el catálogo oficial.`)
+      setShowTemplateModal(false)
+      setTemplateForm({ nombre: "", especie: "Vacuno Novillo", peso_promedio_kg: "250", descripcion: "" })
+      await loadCarniceriaData()
+      if (created?.id) setSelectedTemplateId(created.id)
+    } catch (err: any) {
+      toast.error("Error al crear plantilla", err?.message || "No se pudo guardar la plantilla.")
+    } finally {
+      setSavingTemplate(false)
     }
   }
 
@@ -1111,24 +1176,60 @@ export default function SalonOperacionesPwaPage() {
 
     setRegistrandoBakery(true)
     try {
-      await api.supermer.orders.create({
+      const ord = await api.supermer.orders.create({
         receta_id: selectedBakeryRecipeId,
-        area: "panaderia",
         cantidad_objetivo: cant,
-        estado: "completada",
         fecha_vencimiento: bakeryProdVenc || undefined,
         notas: bakeryProdNotas ? `[PWA Panadería] ${bakeryProdNotas}` : "[PWA Panadería] Horneada en salón",
       })
 
+      if (ord?.id) {
+        await api.supermer.orders.complete(ord.id, {
+          producto_obtenido: cant,
+          fecha_vencimiento: bakeryProdVenc || undefined,
+        })
+      }
+
       soundAlerts.playScanSuccess()
       if (navigator.vibrate) navigator.vibrate([50, 70])
-      toast.success("Horneada Registrada", `${cant} unidades ingresadas a inventario de Panadería.`)
+      toast.success("Horneada Registrada", `${cant} piezas ingresadas directamente al inventario de Panadería.`)
       setBakeryProdNotas("")
       loadPanaderiaData()
     } catch (err: any) {
-      toast.error("Error al registrar horneada", err?.message || "Verificá la conexión.")
+      toast.error("Error al registrar horneada", err?.message || "Verificá la conexión con el servidor.")
     } finally {
       setRegistrandoBakery(false)
+    }
+  }
+
+  // ── ACCIÓN: CREAR RECETA DE PANADERÍA ──
+  const handleSaveBakeryRecipe = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!bakeryRecipeForm.nombre.trim()) {
+      toast.warning("Nombre Requerido", "Ingresá el nombre de la fórmula de panadería.")
+      return
+    }
+    setSavingBakeryRecipe(true)
+    try {
+      const created = await api.supermer.recipes.create({
+        nombre: bakeryRecipeForm.nombre.trim(),
+        area: "panaderia",
+        rendimiento_piezas: parseInt(bakeryRecipeForm.rendimiento_piezas || "1"),
+        costo_estimado: parseFloat(bakeryRecipeForm.costo_estimado || "0"),
+        tiempo_preparacion_min: parseInt(bakeryRecipeForm.tiempo_preparacion_min || "30"),
+        descripcion: bakeryRecipeForm.descripcion,
+        activa: true,
+      })
+      soundAlerts.playScanSuccess()
+      toast.success("Receta Creada", `Fórmula "${bakeryRecipeForm.nombre}" guardada en Panadería.`)
+      setShowBakeryRecipeModal(false)
+      setBakeryRecipeForm({ nombre: "", rendimiento_piezas: "50", costo_estimado: "120000", tiempo_preparacion_min: "45", descripcion: "" })
+      await loadPanaderiaData()
+      if (created?.id) setSelectedBakeryRecipeId(created.id)
+    } catch (err: any) {
+      toast.error("Error al guardar receta", err?.message || "No se pudo registrar la receta.")
+    } finally {
+      setSavingBakeryRecipe(false)
     }
   }
 
@@ -1161,6 +1262,35 @@ export default function SalonOperacionesPwaPage() {
       toast.error("Error al crear plan", err?.message || "Error al conectar.")
     } finally {
       setGuardandoRotiPlan(false)
+    }
+  }
+
+  // ── ACCIÓN: CREAR RECETA DE ROTISERÍA ──
+  const handleSaveRotiRecipe = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!rotiRecipeForm.nombre.trim()) {
+      toast.warning("Nombre Requerido", "Ingresá el nombre del preparado caliente.")
+      return
+    }
+    setSavingRotiRecipe(true)
+    try {
+      const created = await api.rotiseria.recipes.create({
+        nombre: rotiRecipeForm.nombre.trim(),
+        costo_estimado: parseFloat(rotiRecipeForm.costo_estimado || "0"),
+        tiempo_preparacion_min: parseInt(rotiRecipeForm.tiempo_preparacion_min || "60"),
+        descripcion: rotiRecipeForm.descripcion,
+        activa: true,
+      })
+      soundAlerts.playScanSuccess()
+      toast.success("Receta Guardada", `Preparado "${rotiRecipeForm.nombre}" registrado.`)
+      setShowRotiRecipeModal(false)
+      setRotiRecipeForm({ nombre: "", costo_estimado: "35000", tiempo_preparacion_min: "60", descripcion: "" })
+      await loadPanaderiaData()
+      if (created?.id) setSelectedRotiRecipeId(created.id)
+    } catch (err: any) {
+      toast.error("Error al guardar receta", err?.message || "No se pudo registrar.")
+    } finally {
+      setSavingRotiRecipe(false)
     }
   }
 
@@ -1349,6 +1479,78 @@ export default function SalonOperacionesPwaPage() {
       setResolviendoAccionId(null)
     }
   }
+
+  // ── ACCIÓN: GENERAR SCORECARDS DE PROVEEDORES HORTÍCOLAS ──
+  const handleGenerateScorecards = async () => {
+    setGenerandoScorecards(true)
+    try {
+      await api.supermer.produce.scorecards.generate()
+      soundAlerts.playScanSuccess()
+      toast.success("Scorecards Generados", "Índices de calidad y tasa de rechazo de proveedores actualizados.")
+      loadVerduleriaData()
+    } catch (err: any) {
+      toast.error("Error al generar scorecards", err?.message || "No se pudo actualizar.")
+    } finally {
+      setGenerandoScorecards(false)
+    }
+  }
+
+  // ── ACCIÓN: CREAR NUEVO PLAN HACCP ──
+  const handleSaveHaccpPlan = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newPlanForm.nombre.trim()) {
+      toast.warning("Nombre Requerido", "Ingresá el nombre del plan HACCP.")
+      return
+    }
+    setSavingNewPlan(true)
+    try {
+      const created = await api.haccp.plans.create({
+        nombre: newPlanForm.nombre.trim(),
+        area: newPlanForm.area,
+        descripcion: newPlanForm.descripcion,
+        activo: true,
+      })
+      soundAlerts.playScanSuccess()
+      toast.success("Plan HACCP Creado", `Plan "${newPlanForm.nombre}" guardado en el sistema oficial.`)
+      setShowNewPlanModal(false)
+      setNewPlanForm({ nombre: "", area: "Carnicería", descripcion: "" })
+      await loadHaccpData()
+      if (created?.id) setSelectedHaccpPlanId(created.id)
+    } catch (err: any) {
+      toast.error("Error al crear plan", err?.message || "Error al conectar.")
+    } finally {
+      setSavingNewPlan(false)
+    }
+  }
+
+  // ── ACCIÓN: CONSULTAR REPORTE DE CUMPLIMIENTO HACCP ──
+  const loadHaccpReport = async () => {
+    setLoadingReport(true)
+    try {
+      const r = await api.haccp.complianceReport()
+      setHaccpReport(r)
+      toast.success("Reporte HACCP Actualizado", `Cumplimiento global: ${r?.conformidad_pct != null ? Number(r.conformidad_pct).toFixed(1) : 100}%`)
+    } catch (err: any) {
+      toast.error("Error al cargar reporte", err?.message || "No se pudo consultar el reporte.")
+    } finally {
+      setLoadingReport(false)
+    }
+  }
+
+  // ── CARGAR HISTORIAL DE LOGS DE UN PUNTO CRÍTICO ──
+  const loadHaccpLogs = useCallback(async (cpId: string) => {
+    if (!cpId) return
+    try {
+      const logs = await api.haccp.monitoringLogs.list(cpId)
+      if (Array.isArray(logs)) setHaccpRecentLogs(logs)
+    } catch {
+      setHaccpRecentLogs([])
+    }
+  }, [])
+
+  useEffect(() => {
+    if (selectedCpId) loadHaccpLogs(selectedCpId)
+  }, [selectedCpId, loadHaccpLogs])
 
   // Total de Mermas del Día
   const totalMermasHoy = useMemo(() => {
@@ -1905,204 +2107,361 @@ export default function SalonOperacionesPwaPage() {
             {produccionSector === "carniceria" && (
               <div className="space-y-4 animate-fade-in">
                 
-                {/* Desposte de Res Oficial */}
-                <div className="backdrop-blur-2xl bg-slate-900/70 border border-red-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
-                  <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-9 rounded-2xl bg-red-600/30 border border-red-500/40 text-red-400 flex items-center justify-center font-black">
-                        <Beef className="w-4 h-4" />
+                {/* Sub-selector Carnicería */}
+                <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-white/[0.04] border border-white/10">
+                  {[
+                    { id: "desposte", label: "🥩 Desposte Gancho" },
+                    { id: "templates", label: `📋 Plantillas (${butcheryTemplates.length})` },
+                    { id: "rendimiento", label: `📊 Rendimiento (${yieldReport.length || butcheryOrders.length})` },
+                  ].map((sub) => (
+                    <button
+                      key={sub.id}
+                      type="button"
+                      onClick={() => setSubSectorCarniceria(sub.id as any)}
+                      className={`flex-1 py-2 px-1 rounded-xl text-xs font-black transition cursor-pointer text-center truncate ${
+                        subSectorCarniceria === sub.id
+                          ? "bg-red-600 text-white shadow-sm"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      {sub.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* SUB-MODO 1: WIZARD DE DESPOSTE */}
+                {subSectorCarniceria === "desposte" && (
+                  <div className="backdrop-blur-2xl bg-slate-900/70 border border-red-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-2xl bg-red-600/30 border border-red-500/40 text-red-400 flex items-center justify-center font-black">
+                          <Beef className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h2 className="font-black text-sm text-white" style={displayFont}>
+                            Desposte por Rendimiento Oficial
+                          </h2>
+                          <div className="text-[11px] text-slate-400">
+                            Deconstrucción de res contra plantilla de despiece con costeo por corte.
+                          </div>
+                        </div>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => loadCarniceriaData()}
+                        disabled={loadingCarniceria}
+                        className="p-2 rounded-xl bg-white/5 text-slate-400 hover:text-white border border-white/10 cursor-pointer"
+                        title="Actualizar plantillas y órdenes"
+                      >
+                        <RefreshCcw className={`w-3.5 h-3.5 ${loadingCarniceria ? "animate-spin text-red-400" : ""}`} />
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleEjecutarDesposte} className="space-y-3">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                            Plantilla de Cortes (Especie / Categoría):
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setShowTemplateModal(true)}
+                            className="text-[10px] text-red-400 font-bold hover:underline flex items-center gap-0.5 cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>Nueva Plantilla</span>
+                          </button>
+                        </div>
+                        <select
+                          value={selectedTemplateId}
+                          onChange={(e) => setSelectedTemplateId(e.target.value)}
+                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-red-400"
+                        >
+                          {butcheryTemplates.length === 0 ? (
+                            <option value="">-- Sin plantillas cargadas (creá una con + Nueva Plantilla) --</option>
+                          ) : (
+                            butcheryTemplates.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.nombre} ({t.especie || "Vacuno"}) • {t.cuts?.length || 0} cortes
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                            Peso en Gancho (Kg):
+                          </label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={despostePesoEntrada}
+                            onChange={(e) => setDespostePesoEntrada(Number(e.target.value) || 0)}
+                            className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-red-400"
+                            style={monoFont}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                            Costo Total Compra (₲):
+                          </label>
+                          <input
+                            type="text"
+                            value={desposteCostoTotal ? desposteCostoTotal.toLocaleString("es-PY") : ""}
+                            onChange={(e) => setDesposteCostoTotal(Number(e.target.value.replace(/\D/g, "")) || 0)}
+                            className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-red-400"
+                            style={monoFont}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                            Fecha Vencimiento Cortes:
+                          </label>
+                          <input
+                            type="date"
+                            value={desposteVencimiento}
+                            onChange={(e) => setDesposteVencimiento(e.target.value)}
+                            className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-2.5 text-xs text-white outline-none focus:border-red-400"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                            Nro. Tropa / SENACSA / Notas:
+                          </label>
+                          <input
+                            type="text"
+                            value={desposteNotas}
+                            onChange={(e) => setDesposteNotas(e.target.value)}
+                            placeholder="Ej: Tropa 402 - Frigomerc"
+                            className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-2.5 text-xs text-white outline-none focus:border-red-400"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Barra de KPIs en Vivo del Desposte */}
+                      <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-white/[0.03] border border-white/5 text-center">
+                        <div>
+                          <div className="text-[9px] uppercase font-bold text-slate-500">Costo / Kg Gancho</div>
+                          <div className="font-black text-xs sm:text-sm text-slate-200" style={monoFont}>
+                            {formatPYG(desposteCalculo.costoKgGancho)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[9px] uppercase font-bold text-slate-500">Valorizado Venta</div>
+                          <div className="font-black text-xs sm:text-sm text-emerald-400" style={monoFont}>
+                            {formatPYG(desposteCalculo.valorizadoTotal)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[9px] uppercase font-bold text-slate-500">Margen Bruto</div>
+                          <div className="font-black text-xs sm:text-sm text-amber-400" style={monoFont}>
+                            {desposteCalculo.margenPct.toFixed(1)}%
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Desglose de Rendimiento Estimado por Corte */}
+                      <div className="p-3 rounded-2xl bg-slate-950/60 border border-white/10 space-y-1.5 max-h-48 overflow-y-auto">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+                          <span>Cortes Estimados ({desposteCortesEstimados.length})</span>
+                          <span className="text-red-400 font-mono">100% Gancho</span>
+                        </div>
+                        {desposteCortesEstimados.map((c: any, idx: number) => (
+                          <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-white/5 last:border-0 font-medium">
+                            <span className="text-slate-300 truncate max-w-[170px]">{c.nombre || c.corte_nombre}</span>
+                            <div className="flex items-center gap-3 font-mono">
+                              <span className="text-slate-400 text-[11px]">{Number(c.kg_estimado || 0).toFixed(1)} kg</span>
+                              <span className="text-emerald-400 text-[11px]">{formatPYG(c.valor_venta || 0)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={ejecutandoDesposte}
+                        className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-red-600/25 cursor-pointer active:scale-95 transition-all disabled:opacity-50"
+                      >
+                        {ejecutandoDesposte ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Scale className="w-4 h-4" />
+                        )}
+                        <span>Ejecutar Desposte Oficial en Sistema</span>
+                      </button>
+                    </form>
+                  </div>
+                )}
+
+                {/* SUB-MODO 2: PLANTILLAS DE CORTES */}
+                {subSectorCarniceria === "templates" && (
+                  <div className="backdrop-blur-2xl bg-slate-900/70 border border-red-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-3">
                       <div>
                         <h2 className="font-black text-sm text-white" style={displayFont}>
-                          Desposte por Rendimiento Oficial
+                          Plantillas de Desposte Oficiales ({butcheryTemplates.length})
                         </h2>
                         <div className="text-[11px] text-slate-400">
-                          Deconstrucción de res contra plantilla de despiece con costeo por corte.
+                          Catálogo de especies y rendimientos base configurados en Extra.
                         </div>
                       </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => loadCarniceriaData()}
-                      disabled={loadingCarniceria}
-                      className="p-2 rounded-xl bg-white/5 text-slate-400 hover:text-white border border-white/10 cursor-pointer"
-                      title="Actualizar plantillas y órdenes"
-                    >
-                      <RefreshCcw className={`w-3.5 h-3.5 ${loadingCarniceria ? "animate-spin text-red-400" : ""}`} />
-                    </button>
-                  </div>
-
-                  <form onSubmit={handleEjecutarDesposte} className="space-y-3">
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                        Plantilla de Cortes (Especie / Categoría):
-                      </label>
-                      <select
-                        value={selectedTemplateId}
-                        onChange={(e) => setSelectedTemplateId(e.target.value)}
-                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-red-400"
+                      <button
+                        type="button"
+                        onClick={() => setShowTemplateModal(true)}
+                        className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-md shadow-red-600/20"
                       >
-                        {butcheryTemplates.length === 0 ? (
-                          <option value="">-- Cargando plantillas de carnicería... --</option>
-                        ) : (
-                          butcheryTemplates.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.nombre} ({t.especie || "Vacuno"}) • {t.cuts?.length || 0} cortes
-                            </option>
-                          ))
-                        )}
-                      </select>
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Nueva</span>
+                      </button>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                          Peso en Gancho (Kg):
-                        </label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={despostePesoEntrada}
-                          onChange={(e) => setDespostePesoEntrada(Number(e.target.value) || 0)}
-                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-red-400"
-                          style={monoFont}
-                        />
+                    {butcheryTemplates.length === 0 ? (
+                      <div className="p-8 text-center text-xs text-slate-500 bg-white/[0.02] rounded-2xl border border-white/5">
+                        Sin plantillas registradas. Tocá "+ Nueva" para crear la primera plantilla.
                       </div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {butcheryTemplates.map((t) => (
+                          <div key={t.id} className="p-3.5 rounded-2xl bg-slate-950/70 border border-white/10 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <div className="font-bold text-xs text-white flex items-center gap-2">
+                                  <span>{t.nombre}</span>
+                                  <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30">
+                                    {t.especie || "Vacuno"}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-slate-400 mt-0.5">
+                                  Peso prom: {t.peso_promedio_kg || 250} Kg • {t.descripcion || "Desposte de res"}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedTemplateId(t.id)
+                                  setSubSectorCarniceria("desposte")
+                                }}
+                                className="px-2.5 py-1 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-[10px] font-bold border border-white/10 cursor-pointer"
+                              >
+                                Usar
+                              </button>
+                            </div>
 
-                      <div>
-                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                          Costo Total Compra (₲):
-                        </label>
-                        <input
-                          type="text"
-                          value={desposteCostoTotal ? desposteCostoTotal.toLocaleString("es-PY") : ""}
-                          onChange={(e) => setDesposteCostoTotal(Number(e.target.value.replace(/\D/g, "")) || 0)}
-                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-base font-black text-white outline-none focus:border-red-400"
-                          style={monoFont}
-                        />
+                            {t.cuts && t.cuts.length > 0 && (
+                              <div className="flex flex-wrap gap-1 pt-1 border-t border-white/5">
+                                {t.cuts.slice(0, 5).map((c: any, ci: number) => (
+                                  <span key={ci} className="px-2 py-0.5 rounded-lg bg-white/[0.04] text-[9px] text-slate-300 font-mono">
+                                    {c.nombre}: {c.rendimiento_porcentual}%
+                                  </span>
+                                ))}
+                                {t.cuts.length > 5 && (
+                                  <span className="text-[9px] text-slate-500 self-center">+{t.cuts.length - 5} más</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                    </div>
+                    )}
+                  </div>
+                )}
 
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                          Fecha Vencimiento Cortes:
-                        </label>
-                        <input
-                          type="date"
-                          value={desposteVencimiento}
-                          onChange={(e) => setDesposteVencimiento(e.target.value)}
-                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-2.5 text-xs text-white outline-none focus:border-red-400"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                          Nro. Tropa / SENACSA / Notas:
-                        </label>
-                        <input
-                          type="text"
-                          value={desposteNotas}
-                          onChange={(e) => setDesposteNotas(e.target.value)}
-                          placeholder="Ej: Tropa 402 - Frigomerc"
-                          className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-2.5 text-xs text-white outline-none focus:border-red-400"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Barra de KPIs en Vivo del Desposte */}
-                    <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-white/[0.03] border border-white/5 text-center">
-                      <div>
-                        <div className="text-[9px] uppercase font-bold text-slate-500">Costo / Kg Gancho</div>
-                        <div className="font-black text-xs sm:text-sm text-slate-200" style={monoFont}>
-                          {formatPYG(desposteCalculo.costoKgGancho)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-[9px] uppercase font-bold text-slate-500">Valorizado Venta</div>
-                        <div className="font-black text-xs sm:text-sm text-emerald-400" style={monoFont}>
-                          {formatPYG(desposteCalculo.valorizadoTotal)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-[9px] uppercase font-bold text-slate-500">Margen Bruto</div>
-                        <div className="font-black text-xs sm:text-sm text-amber-400" style={monoFont}>
-                          {desposteCalculo.margenPct.toFixed(1)}%
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Desglose de Rendimiento Estimado por Corte */}
-                    <div className="p-3 rounded-2xl bg-slate-950/60 border border-white/10 space-y-1.5 max-h-48 overflow-y-auto">
-                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center justify-between">
-                        <span>Cortes Estimados ({desposteCortesEstimados.length})</span>
-                        <span className="text-red-400 font-mono">100% Gancho</span>
-                      </div>
-                      {desposteCortesEstimados.map((c: any, idx: number) => (
-                        <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-white/5 last:border-0 font-medium">
-                          <span className="text-slate-300 truncate max-w-[170px]">{c.nombre || c.corte_nombre}</span>
-                          <div className="flex items-center gap-3 font-mono">
-                            <span className="text-slate-400 text-[11px]">{Number(c.kg_estimado || 0).toFixed(1)} kg</span>
-                            <span className="text-emerald-400 text-[11px]">{formatPYG(c.valor_venta || 0)}</span>
+                {/* SUB-MODO 3: HISTORIAL & REPORTE DE RENDIMIENTO */}
+                {subSectorCarniceria === "rendimiento" && (
+                  <div className="space-y-4">
+                    {/* Reporte de Rendimiento por Cortes */}
+                    <div className="backdrop-blur-2xl bg-slate-900/70 border border-red-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-3">
+                      <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                        <div>
+                          <h2 className="font-black text-sm text-white" style={displayFont}>
+                            Reporte Oficial de Rendimiento por Corte
+                          </h2>
+                          <div className="text-[11px] text-slate-400">
+                            Rendimiento real acumulado por desposte y corte comercial.
                           </div>
                         </div>
-                      ))}
-                    </div>
+                        <button
+                          type="button"
+                          onClick={() => loadCarniceriaData()}
+                          disabled={loadingCarniceria}
+                          className="p-2 rounded-xl bg-white/5 text-slate-400 hover:text-white border border-white/10 cursor-pointer"
+                        >
+                          <RefreshCcw className={`w-3.5 h-3.5 ${loadingCarniceria ? "animate-spin text-red-400" : ""}`} />
+                        </button>
+                      </div>
 
-                    <button
-                      type="submit"
-                      disabled={ejecutandoDesposte}
-                      className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-red-600/25 cursor-pointer active:scale-95 transition-all disabled:opacity-50"
-                    >
-                      {ejecutandoDesposte ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                      {yieldReport.length === 0 ? (
+                        <div className="p-6 text-center text-xs text-slate-500 bg-white/[0.02] rounded-2xl border border-white/5">
+                          El reporte de rendimiento se alimenta automáticamente conforme se completan despostes en el sistema.
+                        </div>
                       ) : (
-                        <Scale className="w-4 h-4" />
-                      )}
-                      <span>Ejecutar Desposte Oficial en Sistema</span>
-                    </button>
-                  </form>
-                </div>
-
-                {/* Historial de Órdenes de Carnicería Reales */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
-                      Órdenes de Carnicería Registradas ({butcheryOrders.length})
-                    </h3>
-                    <span className="text-[10px] text-red-400 font-mono">Stock Automático</span>
-                  </div>
-                  {butcheryOrders.length === 0 ? (
-                    <div className="p-6 rounded-3xl bg-white/[0.03] border border-white/5 text-center text-xs text-slate-500">
-                      No hay órdenes de carnicería registradas en el turno de hoy.
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {butcheryOrders.slice(0, 10).map((o: any) => (
-                        <div key={o.id} className="p-3.5 rounded-2xl backdrop-blur-md bg-slate-900/60 border border-white/10 flex items-center justify-between gap-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30">
-                                {o.estado || "completada"}
-                              </span>
-                              <div className="font-bold text-xs text-white truncate">
-                                {o.receta_nombre || o.notas || "Desposte de Gancho"}
+                        <div className="space-y-2">
+                          {yieldReport.map((r: any, ri: number) => (
+                            <div key={ri} className="p-3 rounded-2xl bg-slate-950/70 border border-white/10 flex items-center justify-between gap-3 text-xs">
+                              <div className="min-w-0 flex-1">
+                                <div className="font-bold text-white truncate">{r.producto_nombre || r.corte_nombre || "Corte"}</div>
+                                <div className="text-[10px] text-slate-400 mt-0.5 font-mono">
+                                  Costo prom: {r.costo_unitario ? formatPYG(r.costo_unitario) : "—"}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0 font-mono">
+                                <div className="font-black text-sm text-emerald-400">{r.rendimiento_pct ? `${parseFloat(r.rendimiento_pct).toFixed(1)}%` : "—"}</div>
+                                <span className="text-[10px] text-slate-400">{parseFloat(r.kg_producidos || r.total_obtenido || 0).toFixed(1)} kg</span>
                               </div>
                             </div>
-                            <div className="text-[10px] text-slate-400 mt-1">
-                              {o.created_at ? new Date(o.created_at).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }) : "Turno actual"} • {o.responsable_nombre || user?.nombre || "Encargado"}
-                            </div>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <div className="font-black text-sm text-white" style={monoFont}>
-                              {Number(o.cantidad_objetivo || o.producto_obtenido || 0).toFixed(1)} Kg
-                            </div>
-                            <span className="text-[9px] text-emerald-400 font-bold uppercase">En Gaveta/Balanza</span>
-                          </div>
+                          ))}
                         </div>
-                      ))}
+                      )}
                     </div>
-                  )}
-                </div>
+
+                    {/* Historial de Órdenes */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
+                          Despostes Registrados ({butcheryOrders.length})
+                        </h3>
+                        <span className="text-[10px] text-red-400 font-mono">Stock en Gaveta</span>
+                      </div>
+                      {butcheryOrders.length === 0 ? (
+                        <div className="p-6 rounded-3xl bg-white/[0.03] border border-white/5 text-center text-xs text-slate-500">
+                          No hay órdenes de desposte en el sistema.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {butcheryOrders.slice(0, 10).map((o: any) => (
+                            <div key={o.id} className="p-3.5 rounded-2xl backdrop-blur-md bg-slate-900/60 border border-white/10 flex items-center justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30">
+                                    {o.estado || "completada"}
+                                  </span>
+                                  <div className="font-bold text-xs text-white truncate">
+                                    {o.receta_nombre || o.notas || "Desposte de Gancho"}
+                                  </div>
+                                </div>
+                                <div className="text-[10px] text-slate-400 mt-1">
+                                  {o.created_at ? new Date(o.created_at).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }) : "Turno actual"} • {o.responsable_nombre || user?.nombre || "Encargado"}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="font-black text-sm text-white" style={monoFont}>
+                                  {Number(o.cantidad_objetivo || o.producto_obtenido || 0).toFixed(1)} Kg
+                                </div>
+                                <span className="text-[9px] text-emerald-400 font-bold uppercase">En Balanza</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
               </div>
             )}
@@ -2149,14 +2508,24 @@ export default function SalonOperacionesPwaPage() {
                           </div>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => loadPanaderiaData()}
-                        disabled={loadingPanaderia}
-                        className="p-2 rounded-xl bg-white/5 text-slate-400 hover:text-white border border-white/10 cursor-pointer"
-                      >
-                        <RefreshCcw className={`w-3.5 h-3.5 ${loadingPanaderia ? "animate-spin text-amber-400" : ""}`} />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowBakeryRecipeModal(true)}
+                          className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/30 hover:bg-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Nueva Receta</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => loadPanaderiaData()}
+                          disabled={loadingPanaderia}
+                          className="p-2 rounded-xl bg-white/5 text-slate-400 hover:text-white border border-white/10 cursor-pointer"
+                        >
+                          <RefreshCcw className={`w-3.5 h-3.5 ${loadingPanaderia ? "animate-spin text-amber-400" : ""}`} />
+                        </button>
+                      </div>
                     </div>
 
                     <form onSubmit={handleRegistrarBakeryOrder} className="space-y-3">
@@ -2174,7 +2543,7 @@ export default function SalonOperacionesPwaPage() {
                           ) : (
                             bakeryRecipes.map((r) => (
                               <option key={r.id} value={r.id}>
-                                {r.nombre} • Rendimiento: {r.rendimiento_piezas || 0} pzas • Costo: {formatPYG(r.costo_unitario || 0)}
+                                {r.nombre} • Rendimiento: {r.rendimiento_piezas || 0} pzas • Costo: {formatPYG(r.costo_unitario || r.costo_estimado || 0)}
                               </option>
                             ))
                           )}
@@ -2246,6 +2615,26 @@ export default function SalonOperacionesPwaPage() {
                         </div>
                       </div>
                     )}
+
+                    {/* Órdenes Recientes de Panadería */}
+                    {bakeryOrders.length > 0 && (
+                      <div className="pt-2 border-t border-white/10 space-y-2">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                          Horneadas Recientes ({bakeryOrders.length})
+                        </div>
+                        <div className="space-y-1.5">
+                          {bakeryOrders.slice(0, 5).map((bo: any) => (
+                            <div key={bo.id} className="p-2.5 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between text-xs">
+                              <div>
+                                <span className="font-bold text-white">{bo.receta_nombre || bo.notas || "Horneada"}</span>
+                                <div className="text-[10px] text-slate-400">{bo.created_at ? new Date(bo.created_at).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }) : "Turno hoy"}</div>
+                              </div>
+                              <span className="font-mono font-bold text-amber-400">{Number(bo.cantidad_objetivo || bo.producto_obtenido || 0)} un.</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -2266,15 +2655,25 @@ export default function SalonOperacionesPwaPage() {
                           </div>
                         </div>
                       </div>
-                      <button
-                        onClick={handleAutoMarkdownRoti}
-                        disabled={aplicandoAutoMarkdownRoti}
-                        className="px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/30 hover:bg-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-1 cursor-pointer"
-                        title="Aplicar descuentos a productos próximos a vencer"
-                      >
-                        <Tag className="w-3.5 h-3.5" />
-                        <span>Markdown Auto</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowRotiRecipeModal(true)}
+                          className="px-2.5 py-1.5 rounded-xl bg-orange-500/20 border border-orange-500/30 hover:bg-orange-500/30 text-orange-300 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Nueva Receta</span>
+                        </button>
+                        <button
+                          onClick={handleAutoMarkdownRoti}
+                          disabled={aplicandoAutoMarkdownRoti}
+                          className="px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/30 hover:bg-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                          title="Aplicar descuentos a productos próximos a vencer"
+                        >
+                          <Tag className="w-3.5 h-3.5" />
+                          <span>Markdown Auto</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* KPIs de Rotisería */}
@@ -2519,13 +2918,14 @@ export default function SalonOperacionesPwaPage() {
                 <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-white/[0.04] border border-white/10">
                   {[
                     { id: "frescura", label: "🌿 Auditoría Frescura" },
-                    { id: "lotes", label: "📦 Lotes Recibidos" },
+                    { id: "lotes", label: `📦 Lotes (${receiveBatches.length})` },
                     { id: "markdown", label: "🏷️ Liquidación Auto" },
+                    { id: "scorecards", label: `⭐ Proveedores (${scorecards.length})` },
                   ].map((sub) => (
                     <button
                       key={sub.id}
                       onClick={() => setVerduraSubSector(sub.id as any)}
-                      className={`flex-1 py-2 rounded-xl text-xs font-black transition cursor-pointer text-center ${
+                      className={`flex-1 py-2 rounded-xl text-xs font-black transition cursor-pointer text-center truncate ${
                         verduraSubSector === sub.id
                           ? "bg-emerald-500 text-slate-950 shadow-sm"
                           : "text-slate-400 hover:text-white"
@@ -2828,15 +3228,19 @@ export default function SalonOperacionesPwaPage() {
                       <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                         Lotes Activos ({receiveBatches.length})
                       </div>
-                      {receiveBatches.slice(0, 5).map((b: any) => (
-                        <div key={b.id} className="p-3 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-between text-xs">
-                          <div>
-                            <span className="font-bold text-white">{b.producto_nombre || b.producto_id}</span>
-                            <div className="text-[10px] text-slate-400 font-mono">Calidad: {b.calidad} • {b.fecha_recepcion}</div>
+                      {receiveBatches.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-slate-500">Sin lotes activos recibidos.</div>
+                      ) : (
+                        receiveBatches.slice(0, 8).map((b: any) => (
+                          <div key={b.id} className="p-3 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-between text-xs">
+                            <div>
+                              <span className="font-bold text-white">{b.producto_nombre || b.producto_id}</span>
+                              <div className="text-[10px] text-slate-400 font-mono">Calidad: {b.calidad} • {b.fecha_recepcion}</div>
+                            </div>
+                            <span className="font-mono font-black text-emerald-400">{b.cantidad_aceptada || b.cantidad_recibida} kg</span>
                           </div>
-                          <span className="font-mono font-black text-emerald-400">{b.cantidad_aceptada || b.cantidad_recibida} kg</span>
-                        </div>
-                      ))}
+                        ))
+                      )}
                     </div>
                   </div>
                 )}
@@ -2876,6 +3280,60 @@ export default function SalonOperacionesPwaPage() {
                       )}
                       <span>Ejecutar Liquidación Automática de Lotes</span>
                     </button>
+                  </div>
+                )}
+
+                {/* MODO 4: SCORECARDS DE PROVEEDORES HORTÍCOLAS */}
+                {verduraSubSector === "scorecards" && (
+                  <div className="backdrop-blur-2xl bg-slate-900/70 border border-emerald-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                      <div>
+                        <h2 className="font-black text-sm text-white" style={displayFont}>
+                          Scorecards de Proveedores ({scorecards.length})
+                        </h2>
+                        <div className="text-[11px] text-slate-400">
+                          Evaluación de calidad y porcentaje de rechazo histórico en recepción.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleGenerateScorecards}
+                        disabled={generandoScorecards}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-600/20"
+                      >
+                        {generandoScorecards ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCcw className="w-3.5 h-3.5" />}
+                        <span>Calcular</span>
+                      </button>
+                    </div>
+
+                    {scorecards.length === 0 ? (
+                      <div className="p-8 text-center text-xs text-slate-500 bg-white/[0.02] rounded-2xl border border-white/5">
+                        Sin scorecards calculados. Presioná "Calcular" para procesar las recepciones recientes.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {scorecards.map((sc: any, idx: number) => (
+                          <div key={idx} className="p-3.5 rounded-2xl bg-slate-950/70 border border-white/10 flex items-center justify-between gap-3">
+                            <div>
+                              <div className="font-bold text-xs text-white">
+                                {sc.proveedor_nombre || `Proveedor ${sc.proveedor_id || idx + 1}`}
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">
+                                Lotes recibidos: {sc.lotes_entregados || sc.total_entregas || 0}
+                              </div>
+                            </div>
+                            <div className="text-right font-mono">
+                              <div className="font-black text-xs text-emerald-400">
+                                {sc.indice_calidad_pct != null ? `${Number(sc.indice_calidad_pct).toFixed(1)}% Calidad` : "Aceptable"}
+                              </div>
+                              <div className="text-[10px] text-rose-400">
+                                Rechazo: {sc.tasa_rechazo_pct != null ? `${Number(sc.tasa_rechazo_pct).toFixed(1)}%` : "0%"}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -3246,159 +3704,449 @@ export default function SalonOperacionesPwaPage() {
                 </div>
               </div>
 
-              {/* Formulario Registro Monitoreo PCC */}
-              <form onSubmit={handleGuardarMonitoreoHaccp} className="space-y-3 pt-1">
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                    Plan HACCP / Sector:
-                  </label>
-                  <select
-                    value={selectedHaccpPlanId}
-                    onChange={(e) => setSelectedHaccpPlanId(e.target.value)}
-                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-teal-400"
-                  >
-                    {haccpPlanes.length === 0 ? (
-                      <option value="">-- Sin planes HACCP cargados en el sistema --</option>
-                    ) : (
-                      haccpPlanes.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.nombre} ({p.area || "Salón"})
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                    Punto Crítico de Control (PCC) a Medir:
-                  </label>
-                  <select
-                    value={selectedCpId}
-                    onChange={(e) => setSelectedCpId(e.target.value)}
-                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-teal-400"
-                  >
-                    {haccpCriticalPoints.length === 0 ? (
-                      <option value="">-- Sin puntos críticos definidos en este plan --</option>
-                    ) : (
-                      haccpCriticalPoints.map((cp) => (
-                        <option key={cp.id} value={cp.id}>
-                          {cp.nombre} [{cp.limite_inferior ?? "-"}°C a {cp.limite_superior ?? "-"}°C]
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-
-                {/* Badge con Rango Térmico Seguro del PCC Activo */}
-                {(() => {
-                  const cp = haccpCriticalPoints.find(p => p.id === selectedCpId)
-                  if (!cp) return null
-                  return (
-                    <div className="p-3 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-xs flex items-center justify-between text-teal-300 font-mono">
-                      <span>Rango Seguro Normativo:</span>
-                      <strong className="text-white text-sm">
-                        {cp.limite_inferior ?? "-"}°C a {cp.limite_superior ?? "-"}°C ({cp.unidad || "°C"})
-                      </strong>
-                    </div>
-                  )
-                })()}
-
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                    Temperatura Leída en Sonda (°C):
-                  </label>
-                  <input
-                    type="text"
-                    value={haccpTempValor}
-                    onChange={(e) => setHaccpTempValor(e.target.value.replace(/[^0-9.,-]/g, ""))}
-                    placeholder="Ej: 2.5"
-                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-lg font-black text-white outline-none focus:border-teal-400"
-                    style={monoFont}
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                    Observación / Calibración de Termómetro:
-                  </label>
-                  <input
-                    type="text"
-                    value={haccpTempObs}
-                    onChange={(e) => setHaccpTempObs(e.target.value)}
-                    placeholder="Ej: Termómetro digital infrarrojo calibrado en turno..."
-                    className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-2.5 text-xs text-white outline-none focus:border-teal-400"
-                  />
-                </div>
-
+              {/* Sub-tabs de Navegación HACCP */}
+              <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-white/[0.04] border border-white/10 overflow-x-auto no-scrollbar">
                 <button
-                  type="submit"
-                  disabled={guardandoMonitoreo || !selectedCpId}
-                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-600 to-cyan-500 hover:brightness-110 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-teal-600/25 cursor-pointer active:scale-95 transition-all disabled:opacity-50"
+                  type="button"
+                  onClick={() => setHaccpSubTab("monitoreo")}
+                  className={`flex-1 min-w-[85px] py-2 px-2.5 rounded-xl text-xs font-bold transition-all text-center flex items-center justify-center gap-1.5 cursor-pointer ${
+                    haccpSubTab === "monitoreo"
+                      ? "bg-teal-500 text-slate-950 shadow-md font-black"
+                      : "text-slate-400 hover:text-white"
+                  }`}
                 >
-                  {guardandoMonitoreo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Thermometer className="w-4 h-4" />}
-                  <span>Guardar Medición HACCP Oficial</span>
+                  <Thermometer className="w-3.5 h-3.5" />
+                  <span>Monitoreo</span>
                 </button>
-              </form>
+                <button
+                  type="button"
+                  onClick={() => setHaccpSubTab("acciones")}
+                  className={`flex-1 min-w-[85px] py-2 px-2.5 rounded-xl text-xs font-bold transition-all text-center flex items-center justify-center gap-1.5 cursor-pointer ${
+                    haccpSubTab === "acciones"
+                      ? "bg-teal-500 text-slate-950 shadow-md font-black"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>Acciones {haccpAcciones.length > 0 ? `(${haccpAcciones.length})` : ""}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHaccpSubTab("planes")}
+                  className={`flex-1 min-w-[85px] py-2 px-2.5 rounded-xl text-xs font-bold transition-all text-center flex items-center justify-center gap-1.5 cursor-pointer ${
+                    haccpSubTab === "planes"
+                      ? "bg-teal-500 text-slate-950 shadow-md font-black"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Planes ({haccpPlanes.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHaccpSubTab("reporte")
+                    if (!haccpReport) loadHaccpReport()
+                  }}
+                  className={`flex-1 min-w-[85px] py-2 px-2.5 rounded-xl text-xs font-bold transition-all text-center flex items-center justify-center gap-1.5 cursor-pointer ${
+                    haccpSubTab === "reporte"
+                      ? "bg-teal-500 text-slate-950 shadow-md font-black"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Reporte</span>
+                </button>
+              </div>
             </div>
 
-            {/* Panel de Acciones Correctivas Pendientes */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
-                  Acciones Correctivas Pendientes ({haccpAcciones.length})
-                </h3>
-                {haccpAcciones.length > 0 && (
-                  <span className="text-[10px] text-rose-400 font-bold animate-pulse">Atención Inmediata</span>
-                )}
-              </div>
+            {/* ── SUB-TAB 1: MONITOREO DE TEMPERATURA PCC ── */}
+            {haccpSubTab === "monitoreo" && (
+              <div className="space-y-4">
+                <div className="backdrop-blur-2xl bg-slate-900/70 border border-teal-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-3.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                      Registro de Lectura en Sonda
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPlanModal(true)}
+                      className="text-[11px] text-teal-400 hover:text-teal-300 font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Nuevo Plan</span>
+                    </button>
+                  </div>
 
-              {haccpAcciones.length === 0 ? (
-                <div className="p-6 rounded-3xl bg-emerald-500/10 border border-emerald-500/20 text-center text-xs text-emerald-300 flex items-center justify-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>Sin desviaciones bromatológicas activas. Todas las cámaras conformes.</span>
+                  {/* Formulario Registro Monitoreo PCC */}
+                  <form onSubmit={handleGuardarMonitoreoHaccp} className="space-y-3">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                        Plan HACCP / Sector:
+                      </label>
+                      <select
+                        value={selectedHaccpPlanId}
+                        onChange={(e) => setSelectedHaccpPlanId(e.target.value)}
+                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-teal-400"
+                      >
+                        {haccpPlanes.length === 0 ? (
+                          <option value="">-- Sin planes HACCP cargados en el sistema --</option>
+                        ) : (
+                          haccpPlanes.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.nombre} ({p.area || "Salón"})
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                        Punto Crítico de Control (PCC) a Medir:
+                      </label>
+                      <select
+                        value={selectedCpId}
+                        onChange={(e) => setSelectedCpId(e.target.value)}
+                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-teal-400"
+                      >
+                        {haccpCriticalPoints.length === 0 ? (
+                          <option value="">-- Sin puntos críticos definidos en este plan --</option>
+                        ) : (
+                          haccpCriticalPoints.map((cp) => (
+                            <option key={cp.id} value={cp.id}>
+                              {cp.nombre} [{cp.limite_inferior ?? "-"}°C a {cp.limite_superior ?? "-"}°C]
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+
+                    {/* Badge con Rango Térmico Seguro del PCC Activo */}
+                    {(() => {
+                      const cp = haccpCriticalPoints.find(p => p.id === selectedCpId)
+                      if (!cp) return null
+                      return (
+                        <div className="p-3 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-xs flex items-center justify-between text-teal-300 font-mono">
+                          <span>Rango Seguro Normativo:</span>
+                          <strong className="text-white text-sm">
+                            {cp.limite_inferior ?? "-"}°C a {cp.limite_superior ?? "-"}°C ({cp.unidad || "°C"})
+                          </strong>
+                        </div>
+                      )
+                    })()}
+
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                        Temperatura Leída en Sonda (°C):
+                      </label>
+                      <input
+                        type="text"
+                        value={haccpTempValor}
+                        onChange={(e) => setHaccpTempValor(e.target.value.replace(/[^0-9.,-]/g, ""))}
+                        placeholder="Ej: 2.5"
+                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-3 text-lg font-black text-white outline-none focus:border-teal-400"
+                        style={monoFont}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                        Observación / Calibración de Termómetro:
+                      </label>
+                      <input
+                        type="text"
+                        value={haccpTempObs}
+                        onChange={(e) => setHaccpTempObs(e.target.value)}
+                        placeholder="Ej: Termómetro digital infrarrojo calibrado en turno..."
+                        className="w-full bg-slate-950/80 border border-white/15 rounded-2xl px-4 py-2.5 text-xs text-white outline-none focus:border-teal-400"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={guardandoMonitoreo || !selectedCpId}
+                      className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-600 to-cyan-500 hover:brightness-110 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-teal-600/25 cursor-pointer active:scale-95 transition-all disabled:opacity-50"
+                    >
+                      {guardandoMonitoreo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Thermometer className="w-4 h-4" />}
+                      <span>Guardar Medición HACCP Oficial</span>
+                    </button>
+                  </form>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  {haccpAcciones.map((ca: any) => (
-                    <div key={ca.id} className="p-4 rounded-2xl backdrop-blur-md bg-slate-900/80 border border-rose-500/30 space-y-2.5 shadow-lg shadow-rose-500/5">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                              Desviación
-                            </span>
-                            <div className="font-bold text-xs text-white truncate">
-                              {ca.descripcion || "Desviación de temperatura"}
+
+                {/* Historial Reciente de Mediciones del PCC */}
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
+                      Últimas Mediciones de este PCC ({haccpRecentLogs.length})
+                    </h3>
+                  </div>
+
+                  {haccpRecentLogs.length === 0 ? (
+                    <div className="p-5 rounded-2xl bg-white/[0.03] border border-white/5 text-center text-xs text-slate-500">
+                      Sin mediciones recientes registradas para este punto crítico.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {haccpRecentLogs.slice(0, 10).map((log: any) => {
+                        const isConforme = log.conforme ?? (log.estado === "conforme")
+                        return (
+                          <div
+                            key={log.id}
+                            className={`p-3.5 rounded-2xl backdrop-blur-md bg-slate-900/60 border flex items-center justify-between gap-3 ${
+                              isConforme ? "border-emerald-500/20" : "border-rose-500/40 bg-rose-950/10"
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                  isConforme ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-rose-500/20 text-rose-300 border border-rose-500/30"
+                                }`}>
+                                  {isConforme ? "Conforme" : "Desviación"}
+                                </span>
+                                <span className="font-mono text-[10px] text-slate-400">
+                                  {log.timestamp ? new Date(log.timestamp).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }) : "Hoy"}
+                                </span>
+                              </div>
+                              {log.observaciones && (
+                                <div className="text-[10px] text-slate-400 mt-1 truncate">
+                                  {log.observaciones}
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className={`font-black text-base ${isConforme ? "text-teal-300" : "text-rose-400 font-bold"}`} style={monoFont}>
+                                {Number(log.valor ?? log.valor_medido ?? 0).toFixed(1)}°C
+                              </div>
+                              <div className="text-[9px] text-slate-500 uppercase tracking-tight">
+                                {log.fuente || "manual"}
+                              </div>
                             </div>
                           </div>
-                          <div className="text-[11px] text-slate-300 mt-1">
-                            Acción requerida: <strong className="text-amber-300">{ca.accion_tomada || "Revisar compresor y calibración"}</strong>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── SUB-TAB 2: ACCIONES CORRECTIVAS PENDIENTES ── */}
+            {haccpSubTab === "acciones" && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
+                    Acciones Correctivas Pendientes ({haccpAcciones.length})
+                  </h3>
+                  {haccpAcciones.length > 0 && (
+                    <span className="text-[10px] text-rose-400 font-bold animate-pulse">Atención Inmediata</span>
+                  )}
+                </div>
+
+                {haccpAcciones.length === 0 ? (
+                  <div className="p-8 rounded-3xl bg-emerald-500/10 border border-emerald-500/20 text-center text-xs text-emerald-300 flex items-center justify-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                    <span>Sin desviaciones bromatológicas activas. Todas las cámaras y heladeras conformes.</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {haccpAcciones.map((ca: any) => (
+                      <div key={ca.id} className="p-4 rounded-2xl backdrop-blur-md bg-slate-900/80 border border-rose-500/30 space-y-2.5 shadow-lg shadow-rose-500/5">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                                Desviación PCC
+                              </span>
+                              <div className="font-bold text-xs text-white truncate">
+                                {ca.descripcion || "Desviación de temperatura crítica"}
+                              </div>
+                            </div>
+                            <div className="text-[11px] text-slate-300 mt-1.5">
+                              Acción requerida: <strong className="text-amber-300">{ca.accion_tomada || "Revisar compresor y calibración"}</strong>
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-1 font-mono">
+                              Registrado: {ca.created_at ? new Date(ca.created_at).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }) : "Turno actual"}
+                            </div>
                           </div>
-                          <div className="text-[10px] text-slate-400 mt-0.5 font-mono">
-                            Registrado: {ca.created_at ? new Date(ca.created_at).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }) : "Turno actual"}
+
+                          <button
+                            type="button"
+                            onClick={() => handleResolverAccionHaccp(ca.id)}
+                            disabled={resolviendoAccionId === ca.id}
+                            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shrink-0 cursor-pointer shadow-sm active:scale-95 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                          >
+                            {resolviendoAccionId === ca.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Check className="w-3.5 h-3.5" />
+                            )}
+                            <span>Resolver</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── SUB-TAB 3: PLANES HACCP REGISTRADOS ── */}
+            {haccpSubTab === "planes" && (
+              <div className="space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-black text-xs uppercase tracking-wider text-slate-400" style={displayFont}>
+                    Planes de Inocuidad Activos ({haccpPlanes.length})
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPlanModal(true)}
+                    className="px-3 py-1.5 rounded-xl bg-teal-500 text-slate-950 font-black text-xs flex items-center gap-1 shadow-md shadow-teal-500/20 cursor-pointer active:scale-95 transition-all"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Nuevo Plan</span>
+                  </button>
+                </div>
+
+                {haccpPlanes.length === 0 ? (
+                  <div className="p-8 rounded-3xl bg-white/[0.03] border border-white/5 text-center text-xs text-slate-500">
+                    No hay planes HACCP registrados en el sistema.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {haccpPlanes.map((plan: any) => {
+                      const isSelected = selectedHaccpPlanId === plan.id
+                      return (
+                        <div
+                          key={plan.id}
+                          className={`p-4 rounded-2xl backdrop-blur-md bg-slate-900/60 border transition-all ${
+                            isSelected ? "border-teal-500/60 bg-teal-950/20 shadow-lg shadow-teal-500/10" : "border-white/10"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                                  {plan.area || "Salón"}
+                                </span>
+                                <div className="font-bold text-xs text-white truncate">
+                                  {plan.nombre}
+                                </div>
+                              </div>
+                              {plan.descripcion && (
+                                <p className="text-[11px] text-slate-400 mt-1 leading-snug">
+                                  {plan.descripcion}
+                                </p>
+                              )}
+                              <div className="text-[10px] text-slate-500 mt-1.5 flex items-center gap-2">
+                                <span>Puntos Críticos: {plan.puntos_criticos?.length ?? 0}</span>
+                                <span>• Estado: {plan.activo ? "Activo" : "Inactivo"}</span>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedHaccpPlanId(plan.id)
+                                setHaccpSubTab("monitoreo")
+                              }}
+                              className={`px-3 py-1.5 rounded-xl font-black text-xs shrink-0 cursor-pointer transition-all ${
+                                isSelected
+                                  ? "bg-teal-500 text-slate-950 font-black"
+                                  : "bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 border border-white/10"
+                              }`}
+                            >
+                              {isSelected ? "Activo" : "Seleccionar"}
+                            </button>
                           </div>
                         </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
-                        <button
-                          type="button"
-                          onClick={() => handleResolverAccionHaccp(ca.id)}
-                          disabled={resolviendoAccionId === ca.id}
-                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shrink-0 cursor-pointer shadow-sm active:scale-95 transition-all flex items-center gap-1 disabled:opacity-50"
-                        >
-                          {resolviendoAccionId === ca.id ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <Check className="w-3.5 h-3.5" />
-                          )}
-                          <span>Resolver</span>
-                        </button>
+            {/* ── SUB-TAB 4: REPORTE DE CUMPLIMIENTO BROMATOLÓGICO ── */}
+            {haccpSubTab === "reporte" && (
+              <div className="space-y-4">
+                <div className="backdrop-blur-2xl bg-slate-900/70 border border-teal-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+                  <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                    <div>
+                      <h3 className="font-black text-sm text-white" style={displayFont}>
+                        Reporte Bromatológico & Auditoría
+                      </h3>
+                      <div className="text-[11px] text-slate-400">
+                        Indicadores de conformidad para control municipal y bromatológico.
                       </div>
                     </div>
-                  ))}
+                    <button
+                      type="button"
+                      onClick={() => loadHaccpReport()}
+                      disabled={loadingReport}
+                      className="px-3 py-1.5 rounded-xl bg-teal-600/30 border border-teal-500/40 text-teal-300 font-bold text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCcw className={`w-3.5 h-3.5 ${loadingReport ? "animate-spin" : ""}`} />
+                      <span>Actualizar</span>
+                    </button>
+                  </div>
+
+                  {/* Tarjetas de Métricas de Cumplimiento */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-1">
+                      <div className="text-[9px] uppercase font-bold text-slate-500">Conformidad Global</div>
+                      <div className={`font-black text-xl ${
+                        (Number(haccpReport?.conformidad_pct ?? haccpDash?.conformidad_pct) || 100) >= 90 ? "text-emerald-400" :
+                        (Number(haccpReport?.conformidad_pct ?? haccpDash?.conformidad_pct) || 100) >= 70 ? "text-amber-400" : "text-rose-400"
+                      }`} style={monoFont}>
+                        {haccpReport?.conformidad_pct != null
+                          ? `${Number(haccpReport.conformidad_pct).toFixed(1)}%`
+                          : haccpDash?.conformidad_pct != null
+                          ? `${Number(haccpDash.conformidad_pct).toFixed(1)}%`
+                          : "100%"}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        {(Number(haccpReport?.conformidad_pct ?? haccpDash?.conformidad_pct) || 100) >= 90 ? "Excelente cumplimiento" : "Requiere seguimiento"}
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-1">
+                      <div className="text-[9px] uppercase font-bold text-slate-500">Mediciones Totales</div>
+                      <div className="font-black text-xl text-teal-300 font-mono">
+                        {haccpReport?.total_monitoreos ?? haccpDash?.monitoreos_hoy ?? 0}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        Registros en libro digital
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-1">
+                      <div className="text-[9px] uppercase font-bold text-slate-500">Desviaciones Detectadas</div>
+                      <div className="font-black text-xl text-rose-400 font-mono">
+                        {haccpReport?.total_desviaciones ?? haccpAcciones.length ?? 0}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        Fuera de rango seguro
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-1">
+                      <div className="text-[9px] uppercase font-bold text-slate-500">Acciones Resueltas</div>
+                      <div className="font-black text-xl text-emerald-400 font-mono">
+                        {haccpReport?.acciones_resueltas ?? 0}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        Corregidas en turno
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-xs text-teal-300 leading-relaxed">
+                    Normativa aplicable: Código Sanitario del Paraguay e INAN. Las lecturas fuera de límite activan automáticamente alertas en el Libro Digital de Acciones Correctivas.
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
           </div>
         )}
@@ -3590,6 +4338,556 @@ export default function SalonOperacionesPwaPage() {
                 {loggingIn ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserCheck className="w-4 h-4" />}
                 Ingresar al Salón
               </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: NUEVA PLANTILLA DE DESPOSTE BOVINO/PORCINO ── */}
+      {showTemplateModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-slate-900 border border-white/15 rounded-3xl p-6 animate-fade-in space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-rose-600/30 border border-rose-500/40 text-rose-400 flex items-center justify-center font-black">
+                  <Beef className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white" style={displayFont}>
+                    Nueva Plantilla Desposte
+                  </h3>
+                  <div className="text-[10px] text-slate-400">
+                    Estándar de Rendimiento Bovino/Porcino
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setShowTemplateModal(false)} className="text-slate-400 hover:text-white p-1 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveButcheryTemplate} className="space-y-3">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                  Nombre de la Plantilla:
+                </label>
+                <input
+                  type="text"
+                  value={templateForm.nombre}
+                  onChange={(e) => setTemplateForm({ ...templateForm, nombre: e.target.value })}
+                  placeholder="Ej: Desposte Novillo Pesado Premium"
+                  className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white outline-none focus:border-rose-400"
+                  autoFocus
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                    Especie:
+                  </label>
+                  <select
+                    value={templateForm.especie}
+                    onChange={(e) => setTemplateForm({ ...templateForm, especie: e.target.value })}
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none focus:border-rose-400"
+                  >
+                    <option value="Vacuno Novillo">Vacuno Novillo</option>
+                    <option value="Vacuno Vaquilla">Vacuno Vaquilla</option>
+                    <option value="Porcino Cerdo">Porcino Cerdo</option>
+                    <option value="Ovino Cordero">Ovino Cordero</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                    Peso Promedio (kg):
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    value={templateForm.peso_promedio_kg}
+                    onChange={(e) => setTemplateForm({ ...templateForm, peso_promedio_kg: e.target.value })}
+                    placeholder="250"
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs font-black text-white outline-none focus:border-rose-400 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                  Descripción / Observaciones:
+                </label>
+                <input
+                  type="text"
+                  value={templateForm.descripcion}
+                  onChange={(e) => setTemplateForm({ ...templateForm, descripcion: e.target.value })}
+                  placeholder="Cortes para mostrador y envasado al vacío..."
+                  className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none focus:border-rose-400"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTemplateModal(false)}
+                  className="flex-1 py-3 rounded-2xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 font-bold text-xs cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingTemplate}
+                  className="flex-1 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-rose-600/25 cursor-pointer disabled:opacity-50"
+                >
+                  {savingTemplate ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Guardar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: RESUMEN DE DESPOSTE EJECUTADO ── */}
+      {showDesposteResultModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-slate-900 border border-white/15 rounded-3xl p-6 animate-fade-in space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 flex items-center justify-center font-black">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white" style={displayFont}>
+                    Desposte Calculado con Éxito
+                  </h3>
+                  <div className="text-[10px] text-slate-400">
+                    Lote de Carnicería Listo para Producir
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setShowDesposteResultModal(false)} className="text-slate-400 hover:text-white p-1 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 text-xs">
+              <div className="p-3 rounded-2xl bg-white/[0.04] border border-white/10 flex justify-between items-center">
+                <span className="text-slate-400">Peso Bruto Media Res:</span>
+                <span className="font-black text-white font-mono">{Number(despostePesoEntrada || 0).toFixed(1)} kg</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-white/[0.04] border border-white/10 flex justify-between items-center">
+                <span className="text-slate-400">Rendimiento Útil Total:</span>
+                <span className="font-black text-emerald-400 font-mono">
+                  {(resultadoDesposte?.peso_total_cortes ?? (despostePesoEntrada * 0.785)).toFixed(1)} kg ({((resultadoDesposte?.peso_total_cortes ? (resultadoDesposte.peso_total_cortes / (despostePesoEntrada || 1)) * 100 : 78.5)).toFixed(1)}%)
+                </span>
+              </div>
+              <div className="p-3 rounded-2xl bg-white/[0.04] border border-white/10 flex justify-between items-center">
+                <span className="text-slate-400">Merma Grasa / Hueso:</span>
+                <span className="font-black text-rose-400 font-mono">
+                  {Math.max(0, despostePesoEntrada - (resultadoDesposte?.peso_total_cortes ?? (despostePesoEntrada * 0.785))).toFixed(1)} kg
+                </span>
+              </div>
+              <div className="p-3 rounded-2xl bg-white/[0.04] border border-white/10 flex justify-between items-center">
+                <span className="text-slate-400">Costo Bruto Entrada:</span>
+                <span className="font-black text-amber-400 font-mono">{formatPYG(desposteCostoTotal)}</span>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-300 leading-tight">
+              Los cortes y costos unitarios teóricos fueron calculados proporcionalmente sobre la media res.
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowDesposteResultModal(false)}
+              className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-600/20 active:scale-95 transition-all"
+            >
+              <span>Aceptar y Continuar</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: NUEVA RECETA DE PANADERÍA ── */}
+      {showBakeryRecipeModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-slate-900 border border-white/15 rounded-3xl p-6 animate-fade-in space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-amber-600/30 border border-amber-500/40 text-amber-400 flex items-center justify-center font-black">
+                  <ChefHat className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white" style={displayFont}>
+                    Nueva Receta Panadería
+                  </h3>
+                  <div className="text-[10px] text-slate-400">
+                    Fórmula de Producción y Horneada
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setShowBakeryRecipeModal(false)} className="text-slate-400 hover:text-white p-1 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveBakeryRecipe} className="space-y-3">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                  Nombre del Pan / Producto:
+                </label>
+                <input
+                  type="text"
+                  value={bakeryRecipeForm.nombre}
+                  onChange={(e) => setBakeryRecipeForm({ ...bakeryRecipeForm, nombre: e.target.value })}
+                  placeholder="Ej: Pan Trincha 200g Extra"
+                  className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white outline-none focus:border-amber-400"
+                  autoFocus
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                    Piezas:
+                  </label>
+                  <input
+                    type="number"
+                    value={bakeryRecipeForm.rendimiento_piezas}
+                    onChange={(e) => setBakeryRecipeForm({ ...bakeryRecipeForm, rendimiento_piezas: e.target.value })}
+                    placeholder="120"
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3 py-2.5 text-xs font-black text-white outline-none focus:border-amber-400 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                    Costo (Gs):
+                  </label>
+                  <input
+                    type="number"
+                    value={bakeryRecipeForm.costo_estimado}
+                    onChange={(e) => setBakeryRecipeForm({ ...bakeryRecipeForm, costo_estimado: e.target.value })}
+                    placeholder="120000"
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3 py-2.5 text-xs font-black text-white outline-none focus:border-amber-400 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                    Minutos:
+                  </label>
+                  <input
+                    type="number"
+                    value={bakeryRecipeForm.tiempo_preparacion_min}
+                    onChange={(e) => setBakeryRecipeForm({ ...bakeryRecipeForm, tiempo_preparacion_min: e.target.value })}
+                    placeholder="25"
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3 py-2.5 text-xs font-black text-white outline-none focus:border-amber-400 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                  Descripción / Instrucciones:
+                </label>
+                <input
+                  type="text"
+                  value={bakeryRecipeForm.descripcion}
+                  onChange={(e) => setBakeryRecipeForm({ ...bakeryRecipeForm, descripcion: e.target.value })}
+                  placeholder="Harina 000, 55% agua, fermentación 2hs..."
+                  className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowBakeryRecipeModal(false)}
+                  className="flex-1 py-3 rounded-2xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 font-bold text-xs cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingBakeryRecipe}
+                  className="flex-1 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 cursor-pointer disabled:opacity-50"
+                >
+                  {savingBakeryRecipe ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Guardar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: NUEVA RECETA DE ROTISERÍA ── */}
+      {showRotiRecipeModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-slate-900 border border-white/15 rounded-3xl p-6 animate-fade-in space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-orange-600/30 border border-orange-500/40 text-orange-400 flex items-center justify-center font-black">
+                  <Flame className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white" style={displayFont}>
+                    Nueva Receta Rotisería
+                  </h3>
+                  <div className="text-[10px] text-slate-400">
+                    Control Térmico y Cocción Segura
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setShowRotiRecipeModal(false)} className="text-slate-400 hover:text-white p-1 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveRotiRecipe} className="space-y-3">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                  Nombre del Plato / Preparación:
+                </label>
+                <input
+                  type="text"
+                  value={rotiRecipeForm.nombre}
+                  onChange={(e) => setRotiRecipeForm({ ...rotiRecipeForm, nombre: e.target.value })}
+                  placeholder="Ej: Pollo al Spiedo con Papas"
+                  className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white outline-none focus:border-orange-400"
+                  autoFocus
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                    Costo Estimado (Gs):
+                  </label>
+                  <input
+                    type="number"
+                    value={rotiRecipeForm.costo_estimado}
+                    onChange={(e) => setRotiRecipeForm({ ...rotiRecipeForm, costo_estimado: e.target.value })}
+                    placeholder="35000"
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs font-black text-white outline-none focus:border-orange-400 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                    Tiempo Prep (min):
+                  </label>
+                  <input
+                    type="number"
+                    value={rotiRecipeForm.tiempo_preparacion_min}
+                    onChange={(e) => setRotiRecipeForm({ ...rotiRecipeForm, tiempo_preparacion_min: e.target.value })}
+                    placeholder="60"
+                    className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs font-black text-white outline-none focus:border-orange-400 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                  Descripción / Instrucciones:
+                </label>
+                <input
+                  type="text"
+                  value={rotiRecipeForm.descripcion}
+                  onChange={(e) => setRotiRecipeForm({ ...rotiRecipeForm, descripcion: e.target.value })}
+                  placeholder="Marinado 12hs, cocción a fuego parejo..."
+                  className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none focus:border-orange-400"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRotiRecipeModal(false)}
+                  className="flex-1 py-3 rounded-2xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 font-bold text-xs cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingRotiRecipe}
+                  className="flex-1 py-3 rounded-2xl bg-orange-600 hover:bg-orange-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-orange-600/25 cursor-pointer disabled:opacity-50"
+                >
+                  {savingRotiRecipe ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Guardar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: COMPLETAR PLAN ROTISERÍA CON CONTROL TÉRMICO ── */}
+      {completandoRotiId && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-slate-900 border border-white/15 rounded-3xl p-6 animate-fade-in space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-teal-600/30 border border-teal-500/40 text-teal-400 flex items-center justify-center font-black">
+                  <Thermometer className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white" style={displayFont}>
+                    Finalizar Lote Rotisería
+                  </h3>
+                  <div className="text-[10px] text-slate-400">
+                    Control Bromatológico & Sonda Térmica
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setCompletandoRotiId(null)} className="text-slate-400 hover:text-white p-1 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (completandoRotiId) handleCompletarRotiPlan(completandoRotiId)
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                  Temperatura Interna en Sonda (°C):
+                </label>
+                <input
+                  type="text"
+                  value={rotiTempFinal}
+                  onChange={(e) => setRotiTempFinal(e.target.value.replace(/[^0-9.,-]/g, ""))}
+                  placeholder="Ej: 78.5"
+                  className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-3 text-lg font-black text-teal-300 outline-none focus:border-teal-400 font-mono"
+                  autoFocus
+                />
+                <div className="text-[10px] text-slate-400 mt-1">
+                  Norma HACCP: mínimo 74°C en el centro térmico de carnes cocidas.
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                  Porciones / Piezas Obtenidas:
+                </label>
+                <input
+                  type="number"
+                  value={rotiQtyFinal}
+                  onChange={(e) => setRotiQtyFinal(e.target.value)}
+                  placeholder="15"
+                  className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-2.5 text-sm font-black text-white outline-none focus:border-teal-400 font-mono"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCompletandoRotiId(null)}
+                  className="flex-1 py-3 rounded-2xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 font-bold text-xs cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={guardandoRotiPlan}
+                  className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-teal-600 to-emerald-500 hover:brightness-110 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-teal-600/25 cursor-pointer disabled:opacity-50"
+                >
+                  {guardandoRotiPlan ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Confirmar Salida
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: NUEVO PLAN HACCP ── */}
+      {showNewPlanModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-slate-900 border border-white/15 rounded-3xl p-6 animate-fade-in space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-teal-600/30 border border-teal-500/40 text-teal-400 flex items-center justify-center font-black">
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white" style={displayFont}>
+                    Nuevo Plan HACCP
+                  </h3>
+                  <div className="text-[10px] text-slate-400">
+                    Extra Supermercado • Inocuidad Oficial
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setShowNewPlanModal(false)} className="text-slate-400 hover:text-white p-1 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveHaccpPlan} className="space-y-3">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                  Nombre del Plan:
+                </label>
+                <input
+                  type="text"
+                  value={newPlanForm.nombre}
+                  onChange={(e) => setNewPlanForm({ ...newPlanForm, nombre: e.target.value })}
+                  placeholder="Ej: Cadena Frío Carnicería y Desposte"
+                  className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white outline-none focus:border-teal-400"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                  Sector / Área del Supermercado:
+                </label>
+                <select
+                  value={newPlanForm.area}
+                  onChange={(e) => setNewPlanForm({ ...newPlanForm, area: e.target.value })}
+                  className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none focus:border-teal-400"
+                >
+                  <option value="Carnicería">Carnicería & Desposte</option>
+                  <option value="Panadería">Panadería & Confitería</option>
+                  <option value="Rotisería">Rotisería & Comidas Rápidas</option>
+                  <option value="Fiambrería">Fiambrería & Lácteos</option>
+                  <option value="Verdulería">Verdulería & Frutas</option>
+                  <option value="Salón">Salón de Ventas General</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                  Descripción Normativa:
+                </label>
+                <input
+                  type="text"
+                  value={newPlanForm.descripcion}
+                  onChange={(e) => setNewPlanForm({ ...newPlanForm, descripcion: e.target.value })}
+                  placeholder="Control de temperaturas en cámaras y vitrinas..."
+                  className="w-full bg-slate-950/80 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none focus:border-teal-400"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewPlanModal(false)}
+                  className="flex-1 py-3 rounded-2xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 font-bold text-xs cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingNewPlan}
+                  className="flex-1 py-3 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-teal-600/25 cursor-pointer disabled:opacity-50"
+                >
+                  {savingNewPlan ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Crear Plan
+                </button>
+              </div>
             </form>
           </div>
         </div>
