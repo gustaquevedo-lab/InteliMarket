@@ -1,12 +1,17 @@
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import {
   Search, Plus, Users, Edit, Loader2, Upload, Download, X,
   Building2, UserCheck, CreditCard, ChevronLeft, ChevronRight,
   Phone, Mail, MapPin, RefreshCw, Eye, Trash2, CheckCircle2, ShieldCheck,
   Award, Sparkles, Filter, Briefcase, FileText, Check, AlertCircle, Hash,
-  Printer, Copy
+  Printer, Copy, BarChart3, PieChart as PieChartIcon, TrendingUp, Layers,
+  ChevronDown, ChevronUp, SlidersHorizontal, Zap, ArrowUpRight
 } from "lucide-react"
+import {
+  ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend
+} from "recharts"
 import { api, type Customer } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
@@ -30,6 +35,15 @@ const getCreditoLimite = (c: Customer | null | undefined): number => {
   return isNaN(num) ? 0 : num
 }
 
+export const normalizeSearchText = (str: string | null | undefined): string => {
+  if (!str) return ""
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+}
+
 // Lista curada de convenios activos de Extra Supermercado (fallback si el endpoint no tiene datos aún)
 const CONVENIOS_PREDEFINIDOS = [
   { empresa_nombre: "CASA GONZALITO S.R.L.", empresa_ruc: "80005427" },
@@ -50,11 +64,13 @@ export default function CustomersPage() {
   const toast = useToast()
   const confirm = useConfirm()
 
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [search, setSearch] = useState("")
   const [tab, setTab] = useState<"todos" | "socios_extra_club" | "convenios" | "fisica" | "juridica" | "con_credito" | "inactivos">("todos")
+  const [showCharts, setShowCharts] = useState(true)
 
   // Convenios Corporativos cargados del backend
   const [corporateAgreements, setCorporateAgreements] = useState<Array<{ empresa_nombre: string; empresa_ruc: string }>>([])
@@ -109,7 +125,7 @@ export default function CustomersPage() {
     setLoading(true)
     try {
       const [data, agreements] = await Promise.allSettled([
-        api.customers.list(),
+        api.customers.list({ limit: 50000 }),
         api.accountsReceivable.corporateAgreementsSummary(),
       ])
 
@@ -121,7 +137,6 @@ export default function CustomersPage() {
       }
 
       if (agreements.status === "fulfilled" && Array.isArray(agreements.value) && agreements.value.length > 0) {
-        // Unificar con convenios predefinidos sin duplicar
         const map = new Map<string, string>()
         CONVENIOS_PREDEFINIDOS.forEach(c => map.set(c.empresa_nombre.toUpperCase(), c.empresa_ruc))
         agreements.value.forEach((a: any) => {
@@ -145,6 +160,42 @@ export default function CustomersPage() {
     fetchData()
   }, [])
 
+  // Atajo de teclado: Cmd+K / Ctrl+K para enfocar búsqueda
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [])
+
+  // Búsqueda inteligente en servidor con debounce para registros nuevos o específicos
+  useEffect(() => {
+    const term = search.trim()
+    if (term.length < 2) return
+    const handler = setTimeout(async () => {
+      try {
+        const results = await api.customers.list({ search: term, limit: 100 })
+        if (Array.isArray(results) && results.length > 0) {
+          setCustomers(prev => {
+            const currentIds = new Set(prev.map(c => c.id))
+            const newOnes = results.filter(r => !currentIds.has(r.id))
+            if (newOnes.length > 0) {
+              return [...prev, ...newOnes]
+            }
+            return prev
+          })
+        }
+      } catch {
+        // Fallback local silencioso
+      }
+    }, 300)
+    return () => clearTimeout(handler)
+  }, [search])
+
   const handleRefresh = async () => {
     setRefreshing(true)
     await fetchData()
@@ -164,20 +215,102 @@ export default function CustomersPage() {
     return { total, conRuc, personasFisicas, personasJuridicas, conConvenio, sociosExtraClub, conCredito, totalCreditoOtorgado }
   }, [customers])
 
-  // Filtrado
+  // Datos para Gráficos Analíticos
+  const segmentData = useMemo(() => [
+    { name: "Personas Físicas (C.I.)", value: kpis.personasFisicas, color: "#3B82F6", key: "fisica" },
+    { name: "Empresas / RUC", value: kpis.personasJuridicas, color: "#6366F1", key: "juridica" },
+    { name: "Socios ExtraClub", value: kpis.sociosExtraClub, color: "#F59E0B", key: "socios_extra_club" },
+    { name: "Convenios Corporativos", value: kpis.conConvenio, color: "#8B5CF6", key: "convenios" },
+  ], [kpis])
+
+  const creditDistributionData = useMemo(() => {
+    let sinCredito = 0
+    let hasta500k = 0
+    let hasta15M = 0
+    let hasta3M = 0
+    let mas3M = 0
+
+    customers.forEach(c => {
+      const lim = getCreditoLimite(c)
+      if (lim <= 0) sinCredito++
+      else if (lim <= 500000) hasta500k++
+      else if (lim <= 1500000) hasta15M++
+      else if (lim <= 3000000) hasta3M++
+      else mas3M++
+    })
+
+    return [
+      { tramo: "Sin Cupo", clientes: sinCredito, fill: "#94A3B8" },
+      { tramo: "≤ 500k", clientes: hasta500k, fill: "#38BDF8" },
+      { tramo: "500k-1.5M", clientes: hasta15M, fill: "#818CF8" },
+      { tramo: "1.5M-3M", clientes: hasta3M, fill: "#A855F7" },
+      { tramo: "> 3M Gs", clientes: mas3M, fill: "#10B981" },
+    ]
+  }, [customers])
+
+  const topConveniosData = useMemo(() => {
+    const counts = new Map<string, number>()
+    customers.forEach(c => {
+      const emp = (c.empresa_vinculada_nombre || "").trim()
+      if (emp) {
+        counts.set(emp, (counts.get(emp) || 0) + 1)
+      }
+    })
+
+    return Array.from(counts.entries())
+      .map(([empresa, funcionarios]) => ({
+        empresa: empresa.length > 18 ? `${empresa.slice(0, 16)}…` : empresa,
+        nombreCompleto: empresa,
+        funcionarios,
+      }))
+      .sort((a, b) => b.funcionarios - a.funcionarios)
+      .slice(0, 6)
+  }, [customers])
+
+  // Filtrado Multi-Término Inteligente (Soporta Nombres Compuestos, Desacopla Orden y Desacentúa)
   const filteredCustomers = useMemo(() => {
+    const rawTrim = search.trim()
+    const normQuery = normalizeSearchText(rawTrim)
+    const terms = normQuery.split(/\s+/).filter(Boolean)
+
     return customers.filter(c => {
-      const s = search.toLowerCase().trim()
-      const matchSearch = !s ||
-        (c.razon_social || "").toLowerCase().includes(s) ||
-        (c.nombre_fantasia || "").toLowerCase().includes(s) ||
-        (c.ruc || "").toLowerCase().includes(s) ||
-        (c.ci || "").toLowerCase().includes(s) ||
-        (c.telefono || "").toLowerCase().includes(s) ||
-        (c.email || "").toLowerCase().includes(s) ||
-        (c.ciudad || "").toLowerCase().includes(s) ||
-        (c.empresa_vinculada_nombre || "").toLowerCase().includes(s) ||
-        (c.extra_club_numero || "").toLowerCase().includes(s)
+      let matchSearch = true
+
+      if (terms.length > 0) {
+        const normRazon = normalizeSearchText(c.razon_social)
+        const normFantasia = normalizeSearchText(c.nombre_fantasia)
+        const normRuc = normalizeSearchText(c.ruc)
+        const normCi = normalizeSearchText(c.ci)
+        const normTel = (c.telefono || "").replace(/[^0-9]/g, "")
+        const normEmail = normalizeSearchText(c.email)
+        const normConvenio = normalizeSearchText(c.empresa_vinculada_nombre)
+        const normExtraClub = normalizeSearchText(c.extra_club_numero).replace(/-/g, "")
+        const normCiudad = normalizeSearchText(c.ciudad)
+
+        const combined = `${normRazon} ${normFantasia} ${normRuc} ${normCi} ${normTel} ${normEmail} ${normConvenio} ${normExtraClub} ${normCiudad}`
+
+        matchSearch = terms.every(term => {
+          const termSinGuiones = term.replace(/-/g, "")
+          const termDigitsOnly = term.replace(/[^0-9]/g, "")
+
+          if (combined.includes(term)) return true
+          if (termSinGuiones && normExtraClub.includes(termSinGuiones)) return true
+          if (termDigitsOnly && normTel && normTel.includes(termDigitsOnly)) return true
+          if (termDigitsOnly && (normRuc.includes(termDigitsOnly) || normCi.includes(termDigitsOnly))) return true
+
+          // Soporte para nombres pegados o handles (ej: "gustaquevedo" -> "gusta" + "quevedo")
+          if (term.length >= 6) {
+            for (let i = 3; i <= term.length - 3; i++) {
+              const p1 = term.slice(0, i)
+              const p2 = term.slice(i)
+              if (combined.includes(p1) && combined.includes(p2)) {
+                return true
+              }
+            }
+          }
+          return false
+        })
+      }
 
       let matchTab = true
       if (tab === "socios_extra_club") matchTab = Boolean(c.extra_club_numero && c.extra_club_numero.trim().length > 0)
@@ -518,6 +651,17 @@ export default function CustomersPage() {
 
           <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
             <button
+              onClick={() => setShowCharts(!showCharts)}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-sm border ${
+                showCharts
+                  ? "bg-indigo-600 text-white border-indigo-500 shadow-indigo-500/20"
+                  : "bg-slate-800/80 text-slate-300 border-slate-700/80 hover:bg-slate-750 hover:text-white"
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              {showCharts ? "Ocultar Gráficos" : "Mostrar Gráficos"}
+            </button>
+            <button
               onClick={handleRefresh}
               disabled={refreshing}
               className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
@@ -594,62 +738,250 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      {/* 🧭 NAVEGACIÓN POR PESTAÑAS */}
-      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
-        {[
-          { id: "todos", label: "Todos los Clientes", count: kpis.total },
-          { id: "socios_extra_club", label: "⭐ Socios ExtraClub", count: kpis.sociosExtraClub },
-          { id: "convenios", label: "🏢 Convenios Corporativos", count: kpis.conConvenio },
-          { id: "fisica", label: "Personas Físicas (C.I.)", count: kpis.personasFisicas },
-          { id: "juridica", label: "Empresas & RUC", count: kpis.personasJuridicas },
-          { id: "con_credito", label: "Con Crédito ExtraClub", count: kpis.conCredito },
-          { id: "inactivos", label: "Inactivos", count: customers.filter(c => c.activo === false).length },
-        ].map((t) => {
-          const active = tab === t.id
-          return (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id as any)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
-                active
-                  ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
-              }`}
-            >
-              <span>{t.label}</span>
-              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
-                active ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
-              }`}>
-                {t.count}
+      {/* 📊 PANEL ANALÍTICO DE GRÁFICOS & DISTRIBUCIÓN DEL PADRÓN */}
+      {showCharts && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 animate-fade-in">
+          {/* Gráfico 1: Segmentación */}
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                  <PieChartIcon className="w-4 h-4 text-indigo-500" />
+                  Segmentación del Padrón
+                </h3>
+                <p className="text-[11px] text-slate-400">Distribución de perfiles registrados</p>
+              </div>
+              <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900">
+                {kpis.total.toLocaleString()} Clientes
               </span>
-            </button>
-          )
-        })}
-      </div>
+            </div>
 
-      {/* 🔍 BARRA DE HERRAMIENTAS & FILTROS */}
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3.5 w-4 h-4 text-slate-400 top-3" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por Razón Social, RUC, C.I., Empresa Convenio, ExtraClub, Teléfono..."
-            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
+            <div className="h-56 w-full my-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={segmentData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={4}
+                    dataKey="value"
+                  >
+                    {segmentData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(val: number, name: string) => [
+                      `${val.toLocaleString()} (${((val / (kpis.total || 1)) * 100).toFixed(1)}%)`,
+                      name
+                    ]}
+                    contentStyle={{ borderRadius: 12, border: "none", boxShadow: "0 10px 25px -5px rgba(0,0,0,0.15)", fontSize: "11px" }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px]">
+              {segmentData.map((s, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setTab(s.key as any)}
+                  className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 transition text-left"
+                >
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
+                  <span className="truncate text-slate-600 dark:text-slate-300 font-medium">{s.name}</span>
+                  <span className="ml-auto font-mono font-bold text-slate-900 dark:text-white">{s.value.toLocaleString()}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Gráfico 2: Tramos de Crédito */}
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-emerald-500" />
+                  Líneas de Crédito ExtraClub
+                </h3>
+                <p className="text-[11px] text-slate-400">Cupo asignado por cliente</p>
+              </div>
+              <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900">
+                {kpis.conCredito.toLocaleString()} Habilitados
+              </span>
+            </div>
+
+            <div className="h-56 w-full my-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={creditDistributionData} margin={{ top: 15, right: 10, left: -15, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-slate-100 dark:text-slate-800" />
+                  <XAxis dataKey="tramo" tick={{ fontSize: 10, fill: "currentColor" }} className="text-slate-400" axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: "currentColor" }} className="text-slate-400" axisLine={false} tickLine={false} />
+                  <Tooltip
+                    formatter={(val: number) => [`${val.toLocaleString()} clientes`, "Volumen"]}
+                    contentStyle={{ borderRadius: 12, border: "none", boxShadow: "0 10px 25px -5px rgba(0,0,0,0.15)", fontSize: "11px" }}
+                  />
+                  <Bar dataKey="clientes" radius={[6, 6, 0, 0]}>
+                    {creditDistributionData.map((entry, index) => (
+                      <Cell key={`bar-${index}`} fill={entry.fill} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500">
+              <span>Cupo Total Aprobado:</span>
+              <span className="font-mono font-extrabold text-emerald-600 dark:text-emerald-400">
+                {formatPYG(kpis.totalCreditoOtorgado)}
+              </span>
+            </div>
+          </div>
+
+          {/* Gráfico 3: Top Convenios Corporativos */}
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-purple-500" />
+                  Top Convenios Corporativos
+                </h3>
+                <p className="text-[11px] text-slate-400">Empresas con mayor nómina en convenio</p>
+              </div>
+              <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-900">
+                {topConveniosData.length} Empresas
+              </span>
+            </div>
+
+            <div className="space-y-2.5 my-2">
+              {topConveniosData.length === 0 ? (
+                <div className="h-44 flex items-center justify-center text-slate-400 text-xs">
+                  No hay funcionarios vinculados a empresas aún
+                </div>
+              ) : (
+                topConveniosData.map((c, idx) => {
+                  const maxVal = topConveniosData[0]?.funcionarios || 1
+                  const pct = Math.min(100, Math.round((c.funcionarios / maxVal) * 100))
+                  return (
+                    <div key={idx} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-slate-800 dark:text-slate-200 truncate max-w-[200px]" title={c.nombreCompleto}>
+                          {c.empresa}
+                        </span>
+                        <span className="font-mono font-extrabold text-purple-600 dark:text-purple-400">
+                          {c.funcionarios} func.
+                        </span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-purple-500 to-indigo-500 transition-all duration-500"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500">
+              <span>Total en convenios:</span>
+              <span className="font-mono font-extrabold text-purple-600 dark:text-purple-400">
+                {kpis.conConvenio.toLocaleString()} empleados
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔍 COMMAND DECK DE BÚSQUEDA Y FILTRADO */}
+      <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl shadow-slate-200/40 dark:shadow-none space-y-4">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-3">
+          {/* Input de Búsqueda de Lujo */}
+          <div className="relative flex-1 group">
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+              <Search className="w-5 h-5 text-indigo-400 group-focus-within:text-indigo-600 transition-colors" />
+            </div>
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por Nombre, Apellido, RUC, C.I., Empresa Convenio, Teléfono o Socio... (Presiona ⌘K)"
+              className="w-full bg-slate-50 dark:bg-slate-950/80 border-2 border-slate-200 dark:border-slate-800 rounded-2xl pl-12 pr-28 py-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 font-medium focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all shadow-inner"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute inset-y-0 right-14 flex items-center pr-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition"
+                title="Limpiar búsqueda"
+              >
+                <X className="w-4 h-4 bg-slate-200 dark:bg-slate-800 rounded-full p-0.5" />
+              </button>
+            )}
+            <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+              <kbd className="hidden sm:inline-flex items-center px-2 py-1 text-[10px] font-mono font-bold text-slate-400 bg-slate-200/70 dark:bg-slate-800 rounded-lg border border-slate-300 dark:border-slate-700">
+                ⌘K
+              </kbd>
+            </div>
+          </div>
+
+          {/* Controles de página y vista */}
+          <div className="flex items-center gap-2.5 self-end lg:self-auto">
+            {search && (
+              <span className="hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                {filteredCustomers.length.toLocaleString()} encontrados
+              </span>
+            )}
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="bg-slate-50 dark:bg-slate-950 border-2 border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none focus:border-indigo-500 transition"
+            >
+              <option value={25}>25 filas</option>
+              <option value={50}>50 filas</option>
+              <option value={100}>100 filas</option>
+            </select>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <select
-            value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
-          >
-            <option value={25}>25 por página</option>
-            <option value={50}>50 por página</option>
-            <option value={100}>100 por página</option>
-          </select>
+        {/* Chips de filtro rápido */}
+        <div className="flex items-center gap-2 flex-wrap pt-1 text-xs">
+          <span className="text-slate-400 text-[11px] font-bold uppercase tracking-wider flex items-center gap-1">
+            <Filter className="w-3 h-3" /> Filtro:
+          </span>
+          {[
+            { id: "todos", label: "Todos", count: kpis.total },
+            { id: "socios_extra_club", label: "⭐ ExtraClub", count: kpis.sociosExtraClub },
+            { id: "convenios", label: "🏢 Convenios", count: kpis.conConvenio },
+            { id: "con_credito", label: "💳 Con Crédito", count: kpis.conCredito },
+            { id: "fisica", label: "👤 Físicas", count: kpis.personasFisicas },
+            { id: "juridica", label: "🏢 Empresas", count: kpis.personasJuridicas },
+            { id: "inactivos", label: "Inactivos", count: customers.filter(c => c.activo === false).length },
+          ].map((chip) => {
+            const active = tab === chip.id
+            return (
+              <button
+                key={chip.id}
+                onClick={() => setTab(chip.id as any)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                  active
+                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-750"
+                }`}
+              >
+                <span>{chip.label}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                  active ? "bg-white/20 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"
+                }`}>
+                  {chip.count.toLocaleString()}
+                </span>
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -689,7 +1021,7 @@ export default function CustomersPage() {
                   <tr key={c.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
                     <td className="p-4 font-bold text-slate-900 dark:text-white max-w-[220px]">
                       <div className="truncate font-extrabold">{c.razon_social}</div>
-                      {c.nombre_fantasia && (
+                      {c.nombre_fantasia && c.nombre_fantasia.trim().toLowerCase() !== (c.razon_social || "").trim().toLowerCase() && (
                         <div className="text-[10px] text-slate-400 font-normal truncate">
                           Fantasía: {c.nombre_fantasia}
                         </div>
@@ -714,9 +1046,9 @@ export default function CustomersPage() {
                         ) : null}
                         {c.extra_club_numero ? (
                           <div className="flex items-center gap-1 text-[10px] font-mono text-amber-600 dark:text-amber-400" title={`Socio ExtraClub: ${c.extra_club_numero}`}>
-                            <Award className="w-3 h-3 text-amber-500 flex-shrink-0" />
-                            <span className="truncate max-w-[130px] font-bold">
-                              {c.extra_club_numero.length > 18 ? `${c.extra_club_numero.slice(0, 8)}…` : c.extra_club_numero}
+                            <Award className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-300 font-bold border border-amber-500/20">
+                              💳 Activo
                             </span>
                           </div>
                         ) : null}

@@ -29,7 +29,7 @@ async def list_customers(
     tipo: str | None = Query(None),
     exclude_proveedores: bool = Query(False),
     updated_since: datetime | None = Query(None),
-    limit: int = Query(10000, le=50000),
+    limit: int = Query(50000, le=100000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
