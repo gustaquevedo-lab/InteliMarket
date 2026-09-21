@@ -51,9 +51,9 @@ async def registrar_cupon_ticket(
 async def list_tickets(
     company_id: Optional[str] = Query(None, description="UUID de empresa"),
     barrio: Optional[str] = Query(None, description="Filtrar por barrio"),
-    documento: Optional[str] = Query(None, description="Filtrar por documento de cliente"),
+    documento: Optional[str] = Query(None, description="Filtrar por documento, ticket, nombre o teléfono"),
     sincronizado: Optional[bool] = Query(None, description="Filtrar por sincronización"),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(100, ge=1, le=2000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db)
 ):
@@ -71,7 +71,7 @@ async def list_clientes(
     company_id: Optional[str] = Query(None, description="UUID de empresa"),
     search: Optional[str] = Query(None, description="Buscar por nombre, documento o teléfono"),
     barrio: Optional[str] = Query(None, description="Filtrar por barrio"),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(100, ge=1, le=2000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db)
 ):

@@ -128,6 +128,22 @@ async def get_balance(db: AsyncSession, customer_id: str, company_id: str) -> di
     }
 
 
+async def get_balances_map(db: AsyncSession, company_id: str) -> dict[str, int]:
+    """Retorna un mapeo customer_id -> total_puntos para todos los clientes con puntos en la empresa."""
+    cid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
+    stmt = (
+        select(
+            LoyaltyPoints.customer_id,
+            sa_func.coalesce(sa_func.sum(LoyaltyPoints.puntos), 0).label("total"),
+        )
+        .where(LoyaltyPoints.company_id == cid)
+        .group_by(LoyaltyPoints.customer_id)
+    )
+    res = await db.execute(stmt)
+    return {str(row[0]): int(row[1]) for row in res.all()}
+
+
+
 async def audit_loyalty_points(db: AsyncSession, company_id: str, dry_run: bool = True) -> dict:
     """Auditoría de puntos ExtraClub:
     Verifica si existen puntos acreditados a clientes que no cuenten con membresía

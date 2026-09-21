@@ -3047,6 +3047,7 @@ export const api = {
     updateConfig: (companyId: string, data: Partial<LoyaltyConfig>) => client.put<LoyaltyConfig>(`/v1/loyalty/config/${companyId}`, data),
     addPoints: (data: { company_id: string; customer_id: string; tipo: string; puntos: number; referencia_tipo?: string; referencia_id?: string; descripcion?: string }) => client.post<LoyaltyPoints>("/v1/loyalty/points", data),
     balance: (customerId: string, companyId: string) => client.get<{ customer_id: string; total_puntos: number; puntos_por_vencer: number }>(`/v1/loyalty/balance/${customerId}`, { company_id: companyId }),
+    getBalancesMap: (companyId: string) => client.get<Record<string, number>>("/v1/loyalty/balances-map", { company_id: companyId }),
     history: (customerId: string, companyId: string, limit?: number) => client.get<LoyaltyPoints[]>(`/v1/loyalty/history/${customerId}`, { company_id: companyId, limit: limit || 50 }),
     rewards: (companyId: string, activo?: boolean) => client.get<LoyaltyReward[]>("/v1/loyalty/rewards", { company_id: companyId, ...(activo !== undefined ? { activo: String(activo) } : {}) }),
     createReward: (data: Partial<LoyaltyReward>) => client.post<LoyaltyReward>("/v1/loyalty/rewards", data),

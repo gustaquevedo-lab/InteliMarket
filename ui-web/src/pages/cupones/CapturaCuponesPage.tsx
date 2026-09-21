@@ -79,6 +79,14 @@ function playSuccessBeep() {
   } catch {}
 }
 
+function formatDisplayPhone(phone?: string | null): string {
+  if (!phone) return "Sin teléfono"
+  const clean = phone.trim()
+  if (clean.startsWith("+")) return clean
+  return `+${clean}`
+}
+
+
 export default function CapturaCuponesPage() {
   const toast = useToast()
   const [tab, setTab] = useState<"campanas" | "captura" | "tickets" | "clientes" | "ia_insights">("campanas")
@@ -124,6 +132,8 @@ export default function CapturaCuponesPage() {
   const [clientes, setClientes] = useState<CuponCliente[]>([])
   const [stats, setStats] = useState<CuponStats | null>(null)
   const [loadingData, setLoadingData] = useState(false)
+  const [limiteTickets, setLimiteTickets] = useState<number>(250)
+  const [limiteClientes, setLimiteClientes] = useState<number>(250)
 
   // Sincronización por Lotes
   const [syncBatchLoading, setSyncBatchLoading] = useState(false)
@@ -233,11 +243,12 @@ export default function CapturaCuponesPage() {
     setLoadingData(true)
     try {
       const sincParam = filtroSinc === "si" ? true : filtroSinc === "no" ? false : undefined
+      const effectiveLimit = filtroSearch.trim() ? Math.max(500, limiteTickets) : limiteTickets
       const list = await api.cupones.tickets({
         barrio: filtroBarrio || undefined,
-        documento: filtroSearch || undefined,
+        documento: filtroSearch.trim() || undefined,
         sincronizado: sincParam,
-        limit: 100
+        limit: effectiveLimit
       })
       setTickets(list || [])
     } catch (e: any) {
@@ -245,15 +256,16 @@ export default function CapturaCuponesPage() {
     } finally {
       setLoadingData(false)
     }
-  }, [filtroBarrio, filtroSearch, filtroSinc, toast])
+  }, [filtroBarrio, filtroSearch, filtroSinc, limiteTickets, toast])
 
   const loadClientes = useCallback(async () => {
     setLoadingData(true)
     try {
+      const effectiveLimit = filtroSearch.trim() ? Math.max(500, limiteClientes) : limiteClientes
       const list = await api.cupones.clientes({
         barrio: filtroBarrio || undefined,
-        search: filtroSearch || undefined,
-        limit: 100
+        search: filtroSearch.trim() || undefined,
+        limit: effectiveLimit
       })
       setClientes(list || [])
     } catch (e: any) {
@@ -261,7 +273,7 @@ export default function CapturaCuponesPage() {
     } finally {
       setLoadingData(false)
     }
-  }, [filtroBarrio, filtroSearch, toast])
+  }, [filtroBarrio, filtroSearch, limiteClientes, toast])
 
   useEffect(() => {
     loadCampanas()
@@ -347,8 +359,25 @@ export default function CapturaCuponesPage() {
       return
     }
 
-    setSubmitting(true)
-    const telCompleto = `${codigoPais}${telefono.replace(/\D/g, "")}`
+    const rawDigits = telefono.replace(/\D/g, "")
+    let telCompleto = rawDigits
+    if (codigoPais === "595") {
+      if (rawDigits.startsWith("09") && rawDigits.length === 10) {
+        telCompleto = `+595${rawDigits.slice(1)}`
+      } else if (rawDigits.startsWith("9") && rawDigits.length === 9) {
+        telCompleto = `+595${rawDigits}`
+      } else if (rawDigits.startsWith("595")) {
+        telCompleto = `+${rawDigits}`
+      } else {
+        telCompleto = `+595${rawDigits}`
+      }
+    } else {
+      if (rawDigits.startsWith("55")) {
+        telCompleto = `+${rawDigits}`
+      } else {
+        telCompleto = `+55${rawDigits}`
+      }
+    }
 
     const campanaSeleccionada = campanas.find(c => c.id === campanaCapturaId)
     const campanaNombre = campanaSeleccionada ? campanaSeleccionada.nombre : "Gran Sorteo Aniversario"
@@ -1168,7 +1197,7 @@ export default function CapturaCuponesPage() {
                     {ultimoRegistrado.cliente.nombre}
                   </div>
                   <div className="text-xs font-mono text-slate-500">
-                    Doc: {ultimoRegistrado.cliente.documento} · Tel: +{ultimoRegistrado.cliente.telefono}
+                    Doc: {ultimoRegistrado.cliente.documento} · Tel: {formatDisplayPhone(ultimoRegistrado.cliente.telefono)}
                   </div>
                 </div>
 
@@ -1230,6 +1259,19 @@ export default function CapturaCuponesPage() {
                 <option value="todos">Todos los estados</option>
                 <option value="si">Solo Sincronizados</option>
                 <option value="no">Pendientes de Sync</option>
+              </select>
+
+              <select
+                value={limiteTickets}
+                onChange={(e) => setLimiteTickets(Number(e.target.value))}
+                className="input-field text-xs font-bold w-auto"
+                title="Cantidad de registros a consultar"
+              >
+                <option value={100}>Ver 100 tickets</option>
+                <option value={250}>Ver 250 tickets</option>
+                <option value={500}>Ver 500 tickets</option>
+                <option value={1000}>Ver 1.000 tickets</option>
+                <option value={2000}>Ver 2.000 tickets</option>
               </select>
             </div>
 
@@ -1302,7 +1344,7 @@ export default function CapturaCuponesPage() {
                           </div>
                         </td>
                         <td className="table-td font-mono">
-                          +{t.cliente?.telefono}
+                          {formatDisplayPhone(t.cliente?.telefono)}
                         </td>
                         <td className="table-td text-center">
                           <span className="badge-accent font-posMono text-xs font-black">
@@ -1333,6 +1375,11 @@ export default function CapturaCuponesPage() {
                 </tbody>
               </table>
             </div>
+            {tickets.length > 0 && (
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 text-center text-xs text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-800">
+                Mostrando {tickets.length.toLocaleString("es-PY")} tickets emitidos. Utilizá el selector de cantidad o el buscador para filtrar.
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1358,14 +1405,37 @@ export default function CapturaCuponesPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative w-48 sm:w-64">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={filtroSearch}
+                  onChange={(e) => setFiltroSearch(e.target.value)}
+                  placeholder="Buscar nombre, CI, tel..."
+                  className="input-field pl-9 text-xs"
+                />
+              </div>
+
+              <select
+                value={limiteClientes}
+                onChange={(e) => setLimiteClientes(Number(e.target.value))}
+                className="input-field text-xs font-bold w-auto"
+                title="Cantidad de clientes a recuperar"
+              >
+                <option value={100}>Ver 100 clientes</option>
+                <option value={250}>Ver 250 clientes</option>
+                <option value={500}>Ver 500 clientes</option>
+                <option value={1000}>Ver 1.000 clientes</option>
+              </select>
+
               <button
                 onClick={handleAnalizarIA}
                 disabled={analyzingIA}
                 className="btn-primary bg-purple-600 hover:bg-purple-700 text-xs shadow-purple-500/20"
               >
                 <Brain className={`w-3.5 h-3.5 ${analyzingIA ? "animate-spin" : ""}`} />
-                <span>{analyzingIA ? "Analizando con Gemini..." : "Perfilar con Gemini 2.5 Flash"}</span>
+                <span>{analyzingIA ? "Analizando..." : "Perfilar IA"}</span>
               </button>
 
               <button
@@ -1396,7 +1466,7 @@ export default function CapturaCuponesPage() {
                     {c.nombre}
                   </h4>
                   <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
-                    <span>+{c.telefono}</span>
+                    <span>{formatDisplayPhone(c.telefono)}</span>
                     <span>·</span>
                     <span>{c.barrio || "Centro"}</span>
                   </div>

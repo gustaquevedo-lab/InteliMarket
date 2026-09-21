@@ -6,7 +6,8 @@ import {
   RefreshCw, MessageCircle, HeartHandshake, DollarSign, Star,
   ShieldCheck, CreditCard, ChevronRight, Check, X, Tag, Package,
   HelpCircle, BarChart2, Clock, Building, Warehouse as WarehouseIcon,
-  Truck, ArrowDownToLine, CheckSquare, FileText, Sliders, ShieldAlert
+  Truck, ArrowDownToLine, CheckSquare, FileText, Sliders, ShieldAlert,
+  Crown, Zap, ArrowUpRight, ArrowDownLeft
 } from "lucide-react"
 import {
   api, type Customer, type LoyaltyConfig, type LoyaltyReward,
@@ -14,7 +15,7 @@ import {
 } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG, formatDate } from "../../utils/format"
+import { formatPYG, formatDate, formatDateTime } from "../../utils/format"
 import TarjetasSocioPage from "../loyalty/TarjetasSocioPage"
 
 type CrmTab = "miembros" | "tarjetas" | "solicitudes" | "rfm" | "premios" | "reglas"
@@ -69,12 +70,23 @@ export default function CrmPage() {
   // Modal Puntos / Ficha Cliente
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [customerPoints, setCustomerPoints] = useState<number>(0)
+  const [puntosPorVencer, setPuntosPorVencer] = useState<number>(0)
+  const [pointsMap, setPointsMap] = useState<Record<string, number>>({})
   const [pointsHistory, setPointsHistory] = useState<LoyaltyPoints[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [showPointsModal, setShowPointsModal] = useState(false)
+  const [pointsModalTab, setPointsModalTab] = useState<"resumen" | "historial" | "ajuste" | "catalogo">("resumen")
+  const [ajusteTipo, setAjusteTipo] = useState<"suma" | "resta">("suma")
   const [pointsDelta, setPointsDelta] = useState<number>(100)
-  const [pointsMotivo, setPointsMotivo] = useState("Bonificación ExtraClub")
+  const [pointsMotivo, setPointsMotivo] = useState("Bonificación fidelidad Extra Club")
   const [savingPoints, setSavingPoints] = useState(false)
+
+  const getCustomerTier = (pts: number) => {
+    if (pts >= 5000) return { name: "VIP Platino", mult: "2.0x", badgeColor: "bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border-purple-300", icon: Crown }
+    if (pts >= 1500) return { name: "Socio Oro", mult: "1.5x", badgeColor: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-300", icon: Award }
+    if (pts >= 500) return { name: "Socio Plata", mult: "1.2x", badgeColor: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300", icon: Sparkles }
+    return { name: "Socio Bronce", mult: "1.0x", badgeColor: "bg-orange-50 text-orange-800 dark:bg-orange-950/60 dark:text-orange-300 border-orange-200", icon: ShieldCheck }
+  }
 
   // Modal Nuevo / Editar Premio Patrocinado
   const [showRewardModal, setShowRewardModal] = useState(false)
@@ -187,7 +199,7 @@ export default function CrmPage() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [custRes, rewRes, confRes, supRes, whRes, redRes, prodRes] = await Promise.allSettled([
+      const [custRes, rewRes, confRes, supRes, whRes, redRes, prodRes, ptsMapRes] = await Promise.allSettled([
         api.customers.list({ limit: 1000, exclude_proveedores: true } as any),
         api.loyalty.rewards(companyId),
         api.loyalty.getConfig(companyId),
@@ -195,6 +207,7 @@ export default function CrmPage() {
         api.loyalty.getPremiosWarehouse(companyId),
         api.loyalty.getRedemptions(companyId, 50),
         api.products.list({ limit: 300 } as any),
+        api.loyalty.getBalancesMap(companyId),
       ])
 
       if (custRes.status === "fulfilled" && Array.isArray(custRes.value)) setCustomers(custRes.value)
@@ -204,6 +217,9 @@ export default function CrmPage() {
       if (whRes.status === "fulfilled" && whRes.value) setPremiosWarehouse(whRes.value)
       if (redRes.status === "fulfilled" && Array.isArray(redRes.value)) setRedemptions(redRes.value)
       if (prodRes.status === "fulfilled" && Array.isArray(prodRes.value)) setProductList(prodRes.value)
+      if (ptsMapRes.status === "fulfilled" && ptsMapRes.value && typeof ptsMapRes.value === "object") {
+        setPointsMap(ptsMapRes.value)
+      }
     } catch (e: any) {
       toast.error("Error al cargar CRM", e.message)
     } finally {
@@ -314,16 +330,23 @@ export default function CrmPage() {
   const handleOpenCustomerModal = async (c: Customer) => {
     setSelectedCustomer(c)
     setShowPointsModal(true)
+    setPointsModalTab("resumen")
+    setAjusteTipo("suma")
+    setPointsDelta(100)
+    setPointsMotivo("Bonificación fidelidad Extra Club")
     setLoadingHistory(true)
     try {
       const [balRes, hRes] = await Promise.allSettled([
         api.loyalty.balance(c.id, companyId),
-        api.loyalty.history(c.id, companyId),
+        api.loyalty.history(c.id, companyId, 50),
       ])
       if (balRes.status === "fulfilled" && balRes.value) {
-        setCustomerPoints(Number((balRes.value as any)?.balance || 0))
+        const val = balRes.value as any
+        setCustomerPoints(Number(val?.total_puntos ?? val?.balance ?? pointsMap[c.id] ?? 0))
+        setPuntosPorVencer(Number(val?.puntos_por_vencer ?? 0))
       } else {
-        setCustomerPoints(0)
+        setCustomerPoints(pointsMap[c.id] || 0)
+        setPuntosPorVencer(0)
       }
       if (hRes.status === "fulfilled" && Array.isArray(hRes.value)) {
         setPointsHistory(hRes.value)
@@ -331,28 +354,54 @@ export default function CrmPage() {
         setPointsHistory([])
       }
     } catch {
-      setCustomerPoints(0)
+      setCustomerPoints(pointsMap[c.id] || 0)
+      setPuntosPorVencer(0)
       setPointsHistory([])
     } finally {
       setLoadingHistory(false)
     }
   }
 
-  const handleAddPoints = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleAddPoints = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
     if (!selectedCustomer) return
+    const qty = Math.abs(pointsDelta)
+    if (!qty || qty <= 0) {
+      toast.error("Cantidad Inválida", "Ingresá un número mayor a cero para ajustar puntos.")
+      return
+    }
+    if (ajusteTipo === "resta" && qty > customerPoints) {
+      toast.error("Saldo Insuficiente", `El cliente solo dispone de ${customerPoints.toLocaleString("es-PY")} puntos.`)
+      return
+    }
+
     setSavingPoints(true)
     try {
       await api.loyalty.addPoints({
         company_id: companyId,
         customer_id: selectedCustomer.id,
-        puntos: Math.abs(pointsDelta),
-        descripcion: pointsMotivo,
-        tipo: pointsDelta >= 0 ? "suma" : "resta",
+        puntos: qty,
+        descripcion: pointsMotivo.trim() || (ajusteTipo === "suma" ? "Acreditación manual Extra Club" : "Débito manual Extra Club"),
+        tipo: ajusteTipo,
       })
-      toast.success("Puntos Actualizados", `Se ${pointsDelta >= 0 ? "acreditaron" : "debitaron"} ${Math.abs(pointsDelta)} puntos a ${selectedCustomer.nombre || selectedCustomer.razon_social}.`)
-      setShowPointsModal(false)
-      loadData()
+
+      const delta = ajusteTipo === "suma" ? qty : -qty
+      const newTotal = Math.max(0, customerPoints + delta)
+      setCustomerPoints(newTotal)
+      setPointsMap(prev => ({ ...prev, [selectedCustomer.id]: newTotal }))
+
+      toast.success(
+        ajusteTipo === "suma" ? "Puntos Acreditados" : "Puntos Debitados",
+        `Se registraron ${qty.toLocaleString("es-PY")} pts a ${selectedCustomer.nombre || selectedCustomer.razon_social}.`
+      )
+
+      // Recargar historial del cliente
+      try {
+        const hRes = await api.loyalty.history(selectedCustomer.id, companyId, 50)
+        if (Array.isArray(hRes)) setPointsHistory(hRes)
+      } catch {}
+
+      setPointsModalTab("resumen")
     } catch (err: any) {
       toast.error("Error al actualizar puntos", err.message)
     } finally {
@@ -853,7 +902,7 @@ export default function CrmPage() {
                       <th className="p-3.5 text-left">Documento (RUC / CI)</th>
                       <th className="p-3.5 text-left">Contacto & WhatsApp</th>
                       <th className="p-3.5 text-center">Membresía ExtraClub</th>
-                      <th className="p-3.5 text-center">Estado Puntos</th>
+                      <th className="p-3.5 text-center">Puntos ExtraClub</th>
                       <th className="p-3.5 text-right font-mono">Límite Crédito</th>
                       <th className="p-3.5 text-right">Acciones</th>
                     </tr>
@@ -861,12 +910,19 @@ export default function CrmPage() {
                   <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
                     {filteredCustomers.slice(0, 100).map((c) => {
                       const isSocio = Boolean(c.extra_club_numero && c.extra_club_numero.trim())
+                      const customerPts = pointsMap[c.id] || 0
+                      const hasDistinctFantasia = Boolean(
+                        (c as any).nombre_fantasia &&
+                        (c as any).nombre_fantasia.trim().toLowerCase() !== (c.razon_social || c.nombre || "").trim().toLowerCase()
+                      )
 
                       return (
                         <tr key={c.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
                           <td className="p-3.5">
                             <p className="font-extrabold text-gray-900 dark:text-white">{c.razon_social || c.nombre || "Cliente ExtraClub"}</p>
-                            {(c as any).nombre_fantasia && <p className="text-[10px] text-purple-600 font-medium">{(c as any).nombre_fantasia}</p>}
+                            {hasDistinctFantasia && (
+                              <p className="text-[10px] text-purple-600 font-medium">{(c as any).nombre_fantasia}</p>
+                            )}
                           </td>
                           <td className="p-3.5 font-mono text-gray-600 dark:text-gray-300">
                             {c.ruc || c.ci || "Sin documento"}
@@ -882,7 +938,7 @@ export default function CrmPage() {
                           <td className="p-3.5 text-center">
                             {isSocio ? (
                               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800">
-                                <CreditCard className="w-3 h-3 text-emerald-600" /> Socio #{c.extra_club_numero}
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Activo
                               </span>
                             ) : (
                               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-medium border bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700">
@@ -892,12 +948,17 @@ export default function CrmPage() {
                           </td>
                           <td className="p-3.5 text-center">
                             {isSocio ? (
-                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 dark:text-purple-300">
-                                <Coins className="w-3 h-3 text-purple-600" /> Habilitado
-                              </span>
+                              <div className="flex flex-col items-center">
+                                <span className="inline-flex items-center gap-1 text-xs font-black text-purple-700 dark:text-purple-300 font-mono">
+                                  <Sparkles className="w-3.5 h-3.5 text-amber-500 fill-amber-400" /> {customerPts.toLocaleString("es-PY")} pts
+                                </span>
+                                <span className="text-[10px] text-gray-400 font-mono">
+                                  ≈ Gs. {(customerPts * (config?.guarani_por_punto || 100)).toLocaleString("es-PY")}
+                                </span>
+                              </div>
                             ) : (
-                              <span className="text-slate-400 text-[10px]" title="Solo socios registrados con ExtraClub pueden acumular puntos">
-                                Requiere Socio
+                              <span className="text-slate-400 text-[10px] italic" title="Registrá al cliente como socio para acumular puntos Extra Club">
+                                Sin Membresía
                               </span>
                             )}
                           </td>
@@ -1489,37 +1550,475 @@ export default function CrmPage() {
         </div>
       )}
 
-      {/* MODAL FICHA / ACTUALIZAR PUNTOS SOCIO */}
-      {showPointsModal && selectedCustomer && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md border border-gray-200 dark:border-slate-800 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3">
-              <div>
-                <h2 className="font-extrabold text-base text-gray-900 dark:text-white uppercase">{selectedCustomer.razon_social || selectedCustomer.nombre}</h2>
-                <p className="text-[11px] text-purple-600 font-bold font-mono">Saldo actual: {customerPoints.toLocaleString("es-PY")} Puntos ExtraClub</p>
-              </div>
-              <button onClick={() => setShowPointsModal(false)} className="btn-ghost p-1"><X className="w-4 h-4" /></button>
-            </div>
+      {/* MODAL FICHA INTEGRAL DE PUNTOS EXTRA CLUB */}
+      {showPointsModal && selectedCustomer && (() => {
+        const isSocio = Boolean(selectedCustomer.extra_club_numero && selectedCustomer.extra_club_numero.trim())
+        const tier = getCustomerTier(customerPoints)
+        const TierIcon = tier.icon
+        const valorValesPYG = customerPoints * (config?.guarani_por_punto || 100)
+        const hasDistinctFantasia = Boolean(
+          (selectedCustomer as any).nombre_fantasia &&
+          (selectedCustomer as any).nombre_fantasia.trim().toLowerCase() !== (selectedCustomer.razon_social || selectedCustomer.nombre || "").trim().toLowerCase()
+        )
 
-            <form onSubmit={handleAddPoints} className="space-y-3 text-xs">
-              <div>
-                <label className="label-sm">Cantidad de Puntos (+ sumar / - restar) *</label>
-                <input required type="number" className="input text-xs font-mono font-bold" value={pointsDelta} onChange={e => setPointsDelta(parseInt(e.target.value) || 0)} />
-              </div>
-              <div>
-                <label className="label-sm">Motivo / Concepto *</label>
-                <input required className="input text-xs" value={pointsMotivo} onChange={e => setPointsMotivo(e.target.value)} />
-              </div>
-              <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-slate-800">
-                <button type="button" onClick={() => setShowPointsModal(false)} className="btn-secondary text-xs px-4 py-2">Cancelar</button>
-                <button type="submit" disabled={savingPoints} className="btn-primary text-xs px-5 py-2 flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700">
-                  {savingPoints ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Aplicar Ajuste
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-2xl border border-gray-200 dark:border-slate-800 overflow-hidden my-6">
+              {/* Franja de acento superior */}
+              <div className="h-1.5 w-full bg-gradient-to-r from-purple-600 via-pink-500 to-emerald-500" />
+
+              {/* Encabezado */}
+              <div className="p-5 border-b border-gray-100 dark:border-slate-800 flex items-start justify-between gap-4 bg-gray-50/50 dark:bg-slate-800/30">
+                <div className="flex items-start gap-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-600 to-indigo-700 text-white flex items-center justify-center font-black text-lg shadow-md shrink-0">
+                    {(selectedCustomer.razon_social || selectedCustomer.nombre || "C").charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="font-extrabold text-base text-gray-900 dark:text-white uppercase leading-tight">
+                        {selectedCustomer.razon_social || selectedCustomer.nombre}
+                      </h2>
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${tier.badgeColor}`}>
+                        <TierIcon className="w-3 h-3" /> {tier.name}
+                      </span>
+                    </div>
+
+                    {hasDistinctFantasia && (
+                      <p className="text-xs text-purple-600 font-medium">{(selectedCustomer as any).nombre_fantasia}</p>
+                    )}
+
+                    <div className="flex items-center gap-3 mt-1.5 flex-wrap text-xs text-gray-500 dark:text-gray-400">
+                      <span className="font-mono bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-gray-200 dark:border-slate-700">
+                        DOC: {selectedCustomer.ruc || selectedCustomer.ci || "Sin doc"}
+                      </span>
+                      {selectedCustomer.telefono ? (
+                        <a
+                          href={`https://wa.me/${selectedCustomer.telefono.replace(/\D/g, "")}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 font-mono text-emerald-600 dark:text-emerald-400 hover:underline"
+                        >
+                          <Phone className="w-3 h-3" /> {selectedCustomer.telefono}
+                        </a>
+                      ) : (
+                        <span>Sin teléfono</span>
+                      )}
+                      {isSocio ? (
+                        <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-bold">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Socio Activo
+                        </span>
+                      ) : (
+                        <span className="text-amber-600 font-medium">Requiere Registro de Tarjeta</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowPointsModal(false)}
+                  className="btn-ghost p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-white"
+                >
+                  <X className="w-5 h-5" />
                 </button>
               </div>
-            </form>
+
+              {/* KPI Cards de Fidelidad */}
+              <div className="p-5 grid grid-cols-2 sm:grid-cols-4 gap-3 bg-white dark:bg-slate-900">
+                <div className="p-3.5 rounded-2xl bg-purple-50/80 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900/40 space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 flex items-center gap-1">
+                    <Star className="w-3 h-3 fill-purple-600 text-purple-600" /> Saldo Puntos
+                  </span>
+                  <p className="text-xl font-black font-mono text-purple-900 dark:text-purple-200">
+                    {customerPoints.toLocaleString("es-PY")}
+                  </p>
+                  <p className="text-[10px] text-purple-600/80 dark:text-purple-400/80 font-medium">Puntos Extra Club</p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/40 space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <Coins className="w-3 h-3 text-emerald-600" /> Vales de Compra
+                  </span>
+                  <p className="text-xl font-black font-mono text-emerald-900 dark:text-emerald-200">
+                    {formatPYG(valorValesPYG)}
+                  </p>
+                  <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80 font-medium">
+                    1 pt = Gs. {config?.guarani_por_punto || 100}
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/40 space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                    <Award className="w-3 h-3 text-amber-600" /> Multiplicador
+                  </span>
+                  <p className="text-xl font-black font-mono text-amber-900 dark:text-amber-200">
+                    {tier.mult}
+                  </p>
+                  <p className="text-[10px] text-amber-700/80 dark:text-amber-400/80 font-medium">Acumula en compras</p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-slate-500" /> Por Vencer
+                  </span>
+                  <p className="text-xl font-black font-mono text-slate-800 dark:text-slate-200">
+                    {puntosPorVencer.toLocaleString("es-PY")}
+                  </p>
+                  <p className="text-[10px] text-slate-400 font-medium">Vigencia 365 días</p>
+                </div>
+              </div>
+
+              {/* Selector de Pestañas del Modal */}
+              <div className="flex border-b border-gray-100 dark:border-slate-800 px-5 gap-2 bg-gray-50/30 dark:bg-slate-800/20">
+                <button
+                  type="button"
+                  onClick={() => setPointsModalTab("resumen")}
+                  className={`py-2.5 px-3 text-xs font-bold border-b-2 transition flex items-center gap-1.5 ${
+                    pointsModalTab === "resumen"
+                      ? "border-purple-600 text-purple-600 dark:text-purple-400"
+                      : "border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" /> Beneficios & Canjes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPointsModalTab("historial")}
+                  className={`py-2.5 px-3 text-xs font-bold border-b-2 transition flex items-center gap-1.5 ${
+                    pointsModalTab === "historial"
+                      ? "border-purple-600 text-purple-600 dark:text-purple-400"
+                      : "border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"
+                  }`}
+                >
+                  <History className="w-3.5 h-3.5" /> Historial ({pointsHistory.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPointsModalTab("ajuste")}
+                  className={`py-2.5 px-3 text-xs font-bold border-b-2 transition flex items-center gap-1.5 ${
+                    pointsModalTab === "ajuste"
+                      ? "border-purple-600 text-purple-600 dark:text-purple-400"
+                      : "border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"
+                  }`}
+                >
+                  <Edit className="w-3.5 h-3.5" /> Ajustar Puntos (+ / -)
+                </button>
+              </div>
+
+              {/* Contenido de Pestañas */}
+              <div className="p-5 max-h-[380px] overflow-y-auto">
+                {/* TAB 1: RESUMEN Y BENEFICIOS DISPONIBLES */}
+                {pointsModalTab === "resumen" && (
+                  <div className="space-y-4">
+                    <div className="p-4 bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-transparent rounded-2xl border border-purple-200/50 dark:border-purple-900/30 flex items-start gap-3">
+                      <div className="p-2 rounded-xl bg-purple-600 text-white shrink-0">
+                        <Gift className="w-5 h-5" />
+                      </div>
+                      <div className="space-y-1 text-xs">
+                        <p className="font-extrabold text-gray-900 dark:text-white">
+                          Canje Automático en Cajas 2, 3, 4 y 5
+                        </p>
+                        <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
+                          Al momento de cobrar en cualquier caja, la cajera solo solicita el documento de {selectedCustomer.razon_social || selectedCustomer.nombre}. El saldo de <strong className="text-purple-600">{customerPoints.toLocaleString("es-PY")} puntos</strong> se puede aplicar como descuento directo equivalente a <strong className="text-emerald-600">{formatPYG(valorValesPYG)}</strong>.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-2.5">
+                        <h4 className="text-xs font-extrabold text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                          <Gift className="w-3.5 h-3.5 text-purple-600" /> Premios y Artículos de Catálogo
+                        </h4>
+                        <span className="text-[10px] text-gray-400 font-mono">{rewards.length} disponibles</span>
+                      </div>
+
+                      {rewards.length === 0 ? (
+                        <p className="text-xs text-gray-400 py-6 text-center">No hay premios activos en el catálogo de fidelidad.</p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {rewards.slice(0, 6).map((r) => {
+                            const canRedeem = customerPoints >= r.puntos_requeridos
+                            const progress = Math.min(100, Math.round((customerPoints / r.puntos_requeridos) * 100))
+                            return (
+                              <div
+                                key={r.id}
+                                className={`p-3 rounded-2xl border transition ${
+                                  canRedeem
+                                    ? "bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800"
+                                    : "bg-white dark:bg-slate-800/60 border-gray-100 dark:border-slate-800"
+                                } space-y-2`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <p className="font-bold text-xs text-gray-900 dark:text-white line-clamp-1">{r.nombre}</p>
+                                    {r.patrocinador_nombre && (
+                                      <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                                        Patrocinado: {r.patrocinador_nombre}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <span className="text-xs font-mono font-black text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded-lg shrink-0">
+                                    {r.puntos_requeridos.toLocaleString("es-PY")} pts
+                                  </span>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-[10px] font-mono">
+                                    <span className="text-gray-400">Progreso</span>
+                                    <span className={canRedeem ? "text-emerald-600 font-bold" : "text-gray-500"}>
+                                      {progress}%
+                                    </span>
+                                  </div>
+                                  <div className="w-full h-1.5 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full transition-all ${
+                                        canRedeem ? "bg-emerald-500" : "bg-purple-500"
+                                      }`}
+                                      style={{ width: `${progress}%` }}
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center justify-between pt-0.5 text-[10px]">
+                                  {canRedeem ? (
+                                    <span className="inline-flex items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400">
+                                      <CheckCircle2 className="w-3 h-3" /> ¡Canjeable en Caja!
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-400 font-mono">
+                                      Faltan {(r.puntos_requeridos - customerPoints).toLocaleString("es-PY")} pts
+                                    </span>
+                                  )}
+                                  <span className="text-gray-400 font-mono">Stock: {r.stock || 0}</span>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* TAB 2: HISTORIAL DE PUNTOS */}
+                {pointsModalTab === "historial" && (
+                  <div>
+                    {loadingHistory ? (
+                      <div className="flex items-center justify-center py-12 text-gray-400 text-xs gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" /> Cargando movimientos de puntos...
+                      </div>
+                    ) : pointsHistory.length === 0 ? (
+                      <div className="text-center py-12 text-gray-400 text-xs space-y-2">
+                        <History className="w-10 h-10 mx-auto opacity-40 text-purple-400" />
+                        <p className="font-bold text-gray-600 dark:text-gray-300">Sin movimientos registrados</p>
+                        <p className="text-[11px]">Este socio aún no registra transacciones de puntos.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {pointsHistory.map((item) => {
+                          const isPositive = item.puntos > 0 || item.tipo === "suma" || item.tipo === "venta" || item.tipo === "bonificacion"
+                          return (
+                            <div
+                              key={item.id}
+                              className="p-3 bg-white dark:bg-slate-800/70 rounded-2xl border border-gray-100 dark:border-slate-800 flex items-center justify-between gap-3 hover:border-gray-200 transition"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className={`p-2 rounded-xl shrink-0 ${
+                                    isPositive
+                                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400"
+                                      : "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400"
+                                  }`}
+                                >
+                                  {isPositive ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownLeft className="w-4 h-4" />}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-extrabold text-xs text-gray-900 dark:text-white capitalize">
+                                      {item.tipo === "venta"
+                                        ? "Compra en Caja"
+                                        : item.tipo === "canje"
+                                        ? "Canje de Premio / Vale"
+                                        : item.tipo === "suma"
+                                        ? "Acreditación Manual"
+                                        : item.tipo === "resta"
+                                        ? "Débito Manual"
+                                        : item.tipo}
+                                    </p>
+                                    {item.referencia_id && (
+                                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                        Ref: {item.referencia_id.slice(-8)}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                                    {item.descripcion || "Sin descripción"}
+                                  </p>
+                                  <p className="text-[10px] text-gray-400 font-mono flex items-center gap-1 mt-0.5">
+                                    <Clock className="w-2.5 h-2.5" /> {formatDateTime(item.created_at)}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span
+                                  className={`text-sm font-mono font-black ${
+                                    isPositive
+                                      ? "text-emerald-600 dark:text-emerald-400"
+                                      : "text-rose-600 dark:text-rose-400"
+                                  }`}
+                                >
+                                  {isPositive ? `+${Math.abs(item.puntos).toLocaleString("es-PY")}` : `-${Math.abs(item.puntos).toLocaleString("es-PY")}`} pts
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* TAB 3: AJUSTE / CARGA MANUAL */}
+                {pointsModalTab === "ajuste" && (
+                  <form onSubmit={handleAddPoints} className="space-y-4 text-xs">
+                    {/* Switch Acreditar vs Debitar */}
+                    <div className="flex items-center justify-center p-1 bg-gray-100 dark:bg-slate-800 rounded-2xl max-w-sm mx-auto">
+                      <button
+                        type="button"
+                        onClick={() => setAjusteTipo("suma")}
+                        className={`flex-1 py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 ${
+                          ajusteTipo === "suma"
+                            ? "bg-emerald-600 text-white shadow-md"
+                            : "text-gray-600 dark:text-gray-300 hover:text-gray-900"
+                        }`}
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Acreditar (+)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAjusteTipo("resta")}
+                        className={`flex-1 py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 ${
+                          ajusteTipo === "resta"
+                            ? "bg-rose-600 text-white shadow-md"
+                            : "text-gray-600 dark:text-gray-300 hover:text-gray-900"
+                        }`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Debitar (-)
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="label-sm">
+                        Cantidad de Puntos a {ajusteTipo === "suma" ? "Acreditar" : "Debitar"} *
+                      </label>
+                      <div className="relative">
+                        <input
+                          required
+                          type="number"
+                          min="1"
+                          className="input text-base font-mono font-black w-full pr-12"
+                          value={pointsDelta}
+                          onChange={(e) => setPointsDelta(Math.max(1, parseInt(e.target.value) || 0))}
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400 font-mono">
+                          pts
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 pt-1">
+                        {[50, 100, 250, 500, 1000].map((val) => (
+                          <button
+                            key={val}
+                            type="button"
+                            onClick={() => setPointsDelta(val)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition ${
+                              pointsDelta === val
+                                ? "bg-purple-600 text-white border-purple-600"
+                                : "bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-slate-700 hover:border-purple-300"
+                            }`}
+                          >
+                            +{val}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Proyección en Vivo */}
+                    <div className="p-3 bg-purple-50/50 dark:bg-purple-950/20 rounded-2xl border border-purple-100 dark:border-purple-900/30 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="text-gray-500 text-[10px] block">Saldo proyectado:</span>
+                        <span className="font-mono font-black text-purple-900 dark:text-purple-200 text-sm">
+                          {Math.max(0, customerPoints + (ajusteTipo === "suma" ? pointsDelta : -pointsDelta)).toLocaleString("es-PY")} pts
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-gray-500 text-[10px] block">Equivalente en vales:</span>
+                        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          {formatPYG(
+                            Math.max(0, customerPoints + (ajusteTipo === "suma" ? pointsDelta : -pointsDelta)) *
+                              (config?.guarani_por_punto || 100)
+                          )}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="label-sm">Motivo / Justificación del Ajuste *</label>
+                      <div className="grid grid-cols-2 gap-1.5 mb-1.5">
+                        {[
+                          "Bonificación fidelidad Extra Club",
+                          "Compensación reclamo cliente",
+                          "Campaña de Aniversario",
+                          "Carga inicial apertura socio",
+                        ].map((mot) => (
+                          <button
+                            key={mot}
+                            type="button"
+                            onClick={() => setPointsMotivo(mot)}
+                            className={`p-1.5 text-[10px] text-left rounded-lg border truncate transition ${
+                              pointsMotivo === mot
+                                ? "bg-purple-50 dark:bg-purple-950/50 border-purple-400 text-purple-700 dark:text-purple-300 font-bold"
+                                : "bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:border-purple-300"
+                            }`}
+                          >
+                            {mot}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        required
+                        type="text"
+                        className="input text-xs w-full"
+                        value={pointsMotivo}
+                        onChange={(e) => setPointsMotivo(e.target.value)}
+                        placeholder="Escribí el motivo del ajuste..."
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setShowPointsModal(false)}
+                        className="btn-secondary text-xs px-4 py-2"
+                      >
+                        Cerrar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={savingPoints}
+                        className={`btn-primary text-xs px-5 py-2 flex items-center gap-1.5 shadow-md ${
+                          ajusteTipo === "suma" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-rose-600 hover:bg-rose-700"
+                        }`}
+                      >
+                        {savingPoints ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                        {ajusteTipo === "suma" ? "Confirmar Acreditación" : "Confirmar Débito"}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
+
 
       {/* MODAL NUEVO / EDITAR PREMIO PATROCINADO */}
       {showRewardModal && (

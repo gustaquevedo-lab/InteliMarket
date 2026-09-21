@@ -37,6 +37,11 @@ async def add_points(body: PointsCreate, db: AsyncSession = Depends(get_db), use
     return await service.earn_points(db, body)
 
 
+@router.get("/balances-map")
+async def get_balances_map(company_id: str = Query(), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.get_balances_map(db, company_id)
+
+
 @router.get("/balance/{customer_id}", response_model=PointsBalance)
 async def get_balance(customer_id: str, company_id: str = Query(), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     return await service.get_balance(db, customer_id, company_id)

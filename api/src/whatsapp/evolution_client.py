@@ -67,7 +67,7 @@ def save_media_file_to_uploads(
 def normalize_phone_e164(phone: Optional[str]) -> Optional[str]:
     """
     Normaliza el número de teléfono al formato internacional E.164 sin signos '+' ni separadores.
-    Soporta Paraguay (595) y Brasil (55).
+    Soporta Paraguay (595) y Brasil (55). Corrige prefijos duplicados (595595..., 59509..., 5509...).
     """
     if not phone:
         return None
@@ -75,20 +75,45 @@ def normalize_phone_e164(phone: Optional[str]) -> Optional[str]:
     if not cleaned:
         return None
 
-    # Paraguay local con 0 inicial (ej: 0985 123456 -> 595985123456)
+    # Caso 1: Error común de doble prefijo 595 (ej: 595595971...)
+    while cleaned.startswith("595595"):
+        cleaned = cleaned[3:]
+
+    # Caso 2: Error de importación -> "5509..." (ej: 550982528386)
+    if cleaned.startswith("5509") and len(cleaned) == 12:
+        cleaned = "595" + cleaned[3:]
+
+    # Caso 3: 595 con 0 local (ej: 5950985123456 -> 595985123456)
+    if cleaned.startswith("59509") and len(cleaned) == 13:
+        cleaned = "595" + cleaned[4:]
+
+    # Caso 4: Prefijo 55 erróneo en línea paraguaya (ej: 5597..., 5598..., 5599..., 5596...)
+    if cleaned.startswith("55") and len(cleaned) == 11 and cleaned[2:4] in ("96", "97", "98", "99"):
+        cleaned = "595" + cleaned[2:]
+
+    # Caso 5: Paraguay local con 0 inicial (ej: 0985 123456 -> 595985123456)
     if cleaned.startswith("09") and len(cleaned) == 10:
         return "595" + cleaned[1:]
     # Paraguay sin 0 (ej: 985 123456 -> 595985123456)
     if cleaned.startswith("9") and len(cleaned) == 9:
         return "595" + cleaned
 
-    # Ya tiene código de país
-    if cleaned.startswith("595") or cleaned.startswith("55"):
+    # Ya tiene código de país 595
+    if cleaned.startswith("595"):
         return cleaned
 
-    # Celulares brasileños frontera (DDD 67 u otros de 10 u 11 dígitos)
+    # Celulares brasileños frontera sin 55 (DDD 67 u otros de 10 u 11 dígitos)
     if len(cleaned) in (10, 11) and cleaned.startswith("67"):
         return "55" + cleaned
+
+    # Legacy Brasil con 8 dígitos de celular: 55 + DDD (2 dig) + 8 dígitos = 12 dígitos -> insertar 9
+    if cleaned.startswith("55") and len(cleaned) == 12:
+        ddd = cleaned[2:4]
+        subscriber = cleaned[4:]
+        return f"55{ddd}9{subscriber}"
+
+    if cleaned.startswith("55"):
+        return cleaned
 
     return cleaned
 

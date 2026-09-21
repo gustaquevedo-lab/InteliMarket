@@ -116,8 +116,10 @@ async def registrar_cupon(
     Registra el cupón, hace upsert del cliente, cruza con la base de datos de ventas e invoca WhatsApp.
     """
     cleaned_doc = clean_documento(payload.documento)
-    clean_phone = normalize_phone_e164(payload.telefono)
+    raw_clean_phone = normalize_phone_e164(payload.telefono)
+    clean_phone = f"+{raw_clean_phone}" if raw_clean_phone and not raw_clean_phone.startswith("+") else raw_clean_phone
     cleaned_ticket = payload.nro_ticket.strip().upper()
+    cleaned_nombre = payload.nombre.strip().upper() if payload.nombre else "CLIENTE EXTRA"
 
     # 1. Upsert del Cliente en cupones_clientes
     query_cliente = select(CuponCliente).where(
@@ -131,26 +133,26 @@ async def registrar_cupon(
 
     if cliente:
         # Actualizar datos de contacto si se proveyeron nuevos
-        if payload.nombre and payload.nombre.strip():
-            cliente.nombre = payload.nombre.strip()
+        if cleaned_nombre:
+            cliente.nombre = cleaned_nombre
         if clean_phone:
             cliente.telefono = clean_phone
         if payload.direccion:
-            cliente.direccion = payload.direccion.strip()
+            cliente.direccion = payload.direccion.strip().upper()
         if payload.barrio:
-            cliente.barrio = payload.barrio.strip()
+            cliente.barrio = payload.barrio.strip().upper()
         if payload.ciudad:
-            cliente.ciudad = payload.ciudad.strip()
+            cliente.ciudad = payload.ciudad.strip().upper()
         cliente.updated_at = now
     else:
         cliente = CuponCliente(
             company_id=company_id,
             documento=cleaned_doc,
-            nombre=payload.nombre.strip(),
+            nombre=cleaned_nombre,
             telefono=clean_phone,
-            direccion=payload.direccion.strip() if payload.direccion else None,
-            barrio=payload.barrio.strip() if payload.barrio else "Centro",
-            ciudad=payload.ciudad.strip() if payload.ciudad else "Pedro Juan Caballero",
+            direccion=payload.direccion.strip().upper() if payload.direccion else None,
+            barrio=payload.barrio.strip().upper() if payload.barrio else "CENTRO",
+            ciudad=payload.ciudad.strip().upper() if payload.ciudad else "PEDRO JUAN CABALLERO",
             ticket_promedio=0,
             total_gastado=0,
             cantidad_compras=0,
@@ -298,8 +300,18 @@ async def list_cupon_tickets(
     if barrio:
         query = query.where(CuponCliente.barrio.ilike(f"%{barrio}%"))
     if documento:
-        cleaned = clean_documento(documento)
-        query = query.where(CuponCliente.documento.ilike(f"%{cleaned}%"))
+        term = documento.strip()
+        cleaned = clean_documento(term)
+        clean_doc = f"%{cleaned}%" if cleaned else f"%{term}%"
+        term_pattern = f"%{term}%"
+        query = query.where(
+            or_(
+                CuponCliente.documento.ilike(clean_doc),
+                CuponCliente.nombre.ilike(term_pattern),
+                CuponCliente.telefono.ilike(term_pattern),
+                CuponTicket.nro_ticket.ilike(term_pattern),
+            )
+        )
     if sincronizado is not None:
         query = query.where(CuponTicket.sincronizado == sincronizado)
 
