@@ -130,6 +130,7 @@ export default function PurchasesPage() {
   const [returnItemsList, setReturnItemsList] = useState<any[]>([])
   const [generalReturnNotes, setGeneralReturnNotes] = useState<string>("")
   const [savingReturn, setSavingReturn] = useState(false)
+  const [editingReturnId, setEditingReturnId] = useState<string | null>(null)
 
   // Estados avanzados de búsqueda para Proveedores y Productos en Devoluciones
   const [supplierSearchForReturn, setSupplierSearchForReturn] = useState("")
@@ -1921,6 +1922,24 @@ export default function PurchasesPage() {
            (p.sku && p.sku.toLowerCase() === clean.toLowerCase())
     )
     if (matchSupplier) {
+      // Si ya está en la lista de items, incrementar cantidad directamente
+      const inList = returnItemsList.find(it => it.producto_id === matchSupplier.id)
+      if (inList) {
+        setReturnItemsList(prev => prev.map(it => {
+          if (it.producto_id === matchSupplier.id) {
+            const nCant = Number(it.cantidad || 0) + 1
+            return {
+              ...it,
+              cantidad: nCant,
+              valor_total: nCant * Number(it.valor_unitario || 0),
+            }
+          }
+          return it
+        }))
+        toast.success("Línea Incrementada (+1)", `${matchSupplier.nombre} — Total: ${Number(inList.cantidad || 0) + 1} un.`)
+        setProductSearchForReturn("")
+        return
+      }
       toast.success("Producto Detectado", `${matchSupplier.nombre}`)
       await handleSelectProductObjectForReturn(matchSupplier)
       return
@@ -1935,6 +1954,26 @@ export default function PurchasesPage() {
           p => (p.codigo_barra && p.codigo_barra.toLowerCase() === clean.toLowerCase()) ||
                (p.sku && p.sku.toLowerCase() === clean.toLowerCase())
         ) || res[0]
+
+        // Si ya está en la lista de items, incrementar cantidad directamente
+        const inList = returnItemsList.find(it => it.producto_id === exact.id)
+        if (inList) {
+          setReturnItemsList(prev => prev.map(it => {
+            if (it.producto_id === exact.id) {
+              const nCant = Number(it.cantidad || 0) + 1
+              return {
+                ...it,
+                cantidad: nCant,
+                valor_total: nCant * Number(it.valor_unitario || 0),
+              }
+            }
+            return it
+          }))
+          toast.success("Línea Incrementada (+1)", `${exact.nombre} — Total: ${Number(inList.cantidad || 0) + 1} un.`)
+          setProductSearchForReturn("")
+          return
+        }
+
         toast.success("Producto Encontrado", `${exact.nombre}`)
         await handleSelectProductObjectForReturn(exact)
       } else {
@@ -2012,7 +2051,33 @@ export default function PurchasesPage() {
       detalle: returnDetailNotes || undefined,
     }
 
-    setReturnItemsList(prev => [...prev, newItem])
+    // Unificación de líneas: si el producto ya existe en la lista, se incrementa su cantidad
+    setReturnItemsList(prev => {
+      const existingIdx = prev.findIndex(it => it.producto_id === newItem.producto_id)
+      if (existingIdx >= 0) {
+        const updated = [...prev]
+        const existing = updated[existingIdx]
+        const nuevaCantidad = Number(existing.cantidad || 0) + Number(newItem.cantidad || 0)
+        const unitPrice = newItem.valor_unitario > 0 ? newItem.valor_unitario : (existing.valor_unitario || 0)
+        updated[existingIdx] = {
+          ...existing,
+          cantidad: nuevaCantidad,
+          valor_unitario: unitPrice,
+          valor_total: nuevaCantidad * unitPrice,
+          motivo: newItem.motivo || existing.motivo,
+          lote: [existing.lote, newItem.lote].filter(Boolean).join(", ") || undefined,
+          fecha_vencimiento: newItem.fecha_vencimiento || existing.fecha_vencimiento,
+          factura_id: newItem.factura_id || existing.factura_id,
+          factura_numero: newItem.factura_numero || existing.factura_numero,
+          detalle: [existing.detalle, newItem.detalle].filter(Boolean).join(" | ") || undefined,
+        }
+        toast.success("Línea Incrementada", `Se sumaron ${qty} unidades a ${existing.producto_nombre} (Total: ${nuevaCantidad} un.)`)
+        return updated
+      }
+      toast.success("Producto agregado a la lista de devolución")
+      return [...prev, newItem]
+    })
+
     setSelectedProductForReturn("")
     setSelectedProductDetails(null)
     setProductStockInfo(null)
@@ -2022,11 +2087,74 @@ export default function PurchasesPage() {
     setReturnLot("")
     setReturnExpiryDate("")
     setReturnDetailNotes("")
-    toast.success("Producto agregado a la lista de devolución")
   }
 
   const handleRemoveReturnItem = (index: number) => {
     setReturnItemsList(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleEditReturn = async (item: any) => {
+    const raw = item.raw || item
+    const supId = raw.proveedor_id || item.proveedor_id || item.supplier_id || ""
+    setEditingReturnId(item.id)
+    setSelectedSupplierForReturn(supId)
+    setSelectedWarehouseForReturn(raw.warehouse_id || item.warehouse_id || "")
+    setGeneralReturnNotes(raw.observaciones || item.observaciones || "")
+
+    if (supId) {
+      setLoadingSupplierProducts(true)
+      try {
+        const prods = await api.purchases.supplierProducts(supId)
+        setSupplierProducts(prods || [])
+      } catch {
+        setSupplierProducts([])
+      } finally {
+        setLoadingSupplierProducts(false)
+      }
+    }
+
+    // Unificar items existentes por producto_id para visualización limpia y consolidada
+    const rawItems = raw.items || item.items || []
+    const map = new Map<string, any>()
+    for (const it of rawItems) {
+      const key = String(it.producto_id || it.id)
+      const cant = Number(it.cantidad || 0)
+      const valU = Number(it.valor_unitario || it.costo_promedio || 0)
+      const valTot = Number(it.valor_total != null ? it.valor_total : cant * valU)
+      if (map.has(key)) {
+        const ex = map.get(key)
+        const nCant = ex.cantidad + cant
+        const nTot = ex.valor_total + valTot
+        map.set(key, {
+          ...ex,
+          cantidad: nCant,
+          valor_total: nTot,
+          valor_unitario: nCant > 0 ? Math.round(nTot / nCant) : valU,
+          lote: [ex.lote, it.lote].filter(Boolean).join(", ") || undefined,
+          fecha_vencimiento: ex.fecha_vencimiento || it.fecha_vencimiento,
+          factura_numero: [ex.factura_numero, it.factura_numero].filter(Boolean).join(", ") || undefined,
+          detalle: [ex.detalle, it.detalle].filter(Boolean).join(" | ") || undefined,
+        })
+      } else {
+        map.set(key, {
+          producto_id: it.producto_id,
+          producto_nombre: it.producto_nombre || "Producto",
+          sku: it.sku,
+          codigo_barra: it.codigo_barra || it.codigo_barras,
+          factura_id: it.factura_id,
+          factura_numero: it.factura_numero,
+          cantidad: cant,
+          valor_unitario: valU,
+          valor_total: valTot,
+          motivo: it.motivo || "vencido",
+          lote: it.lote,
+          fecha_vencimiento: it.fecha_vencimiento,
+          detalle: it.detalle,
+        })
+      }
+    }
+    setReturnItemsList(Array.from(map.values()))
+    setShowCreateReturnModal(true)
   }
 
   const handleSaveSupplierReturn = async () => {
@@ -2058,13 +2186,24 @@ export default function PurchasesPage() {
         })),
       }
 
-      await api.purchases.returns.create(payload)
-      toast.success("Devolución creada", "La solicitud fue registrada en estado Pendiente de Aprobación")
+      if (editingReturnId) {
+        await api.purchases.returns.update(editingReturnId, payload)
+        toast.success("Devolución actualizada", "Los cambios y líneas unificadas fueron guardados")
+      } else {
+        await api.purchases.returns.create(payload)
+        toast.success("Devolución creada", "La solicitud fue registrada en estado Pendiente de Aprobación")
+      }
+
+      setEditingReturnId(null)
       setShowCreateReturnModal(false)
+      setReturnItemsList([])
+      setSelectedSupplierForReturn("")
+      setSupplierProducts([])
+      setProductInvoices([])
       const updated = await api.purchases.returns.list()
       setManagedReturns(updated || [])
     } catch (err: any) {
-      toast.error("Error al registrar devolución", err.message)
+      toast.error("Error al guardar devolución", err.message)
     } finally {
       setSavingReturn(false)
     }
@@ -3990,6 +4129,16 @@ export default function PurchasesPage() {
                                   title="Ver detalle de productos devueltos"
                                 >
                                   <Eye className="w-4 h-4" />
+                                </button>
+                              )}
+
+                              {isManaged && estado !== "completado" && (
+                                <button
+                                  onClick={() => handleEditReturn(item)}
+                                  className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg transition"
+                                  title="Editar devolución (modificar productos, almacén u observaciones)"
+                                >
+                                  <Edit3 className="w-4 h-4" />
                                 </button>
                               )}
 
@@ -7047,23 +7196,32 @@ export default function PurchasesPage() {
             <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-4 bg-slate-50/70 dark:bg-slate-800/40">
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                    Circuito de Devolución
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                    editingReturnId
+                      ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
+                      : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                  }`}>
+                    {editingReturnId ? "Modo Edición" : "Circuito de Devolución"}
                   </span>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">Paso 1: Solicitud e imputación de productos</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {editingReturnId ? "Actualización de ítems y condiciones de devolución" : "Paso 1: Solicitud e imputación de productos"}
+                  </span>
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                   <Truck className="w-6 h-6 text-amber-600 dark:text-amber-400" />
-                  Nueva Devolución a Proveedor
+                  {editingReturnId ? "Editar Devolución a Proveedor" : "Nueva Devolución a Proveedor"}
                 </h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Seleccione el proveedor para consultar su catálogo de productos y vincular las facturas correspondientes.
+                  {editingReturnId
+                    ? "Modifique los productos, cantidades, almacén u observaciones. Al agregar productos existentes las líneas se unificarán automáticamente."
+                    : "Seleccione el proveedor para consultar su catálogo de productos y vincular las facturas correspondientes."}
                 </p>
               </div>
 
               <button
                 onClick={() => {
                   setShowCreateReturnModal(false)
+                  setEditingReturnId(null)
                   setReturnItemsList([])
                   setSelectedSupplierForReturn("")
                   setSupplierProducts([])
@@ -7630,6 +7788,7 @@ export default function PurchasesPage() {
                 type="button"
                 onClick={() => {
                   setShowCreateReturnModal(false)
+                  setEditingReturnId(null)
                   setReturnItemsList([])
                   setSelectedSupplierForReturn("")
                   setSupplierProducts([])
@@ -7648,11 +7807,11 @@ export default function PurchasesPage() {
               >
                 {savingReturn ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" /> Registrando...
+                    <Loader2 className="w-4 h-4 animate-spin" /> {editingReturnId ? "Guardando..." : "Registrando..."}
                   </>
                 ) : (
                   <>
-                    <Save className="w-4 h-4" /> Guardar Solicitud de Devolución
+                    <Save className="w-4 h-4" /> {editingReturnId ? "Guardar Modificaciones" : "Guardar Solicitud de Devolución"}
                   </>
                 )}
               </button>
@@ -7686,6 +7845,20 @@ export default function PurchasesPage() {
               </div>
 
               <div className="flex items-center gap-2">
+                {viewingReturnDetail.estado !== "completado" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const itm = viewingReturnDetail
+                      setViewingReturnDetail(null)
+                      handleEditReturn(itm)
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-1.5 shadow-sm transition-colors"
+                    title="Editar esta devolución"
+                  >
+                    <Edit3 className="w-4 h-4" /> Editar Devolución
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setPrintingReturnDoc(viewingReturnDetail.raw || viewingReturnDetail)}
@@ -7775,36 +7948,64 @@ export default function PurchasesPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {(viewingReturnDetail.raw?.items || []).map((it: any, idx: number) => (
-                      <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                        <td className="py-2.5 px-3">
-                          <span className="font-semibold text-gray-900 dark:text-white block">{it.producto_nombre}</span>
-                          <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 font-mono">
-                            {it.codigo_barras && <span>CB: {it.codigo_barras}</span>}
-                            {it.codigo_interno && <span>SKU: {it.codigo_interno}</span>}
-                            {it.lote && <span>Lote: {it.lote}</span>}
-                            {it.fecha_vencimiento && <span>Vto: {it.fecha_vencimiento}</span>}
-                          </div>
-                        </td>
-                        <td className="py-2.5 px-3 font-mono text-gray-600 dark:text-gray-300">
-                          {it.factura_numero || "Ajuste directo"}
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300">
-                            {it.motivo}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-bold text-gray-900 dark:text-white">
-                          {it.cantidad}
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-gray-700 dark:text-gray-300">
-                          {formatPYG(it.valor_unitario)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-bold text-amber-600 dark:text-amber-400">
-                          {formatPYG(it.valor_total)}
-                        </td>
-                      </tr>
-                    ))}
+                    {(() => {
+                      const rawItems = viewingReturnDetail.raw?.items || viewingReturnDetail.items || []
+                      const map = new Map<string, any>()
+                      for (const it of rawItems) {
+                        const key = String(it.producto_id || it.id || it.producto_nombre)
+                        const cant = Number(it.cantidad || 0)
+                        const valU = Number(it.valor_unitario || it.costo_promedio || 0)
+                        const valTot = Number(it.valor_total != null ? it.valor_total : cant * valU)
+                        if (map.has(key)) {
+                          const ex = map.get(key)
+                          const nCant = ex.cantidad + cant
+                          const nTot = ex.valor_total + valTot
+                          map.set(key, {
+                            ...ex,
+                            cantidad: nCant,
+                            valor_total: nTot,
+                            valor_unitario: nCant > 0 ? Math.round(nTot / nCant) : valU,
+                            lote: [ex.lote, it.lote].filter(Boolean).join(", ") || undefined,
+                            fecha_vencimiento: ex.fecha_vencimiento || it.fecha_vencimiento,
+                            factura_numero: [ex.factura_numero, it.factura_numero].filter(Boolean).join(", ") || undefined,
+                          })
+                        } else {
+                          map.set(key, { ...it, cantidad: cant, valor_unitario: valU, valor_total: valTot })
+                        }
+                      }
+                      return Array.from(map.values()).map((it: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                          <td className="py-2.5 px-3">
+                            <span className="font-semibold text-gray-900 dark:text-white block">{it.producto_nombre}</span>
+                            <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 font-mono">
+                              {it.codigo_barras && <span>CB: {it.codigo_barras}</span>}
+                              {it.codigo_barra && !it.codigo_barras && <span>CB: {it.codigo_barra}</span>}
+                              {it.codigo_interno && <span>SKU: {it.codigo_interno}</span>}
+                              {it.sku && !it.codigo_interno && <span>SKU: {it.sku}</span>}
+                              {it.lote && <span>Lote: {it.lote}</span>}
+                              {it.fecha_vencimiento && <span>Vto: {it.fecha_vencimiento}</span>}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-gray-600 dark:text-gray-300">
+                            {it.factura_numero || "Ajuste directo"}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300">
+                              {it.motivo}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-gray-900 dark:text-white font-mono">
+                            {it.cantidad}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-gray-700 dark:text-gray-300 font-mono">
+                            {formatPYG(it.valor_unitario)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-amber-600 dark:text-amber-400 font-mono">
+                            {formatPYG(it.valor_total)}
+                          </td>
+                        </tr>
+                      ))
+                    })()}
                   </tbody>
                   <tfoot className="bg-slate-50 dark:bg-slate-800/80 font-bold border-t border-slate-200 dark:border-slate-700">
                     <tr>

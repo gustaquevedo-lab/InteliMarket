@@ -1443,32 +1443,58 @@ export default function ReturnsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {viewingSupRet.items.map((it: any, idx: number) => (
-                      <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                        <td className="py-2 px-3">
-                          <span className="font-semibold text-gray-900 dark:text-white block">{it.producto_nombre || it.descripcion}</span>
-                          <div className="flex items-center gap-2 text-[10px] text-gray-400 font-mono">
-                            {it.codigo_barras && <span>CB: {it.codigo_barras}</span>}
-                            {it.codigo_interno && <span>SKU: {it.codigo_interno}</span>}
-                            {it.lote && <span>Lote: {it.lote}</span>}
-                          </div>
-                        </td>
-                        <td className="py-2 px-3">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300">
-                            {it.motivo || "Devolución"}
-                          </span>
-                        </td>
-                        <td className="py-2 px-3 text-right font-bold text-gray-900 dark:text-white">
-                          {it.cantidad}
-                        </td>
-                        <td className="py-2 px-3 text-right text-gray-700 dark:text-gray-300 font-mono">
-                          {formatPYG(Number(it.valor_unitario || it.precio_unitario || 0))}
-                        </td>
-                        <td className="py-2 px-3 text-right font-bold text-amber-600 dark:text-amber-400 font-mono">
-                          {formatPYG(Number(it.valor_total || it.total || 0))}
-                        </td>
-                      </tr>
-                    ))}
+                    {(() => {
+                      const rawItems = viewingSupRet.items || []
+                      const map = new Map<string, any>()
+                      for (const it of rawItems) {
+                        const key = String(it.producto_id || it.id || it.producto_nombre || it.descripcion)
+                        const cant = Number(it.cantidad || 0)
+                        const valU = Number(it.valor_unitario || it.precio_unitario || 0)
+                        const valTot = Number(it.valor_total || it.total || (cant * valU))
+                        if (map.has(key)) {
+                          const ex = map.get(key)
+                          const nCant = ex.cantidad + cant
+                          const nTot = ex.valor_total + valTot
+                          map.set(key, {
+                            ...ex,
+                            cantidad: nCant,
+                            valor_total: nTot,
+                            valor_unitario: nCant > 0 ? Math.round(nTot / nCant) : valU,
+                            lote: [ex.lote, it.lote].filter(Boolean).join(", ") || undefined,
+                          })
+                        } else {
+                          map.set(key, { ...it, cantidad: cant, valor_unitario: valU, valor_total: valTot })
+                        }
+                      }
+                      return Array.from(map.values()).map((it: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                          <td className="py-2 px-3">
+                            <span className="font-semibold text-gray-900 dark:text-white block">{it.producto_nombre || it.descripcion}</span>
+                            <div className="flex items-center gap-2 text-[10px] text-gray-400 font-mono">
+                              {it.codigo_barras && <span>CB: {it.codigo_barras}</span>}
+                              {it.codigo_barra && !it.codigo_barras && <span>CB: {it.codigo_barra}</span>}
+                              {it.codigo_interno && <span>SKU: {it.codigo_interno}</span>}
+                              {it.sku && !it.codigo_interno && <span>SKU: {it.sku}</span>}
+                              {it.lote && <span>Lote: {it.lote}</span>}
+                            </div>
+                          </td>
+                          <td className="py-2 px-3">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300">
+                              {it.motivo || "Devolución"}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-right font-bold text-gray-900 dark:text-white">
+                            {it.cantidad}
+                          </td>
+                          <td className="py-2 px-3 text-right text-gray-700 dark:text-gray-300 font-mono">
+                            {formatPYG(Number(it.valor_unitario || it.precio_unitario || 0))}
+                          </td>
+                          <td className="py-2 px-3 text-right font-bold text-amber-600 dark:text-amber-400 font-mono">
+                            {formatPYG(Number(it.valor_total || it.total || 0))}
+                          </td>
+                        </tr>
+                      ))
+                    })()}
                   </tbody>
                 </table>
               </div>

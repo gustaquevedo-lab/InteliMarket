@@ -171,25 +171,60 @@ async def list_supplier_returns(
 
     out = []
     for r, prov_nom, prov_ruc, wh_nom in rows:
-        items_detail = []
+        items_map: Dict[uuid.UUID, Dict[str, Any]] = {}
         for it in r.items:
             p_info = prod_names.get(it.producto_id, {})
-            items_detail.append({
-                "id": str(it.id),
-                "producto_id": str(it.producto_id),
-                "producto_nombre": p_info.get("nombre", "Producto"),
-                "sku": p_info.get("sku"),
-                "codigo_barra": p_info.get("codigo_barra"),
-                "factura_id": str(it.factura_id) if it.factura_id else None,
-                "factura_numero": it.factura_numero,
-                "cantidad": float(it.cantidad or 0),
-                "valor_unitario": float(it.valor_unitario or 0),
-                "valor_total": float(it.valor_total or 0),
-                "motivo": it.motivo,
-                "lote": it.lote,
-                "fecha_vencimiento": it.fecha_vencimiento.isoformat() if it.fecha_vencimiento else None,
-                "detalle": it.detalle,
-            })
+            pid = it.producto_id
+            cant = float(it.cantidad or 0)
+            val_u = float(it.valor_unitario or it.costo_promedio or 0)
+            val_tot = float(it.valor_total or (cant * val_u))
+
+            if pid in items_map:
+                existing = items_map[pid]
+                prev_cant = existing["cantidad"]
+                prev_tot = existing["valor_total"]
+                new_cant = prev_cant + cant
+                new_tot = prev_tot + val_tot
+                new_u = round(new_tot / new_cant, 2) if new_cant > 0 else val_u
+
+                lotes = [existing.get("lote"), it.lote]
+                unique_lotes = ", ".join(filter(None, set(lotes)))
+
+                vtos = [existing.get("fecha_vencimiento"), it.fecha_vencimiento.isoformat() if it.fecha_vencimiento else None]
+                unique_vtos = ", ".join(filter(None, set(vtos)))
+
+                facturas = [existing.get("factura_numero"), it.factura_numero]
+                unique_facturas = ", ".join(filter(None, set(facturas)))
+
+                detalles = [existing.get("detalle"), it.detalle]
+                unique_detalles = " | ".join(filter(None, set(detalles)))
+
+                existing["cantidad"] = new_cant
+                existing["valor_unitario"] = new_u
+                existing["valor_total"] = new_tot
+                existing["lote"] = unique_lotes or None
+                existing["fecha_vencimiento"] = unique_vtos or None
+                existing["factura_numero"] = unique_facturas or None
+                existing["detalle"] = unique_detalles or None
+            else:
+                items_map[pid] = {
+                    "id": str(it.id),
+                    "producto_id": str(it.producto_id),
+                    "producto_nombre": p_info.get("nombre", "Producto"),
+                    "sku": p_info.get("sku"),
+                    "codigo_barra": p_info.get("codigo_barra"),
+                    "factura_id": str(it.factura_id) if it.factura_id else None,
+                    "factura_numero": it.factura_numero,
+                    "cantidad": cant,
+                    "valor_unitario": val_u,
+                    "valor_total": val_tot,
+                    "motivo": it.motivo,
+                    "lote": it.lote,
+                    "fecha_vencimiento": it.fecha_vencimiento.isoformat() if it.fecha_vencimiento else None,
+                    "detalle": it.detalle,
+                }
+
+        items_detail = list(items_map.values())
 
         out.append({
             "id": str(r.id),
@@ -202,8 +237,8 @@ async def list_supplier_returns(
             "almacen_nombre": wh_nom or "Depósito Principal",
             "fecha_creacion": r.fecha_creacion.isoformat() if r.fecha_creacion else None,
             "fecha_estimada_retiro": r.fecha_estimada_retiro.isoformat() if r.fecha_estimada_retiro else None,
-            "total_items": r.total_items or len(items_detail),
-            "valor_total_estimado": float(r.valor_total_estimado or 0),
+            "total_items": len(items_detail) if items_detail else (r.total_items or 0),
+            "valor_total_estimado": float(sum(it["valor_total"] for it in items_detail)) if items_detail else float(r.valor_total_estimado or 0),
             "nota_credito_numero": r.nota_credito_numero,
             "nota_credito_monto": float(r.nota_credito_monto or 0) if r.nota_credito_monto else None,
             "estado": r.estado or "pendiente",
@@ -220,13 +255,63 @@ async def list_supplier_returns(
     return out
 
 
+def consolidate_return_items(items: List[Any]) -> List[Dict[str, Any]]:
+    """
+    Unifica ítems repetidos por producto_id en una sola línea,
+    sumando sus cantidades y recalculando el nuevo subtotal y precio unitario ponderado.
+    """
+    consolidated: Dict[uuid.UUID, Dict[str, Any]] = {}
+    for it in items:
+        pid = it.producto_id if isinstance(it.producto_id, uuid.UUID) else uuid.UUID(str(it.producto_id))
+        cant = Decimal(str(it.cantidad))
+        val_u = Decimal(str(it.valor_unitario))
+        val_tot = cant * val_u
+
+        if pid in consolidated:
+            entry = consolidated[pid]
+            prev_cant = entry["cantidad"]
+            prev_tot = entry["valor_total"]
+            new_cant = prev_cant + cant
+            new_tot = prev_tot + val_tot
+            new_u = (new_tot / new_cant) if new_cant > 0 else val_u
+
+            if not entry.get("factura_id") and getattr(it, "factura_id", None):
+                entry["factura_id"] = it.factura_id
+                entry["factura_numero"] = getattr(it, "factura_numero", None)
+            if not entry.get("lote") and getattr(it, "lote", None):
+                entry["lote"] = it.lote
+            if not entry.get("fecha_vencimiento") and getattr(it, "fecha_vencimiento", None):
+                entry["fecha_vencimiento"] = it.fecha_vencimiento
+            it_detalle = getattr(it, "detalle", None)
+            if it_detalle:
+                entry["detalle"] = (entry["detalle"] + " | " + it_detalle) if entry.get("detalle") else it_detalle
+
+            entry["cantidad"] = new_cant
+            entry["valor_unitario"] = new_u
+            entry["valor_total"] = new_tot
+        else:
+            consolidated[pid] = {
+                "producto_id": pid,
+                "factura_id": getattr(it, "factura_id", None),
+                "factura_numero": getattr(it, "factura_numero", None),
+                "cantidad": cant,
+                "valor_unitario": val_u,
+                "valor_total": val_tot,
+                "motivo": getattr(it, "motivo", "vencido") or "vencido",
+                "lote": getattr(it, "lote", None),
+                "fecha_vencimiento": getattr(it, "fecha_vencimiento", None),
+                "detalle": getattr(it, "detalle", None),
+            }
+    return list(consolidated.values())
+
+
 async def create_supplier_return(
     db: AsyncSession,
     company_id: uuid.UUID,
     user_id: uuid.UUID,
     data: Any,
 ) -> Dict[str, Any]:
-    """Crea una devolución a proveedor en estado inicial 'pendiente'."""
+    """Crea una devolución a proveedor en estado inicial 'pendiente' unificando ítems repetidos."""
     now = datetime.utcnow()
     # Generar código correlativo DEV-AAAAMMDD-XXXX
     sec_q = select(func.count(SupplierReturn.id)).where(
@@ -237,32 +322,35 @@ async def create_supplier_return(
     correlativo = (sec_res.scalar() or 0) + 1
     codigo = f"DEV-{date.today().strftime('%Y%m%d')}-{correlativo:04d}"
 
+    # Consolidar ítems por producto antes de persistir
+    unified_items = consolidate_return_items(data.items)
     total_val = Decimal(0)
     item_objects = []
-    for it in data.items:
-        cant = Decimal(str(it.cantidad))
-        val_u = Decimal(str(it.valor_unitario))
-        val_tot = cant * val_u
+    for it in unified_items:
+        cant = it["cantidad"]
+        val_u = it["valor_unitario"]
+        val_tot = it["valor_total"]
         total_val += val_tot
 
         # Obtener número de factura si vino factura_id y no vino factura_numero
-        factura_num = it.factura_numero
-        if it.factura_id and not factura_num:
-            inv_res = await db.execute(select(SupplierInvoice.numero_factura).where(SupplierInvoice.id == it.factura_id))
+        factura_num = it.get("factura_numero")
+        fac_id = it.get("factura_id")
+        if fac_id and not factura_num:
+            inv_res = await db.execute(select(SupplierInvoice.numero_factura).where(SupplierInvoice.id == fac_id))
             factura_num = inv_res.scalar_one_or_none()
 
         item_obj = SupplierReturnItem(
-            producto_id=it.producto_id,
-            factura_id=it.factura_id,
+            producto_id=it["producto_id"],
+            factura_id=fac_id,
             factura_numero=factura_num,
             cantidad=cant,
             costo_promedio=val_u,
             valor_unitario=val_u,
             valor_total=val_tot,
-            motivo=it.motivo,
-            lote=it.lote,
-            fecha_vencimiento=it.fecha_vencimiento,
-            detalle=it.detalle,
+            motivo=it.get("motivo") or "vencido",
+            lote=it.get("lote"),
+            fecha_vencimiento=it.get("fecha_vencimiento"),
+            detalle=it.get("detalle"),
         )
         item_objects.append(item_obj)
 
@@ -287,6 +375,100 @@ async def create_supplier_return(
     res = await list_supplier_returns(db, company_id, supplier_id=data.proveedor_id)
     matched = [r for r in res if r["id"] == str(supplier_return.id)]
     return matched[0] if matched else {"id": str(supplier_return.id), "codigo": codigo, "estado": "pendiente"}
+
+
+async def update_supplier_return(
+    db: AsyncSession,
+    company_id: uuid.UUID,
+    return_id: uuid.UUID,
+    user_id: uuid.UUID,
+    data: Any,
+) -> Dict[str, Any]:
+    """
+    Edita una devolución a proveedor mientras no esté completamente aprobada (estado != 'completado').
+    Actualiza cabecera, unifica ítems por producto y recalcula totales.
+    """
+    q = select(SupplierReturn).options(selectinload(SupplierReturn.items)).where(
+        SupplierReturn.id == return_id,
+        SupplierReturn.company_id == company_id,
+    )
+    res = await db.execute(q)
+    sr = res.scalar_one_or_none()
+    if not sr:
+        raise HTTPException(404, "Devolución a proveedor no encontrada")
+
+    if sr.estado == "completado":
+        raise HTTPException(400, "No se puede editar una devolución que ya fue completada (stock y finanzas impactados)")
+
+    # Eliminar ítems anteriores
+    for old_item in list(sr.items):
+        await db.delete(old_item)
+    sr.items.clear()
+    await db.flush()
+
+    # Consolidar nuevos ítems
+    unified_items = consolidate_return_items(data.items)
+    total_val = Decimal(0)
+    new_item_objects = []
+
+    for it in unified_items:
+        cant = it["cantidad"]
+        val_u = it["valor_unitario"]
+        val_tot = it["valor_total"]
+        total_val += val_tot
+
+        factura_num = it.get("factura_numero")
+        fac_id = it.get("factura_id")
+        if fac_id and not factura_num:
+            inv_res = await db.execute(select(SupplierInvoice.numero_factura).where(SupplierInvoice.id == fac_id))
+            factura_num = inv_res.scalar_one_or_none()
+
+        item_obj = SupplierReturnItem(
+            return_id=sr.id,
+            producto_id=it["producto_id"],
+            factura_id=fac_id,
+            factura_numero=factura_num,
+            cantidad=cant,
+            costo_promedio=val_u,
+            valor_unitario=val_u,
+            valor_total=val_tot,
+            motivo=it.get("motivo") or "vencido",
+            lote=it.get("lote"),
+            fecha_vencimiento=it.get("fecha_vencimiento"),
+            detalle=it.get("detalle"),
+        )
+        new_item_objects.append(item_obj)
+        db.add(item_obj)
+
+    if data.warehouse_id is not None:
+        sr.warehouse_id = data.warehouse_id
+    if data.fecha_estimada_retiro is not None:
+        sr.fecha_estimada_retiro = data.fecha_estimada_retiro
+    if data.observaciones is not None:
+        sr.observaciones = data.observaciones
+    if data.tipo is not None:
+        sr.tipo = data.tipo
+    if getattr(data, "proveedor_id", None) and data.proveedor_id != sr.proveedor_id:
+        sr.proveedor_id = data.proveedor_id
+
+    sr.total_items = len(new_item_objects)
+    sr.valor_total_estimado = total_val
+    sr.updated_at = datetime.utcnow()
+
+    # Si estaba rechazada y se editó, vuelve a pendiente para reevaluación
+    if sr.estado == "rechazado":
+        sr.estado = "pendiente"
+        sr.motivo_rechazo = None
+        sr.rechazado_por = None
+        sr.rechazado_at = None
+
+    await db.commit()
+    await db.refresh(sr)
+
+    res_list = await list_supplier_returns(db, company_id)
+    matched = [r for r in res_list if r["id"] == str(sr.id)]
+    return matched[0] if matched else {"id": str(sr.id), "codigo": sr.codigo, "estado": sr.estado}
+
 
 
 async def approve_supplier_return(

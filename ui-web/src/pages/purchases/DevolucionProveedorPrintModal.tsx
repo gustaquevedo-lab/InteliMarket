@@ -1,4 +1,4 @@
-import React, { useRef } from "react"
+import React, { useRef, useMemo } from "react"
 import { Printer, X, Truck, CheckCircle2, Clock, Ban, Building2, FileCheck, ShieldCheck, UserCheck } from "lucide-react"
 import { formatDate, formatDateTime, formatPYG } from "../../utils/format"
 
@@ -58,14 +58,69 @@ interface Props {
 export const DevolucionProveedorPrintModal: React.FC<Props> = ({ devolucion, onClose }) => {
   const printAreaRef = useRef<HTMLDivElement>(null)
 
-  const items: DevolucionItemPrint[] = devolucion.items || devolucion.raw?.items || []
+  const rawItems: DevolucionItemPrint[] = devolucion.items || devolucion.raw?.items || []
+
+  // Unificar líneas de productos por producto_id / SKU / código de barras / nombre
+  const items: DevolucionItemPrint[] = useMemo(() => {
+    const map = new Map<string, DevolucionItemPrint>()
+    for (const it of rawItems) {
+      const key = (it.producto_id && String(it.producto_id)) || it.sku || it.codigo_barra || it.codigo_barras || it.codigo_interno || it.producto_nombre || Math.random().toString()
+      const cant = Number(it.cantidad || 0)
+      const unit = Number(it.valor_unitario || 0)
+      const sub = Number(it.valor_total != null ? it.valor_total : cant * unit)
+
+      if (map.has(key)) {
+        const existing = map.get(key)!
+        const newCant = Number(existing.cantidad || 0) + cant
+        const newSub = Number(existing.valor_total || 0) + sub
+        const newUnit = newCant > 0 ? Math.round(newSub / newCant) : (unit || existing.valor_unitario)
+
+        // Combinar lotes sin duplicar
+        const lotes = [existing.lote, it.lote].filter(Boolean)
+        const uniqueLotes = Array.from(new Set(lotes)).join(", ")
+
+        // Combinar vencimientos
+        const vtos = [existing.fecha_vencimiento, it.fecha_vencimiento].filter(Boolean)
+        const uniqueVtos = Array.from(new Set(vtos)).join(", ")
+
+        // Combinar facturas
+        const facturas = [existing.factura_numero, it.factura_numero].filter(Boolean)
+        const uniqueFacturas = Array.from(new Set(facturas)).join(", ")
+
+        // Combinar detalles
+        const detalles = [existing.detalle, it.detalle].filter(Boolean)
+        const uniqueDetalles = Array.from(new Set(detalles)).join(" | ")
+
+        map.set(key, {
+          ...existing,
+          cantidad: newCant,
+          valor_unitario: newUnit,
+          valor_total: newSub,
+          lote: uniqueLotes || undefined,
+          fecha_vencimiento: uniqueVtos || undefined,
+          factura_numero: uniqueFacturas || undefined,
+          detalle: uniqueDetalles || undefined,
+        })
+      } else {
+        map.set(key, {
+          ...it,
+          cantidad: cant,
+          valor_unitario: unit,
+          valor_total: sub,
+        })
+      }
+    }
+    return Array.from(map.values())
+  }, [rawItems])
+
   const proveedorNombre = devolucion.proveedor_nombre || devolucion.supplier_nombre || devolucion.raw?.proveedor_nombre || "Proveedor Sin Asignar"
   const proveedorRuc = devolucion.proveedor_ruc || devolucion.raw?.proveedor_ruc || devolucion.raw?.supplier?.ruc || "—"
   const proveedorTel = devolucion.proveedor_telefono || devolucion.raw?.proveedor_telefono || devolucion.raw?.supplier?.telefono || "—"
   const proveedorDir = devolucion.proveedor_direccion || devolucion.raw?.proveedor_direccion || devolucion.raw?.supplier?.direccion || "—"
   const codigo = devolucion.codigo || devolucion.raw?.codigo || `DEV-${devolucion.id.slice(0, 8).toUpperCase()}`
-  const totalDevuelto = Number(devolucion.valor_total_estimado ?? devolucion.monto ?? devolucion.raw?.valor_total_estimado ?? 0)
   const totalBultos = items.reduce((acc, it) => acc + (Number(it.cantidad) || 0), 0)
+  const totalCalculado = items.reduce((acc, it) => acc + (Number(it.valor_total) || 0), 0)
+  const totalDevuelto = totalCalculado > 0 ? totalCalculado : Number(devolucion.valor_total_estimado ?? devolucion.monto ?? devolucion.raw?.valor_total_estimado ?? 0)
   const almacen = devolucion.almacen_nombre || devolucion.raw?.almacen_nombre || "Depósito Central"
 
   const estado = devolucion.estado || "pendiente"

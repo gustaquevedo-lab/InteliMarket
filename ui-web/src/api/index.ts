@@ -2402,6 +2402,24 @@ export const api = {
           detalle?: string
         }[]
       }) => client.post<any>("/v1/purchases/returns", data),
+      update: (returnId: string, data: {
+        proveedor_id?: string
+        warehouse_id?: string
+        tipo?: string
+        fecha_estimada_retiro?: string
+        observaciones?: string
+        items: {
+          producto_id: string
+          factura_id?: string
+          factura_numero?: string
+          cantidad: number
+          valor_unitario: number
+          motivo: string
+          lote?: string
+          fecha_vencimiento?: string
+          detalle?: string
+        }[]
+      }) => client.put<any>(`/v1/purchases/returns/${returnId}`, data),
       approve: (returnId: string) =>
         client.post<any>(`/v1/purchases/returns/${returnId}/approve`),
       reject: (returnId: string, motivo_rechazo: string) =>

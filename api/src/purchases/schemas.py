@@ -242,8 +242,8 @@ class ReceiptItemInput(BaseModel):
     product_id: UUID
     variant_id: Optional[UUID] = None
     cantidad_ordenada: Optional[Decimal] = None
-    cantidad_recibida: Decimal = Field(ge=Decimal("0.001"))
-    costo_unitario: Decimal = Field(ge=0)
+    cantidad_recibida: Decimal = Field(default=Decimal("0"), ge=0)
+    costo_unitario: Decimal = Field(default=Decimal("0"), ge=0)
     lote: Optional[str] = None
     fecha_vencimiento: Optional[datetime] = None
     cantidad_rechazada: Optional[Decimal] = None
@@ -252,8 +252,6 @@ class ReceiptItemInput(BaseModel):
     es_extraordinario: bool = False
     autorizado_por: Optional[UUID] = None
     autorizacion_motivo: Optional[str] = None
-
-
 
     @field_validator("fecha_vencimiento", mode="before")
     def _clean_empty_dt(cls, v):
@@ -265,7 +263,19 @@ class ReceiptItemInput(BaseModel):
     def _clean_empty_uuid(cls, v):
         if v == "" or v is None:
             return None
-        return v
+        if isinstance(v, UUID):
+            return v
+        try:
+            return UUID(str(v).strip())
+        except Exception:
+            return None
+
+    @field_validator("lote", "motivo_rechazo", "autorizacion_motivo", mode="before")
+    def _clean_empty_str(cls, v):
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s if s else None
 
 
 class ReceiptCreate(BaseModel):
@@ -277,6 +287,17 @@ class ReceiptCreate(BaseModel):
     items: list[ReceiptItemInput]
     observaciones: Optional[str] = None
     user_id: Optional[UUID] = None
+
+    @field_validator("company_id", "purchase_order_id", "supplier_id", "warehouse_id", "user_id", mode="before")
+    def _clean_empty_uuids_create(cls, v):
+        if v == "" or v is None:
+            return None
+        if isinstance(v, UUID):
+            return v
+        try:
+            return UUID(str(v).strip())
+        except Exception:
+            return None
 
 
 class ReceiptResponse(BaseModel):

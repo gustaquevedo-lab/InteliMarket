@@ -35,7 +35,7 @@ from api.src.purchases.schemas import (
     Perform3WayMatchRequest, Perform3WayMatchResponse, AssociatePurchaseOrderRequest,
     SupplierNcRequestResponse, ResolveSupplierNcRequest,
     SupplierProductItemResponse, ProductInvoiceOptionResponse,
-    SupplierReturnCreateInput, SupplierReturnRejectInput, SupplierReturnCompleteInput,
+    SupplierReturnCreateInput, SupplierReturnUpdateInput, SupplierReturnRejectInput, SupplierReturnCompleteInput,
 )
 from api.src.purchases import service
 from api.src.purchases import imap_service
@@ -978,6 +978,20 @@ async def create_purchase_supplier_return(
     cid = uuid.UUID(user.get("company_id") or company_id)
     uid = uuid.UUID(str(user.get("id")))
     return await returns_service.create_supplier_return(db, cid, uid, body)
+
+
+@router.put("/purchases/returns/{return_id}")
+async def update_purchase_supplier_return(
+    return_id: str,
+    body: SupplierReturnUpdateInput,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Edita una devolución a proveedor mientras no esté completamente aprobada."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    uid = uuid.UUID(str(user.get("id")))
+    return await returns_service.update_supplier_return(db, cid, uuid.UUID(return_id), uid, body)
 
 
 @router.get("/purchases/returns")
