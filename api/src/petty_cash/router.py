@@ -356,6 +356,10 @@ async def list_expenses(
     estado: Optional[str] = Query(None),
     desde: Optional[date] = Query(None),
     hasta: Optional[date] = Query(None),
+    search: Optional[str] = Query(None),
+    monto: Optional[float] = Query(None),
+    monto_min: Optional[float] = Query(None),
+    monto_max: Optional[float] = Query(None),
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -365,6 +369,7 @@ async def list_expenses(
         db, user["company_id"], branch_id=branch_id, fund_id=fund_id,
         rendicion_id=rendicion_id, sin_rendicion=sin_rendicion,
         category_id=category_id, estado=estado, desde=desde, hasta=hasta,
+        search=search, monto=monto, monto_min=monto_min, monto_max=monto_max,
         limit=limit, offset=offset
     )
 

@@ -6,7 +6,7 @@ import json
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import select, text, func as sa_func, and_
+from sqlalchemy import select, text, func as sa_func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.petty_cash.models import (
@@ -902,6 +902,10 @@ async def list_expenses(
     sin_rendicion: bool | None = None,
     category_id: str | None = None, estado: str | None = None,
     desde: date | None = None, hasta: date | None = None,
+    search: str | None = None,
+    monto: float | None = None,
+    monto_min: float | None = None,
+    monto_max: float | None = None,
     limit: int = 100, offset: int = 0, incluir_anulados: bool = False,
 ) -> list[Expense]:
     query = select(Expense).where(Expense.company_id == uuid.UUID(company_id))
@@ -923,6 +927,30 @@ async def list_expenses(
         query = query.where(Expense.fecha_gasto >= desde)
     if hasta:
         query = query.where(Expense.fecha_gasto <= hasta)
+    if monto is not None:
+        query = query.where(Expense.monto == Decimal(str(monto)))
+    if monto_min is not None:
+        query = query.where(Expense.monto >= Decimal(str(monto_min)))
+    if monto_max is not None:
+        query = query.where(Expense.monto <= Decimal(str(monto_max)))
+    if search:
+        s_clean = search.strip()
+        conditions = [
+            Expense.descripcion.ilike(f"%{s_clean}%"),
+            Expense.proveedor.ilike(f"%{s_clean}%"),
+            Expense.numero_factura.ilike(f"%{s_clean}%"),
+            Expense.timbrado.ilike(f"%{s_clean}%"),
+            Expense.ruc.ilike(f"%{s_clean}%"),
+        ]
+        digits_only = "".join(ch for ch in s_clean if ch.isdigit())
+        if digits_only:
+            try:
+                num_val = Decimal(digits_only)
+                conditions.append(Expense.monto == num_val)
+            except Exception:
+                pass
+        query = query.where(or_(*conditions))
+
     query = query.order_by(Expense.fecha_gasto.desc(), Expense.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     expenses = list(result.scalars().all())
@@ -933,8 +961,43 @@ async def list_expenses(
         disb_map = {}
         for d in disb_res:
             disb_map.setdefault(d.expense_id, []).append(d)
+
+        rend_ids = list({e.rendicion_id for e in expenses if e.rendicion_id})
+        rend_map = {}
+        if rend_ids:
+            rend_q = select(PettyCashRendicion).where(PettyCashRendicion.id.in_(rend_ids))
+            rends = (await db.execute(rend_q)).scalars().all()
+            rend_map = {r.id: r for r in rends}
+
+        fund_ids = list({e.fund_id for e in expenses if e.fund_id})
+        fund_map = {}
+        if fund_ids:
+            fund_q = select(PettyCashFund).where(PettyCashFund.id.in_(fund_ids))
+            funds = (await db.execute(fund_q)).scalars().all()
+            fund_map = {f.id: f for f in funds}
+
+        cc_ids = list({e.cost_center_id for e in expenses if e.cost_center_id})
+        cc_map = {}
+        if cc_ids:
+            cc_q = select(CostCenter).where(CostCenter.id.in_(cc_ids))
+            ccs = (await db.execute(cc_q)).scalars().all()
+            cc_map = {c.id: c.nombre for c in ccs}
+
         for e in expenses:
             e.disbursements = disb_map.get(e.id, [])
+            rend = rend_map.get(e.rendicion_id)
+            if rend:
+                e.rendicion_numero = rend.numero_rendicion
+                e.rendicion_estado = rend.estado
+                e.rendicion_fecha = rend.fecha_presentacion or rend.created_at
+            else:
+                e.rendicion_numero = None
+                e.rendicion_estado = None
+                e.rendicion_fecha = None
+            fund = fund_map.get(e.fund_id)
+            e.fund_nombre = fund.nombre if fund else None
+            e.cost_center_nombre = cc_map.get(e.cost_center_id)
+
     return expenses
 
 

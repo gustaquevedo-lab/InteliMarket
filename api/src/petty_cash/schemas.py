@@ -220,7 +220,11 @@ class ExpenseResponse(BaseModel):
     company_id: Optional[UUID] = None
     branch_id: Optional[UUID] = None
     fund_id: Optional[UUID] = None
+    fund_nombre: Optional[str] = None
     rendicion_id: Optional[UUID] = None
+    rendicion_numero: Optional[str] = None
+    rendicion_estado: Optional[str] = None
+    rendicion_fecha: Optional[datetime] = None
     category_id: Optional[UUID] = None
     cost_center_id: Optional[UUID] = None
     cost_center_nombre: Optional[str] = None

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef, useMemo } from "react"
 import {
   Search, Plus, Loader2, DollarSign, CheckCircle2, XCircle, Wallet, TrendingUp,
   TrendingDown, BarChart3, Ban, Receipt as ReceiptIcon, Building2, Sparkles,
@@ -37,6 +37,8 @@ export default function ExpensesPage() {
   
   // Filtros
   const [search, setSearch] = useState("")
+  const [filterMonto, setFilterMonto] = useState("")
+  const [filterRendicion, setFilterRendicion] = useState("")
   const [filterEstado, setFilterEstado] = useState("")
   const [filterFund, setFilterFund] = useState("")
   const [filterCategory, setFilterCategory] = useState("")
@@ -162,6 +164,19 @@ export default function ExpensesPage() {
   const sectorName = (id?: string) => costCenters.find(c => c.id === id)?.nombre || "Sin sector"
   const fundName = (id?: string) => funds.find(f => f.id === id)?.nombre || "General"
 
+  const rendicionMap = useMemo(() => {
+    const map = new Map<string, PettyCashRendicion>()
+    rendiciones.forEach(r => map.set(r.id, r))
+    return map
+  }, [rendiciones])
+
+  const getExpenseRendicion = (e: Expense): PettyCashRendicion | null => {
+    if (e.rendicion_id && rendicionMap.has(e.rendicion_id)) {
+      return rendicionMap.get(e.rendicion_id)!
+    }
+    return null
+  }
+
   const fetchRendiciones = async () => {
     setLoadingRendiciones(true)
     try {
@@ -216,11 +231,18 @@ export default function ExpensesPage() {
       }
 
       if (tab === "list" || tab === "dashboard") {
-        const e = await api.expenses.list({
-          estado: filterEstado || undefined,
-          category_id: filterCategory || undefined,
-        }).catch(() => [])
+        const [e, r] = await Promise.all([
+          api.expenses.list({
+            estado: filterEstado || undefined,
+            category_id: filterCategory || undefined,
+            limit: 500,
+          }).catch(() => []),
+          api.expenses.rendiciones.list().catch(() => []),
+        ])
         setExpenses(e)
+        if (Array.isArray(r) && r.length > 0) {
+          setRendiciones(r)
+        }
       }
 
       if (tab === "rendiciones") {
@@ -770,12 +792,67 @@ export default function ExpensesPage() {
 
   // Filtrado de gastos en tabla
   const filteredExpenses = expenses.filter(e => {
-    const matchSearch = !search ||
-      e.descripcion.toLowerCase().includes(search.toLowerCase()) ||
-      (e.proveedor && e.proveedor.toLowerCase().includes(search.toLowerCase()))
+    // 1. Filtro por Rendición
+    if (filterRendicion === "sin_rendicion" && e.rendicion_id) return false
+    if (filterRendicion === "con_rendicion" && !e.rendicion_id) return false
+    if (filterRendicion && filterRendicion !== "sin_rendicion" && filterRendicion !== "con_rendicion") {
+      if (e.rendicion_id !== filterRendicion) return false
+    }
+
+    // 2. Filtro por Fondo y Sector
     const matchFund = !filterFund || e.fund_id === filterFund
     const matchSector = !filterSector || e.cost_center_id === filterSector
-    return matchSearch && matchFund && matchSector
+    if (!matchFund || !matchSector) return false
+
+    // 3. Filtro específico por Monto (input dedicado)
+    if (filterMonto && filterMonto.trim()) {
+      const cleanMontoInput = filterMonto.replace(/[^\d]/g, "")
+      const montoDigits = String(Math.round(e.monto || 0))
+      if (cleanMontoInput && !montoDigits.includes(cleanMontoInput)) {
+        return false
+      }
+    }
+
+    // 4. Búsqueda general (concepto, proveedor, factura, timbrado, RUC, rendición, monto)
+    if (search && search.trim()) {
+      const sRaw = search.trim().toLowerCase()
+      const sDigits = search.replace(/[^\d]/g, "")
+
+      const rend = getExpenseRendicion(e)
+      const rendNum = (e.rendicion_numero || rend?.numero_rendicion || "").toLowerCase()
+      const rendCustodio = (rend?.custodio_nombre || "").toLowerCase()
+      const desc = (e.descripcion || "").toLowerCase()
+      const prov = (e.proveedor || "").toLowerCase()
+      const numFact = (e.numero_factura || "").toLowerCase()
+      const timb = (e.timbrado || "").toLowerCase()
+      const ruc = (e.ruc || "").toLowerCase()
+      const fName = (e.fund_nombre || fundName(e.fund_id) || "").toLowerCase()
+      const secName = (e.cost_center_nombre || sectorName(e.cost_center_id) || "").toLowerCase()
+
+      const textMatch =
+        desc.includes(sRaw) ||
+        prov.includes(sRaw) ||
+        numFact.includes(sRaw) ||
+        timb.includes(sRaw) ||
+        ruc.includes(sRaw) ||
+        rendNum.includes(sRaw) ||
+        rendCustodio.includes(sRaw) ||
+        fName.includes(sRaw) ||
+        secName.includes(sRaw)
+
+      const montoVal = Math.round(Number(e.monto || 0))
+      const montoDigits = String(montoVal)
+      const montoFormatted = formatPYG(e.monto || 0).toLowerCase()
+
+      const montoMatch =
+        (sDigits.length >= 2 && montoDigits.includes(sDigits)) ||
+        montoDigits === sDigits ||
+        montoFormatted.includes(sRaw)
+
+      if (!textMatch && !montoMatch) return false
+    }
+
+    return true
   }).sort((a, b) => new Date(b.fecha_gasto || b.created_at || 0).getTime() - new Date(a.fecha_gasto || a.created_at || 0).getTime())
 
   const maxTendencia = dashboard ? Math.max(...dashboard.tendencia_mensual.map(t => t.total), 1) : 1
@@ -1531,18 +1608,74 @@ export default function ExpensesPage() {
           {tab === "list" && (
             <div className="space-y-4">
               {/* Barra de Filtros */}
-              <div className="card p-4 bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/60">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-center">
-                  <div className="relative">
+              <div className="card p-4 bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/60 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-center">
+                  {/* Buscador General */}
+                  <div className="relative sm:col-span-2">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <input
-                      className="input-field pl-9 text-xs w-full"
-                      placeholder="Buscar por concepto, proveedor..."
+                      className="input-field pl-9 pr-7 text-xs w-full"
+                      placeholder="Buscar por concepto, proveedor, factura o monto..."
                       value={search}
                       onChange={e => setSearch(e.target.value)}
                     />
+                    {search && (
+                      <button
+                        type="button"
+                        onClick={() => setSearch("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        title="Limpiar búsqueda"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
 
+                  {/* Búsqueda Directa por Monto */}
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
+                    <input
+                      type="text"
+                      className="input-field pl-9 pr-7 text-xs w-full font-mono font-medium"
+                      placeholder="Monto Gs. (ej: 50.000)"
+                      value={filterMonto}
+                      onChange={e => setFilterMonto(e.target.value)}
+                    />
+                    {filterMonto && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterMonto("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        title="Limpiar filtro de monto"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filtro por Rendición */}
+                  <div>
+                    <select
+                      className="input-field text-xs w-full"
+                      value={filterRendicion}
+                      onChange={e => setFilterRendicion(e.target.value)}
+                    >
+                      <option value="">Todas las Rendiciones</option>
+                      <option value="sin_rendicion">⚠️ Sin Rendición (Pendientes)</option>
+                      <option value="con_rendicion">📄 Asignados a una Rendición</option>
+                      {rendiciones.length > 0 && (
+                        <optgroup label="Rendiciones Específicas">
+                          {rendiciones.map(r => (
+                            <option key={r.id} value={r.id}>
+                              {r.numero_rendicion} ({r.estado})
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Filtro por Estado */}
                   <div>
                     <select
                       className="input-field text-xs w-full"
@@ -1557,6 +1690,7 @@ export default function ExpensesPage() {
                     </select>
                   </div>
 
+                  {/* Filtro Caja Chica */}
                   <div>
                     <select
                       className="input-field text-xs w-full"
@@ -1569,26 +1703,49 @@ export default function ExpensesPage() {
                       ))}
                     </select>
                   </div>
+                </div>
 
-                  <div>
+                {/* Sub-barra de acciones y filtros activos */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-700/60 text-xs">
+                  <div className="flex items-center gap-2 text-slate-500 text-[11px] flex-wrap">
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">
+                      Mostrando {filteredExpenses.length} de {expenses.length} comprobante(s)
+                    </span>
+                    {(search || filterMonto || filterRendicion || filterEstado || filterFund || filterSector) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearch("")
+                          setFilterMonto("")
+                          setFilterRendicion("")
+                          setFilterEstado("")
+                          setFilterFund("")
+                          setFilterSector("")
+                        }}
+                        className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400 hover:underline font-bold"
+                      >
+                        <XCircle className="w-3 h-3" /> Limpiar filtros
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
                     <select
-                      className="input-field text-xs w-full"
+                      className="input-field text-xs py-1"
                       value={filterSector}
                       onChange={e => setFilterSector(e.target.value)}
                     >
-                      <option value="">Todos los Centros de Costo</option>
+                      <option value="">Todos los Sectores</option>
                       {costCenters.map(cc => (
                         <option key={cc.id} value={cc.id}>{cc.nombre}</option>
                       ))}
                     </select>
-                  </div>
 
-                  <div className="flex justify-end">
                     <button
                       type="button"
                       onClick={handleDownloadConsolidatedPdf}
                       disabled={downloadingConsolidatedPdf}
-                      className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition shadow-sm whitespace-nowrap"
                       title="Descargar Reporte Consolidado Analítico de Gastos en PDF"
                     >
                       {downloadingConsolidatedPdf ? (
@@ -1612,6 +1769,7 @@ export default function ExpensesPage() {
                         <th className="p-3.5">Descripción & Comprobante</th>
                         <th className="p-3.5">Proveedor</th>
                         <th className="p-3.5">Caja Chica</th>
+                        <th className="p-3.5">Rendición / Ubicación</th>
                         <th className="p-3.5">Sector</th>
                         <th className="p-3.5">Categoría</th>
                         <th className="p-3.5">Monto Total</th>
@@ -1620,147 +1778,234 @@ export default function ExpensesPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60 text-xs">
-                      {filteredExpenses.map(e => (
-                        <tr key={e.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                          <td className="p-3.5 font-mono text-gray-500 whitespace-nowrap">
-                            {e.fecha_gasto ? new Date(e.fecha_gasto).toLocaleDateString("es-PY") : "—"}
-                          </td>
-                          <td className="p-3.5 font-bold text-gray-900 dark:text-white max-w-xs">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span>{e.descripcion}</span>
-                              {e.es_pago_proveedor && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
-                                  <Package className="w-2.5 h-2.5" /> Mercaderías (Cuentas por Pagar)
-                                </span>
-                              )}
-                            </div>
-                            {e.comprobante_url && (
-                              <a
-                                href={e.comprobante_url.startsWith("http") ? e.comprobante_url : `${API_ORIGIN}${e.comprobante_url}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline mt-1 font-semibold"
-                              >
-                                <Paperclip className="w-3 h-3" /> Ver Comprobante Adjunto
-                              </a>
-                            )}
-                          </td>
-                          <td className="p-3.5 text-gray-600 dark:text-gray-300">
-                            {e.proveedor || "—"}
-                          </td>
-                          <td className="p-3.5">
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
-                              {fundName(e.fund_id)}
-                            </span>
-                          </td>
-                          <td className="p-3.5 text-gray-500">
-                            {sectorName(e.cost_center_id)}
-                          </td>
-                          <td className="p-3.5 text-gray-500">
-                            {catName(e.category_id)}
-                          </td>
-                          <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white whitespace-nowrap">
-                            {formatPYG(e.monto)}
-                          </td>
-                          <td className="p-3.5">
-                            <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
-                              e.estado === "pagado"
-                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200"
-                                : e.estado === "aprobado"
-                                ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200"
-                                : e.estado === "rechazado"
-                                ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200"
-                                : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
-                            }`}>
-                              {e.estado === "pagado" ? "Pagado" : e.estado === "aprobado" ? "Aprobado" : e.estado === "rechazado" ? "Rechazado" : "Pendiente"}
-                            </span>
-                            {e.forma_pago_resumen && (
-                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5 truncate max-w-[130px]" title={e.forma_pago_resumen}>
-                                {e.forma_pago_resumen}
-                              </p>
-                            )}
-                            {e.estado === "rechazado" && e.rechazado_motivo && (
-                              <p className="text-[10px] text-red-500 mt-1 max-w-[140px] italic">
-                                {e.rechazado_motivo}
-                              </p>
-                            )}
-                          </td>
-                          <td className="p-3.5 text-right whitespace-nowrap">
-                            <div className="flex items-center justify-end gap-1.5">
-                              {/* 0. Botón Editar Comprobante */}
-                              {!e.anulado && e.estado !== "anulado" && (
-                                <button
-                                  onClick={() => handleOpenEdit(e)}
-                                  title="Editar comprobante de gasto"
-                                  className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                                >
-                                  <Pencil className="w-4 h-4" />
-                                </button>
-                              )}
+                      {filteredExpenses.map(e => {
+                        const rend = getExpenseRendicion(e)
+                        const rendNumero = e.rendicion_numero || rend?.numero_rendicion
+                        const rendEstado = e.rendicion_estado || rend?.estado
+                        const rendId = e.rendicion_id || rend?.id
+                        const rendFecha = e.rendicion_fecha || rend?.fecha_presentacion || rend?.created_at
+                        const rendCustodio = rend?.custodio_nombre
 
-                              {/* 1. Si está pendiente: Botones de Aprobar y Rechazar */}
-                              {e.estado === "pendiente" && (
-                                <>
-                                  <button
-                                    onClick={() => handleApprove(e.id)}
-                                    title="Aprobar comprobante de gasto"
-                                    className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors"
-                                  >
-                                    <CheckCircle2 className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    onClick={() => handleReject(e.id)}
-                                    title="Rechazar gasto"
-                                    className="p-1.5 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors"
-                                  >
-                                    <XCircle className="w-4 h-4" />
-                                  </button>
-                                </>
-                              )}
+                        return (
+                          <tr key={e.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                            <td className="p-3.5 font-mono text-gray-500 whitespace-nowrap">
+                              {e.fecha_gasto ? new Date(e.fecha_gasto).toLocaleDateString("es-PY") : "—"}
+                            </td>
+                            <td className="p-3.5 font-bold text-gray-900 dark:text-white max-w-xs">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span>{e.descripcion}</span>
+                                {e.es_pago_proveedor && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                                    <Package className="w-2.5 h-2.5" /> Mercaderías (Cuentas por Pagar)
+                                  </span>
+                                )}
+                              </div>
 
-                              {/* 2. Si está aprobado: Botón destacado Pagar / Liquidar */}
-                              {e.estado === "aprobado" && (
-                                <button
-                                  onClick={() => setPaymentModalExpense(e)}
-                                  title="Liquidar gasto y asignar medios de pago"
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all"
-                                >
-                                  <Wallet className="w-3.5 h-3.5" />
-                                  Pagar
-                                </button>
-                              )}
-
-                              {/* 3. Si está pagado o aprobado: Botón de Recibo PDF */}
-                              {(e.estado === "pagado" || e.estado === "aprobado") && (
-                                <button
-                                  onClick={() => handleDownloadReceiptPdf(e.id)}
-                                  disabled={downloadingReceiptId === e.id}
-                                  title="Descargar Recibo Oficial / Orden de Pago PDF"
-                                  className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                                >
-                                  {downloadingReceiptId === e.id ? (
-                                    <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-                                  ) : (
-                                    <Printer className="w-4 h-4" />
+                              {/* Datos fiscales para ubicar el comprobante físico */}
+                              {(e.numero_factura || e.timbrado || e.ruc) && (
+                                <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono mt-1 flex-wrap">
+                                  {e.tipo_comprobante && (
+                                    <span className="uppercase text-[9px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">
+                                      {e.tipo_comprobante.replace("_", " ")}
+                                    </span>
                                   )}
-                                </button>
+                                  {e.numero_factura && (
+                                    <span className="text-gray-800 dark:text-gray-200 font-semibold bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+                                      N° {e.numero_factura}
+                                    </span>
+                                  )}
+                                  {e.timbrado && (
+                                    <span className="text-gray-500" title={`Timbrado oficial: ${e.timbrado}`}>
+                                      Timb: {e.timbrado}
+                                    </span>
+                                  )}
+                                  {e.ruc && (
+                                    <span className="text-gray-500">
+                                      RUC: {e.ruc}
+                                    </span>
+                                  )}
+                                </div>
                               )}
 
-                              {/* 4. Anular gasto */}
-                              <button
-                                onClick={() => handleVoid(e.id)}
-                                title="Anular gasto"
-                                className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                              >
-                                <Ban className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                              {e.comprobante_url && (
+                                <a
+                                  href={e.comprobante_url.startsWith("http") ? e.comprobante_url : `${API_ORIGIN}${e.comprobante_url}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline mt-1 font-semibold"
+                                >
+                                  <Paperclip className="w-3 h-3" /> Ver Comprobante Adjunto
+                                </a>
+                              )}
+                            </td>
+                            <td className="p-3.5 text-gray-600 dark:text-gray-300">
+                              {e.proveedor || "—"}
+                            </td>
+                            <td className="p-3.5">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
+                                {fundName(e.fund_id)}
+                              </span>
+                            </td>
+
+                            {/* COLUMNA: Rendición / Ubicación */}
+                            <td className="p-3.5">
+                              {rendNumero && rendId ? (
+                                <div className="space-y-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedRendicionForAuditId(rendId)}
+                                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] font-mono font-bold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition shadow-sm group"
+                                    title="Ver expediente y auditoría de esta rendición"
+                                  >
+                                    <FileText className="w-3.5 h-3.5 text-indigo-500 group-hover:scale-110 transition-transform" />
+                                    <span>{rendNumero}</span>
+                                  </button>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded ${
+                                      rendEstado === "aprobada" || rendEstado === "pagada"
+                                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
+                                        : rendEstado === "presentada" || rendEstado === "en_revision"
+                                        ? "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300"
+                                        : rendEstado === "rechazada"
+                                        ? "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300"
+                                        : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                                    }`}>
+                                      {rendEstado === "pagada" ? "Pagada / Repuesta" : rendEstado || "En Rendición"}
+                                    </span>
+                                    {rendCustodio && (
+                                      <span className="text-[10px] text-gray-500 truncate max-w-[110px]" title={`Custodio: ${rendCustodio}`}>
+                                        👤 {rendCustodio}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {rendFecha && (
+                                    <p className="text-[9px] text-gray-400 font-mono">
+                                      {new Date(rendFecha).toLocaleDateString("es-PY")}
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="space-y-0.5">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60">
+                                    <AlertCircle className="w-3 h-3 text-amber-500" />
+                                    Sin Rendición
+                                  </span>
+                                  <p className="text-[10px] text-gray-400">
+                                    En custodia ({fundName(e.fund_id)})
+                                  </p>
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="p-3.5 text-gray-500">
+                              {sectorName(e.cost_center_id)}
+                            </td>
+                            <td className="p-3.5 text-gray-500">
+                              {catName(e.category_id)}
+                            </td>
+                            <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white whitespace-nowrap">
+                              {formatPYG(e.monto)}
+                            </td>
+                            <td className="p-3.5">
+                              <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
+                                e.estado === "pagado"
+                                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200"
+                                  : e.estado === "aprobado"
+                                  ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200"
+                                  : e.estado === "rechazado"
+                                  ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200"
+                                  : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
+                              }`}>
+                                {e.estado === "pagado" ? "Pagado" : e.estado === "aprobado" ? "Aprobado" : e.estado === "rechazado" ? "Rechazado" : "Pendiente"}
+                              </span>
+                              {e.forma_pago_resumen && (
+                                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5 truncate max-w-[130px]" title={e.forma_pago_resumen}>
+                                  {e.forma_pago_resumen}
+                                </p>
+                              )}
+                              {e.estado === "rechazado" && e.rechazado_motivo && (
+                                <p className="text-[10px] text-red-500 mt-1 max-w-[140px] italic">
+                                  {e.rechazado_motivo}
+                                </p>
+                              )}
+                            </td>
+                            <td className="p-3.5 text-right whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1.5">
+                                {/* 0. Botón Editar Comprobante */}
+                                {!e.anulado && e.estado !== "anulado" && (
+                                  <button
+                                    onClick={() => handleOpenEdit(e)}
+                                    title="Editar comprobante de gasto"
+                                    className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </button>
+                                )}
+
+                                {/* 1. Si está pendiente: Botones de Aprobar y Rechazar */}
+                                {e.estado === "pendiente" && (
+                                  <>
+                                    <button
+                                      onClick={() => handleApprove(e.id)}
+                                      title="Aprobar comprobante de gasto"
+                                      className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors"
+                                    >
+                                      <CheckCircle2 className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleReject(e.id)}
+                                      title="Rechazar gasto"
+                                      className="p-1.5 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors"
+                                    >
+                                      <XCircle className="w-4 h-4" />
+                                    </button>
+                                  </>
+                                )}
+
+                                {/* 2. Si está aprobado: Botón destacado Pagar / Liquidar */}
+                                {e.estado === "aprobado" && (
+                                  <button
+                                    onClick={() => setPaymentModalExpense(e)}
+                                    title="Liquidar gasto y asignar medios de pago"
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all"
+                                  >
+                                    <Wallet className="w-3.5 h-3.5" />
+                                    Pagar
+                                  </button>
+                                )}
+
+                                {/* 3. Si está pagado o aprobado: Botón de Recibo PDF */}
+                                {(e.estado === "pagado" || e.estado === "aprobado") && (
+                                  <button
+                                    onClick={() => handleDownloadReceiptPdf(e.id)}
+                                    disabled={downloadingReceiptId === e.id}
+                                    title="Descargar Recibo Oficial / Orden de Pago PDF"
+                                    className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                                  >
+                                    {downloadingReceiptId === e.id ? (
+                                      <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                                    ) : (
+                                      <Printer className="w-4 h-4" />
+                                    )}
+                                  </button>
+                                )}
+
+                                {/* 4. Anular gasto */}
+                                <button
+                                  onClick={() => handleVoid(e.id)}
+                                  title="Anular gasto"
+                                  className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                >
+                                  <Ban className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
                       {filteredExpenses.length === 0 && (
                         <tr>
-                          <td colSpan={9} className="text-center py-12 text-gray-400">
+                          <td colSpan={10} className="text-center py-12 text-gray-400">
                             No se encontraron comprobantes registrados con los filtros aplicados.
                           </td>
                         </tr>

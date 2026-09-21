@@ -1104,7 +1104,11 @@ export interface Expense {
   company_id?: string;
   branch_id?: string;
   fund_id?: string;
+  fund_nombre?: string | null;
   rendicion_id?: string | null;
+  rendicion_numero?: string | null;
+  rendicion_estado?: string | null;
+  rendicion_fecha?: string | null;
   category_id?: string;
   cost_center_id?: string;
   cost_center_nombre?: string;
@@ -3231,7 +3235,7 @@ export const api = {
       list: () => client.get<CostCenter[]>("/v1/expenses/cost-centers"),
       create: (data: any) => client.post<CostCenter>("/v1/expenses/cost-centers", data),
     },
-    list: (params?: { branch_id?: string; fund_id?: string; rendicion_id?: string; sin_rendicion?: boolean; category_id?: string; estado?: string; desde?: string; hasta?: string; limit?: number; offset?: number }) => client.get<Expense[]>("/v1/expenses", params as any),
+    list: (params?: { branch_id?: string; fund_id?: string; rendicion_id?: string; sin_rendicion?: boolean; category_id?: string; estado?: string; desde?: string; hasta?: string; search?: string; monto?: number; monto_min?: number; monto_max?: number; limit?: number; offset?: number }) => client.get<Expense[]>("/v1/expenses", params as any),
     rendiciones: {
       list: (params?: { fund_id?: string; estado?: string }) => client.get<PettyCashRendicion[]>("/v1/petty-cash-funds/rendiciones", params as any),
       get: (id: string) => client.get<{ rendicion: PettyCashRendicion; expenses: Expense[]; fund: PettyCashFund }>(`/v1/petty-cash-funds/rendiciones/${id}`),
