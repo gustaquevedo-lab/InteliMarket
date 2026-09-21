@@ -1,4 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from "react"
+import { captureException } from "../monitor"
 import {
   AlertTriangle, RefreshCw, Copy, Check, MessageSquare, Home,
   ChevronDown, ChevronUp, Terminal, ShieldAlert, Cpu, Sparkles, ExternalLink
@@ -35,6 +36,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     this.setState({ errorInfo })
+    try { captureException(error, { componentStack: (errorInfo.componentStack || "").slice(0, 1500), modulo: this.props.moduleName || "raiz" }, "fatal") } catch { /* nada */ }
     console.error("🚨 [InteliMarket ErrorBoundary Caught]:", error, errorInfo)
   }
 

@@ -24,6 +24,7 @@ import { offlineDB } from "../../utils/offlineDB"
 import { syncPendingSales, syncPendingCupones, syncFullCatalog } from "../../utils/syncManager"
 import { verifySupervisorPinLocal, syncSupervisorPins } from "../../utils/localAuth"
 import QRCode from "qrcode"
+import { imDinelco, imBancard } from "../../monitor/integrations"
 
 
 // ── BANDERAS VECTORIALES SVG PARA COMPATIBILIDAD TOTAL EN WINDOWS / ELECTRON ─
@@ -1777,7 +1778,7 @@ export default function POSPage() {
       body1.plan = 1
     }
     console.log(`[BANCARD-TRACE] paso1 -> ip=${ip} path=${path1} body=${JSON.stringify(body1)}`)
-    const res1 = await electronAPI.bancardCall(ip, path1, body1, 90000)
+    const res1 = await imBancard(electronAPI, ip, path1, body1, 90000)
     console.log(`[BANCARD-TRACE] paso1 <- ${JSON.stringify(res1)}`)
 
     if (!res1.ok) {
@@ -1801,7 +1802,7 @@ export default function POSPage() {
     setBancardTxnState("confirmando")
     const body2 = { bin, nsu, monto: montoBancard }
     console.log(`[BANCARD-TRACE] paso2 -> ip=${ip} path=/pos/descuento body=${JSON.stringify(body2)}`)
-    const res2 = await electronAPI.bancardCall(ip, "/pos/descuento", body2, 30000)
+    const res2 = await imBancard(electronAPI, ip, "/pos/descuento", body2, 30000)
     console.log(`[BANCARD-TRACE] paso2 <- ${JSON.stringify(res2)}`)
 
     if (!res2.ok) {
@@ -1866,7 +1867,7 @@ export default function POSPage() {
       body1.cuotas = leg.cardCuotas
       body1.plan = 1
     }
-    const res1 = await electronAPI.bancardCall(ip, path1, body1, 90000)
+    const res1 = await imBancard(electronAPI, ip, path1, body1, 90000)
 
     if (!res1.ok) {
       if (res1.status === 400 || res1.status === 500) {
@@ -1884,7 +1885,7 @@ export default function POSPage() {
     const { bin, nsu } = res1.body || {}
     updateExtraLeg(leg.id, { txnState: "confirmando" })
     const body2 = { bin, nsu, monto: montoBancard }
-    const res2 = await electronAPI.bancardCall(ip, "/pos/descuento", body2, 30000)
+    const res2 = await imBancard(electronAPI, ip, "/pos/descuento", body2, 30000)
 
     if (!res2.ok) {
       if (res2.status === 400 || res2.status === 500) {
@@ -1953,7 +1954,7 @@ export default function POSPage() {
     setDinelcoTxnResult(null)
     setShowDinelcoManualFallback(false)
 
-    const res1 = await electronAPI.dinelcoCall(ip, "venta_inicio", { op: "01", monto: montoDinelco }, null, 90000)
+    const res1 = await imDinelco(electronAPI, ip, "venta_inicio", { op: "01", monto: montoDinelco }, null, 90000)
 
     if (!res1.ok) {
       setDinelcoTxnState(res1.error ? "error_conexion" : "error_rechazo")
@@ -1977,7 +1978,7 @@ export default function POSPage() {
     // esperan que el cliente escanee y apruebe en su banco) y explicaba el
     // sintoma reportado: el terminal seguia "calculando" la autorizacion
     // real mientras nuestro cliente ya habia tirado la toalla por timeout.
-    const res2 = await electronAPI.dinelcoCall(ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 90000)
+    const res2 = await imDinelco(electronAPI, ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 90000)
 
     if (!res2.ok) {
       setDinelcoTxnState(res2.error ? "error_conexion" : "error_rechazo")
@@ -2041,8 +2042,8 @@ export default function POSPage() {
     setDinelcoQrError("")
 
     const res = dinelcoQrMode === "pix"
-      ? await electronAPI.dinelcoCall(ip, "pix", { monto: montoQrDinelco, cpf: dinelcoPixCpf.replace(/\D/g, "") }, null, 90000)
-      : await electronAPI.dinelcoCall(ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
+      ? await imDinelco(electronAPI, ip, "pix", { monto: montoQrDinelco, cpf: dinelcoPixCpf.replace(/\D/g, "") }, null, 90000)
+      : await imDinelco(electronAPI, ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
 
     const tipoOperacion = dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr"
 
@@ -2084,7 +2085,7 @@ export default function POSPage() {
     updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null, showManualFallback: false })
 
     const tipoOperacion = leg.cardType === "credito" && leg.cardCuotas > 1 ? `dinelco_venta_credito_${leg.cardCuotas}cuotas` : `dinelco_venta_${leg.cardType}`
-    const res1 = await electronAPI.dinelcoCall(ip, "venta_inicio", { op: "01", monto: montoDinelco }, null, 90000)
+    const res1 = await imDinelco(electronAPI, ip, "venta_inicio", { op: "01", monto: montoDinelco }, null, 90000)
 
     if (!res1.ok) {
       updateExtraLeg(leg.id, {
@@ -2101,7 +2102,7 @@ export default function POSPage() {
 
     updateExtraLeg(leg.id, { txnState: "confirmando" })
     const cuotasParam = leg.cardType === "credito" && leg.cardCuotas > 1 ? leg.cardCuotas : 0
-    const res2 = await electronAPI.dinelcoCall(ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 90000)
+    const res2 = await imDinelco(electronAPI, ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 90000)
 
     if (!res2.ok) {
       updateExtraLeg(leg.id, {
@@ -2155,8 +2156,8 @@ export default function POSPage() {
     updateExtraLeg(leg.id, { txnState: "esperando", txnError: "" })
 
     const res = leg.dinelcoQrMode === "pix"
-      ? await electronAPI.dinelcoCall(ip, "pix", { monto: montoQrDinelco, cpf: (leg.pixCpf || "").replace(/\D/g, "") }, null, 90000)
-      : await electronAPI.dinelcoCall(ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
+      ? await imDinelco(electronAPI, ip, "pix", { monto: montoQrDinelco, cpf: (leg.pixCpf || "").replace(/\D/g, "") }, null, 90000)
+      : await imDinelco(electronAPI, ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
 
     const tipoOperacion = leg.dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr"
 
@@ -2205,7 +2206,7 @@ export default function POSPage() {
 
     const bodyQr = { facturaNro, monto: montoQr, montoVuelto: 0 }
     console.log(`[BANCARD-TRACE] QR -> ip=${ip} path=/pos/venta-qr body=${JSON.stringify(bodyQr)}`)
-    const res = await electronAPI.bancardCall(ip, "/pos/venta-qr", bodyQr, 180000)
+    const res = await imBancard(electronAPI, ip, "/pos/venta-qr", bodyQr, 180000)
     console.log(`[BANCARD-TRACE] QR <- ${JSON.stringify(res)}`)
 
     if (!res.ok) {
@@ -2259,7 +2260,7 @@ export default function POSPage() {
     updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null })
 
     const bodyQr = { facturaNro, monto: montoQr, montoVuelto: 0 }
-    const res = await electronAPI.bancardCall(ip, "/pos/venta-qr", bodyQr, 180000)
+    const res = await imBancard(electronAPI, ip, "/pos/venta-qr", bodyQr, 180000)
 
     if (!res.ok) {
       if (res.status === 400 || res.status === 500) {

@@ -10,7 +10,7 @@ REL="$RELEASES/$(date +%Y%m%d-%H%M%S)"
 
 echo "==> Compilando build de produccion..."
 cd "$SRC"
-VITE_API_PROXY_TARGET=http://127.0.0.1:8000 npm run build
+VITE_RELEASE=$(basename "$REL") VITE_API_PROXY_TARGET=http://127.0.0.1:8000 npm run build
 
 echo "==> Copiando a $REL"
 cp -r "$SRC/../ui-web-dist" "$REL"

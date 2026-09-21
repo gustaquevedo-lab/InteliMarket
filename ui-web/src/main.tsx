@@ -4,6 +4,7 @@ import { ToastProvider } from "./context/ToastContext"
 import ErrorBoundary from "./components/ErrorBoundary"
 import { ConfirmProvider } from "./components/ConfirmDialog"
 import App from "./App"
+import { initMonitor } from "./monitor"
 import "./index.css"
 
 // Credencial de estacion pasada por URL (?token=...). Se procesa ACA, antes de
@@ -35,6 +36,8 @@ import "./index.css"
     // sin acceso a localStorage (modo restringido): que la app arranque igual
   }
 })()
+
+try { initMonitor() } catch { /* el monitor nunca frena el arranque */ }
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

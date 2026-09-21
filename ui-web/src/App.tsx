@@ -31,6 +31,7 @@ const CajaPage = lazy(() => import("./pages/caja/CajaPage"))
 const AdminPage = lazy(() => import("./pages/admin/AdminPage"))
 const VerticalsPage = lazy(() => import("./pages/admin/VerticalsPage"))
 const SaludSistemaPage = lazy(() => import("./pages/salud/SaludSistemaPage"))
+const PlataformaPage = lazy(() => import("./pages/plataforma/PlataformaPage"))
 // const PagoparPage = lazy(() => import("./pages/pagopar/PagoparPage"))  // DESACTIVADO: sin credenciales reales, ver auditoria 2026-09-02
 // const KuapayPage = lazy(() => import("./pages/kuapay/KuapayPage"))  // DESACTIVADO: sin credenciales reales, ver auditoria 2026-09-02
 const SpiPage = lazy(() => import("./pages/spi/SpiPage"))
@@ -299,6 +300,7 @@ function AppRoutes() {
           ["admin", <AdminPage />],
           ["admin/verticals", <VerticalsPage />],
           ["salud-sistema", <SaludSistemaPage />],
+          ["plataforma", <SuperadminRoute><PlataformaPage /></SuperadminRoute>],
           ["audit", <RiskAgentPage />],
           ["quotes", <PedidosCotizacionesPage />],
           ["sales-orders", <PedidosCotizacionesPage />],
