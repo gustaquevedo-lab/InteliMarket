@@ -99,12 +99,24 @@ class WhatsAppConversation(Base):
     status = Column(String(20), default="active", server_default="active")
     session_state = Column(String(50), default="idle", server_default="idle", comment="Chatbot state: idle, menu_main, menu_products, etc.")
     session_data = Column(JSONB, comment="Additional session data (selected product, order context, etc.)")
+    
+    # Soporte Multi-Agente e Inbox
+    handling_mode = Column(String(30), default="ai_bot", server_default="ai_bot", index=True, comment="ai_bot, human_pending, human_active, resolved")
+    assigned_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    assigned_user_name = Column(String(150), nullable=True)
+    department = Column(String(50), default="general", server_default="general", index=True, comment="ventas, envios, cajas, atencion, general")
+    waiting_since = Column(DateTime(timezone=True), nullable=True, index=True)
+    unread_agent_count = Column(Integer, default=0, server_default="0")
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         Index("ix_whatsapp_conversations_tenant_id", "tenant_id"),
         Index("ix_whatsapp_conversations_contact_phone", "contact_phone"),
         Index("ix_whatsapp_conversations_status", "status"),
+        Index("ix_whatsapp_conversations_handling_mode", "handling_mode"),
+        Index("ix_whatsapp_conversations_assigned_user", "assigned_user_id"),
+        Index("ix_whatsapp_conversations_department", "department"),
     )
 
 
@@ -120,6 +132,17 @@ class WhatsAppMessage(Base):
     media_url = Column(Text)
     status = Column(String(20), default="queued", server_default="queued")
     command = Column(String(50))
+    
+    # Identidad del emisor y tipo de mensaje
+    sender_type = Column(String(30), default="customer", server_default="customer", index=True, comment="customer, bot, agent, system, internal_note")
+    sender_user_id = Column(UUID(as_uuid=True), nullable=True)
+    sender_name = Column(String(150), nullable=True)
+    
+    # Metadatos multimedia enriquecidos
+    media_type = Column(String(30), nullable=True, index=True, comment="image, audio, video, document, sticker, location")
+    media_filename = Column(String(255), nullable=True)
+    media_size_bytes = Column(BigInteger, nullable=True)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -127,6 +150,8 @@ class WhatsAppMessage(Base):
         Index("ix_whatsapp_messages_conversation_id", "conversation_id"),
         Index("ix_whatsapp_messages_direction", "direction"),
         Index("ix_whatsapp_messages_created_at", "created_at"),
+        Index("ix_whatsapp_messages_sender_type", "sender_type"),
+        Index("ix_whatsapp_messages_media_type", "media_type"),
     )
 
 

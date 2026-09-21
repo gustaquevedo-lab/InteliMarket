@@ -19,7 +19,9 @@ from api.src.whatsapp.schemas import (
     WhatsAppConversationResponse, WhatsAppMessageResponse,
     WhatsAppTemplateCreate, WhatsAppTemplateUpdate, WhatsAppTemplateResponse,
     TwilioWebhook, SendMessageRequest, WhatsAppStats,
+    AssignConversationRequest, SetHandlingModeRequest, CreateInternalNoteRequest, AgentItemResponse,
 )
+from api.src.auth.models import User
 from api.src.whatsapp import service as whatsapp_service
 from api.src.whatsapp.models import (
     WhatsAppConversation,
@@ -462,6 +464,10 @@ async def test_message_legacy(
 @router.get("/conversations")
 async def list_conversations(
     status: str = Query(None),
+    inbox: Optional[str] = Query(None, description="pending, mine, bot, all, resolved"),
+    department: Optional[str] = Query(None),
+    assigned_user_id: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
     limit: int = Query(50, le=500),
     offset: int = Query(0, ge=0),
     user: dict = Depends(require_auth),
@@ -469,12 +475,64 @@ async def list_conversations(
 ):
     tenant_id = UUID(user["tenant_id"])
     query = select(WhatsAppConversation).where(WhatsAppConversation.tenant_id == tenant_id)
-    if status:
+
+    # Filtrado por bandeja especializada (Inbox)
+    if inbox == "pending":
+        query = query.where(
+            or_(
+                WhatsAppConversation.handling_mode == "human_pending",
+                and_(
+                    WhatsAppConversation.session_data["human_takeover"].as_boolean() == True,
+                    WhatsAppConversation.assigned_user_id == None,
+                    WhatsAppConversation.status != "archived",
+                )
+            )
+        )
+    elif inbox == "mine":
+        user_uuid = UUID(user["id"])
+        query = query.where(
+            WhatsAppConversation.assigned_user_id == user_uuid,
+            WhatsAppConversation.status != "archived",
+        )
+    elif inbox == "bot":
+        query = query.where(
+            or_(
+                WhatsAppConversation.handling_mode == "ai_bot",
+                WhatsAppConversation.handling_mode == None,
+            ),
+            WhatsAppConversation.status != "archived",
+        )
+    elif inbox == "resolved":
+        query = query.where(
+            or_(
+                WhatsAppConversation.handling_mode == "resolved",
+                WhatsAppConversation.status == "archived",
+            )
+        )
+    elif status:
         query = query.where(WhatsAppConversation.status == status)
     else:
-        # Por defecto excluir pruebas simuladas o números ficticios
+        # Por defecto excluir pruebas residuales y números ficticios
         query = query.where(WhatsAppConversation.status != "simulated")
         query = query.where(WhatsAppConversation.contact_phone != "+595990000000")
+
+    if department:
+        query = query.where(WhatsAppConversation.department == department)
+
+    if assigned_user_id:
+        try:
+            query = query.where(WhatsAppConversation.assigned_user_id == UUID(assigned_user_id))
+        except ValueError:
+            pass
+
+    if search:
+        s = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                WhatsAppConversation.contact_name.ilike(s),
+                WhatsAppConversation.contact_phone.ilike(s),
+            )
+        )
 
     query = query.order_by(
         WhatsAppConversation.last_message_at.desc().nulls_last(),
@@ -527,6 +585,13 @@ async def list_conversations(
             last_message_preview=previews.get(c.id),
             total_messages=counts.get(c.id, 0),
             created_at=c.created_at,
+            handling_mode=c.handling_mode or "ai_bot",
+            assigned_user_id=c.assigned_user_id,
+            assigned_user_name=c.assigned_user_name,
+            department=c.department or "general",
+            waiting_since=c.waiting_since,
+            unread_agent_count=c.unread_agent_count or 0,
+            is_ai_typing=(c.id in _active_agent_conversations),
         )
         for c in convs
     ]
@@ -551,7 +616,16 @@ async def get_conversation(
         contact_phone=conversation.contact_phone,
         last_message_at=conversation.last_message_at,
         status=_val(conversation.status, "active"),
+        session_state=conversation.session_state or "idle",
+        session_data=conversation.session_data,
         created_at=conversation.created_at,
+        handling_mode=conversation.handling_mode or "ai_bot",
+        assigned_user_id=conversation.assigned_user_id,
+        assigned_user_name=conversation.assigned_user_name,
+        department=conversation.department or "general",
+        waiting_since=conversation.waiting_since,
+        unread_agent_count=conversation.unread_agent_count or 0,
+        is_ai_typing=(conversation.id in _active_agent_conversations),
     )
 
 
@@ -565,7 +639,15 @@ async def get_messages(
 ):
     tenant_id = UUID(user["tenant_id"])
     from uuid import UUID as U
-    messages = await whatsapp_service.get_conversation_messages(db, tenant_id, U(conv_id), limit, offset)
+    c_uuid = U(conv_id)
+    
+    # Marcar mensajes como leídos para el operador
+    conv = await db.get(WhatsAppConversation, c_uuid)
+    if conv and conv.tenant_id == tenant_id and conv.unread_agent_count > 0:
+        conv.unread_agent_count = 0
+        await db.commit()
+
+    messages = await whatsapp_service.get_conversation_messages(db, tenant_id, c_uuid, limit, offset)
     return [
         WhatsAppMessageResponse(
             id=m.id,
@@ -578,6 +660,12 @@ async def get_messages(
             status=_val(m.status, "queued"),
             command=m.command,
             created_at=m.created_at,
+            sender_type=m.sender_type or ("customer" if _val(m.direction) == "inbound" else "bot"),
+            sender_user_id=m.sender_user_id,
+            sender_name=m.sender_name,
+            media_type=m.media_type,
+            media_filename=m.media_filename,
+            media_size_bytes=m.media_size_bytes,
         )
         for m in messages
     ]
@@ -636,7 +724,30 @@ async def send_outbound_message(
     if not content_str and not body.media_url:
         raise HTTPException(status_code=400, detail="El mensaje debe contener texto o un archivo adjunto")
 
-    msg = await whatsapp_service.send_message(db, tenant_id, U(conv_id), content_str, body.media_url)
+    # Detectar tipo de media
+    media_type = None
+    if body.media_url:
+        clean = body.media_url.lower().split("?")[0]
+        if any(clean.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"]):
+            media_type = "image"
+        elif any(clean.endswith(ext) for ext in [".mp4", ".webm", ".mov"]):
+            media_type = "video"
+        elif any(clean.endswith(ext) for ext in [".mp3", ".ogg", ".wav", ".m4a"]):
+            media_type = "audio"
+        else:
+            media_type = "document"
+
+    msg = await whatsapp_service.send_message(
+        db,
+        tenant_id,
+        U(conv_id),
+        content_str,
+        body.media_url,
+        sender_type="agent",
+        sender_user_id=UUID(user["id"]),
+        sender_name=user.get("nombre", "Operador"),
+        media_type=media_type,
+    )
     return WhatsAppMessageResponse(
         id=msg.id,
         tenant_id=msg.tenant_id,
@@ -648,7 +759,272 @@ async def send_outbound_message(
         status=_val(msg.status, "queued"),
         command=msg.command,
         created_at=msg.created_at,
+        sender_type=msg.sender_type,
+        sender_user_id=msg.sender_user_id,
+        sender_name=msg.sender_name,
+        media_type=msg.media_type,
+        media_filename=msg.media_filename,
+        media_size_bytes=msg.media_size_bytes,
     )
+
+
+@router.post("/conversations/{conv_id}/take")
+async def take_conversation(
+    conv_id: str,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Auto-asigna la conversación al usuario actual y silencia la IA."""
+    tenant_id = UUID(user["tenant_id"])
+    from uuid import UUID as U
+    c_uuid = U(conv_id)
+
+    conv = await db.get(WhatsAppConversation, c_uuid)
+    if not conv or conv.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+    conv.handling_mode = "human_active"
+    conv.assigned_user_id = UUID(user["id"])
+    conv.assigned_user_name = user.get("nombre", "Operador")
+    conv.waiting_since = None
+    conv.unread_agent_count = 0
+
+    s_data = dict(conv.session_data or {})
+    s_data["human_takeover"] = True
+    s_data["human_takeover_at"] = datetime.now(timezone.utc).isoformat()
+    s_data["human_takeover_reason"] = f"Tomado manualmente por {user.get('nombre')}"
+    conv.session_data = s_data
+
+    # Registrar mensaje de sistema (evento de auditoría)
+    sys_msg = WhatsAppMessage(
+        tenant_id=tenant_id,
+        conversation_id=c_uuid,
+        direction=MessageDirection.outbound,
+        content=f"📌 {user.get('nombre', 'Un operador')} tomó la conversación",
+        status=MessageStatus.delivered,
+        sender_type="system",
+        sender_name="Sistema",
+    )
+    db.add(sys_msg)
+    await db.commit()
+    await db.refresh(conv)
+    return {"status": "ok", "handling_mode": conv.handling_mode, "assigned_to": conv.assigned_user_name}
+
+
+@router.post("/conversations/{conv_id}/assign")
+async def assign_conversation(
+    conv_id: str,
+    body: AssignConversationRequest,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Deriva o reasigna una conversación a otro agente o departamento."""
+    tenant_id = UUID(user["tenant_id"])
+    from uuid import UUID as U
+    c_uuid = U(conv_id)
+
+    conv = await db.get(WhatsAppConversation, c_uuid)
+    if not conv or conv.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+    dest_name = None
+    if body.assigned_user_id:
+        dest_user = await db.get(User, body.assigned_user_id)
+        if dest_user:
+            dest_name = dest_user.nombre
+            conv.assigned_user_id = dest_user.id
+            conv.assigned_user_name = dest_user.nombre
+            conv.handling_mode = "human_active"
+    else:
+        # Si se desasigna de usuario pero se asigna a departamento
+        conv.assigned_user_id = None
+        conv.assigned_user_name = None
+        conv.handling_mode = "human_pending"
+        conv.waiting_since = datetime.now(timezone.utc)
+
+    if body.department:
+        conv.department = body.department
+
+    s_data = dict(conv.session_data or {})
+    s_data["human_takeover"] = True
+    conv.session_data = s_data
+
+    # Registrar evento de auditoría en el timeline
+    target_info = dest_name or (f"departamento {body.department}" if body.department else "cola general")
+    sys_msg = WhatsAppMessage(
+        tenant_id=tenant_id,
+        conversation_id=c_uuid,
+        direction=MessageDirection.outbound,
+        content=f"🔁 Transferido a {target_info} por {user.get('nombre')}",
+        status=MessageStatus.delivered,
+        sender_type="system",
+        sender_name="Sistema",
+    )
+    db.add(sys_msg)
+
+    # Si incluyó una nota interna de traspaso
+    if body.internal_note and body.internal_note.strip():
+        note_msg = WhatsAppMessage(
+            tenant_id=tenant_id,
+            conversation_id=c_uuid,
+            direction=MessageDirection.outbound,
+            content=f"📝 Nota de traspaso: {body.internal_note.strip()}",
+            status=MessageStatus.delivered,
+            sender_type="internal_note",
+            sender_user_id=UUID(user["id"]),
+            sender_name=user.get("nombre"),
+        )
+        db.add(note_msg)
+
+    await db.commit()
+    await db.refresh(conv)
+    return {"status": "ok", "assigned_user_name": conv.assigned_user_name, "department": conv.department}
+
+
+@router.post("/conversations/{conv_id}/release-to-bot")
+async def release_conversation_to_bot(
+    conv_id: str,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Devuelve el control al Asistente Virtual / IA de WhatsApp."""
+    tenant_id = UUID(user["tenant_id"])
+    from uuid import UUID as U
+    c_uuid = U(conv_id)
+
+    conv = await db.get(WhatsAppConversation, c_uuid)
+    if not conv or conv.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+    conv.handling_mode = "ai_bot"
+    conv.waiting_since = None
+    s_data = dict(conv.session_data or {})
+    s_data["human_takeover"] = False
+    s_data.pop("human_takeover_reason", None)
+    conv.session_data = s_data
+    conv.session_state = "idle"
+
+    sys_msg = WhatsAppMessage(
+        tenant_id=tenant_id,
+        conversation_id=c_uuid,
+        direction=MessageDirection.outbound,
+        content=f"🤖 Asistente virtual (IA) reactivado por {user.get('nombre')}",
+        status=MessageStatus.delivered,
+        sender_type="system",
+        sender_name="Sistema",
+    )
+    db.add(sys_msg)
+    await db.commit()
+    return {"status": "ok", "handling_mode": "ai_bot"}
+
+
+@router.post("/conversations/{conv_id}/resolve")
+async def resolve_conversation(
+    conv_id: str,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Marca la conversación como resuelta y archiva el ticket."""
+    tenant_id = UUID(user["tenant_id"])
+    from uuid import UUID as U
+    c_uuid = U(conv_id)
+
+    conv = await db.get(WhatsAppConversation, c_uuid)
+    if not conv or conv.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+    conv.handling_mode = "resolved"
+    conv.status = "archived"
+    conv.waiting_since = None
+
+    sys_msg = WhatsAppMessage(
+        tenant_id=tenant_id,
+        conversation_id=c_uuid,
+        direction=MessageDirection.outbound,
+        content=f"✅ Conversación marcada como resuelta por {user.get('nombre')}",
+        status=MessageStatus.delivered,
+        sender_type="system",
+        sender_name="Sistema",
+    )
+    db.add(sys_msg)
+    await db.commit()
+    return {"status": "ok", "handling_mode": "resolved"}
+
+
+@router.post("/conversations/{conv_id}/internal-note")
+async def add_internal_note(
+    conv_id: str,
+    body: CreateInternalNoteRequest,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Agrega una nota interna privada visible solo para los operadores del sistema.
+    NO se envía a WhatsApp ni a Evolution API.
+    """
+    tenant_id = UUID(user["tenant_id"])
+    from uuid import UUID as U
+    c_uuid = U(conv_id)
+
+    conv = await db.get(WhatsAppConversation, c_uuid)
+    if not conv or conv.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+    note_msg = WhatsAppMessage(
+        tenant_id=tenant_id,
+        conversation_id=c_uuid,
+        direction=MessageDirection.outbound,
+        content=body.content.strip(),
+        status=MessageStatus.delivered,
+        sender_type="internal_note",
+        sender_user_id=UUID(user["id"]),
+        sender_name=user.get("nombre", "Operador"),
+    )
+    db.add(note_msg)
+    conv.last_message_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(note_msg)
+
+    return WhatsAppMessageResponse(
+        id=note_msg.id,
+        tenant_id=note_msg.tenant_id,
+        conversation_id=note_msg.conversation_id,
+        direction=_val(note_msg.direction, "outbound"),
+        content=note_msg.content,
+        message_id=f"note-{note_msg.id}",
+        media_url=None,
+        status="delivered",
+        command=None,
+        created_at=note_msg.created_at,
+        sender_type="internal_note",
+        sender_user_id=note_msg.sender_user_id,
+        sender_name=note_msg.sender_name,
+    )
+
+
+@router.get("/agents", response_model=list[AgentItemResponse])
+async def list_available_agents(
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista los operadores y colaboradores disponibles para asignación de chats."""
+    # Listar usuarios activos del sistema
+    res = await db.execute(
+        select(User)
+        .where(User.activo == True)
+        .order_by(User.nombre.asc())
+    )
+    users = list(res.scalars().all())
+    return [
+        AgentItemResponse(
+            id=u.id,
+            nombre=u.nombre,
+            email=u.email,
+            rol=u.rol,
+            foto_url=u.foto_url,
+        )
+        for u in users
+    ]
 
 
 @router.put("/conversations/{conv_id}/archive")
@@ -1075,6 +1451,36 @@ async def evolution_webhook(
             return {"status": "ignored", "detail": "No tenant found"}
 
         conv = await whatsapp_service.get_or_create_conversation(db, tenant.id, clean_phone, push_name)
+        
+        # Detectar si el cliente solicita explícitamente atención humana
+        lower_content = content.lower().strip()
+        wants_human = any(kw in lower_content for kw in [
+            "humano", "asesor", "persona", "operador", "reclamo",
+            "hablar con alguien", "hablar con un asesor", "atención", "atencion", "ayuda humana"
+        ])
+        wants_bot = lower_content in ["bot", "reactivar", "asistente", "menu", "reiniciar", "volver al bot"]
+
+        session_data = dict(conv.session_data or {})
+        if wants_human:
+            conv.handling_mode = "human_pending"
+            conv.waiting_since = datetime.now(timezone.utc)
+            session_data["human_takeover"] = True
+            session_data["human_takeover_reason"] = "Solicitud explícita del cliente"
+            conv.session_data = session_data
+            logger.info(f"[Evolution Webhook] Conversación '{clean_phone}' pasada a 'human_pending' por solicitud de asesor")
+        elif wants_bot:
+            conv.handling_mode = "ai_bot"
+            conv.waiting_since = None
+            session_data["human_takeover"] = False
+            session_data.pop("human_takeover_reason", None)
+            conv.session_data = session_data
+            conv.session_state = "idle"
+            logger.info(f"[Evolution Webhook] Agente IA reactivado por cliente en '{clean_phone}'")
+
+        # Incrementar contador de no leídos para el operador si está en cola o atendido por humano
+        if conv.handling_mode in ("human_pending", "human_active") or session_data.get("human_takeover"):
+            conv.unread_agent_count = (conv.unread_agent_count or 0) + 1
+
         inbound_msg = WhatsAppMessage(
             tenant_id=tenant.id,
             conversation_id=conv.id,
@@ -1083,6 +1489,8 @@ async def evolution_webhook(
             message_id=key.get("id"),
             media_url=media_url,
             status=MessageStatus.delivered,
+            sender_type="customer",
+            sender_name=push_name,
         )
         db.add(inbound_msg)
         conv.last_message_at = datetime.now(timezone.utc)
@@ -1093,24 +1501,13 @@ async def evolution_webhook(
             t_cfg = (tenant.config or {}) if tenant else {}
             bot_cfg = t_cfg.get("chatbot", {})
 
-            # Auto-responder del Agente IA (verdadero por defecto a menos que se pause)
             auto_reply_active = bot_cfg.get("auto_reply", True)
             should_reply = bool(auto_reply_active)
 
-            # Verificar si la conversación está en modo atención humana (human_takeover)
-            session_data = conv.session_data or {}
-            if session_data.get("human_takeover"):
-                # Si el usuario pide explícitamente reactivar el agente
-                if content.strip().lower() in ["bot", "reactivar", "asistente", "menu", "reiniciar"]:
-                    session_data["human_takeover"] = False
-                    session_data.pop("human_takeover_reason", None)
-                    conv.session_data = session_data
-                    conv.session_state = "idle"
-                    await db.commit()
-                    logger.info(f"[Evolution Webhook] Agente IA reactivado por cliente en '{clean_phone}'")
-                else:
-                    logger.info(f"[Evolution Webhook] Conversación '{clean_phone}' en ATENCIÓN HUMANA (Agente IA en pausa)")
-                    should_reply = False
+            # Si está en modo atención humana (human_takeover) y no reactivó el bot
+            if session_data.get("human_takeover") and not wants_bot:
+                logger.info(f"[Evolution Webhook] Conversación '{clean_phone}' en ATENCIÓN HUMANA (Agente IA en pausa)")
+                should_reply = False
 
             if not should_reply:
                 logger.info(f"[Evolution Webhook] Agente IA en PAUSA para '{clean_phone}' (auto_reply={auto_reply_active}).")
@@ -1157,6 +1554,8 @@ async def evolution_webhook(
                                     content=ai_res["text"],
                                     message_id=f"ai-{datetime.now(timezone.utc).timestamp()}",
                                     status=MessageStatus.sent,
+                                    sender_type="bot",
+                                    sender_name="ExtraBot IA",
                                 )
                                 db.add(outbound_msg)
                                 conv.last_message_at = datetime.now(timezone.utc)
@@ -1168,6 +1567,13 @@ async def evolution_webhook(
                                 b64_pdf = base64.b64encode(ai_res["pdf_bytes"]).decode("ascii")
                                 media_data = f"data:application/pdf;base64,{b64_pdf}"
                                 logger.info(f"[Evolution Webhook] Despachando PDF de pedido a '{clean_phone}': {pdf_fn}")
+
+                                # Guardar PDF localmente para visualización y descarga en panel humano
+                                pdf_media_dir = _UPLOADS_DIR / "whatsapp_media"
+                                pdf_media_dir.mkdir(parents=True, exist_ok=True)
+                                safe_pdf_name = f"pedido_{conv.id}_{int(datetime.now(timezone.utc).timestamp())}.pdf"
+                                (pdf_media_dir / safe_pdf_name).write_bytes(ai_res["pdf_bytes"])
+                                local_pdf_url = f"/uploads/whatsapp_media/{safe_pdf_name}"
 
                                 await evolution_client.send_media_message(
                                     phone=clean_phone,
@@ -1181,11 +1587,26 @@ async def evolution_webhook(
                                     tenant_id=tenant.id,
                                     conversation_id=conv.id,
                                     direction=MessageDirection.outbound,
-                                    content=f"[Documento Adjunto: {pdf_fn}]",
+                                    content=f"📄 Presupuesto oficial #{ai_res.get('order_code', '')}: {pdf_fn}",
+                                    media_url=local_pdf_url,
                                     message_id=f"ai-pdf-{datetime.now(timezone.utc).timestamp()}",
                                     status=MessageStatus.sent,
+                                    sender_type="bot",
+                                    sender_name="ExtraBot IA",
+                                    media_type="document",
+                                    media_filename=pdf_fn,
+                                    media_size_bytes=len(ai_res["pdf_bytes"]),
                                 )
                                 db.add(pdf_msg)
+
+                                # Derivar automáticamente a cola humana para confirmación de pedido
+                                conv.handling_mode = "human_pending"
+                                conv.waiting_since = datetime.now(timezone.utc)
+                                conv.unread_agent_count = (conv.unread_agent_count or 0) + 1
+                                session_data["human_takeover"] = True
+                                session_data["human_takeover_reason"] = f"Pedido generado #{ai_res.get('order_code', '')}"
+                                conv.session_data = session_data
+
                                 await db.commit()
                     finally:
                         _active_agent_conversations.discard(conv.id)

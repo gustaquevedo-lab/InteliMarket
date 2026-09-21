@@ -28,6 +28,7 @@ def save_media_file_to_uploads(
 ) -> str:
     """
     Decodifica base64 y guarda el archivo en uploads/whatsapp_media/.
+    Detecta automáticamente extensión y tipo MIME por magic bytes si no se proporciona.
     Retorna la URL relativa '/uploads/whatsapp_media/{filename}'.
     """
     clean_b64 = b64_string
@@ -38,6 +39,12 @@ def save_media_file_to_uploads(
 
     media_dir = _UPLOADS_DIR / "whatsapp_media"
     media_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        file_bytes = base64.b64decode(clean_b64)
+    except Exception as e:
+        logger.error(f"Error decodificando base64 para {message_id}: {e}")
+        return ""
 
     ext = "bin"
     if mimetype:
@@ -52,14 +59,32 @@ def save_media_file_to_uploads(
             ext = "mp4"
         elif "pdf" in mimetype:
             ext = "pdf"
+        elif "webp" in mimetype:
+            ext = "webp"
     elif original_name and "." in original_name:
         ext = original_name.rsplit(".", 1)[1].lower()
+
+    # Detección por magic bytes si sigue siendo .bin o genérico
+    if ext in ("bin", "") and len(file_bytes) > 12:
+        if file_bytes.startswith(b"\xff\xd8\xff"):
+            ext = "jpeg"
+        elif file_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            ext = "png"
+        elif file_bytes.startswith(b"RIFF") and file_bytes[8:12] == b"WEBP":
+            ext = "webp"
+        elif file_bytes.startswith(b"%PDF"):
+            ext = "pdf"
+        elif file_bytes.startswith(b"OggS"):
+            ext = "ogg"
+        elif file_bytes.startswith(b"ID3") or file_bytes.startswith(b"\xff\xfb"):
+            ext = "mp3"
+        elif file_bytes[4:8] == b"ftyp":
+            ext = "mp4"
 
     clean_id = re.sub(r"[^\w\-]", "", message_id or "media")
     filename = f"{clean_id}.{ext}"
     target_path = media_dir / filename
 
-    file_bytes = base64.b64decode(clean_b64)
     target_path.write_bytes(file_bytes)
     return f"/uploads/whatsapp_media/{filename}"
 

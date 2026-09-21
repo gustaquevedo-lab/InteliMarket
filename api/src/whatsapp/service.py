@@ -137,7 +137,17 @@ async def archive_conversation(db: AsyncSession, tenant_id: UUID, conversation_i
 
 
 async def send_message(
-    db: AsyncSession, tenant_id: UUID, conversation_id: UUID, content: str, media_url: Optional[str] = None
+    db: AsyncSession,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    content: str,
+    media_url: Optional[str] = None,
+    sender_type: str = "agent",
+    sender_user_id: Optional[UUID] = None,
+    sender_name: Optional[str] = None,
+    media_type: Optional[str] = None,
+    media_filename: Optional[str] = None,
+    media_size_bytes: Optional[int] = None,
 ) -> WhatsAppMessage:
     config = await get_config(db, tenant_id)
     conversation = await db.get(WhatsAppConversation, conversation_id)
@@ -151,6 +161,12 @@ async def send_message(
         content=content,
         media_url=media_url,
         status=MessageStatus.queued,
+        sender_type=sender_type,
+        sender_user_id=sender_user_id,
+        sender_name=sender_name,
+        media_type=media_type,
+        media_filename=media_filename,
+        media_size_bytes=media_size_bytes,
     )
     db.add(msg)
     await db.flush()
@@ -160,6 +176,17 @@ async def send_message(
     msg.status = MessageStatus.sent if evo_resp.get("success") else MessageStatus.failed
 
     conversation.last_message_at = datetime.now(timezone.utc)
+    if sender_type == "agent":
+        conversation.handling_mode = "human_active"
+        conversation.unread_agent_count = 0
+        s_data = dict(conversation.session_data or {})
+        s_data["human_takeover"] = True
+        s_data["human_takeover_at"] = datetime.now(timezone.utc).isoformat()
+        conversation.session_data = s_data
+        if not conversation.assigned_user_id and sender_user_id:
+            conversation.assigned_user_id = sender_user_id
+            conversation.assigned_user_name = sender_name
+
     await db.commit()
     await db.refresh(msg)
     return msg

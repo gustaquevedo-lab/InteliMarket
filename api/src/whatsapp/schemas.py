@@ -61,6 +61,15 @@ class WhatsAppConversationResponse(BaseModel):
     last_message_preview: Optional[str] = None
     total_messages: Optional[int] = 0
     created_at: datetime
+    
+    # Multi-agente e Inboxes
+    handling_mode: str = "ai_bot"
+    assigned_user_id: Optional[UUID] = None
+    assigned_user_name: Optional[str] = None
+    department: Optional[str] = "general"
+    waiting_since: Optional[datetime] = None
+    unread_agent_count: int = 0
+    is_ai_typing: bool = False
 
 
 class WhatsAppMessageResponse(BaseModel):
@@ -74,6 +83,36 @@ class WhatsAppMessageResponse(BaseModel):
     status: str
     command: Optional[str] = None
     created_at: datetime
+    
+    # Identidad y multimedia
+    sender_type: str = "customer"
+    sender_user_id: Optional[UUID] = None
+    sender_name: Optional[str] = None
+    media_type: Optional[str] = None
+    media_filename: Optional[str] = None
+    media_size_bytes: Optional[int] = None
+
+
+class AssignConversationRequest(BaseModel):
+    assigned_user_id: Optional[UUID] = None
+    department: Optional[str] = None
+    internal_note: Optional[str] = None
+
+
+class SetHandlingModeRequest(BaseModel):
+    handling_mode: str = Field(..., description="ai_bot, human_pending, human_active, resolved")
+
+
+class CreateInternalNoteRequest(BaseModel):
+    content: str = Field(..., min_length=1)
+
+
+class AgentItemResponse(BaseModel):
+    id: UUID
+    nombre: str
+    email: str
+    rol: str
+    foto_url: Optional[str] = None
 
 
 class WhatsAppTemplateCreate(BaseModel):
