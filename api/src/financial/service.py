@@ -3952,6 +3952,8 @@ async def create_multi_supplier_payment_batch(
             m_aplicado = Decimal(str(alloc.monto_aplicado))
             m_ret = Decimal(str(alloc.monto_retencion or 0))
             saldo_ant = Decimal(str(inv.saldo_pendiente or inv.total))
+            total_amort = m_aplicado + m_ret
+            saldo_rest = max(Decimal("0"), saldo_ant - total_amort)
 
             db.add(SupplierPaymentOrderAllocation(
                 payment_order_id=op.id,
@@ -3959,10 +3961,10 @@ async def create_multi_supplier_payment_batch(
                 monto_aplicado=m_aplicado,
                 monto_retencion=m_ret,
                 saldo_anterior=saldo_ant,
+                saldo_restante=saldo_rest,
             ))
 
-            total_amort = m_aplicado + m_ret
-            inv.saldo_pendiente = max(Decimal("0"), saldo_ant - total_amort)
+            inv.saldo_pendiente = saldo_rest
             if inv.saldo_pendiente <= Decimal("0"):
                 inv.estado = "pagada"
             else:
@@ -4200,6 +4202,7 @@ async def settle_vales_and_pay(
         monto_aplicado=monto_factura,
         monto_retencion=Decimal("0"),
         saldo_anterior=monto_factura,
+        saldo_restante=Decimal("0"),
     ))
 
     db.add(SupplierInvoicePayment(

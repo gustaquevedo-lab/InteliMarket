@@ -381,7 +381,7 @@ class SupplierPaymentOrderAllocation(Base):
     monto_aplicado = Column(Numeric(15, 0), nullable=False)
     monto_retencion = Column(Numeric(15, 0), default=0)
     saldo_anterior = Column(Numeric(15, 0), nullable=False)
-    saldo_restante = Column(Numeric(15, 0), nullable=False)
+    saldo_restante = Column(Numeric(15, 0), nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     payment_order = relationship("SupplierPaymentOrder", back_populates="allocations")
