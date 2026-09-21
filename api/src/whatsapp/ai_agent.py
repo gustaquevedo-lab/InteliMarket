@@ -350,13 +350,20 @@ class CustomerAIAgent:
         valor_canje_gs = total_pts * guarani_por_punto
 
         # Cupones de sorteo
-        cup_res = await self.db.execute(
-            select(func.count(CuponTicket.id)).where(
-                CuponTicket.company_id == self.company_id,
-                CuponTicket.customer_id == customer.id,
+        total_cupones = 0
+        doc_search = customer.ci or customer.ruc
+        if doc_search:
+            from api.src.cupones.models import CuponCliente
+            clean_doc = re.sub(r"[^\d]", "", doc_search)
+            cup_res = await self.db.execute(
+                select(func.coalesce(func.sum(CuponTicket.cantidad), 0))
+                .join(CuponCliente, CuponCliente.id == CuponTicket.cliente_id)
+                .where(
+                    CuponTicket.company_id == self.company_id,
+                    CuponCliente.documento.ilike(f"%{clean_doc}%"),
+                )
             )
-        )
-        total_cupones = int(cup_res.scalar() or 0)
+            total_cupones = int(cup_res.scalar() or 0)
 
         return {
             "status": "success",
@@ -373,15 +380,17 @@ class CustomerAIAgent:
 
     async def tool_consultar_promociones_activas(self) -> Dict[str, Any]:
         """Tool: Promociones y ofertas vigentes."""
-        now = datetime.now(timezone.utc)
+        py_today = datetime.now(ZoneInfo("America/Asuncion")).date()
         stmt = (
             select(Promotion)
             .where(
                 Promotion.company_id == self.company_id,
                 Promotion.activo == True,
+                or_(Promotion.valido_desde == None, Promotion.valido_desde <= py_today),
+                or_(Promotion.valido_hasta == None, Promotion.valido_hasta >= py_today),
             )
-            .order_by(desc(Promotion.prioridad))
-            .limit(5)
+            .order_by(desc(Promotion.created_at))
+            .limit(8)
         )
         res = await self.db.execute(stmt)
         promos = res.scalars().all()
@@ -394,11 +403,21 @@ class CustomerAIAgent:
 
         lista = []
         for p in promos:
+            beneficio_str = ""
+            if p.tipo == "precio_fijo_oferta" and p.precio_fijo_promocional:
+                beneficio_str = f"Gs. {int(float(p.precio_fijo_promocional)):,}".replace(",", ".")
+            elif p.tipo == "porcentaje" and p.valor:
+                beneficio_str = f"{p.valor}% OFF"
+            elif p.valor:
+                beneficio_str = f"Gs. {int(float(p.valor)):,}".replace(",", ".")
+            else:
+                beneficio_str = p.tipo.replace("_", " ").title()
+
             lista.append({
                 "nombre": p.nombre,
                 "descripcion": p.descripcion or "",
-                "tipo": p.tipo_descuento,
-                "descuento": float(p.valor_descuento or 0),
+                "mecanica": p.tipo,
+                "beneficio": beneficio_str,
             })
 
         return {
