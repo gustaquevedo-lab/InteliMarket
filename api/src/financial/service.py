@@ -3113,14 +3113,9 @@ async def _execute_disbursements_internal(
             # Registrar movimiento de caja/bóveda
             from api.src.caja.models import CashRegister
             reg_res = await db.execute(
-                select(CashRegister).where(CashRegister.company_id == cid, CashRegister.es_boveda == True).limit(1)
+                select(CashRegister).where(CashRegister.company_id == cid).order_by(CashRegister.activo.desc(), CashRegister.created_at.asc()).limit(1)
             )
             main_reg = reg_res.scalar_one_or_none()
-            if not main_reg:
-                reg_res = await db.execute(
-                    select(CashRegister).where(CashRegister.company_id == cid).limit(1)
-                )
-                main_reg = reg_res.scalar_one_or_none()
 
             if main_reg:
                 db.add(CashRegisterMovement(
@@ -3879,14 +3874,9 @@ async def create_multi_supplier_payment_batch(
 
         from api.src.caja.models import CashRegister
         reg_res = await db.execute(
-            select(CashRegister).where(CashRegister.company_id == cid, CashRegister.es_boveda == True).limit(1)
+            select(CashRegister).where(CashRegister.company_id == cid).order_by(CashRegister.activo.desc(), CashRegister.created_at.asc()).limit(1)
         )
         main_reg = reg_res.scalar_one_or_none()
-        if not main_reg:
-            reg_res = await db.execute(
-                select(CashRegister).where(CashRegister.company_id == cid).limit(1)
-            )
-            main_reg = reg_res.scalar_one_or_none()
 
         if main_reg:
             db.add(CashRegisterMovement(
