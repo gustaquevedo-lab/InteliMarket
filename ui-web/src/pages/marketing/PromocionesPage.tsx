@@ -1449,6 +1449,10 @@ export default function PromocionesPage() {
                             <span className="text-emerald-600 dark:text-emerald-400">
                               {formatPYG(Number(promo.precio_fijo_promocional))}
                             </span>
+                          ) : (promo as any).precios_por_producto && Object.keys((promo as any).precios_por_producto).length > 0 ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold text-xs bg-emerald-50 dark:bg-emerald-950/50 px-2 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                              🏷️ {Object.keys((promo as any).precios_por_producto).length} precios fijados
+                            </span>
                           ) : promo.tipo === "porcentaje" && promo.valor ? (
                             <span className="text-blue-600 dark:text-blue-400">
                               -{promo.valor}% OFF
@@ -1469,6 +1473,27 @@ export default function PromocionesPage() {
                         {/* Vigencia & Días */}
                         <td className="p-3.5 whitespace-nowrap font-mono text-gray-600 dark:text-gray-300">
                           <div>{promo.valido_desde} ➔ {promo.valido_hasta}</div>
+                          {(() => {
+                            const hoyStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Asuncion" })
+                            const hoyDow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Asuncion" })).getDay()
+                            const enFecha = (!promo.valido_desde || hoyStr >= promo.valido_desde) && (!promo.valido_hasta || hoyStr <= promo.valido_hasta)
+                            const enDia = !promo.dias_semana || promo.dias_semana.length === 0 || promo.dias_semana.includes(hoyDow)
+                            const rigeHoy = promo.activo && enFecha && enDia
+                            return (
+                              <div className="mt-1">
+                                {rigeHoy ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                                    RIGE HOY EN CAJA
+                                  </span>
+                                ) : promo.activo ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                    No rige hoy
+                                  </span>
+                                ) : null}
+                              </div>
+                            )
+                          })()}
                           {promo.horario_desde && promo.horario_hasta && (
                             <div className="text-[9px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">
                               ⚡ {String(promo.horario_desde).slice(0, 5)} - {String(promo.horario_hasta).slice(0, 5)} hs

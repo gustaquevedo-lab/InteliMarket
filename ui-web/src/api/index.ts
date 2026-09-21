@@ -151,7 +151,13 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     }
     const error = await response.json().catch(() => ({ detail: fallbackDetail }))
     const detailMsg = Array.isArray(error.detail)
-      ? error.detail.map((d: any) => d.msg || `${d.loc?.join(".")}: ${d.type}`).join(", ")
+      ? error.detail
+          .map((d: any) => {
+            const loc = Array.isArray(d.loc) ? d.loc.filter((x: any) => x !== "body").join(".") : ""
+            const msg = d.msg || d.type || "Error de validación"
+            return loc ? `${loc}: ${msg}` : msg
+          })
+          .join(", ")
       : typeof error.detail === "string"
       ? error.detail
       : typeof error.message === "string"

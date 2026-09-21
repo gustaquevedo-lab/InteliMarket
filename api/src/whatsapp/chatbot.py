@@ -551,17 +551,11 @@ class ChatbotEngine:
         message_body: str,
         media_url: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Procesa un mensaje entrante y devuelve la respuesta del bot"""
-        current_state = conversation.session_state or "idle"
-        user_input = message_body.strip().lower()
-
-        # Si el bot tiene un flujo visual configurado y activo, procesar preferentemente con el motor de flujos
-        cfg = await self.get_config()
-        flow = cfg.get("flow") or DEFAULT_BOT_FLOW
-        if flow and flow.get("active", True) and flow.get("nodes"):
-            flow_resp = await self._process_visual_flow(conversation, user_input, flow)
-            if flow_resp:
-                return flow_resp
+        """[DESACTIVADO] El motor de chatbot rígido por flujos/botones fue reemplazado por el Agente de IA Conversacional."""
+        logger.warning(
+            f"[ChatbotEngine] Chatbot clásico DESACTIVADO. Ignorando mensaje para conv {conversation.id} ('{conversation.contact_phone}'). El Agente IA maneja las conversaciones."
+        )
+        return {"text": None}
 
         # Comandos globales de salida o reseteo
         if user_input in ["0", "menu", "inicio", "volver", "cancelar"]:

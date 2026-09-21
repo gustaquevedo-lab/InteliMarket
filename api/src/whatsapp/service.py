@@ -365,29 +365,20 @@ async def handle_inbound_webhook(
     await db.commit()
 
     if config.auto_reply:
-        # Use new chatbot engine with interactive menus
-        from api.src.whatsapp.chatbot import ChatbotEngine, update_conversation_state
-        
-        # Get company_id from tenant (assuming first company)
+        # Usar Agente de IA Conversacional (Qwen 2.5)
         from api.src.companies.models import Company
         company_result = await db.execute(
             select(Company).where(Company.tenant_id == config.tenant_id).limit(1)
         )
         company = company_result.scalar_one_or_none()
-        
+
         if company:
-            chatbot = ChatbotEngine(db, company.id)
-            response_data = await chatbot.process_message(conversation, body, msg.media_url)
-            
-            if response_data and response_data.get("text"):
-                # Send response
-                await reply_to_conversation(db, config.tenant_id, conversation.id, response_data["text"], command)
-                
-                # Update conversation state
-                if response_data.get("next_state"):
-                    await update_conversation_state(db, conversation.id, response_data["next_state"])
+            from api.src.whatsapp.ai_agent import CustomerAIAgent
+            agent = CustomerAIAgent(db, company.id, config.tenant_id)
+            ai_res = await agent.process_message(conversation, body)
+            if ai_res and ai_res.get("text"):
+                await reply_to_conversation(db, config.tenant_id, conversation.id, ai_res["text"], command)
         else:
-            # Fallback to old command system if no company found
             response = await execute_command(db, command or "", args, config.tenant_id, raw_body=body)
             if response:
                 await reply_to_conversation(db, config.tenant_id, conversation.id, response, command)

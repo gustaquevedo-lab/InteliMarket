@@ -167,6 +167,7 @@ export default function DepositoRecepcionPage() {
         api.purchases.getOrder(po.id!),
         api.purchases.getOrderItems(po.id!).catch(() => []),
       ])
+      if (fullPO) setSelectedPO(fullPO)
 
       const detailedMap = new Map<string, any>()
       ;(detailedItems || []).forEach((d: any) => {
@@ -561,8 +562,9 @@ export default function DepositoRecepcionPage() {
       const payload: any = {
         purchase_order_id: selectedPO.id,
         supplier_id: selectedPO.supplier_id,
+        warehouse_id: (selectedPO as any)?.warehouse_id || undefined,
         proveedor_ref: proveedorRef.trim() || `REMITO-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}`,
-        observaciones: `Recepción móvil de muelle por ${user?.nombre || "Encargado de Depósito"}. ${observaciones}`,
+        observaciones: `Recepción móvil de muelle por ${user?.nombre || "Encargado de Depósito"}. ${observaciones}`.trim(),
         items: itemsDraft
           .filter((it) => it.cantidad_recibir > 0 || it.cantidad_rechazada > 0)
           .map((it) => ({
@@ -571,13 +573,15 @@ export default function DepositoRecepcionPage() {
             precio_unitario: it.precio_unitario,
             costo_unitario: it.precio_unitario,
             total: it.cantidad_recibir * it.precio_unitario,
-            lote: it.lote,
-            fecha_vencimiento: it.fecha_vencimiento,
-            cantidad_rechazada: it.cantidad_rechazada,
-            motivo_rechazo: it.motivo_rechazo,
+            lote: it.lote ? it.lote.trim() : undefined,
+            fecha_vencimiento: it.fecha_vencimiento
+              ? (it.fecha_vencimiento.includes("T") ? it.fecha_vencimiento : `${it.fecha_vencimiento}T00:00:00Z`)
+              : undefined,
+            cantidad_rechazada: it.cantidad_rechazada || 0,
+            motivo_rechazo: it.motivo_rechazo ? it.motivo_rechazo.trim() : undefined,
             es_extraordinario: it.es_extraordinario || false,
-            autorizado_por: it.autorizado_por || null,
-            autorizacion_motivo: it.autorizacion_motivo || null,
+            autorizado_por: it.autorizado_por || undefined,
+            autorizacion_motivo: it.autorizacion_motivo ? it.autorizacion_motivo.trim() : undefined,
           })),
       }
 

@@ -618,6 +618,31 @@ RECEIPT_PRICE_TOLERANCE = Decimal("0.05")  # 5% de desvio vs. el precio pactado 
 
 
 async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseReceipt:
+    po = None
+    if data.purchase_order_id:
+        po_res = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == data.purchase_order_id))
+        po = po_res.scalar_one_or_none()
+
+    company_id = data.company_id or (po.company_id if po else None) or UUID("00000000-0000-0000-0000-000000000010")
+    supplier_id = data.supplier_id or (po.supplier_id if po else None)
+    if not supplier_id:
+        raise ValueError("Proveedor requerido para registrar la recepción")
+
+    warehouse_id = data.warehouse_id or (po.warehouse_id if po else None)
+    if not warehouse_id:
+        from api.src.inventory.models import Warehouse
+        wh_res = await db.execute(
+            select(Warehouse.id)
+            .where(Warehouse.company_id == company_id, Warehouse.activo.is_(True))
+            .order_by(Warehouse.codigo.asc(), Warehouse.created_at.asc())
+        )
+        warehouse_id = wh_res.scalars().first()
+        if not warehouse_id:
+            wh_any = await db.execute(select(Warehouse.id).where(Warehouse.activo.is_(True)).limit(1))
+            warehouse_id = wh_any.scalars().first()
+        if not warehouse_id:
+            raise ValueError("No se encontró ningún depósito activo para ingresar el stock recibido")
+
     numero = await generate_receipt_number(db)
     total = sum((item.cantidad_recibida * item.costo_unitario for item in data.items), Decimal("0"))
 
@@ -631,10 +656,10 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
     review_reasons: list[str] = []
 
     receipt = PurchaseReceipt(
-        company_id=data.company_id,
+        company_id=company_id,
         purchase_order_id=data.purchase_order_id,
-        supplier_id=data.supplier_id,
-        warehouse_id=data.warehouse_id,
+        supplier_id=supplier_id,
+        warehouse_id=warehouse_id,
         numero=numero,
         total=total.quantize(Decimal("1")),
         proveedor_ref=data.proveedor_ref,
@@ -683,7 +708,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
 
         stock_result = await db.execute(
             select(Stock).where(
-                Stock.warehouse_id == data.warehouse_id,
+                Stock.warehouse_id == warehouse_id,
                 Stock.product_id == item_data.product_id,
             )
         )
@@ -691,7 +716,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
 
         if not stock_obj:
             stock_obj = Stock(
-                warehouse_id=data.warehouse_id,
+                warehouse_id=warehouse_id,
                 product_id=item_data.product_id,
                 variant_id=item_data.variant_id,
                 cantidad=0,
@@ -708,8 +733,8 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         stock_obj.updated_at = datetime.now(timezone.utc)
 
         stock_lot = StockLot(
-            company_id=data.company_id,
-            warehouse_id=data.warehouse_id,
+            company_id=company_id,
+            warehouse_id=warehouse_id,
             product_id=item_data.product_id,
             variant_id=item_data.variant_id,
             cantidad=qty,
@@ -722,8 +747,8 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         db.add(stock_lot)
 
         movement = InventoryMovement(
-            company_id=data.company_id,
-            warehouse_id=data.warehouse_id,
+            company_id=company_id,
+            warehouse_id=warehouse_id,
             product_id=item_data.product_id,
             variant_id=item_data.variant_id,
             tipo="entrada_compra",
@@ -735,10 +760,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         )
         db.add(movement)
 
-    if data.purchase_order_id:
-        po_result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == data.purchase_order_id))
-        po = po_result.scalar_one_or_none()
-        if po:
+    if po:
             for item_data in data.items:
                 await db.execute(
                     text("""
@@ -784,7 +806,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
 
     # Auto-vincular recepción a Cuentas por Pagar (SupplierInvoice)
     try:
-        sup_res = await db.execute(select(Supplier).where(Supplier.id == data.supplier_id))
+        sup_res = await db.execute(select(Supplier).where(Supplier.id == supplier_id))
         sup = sup_res.scalar_one_or_none()
         plazo_dias = sup.plazo_pago_dias if (sup and sup.plazo_pago_dias) else 30
         fecha_emision = date.today()
@@ -794,8 +816,8 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         iva_10 = (receipt.total / Decimal("11")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
         inv = SupplierInvoice(
-            company_id=data.company_id,
-            supplier_id=data.supplier_id,
+            company_id=company_id,
+            supplier_id=supplier_id,
             numero_factura=invoice_num,
             fecha_emision=fecha_emision,
             fecha_recepcion=fecha_emision,

@@ -1,6 +1,6 @@
 """Purchase schemas — suppliers, orders, receipts, requisitions, contracts, forecasting, suggestions, budgets"""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime, date
 from uuid import UUID
@@ -255,11 +255,24 @@ class ReceiptItemInput(BaseModel):
 
 
 
+    @field_validator("fecha_vencimiento", mode="before")
+    def _clean_empty_dt(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
+    @field_validator("autorizado_por", "batch_id", "variant_id", mode="before")
+    def _clean_empty_uuid(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
+
 class ReceiptCreate(BaseModel):
-    company_id: UUID
+    company_id: Optional[UUID] = None
     purchase_order_id: Optional[UUID] = None
-    supplier_id: UUID
-    warehouse_id: UUID
+    supplier_id: Optional[UUID] = None
+    warehouse_id: Optional[UUID] = None
     proveedor_ref: Optional[str] = None
     items: list[ReceiptItemInput]
     observaciones: Optional[str] = None

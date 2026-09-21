@@ -1,394 +1,572 @@
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useCallback } from "react"
 import {
-  Users, DollarSign, Clock, ShieldCheck, ExternalLink, RefreshCcw,
-  CheckCircle2, AlertTriangle, Building, Briefcase, ChevronRight,
-  Maximize2, Minimize2, Lock, FileSpreadsheet, Gift, Award, Zap,
-  TrendingUp, ArrowUpRight, ArrowDownRight, Layers, Sparkles, UserCheck
+  Users, Clock, CheckCircle, XCircle, AlertTriangle, TrendingUp,
+  DollarSign, ExternalLink, Search, RefreshCw, Activity, Briefcase,
+  UserCheck, UserX, Coffee, Fingerprint, ShieldCheck
 } from "lucide-react"
-import { api } from "../../api"
-import { useToast } from "../../context/ToastContext"
-import { formatPYG } from "../../utils/format"
 
-type Tab = "portal" | "resumen" | "novedades"
+// ── Configuración de Integración con SueldOK ──────────────────────────
+const SUELDOK_BASE_URL = "https://sueldok.intellihouse.lat"
+const SUELDOK_OVERVIEW_URL = `${SUELDOK_BASE_URL}/http/api/intelimarket/overview`
+const SUELDOK_SSO_URL = `${SUELDOK_BASE_URL}/http/api/intelimarket/sso-token`
+
+// Llaves de integración por empresa
+const EMPRESAS_DISPONIBLES = [
+  {
+    id: "k177xrnra3m1na7sg640rrm85x8aj62k",
+    nombre: "Grupo Santa Teresa E.A.S.",
+    ruc: "80150377-9",
+    apiKey: "ifk_santateresa_live_api_key_2026",
+    relojInfo: "Dahua Facial (192.168.0.122)",
+  },
+  {
+    id: "k17fz2ntbvprjrngkyysgrmb7589m4w7",
+    nombre: "Casa Gonzalito S.R.L.",
+    ruc: "80005427-0",
+    apiKey: "ifk_m953H3eJeBUZj3ITBHtNlLQPbGg-AO8FLberndVxEdE",
+    relojInfo: "SueldOK App Mobile",
+  },
+]
+
+const COLORES_AVATAR = [
+  "#6366f1", "#8b5cf6", "#ec4899", "#14b8a6", "#f59e0b",
+  "#10b981", "#3b82f6", "#ef4444", "#84cc16", "#f97316",
+]
+
+type TabType = "dashboard" | "asistencia" | "funcionarios"
+
+const estadoConfig: Record<string, { label: string; color: string; bg: string; icon: any }> = {
+  presente: { label: "Presente", color: "#10b981", bg: "rgba(16,185,129,0.12)", icon: CheckCircle },
+  Late: { label: "Tardanza", color: "#f59e0b", bg: "rgba(245,158,11,0.12)", icon: AlertTriangle },
+  tardanza: { label: "Tardanza", color: "#f59e0b", bg: "rgba(245,158,11,0.12)", icon: AlertTriangle },
+  absent: { label: "Ausente", color: "#ef4444", bg: "rgba(239,68,68,0.12)", icon: XCircle },
+  ausente: { label: "Ausente", color: "#ef4444", bg: "rgba(239,68,68,0.12)", icon: XCircle },
+  licencia: { label: "Licencia / Permiso", color: "#60a5fa", bg: "rgba(96,165,250,0.12)", icon: Coffee },
+}
+
+function AvatarCircle({ initials, idx, size = 42 }: { initials: string; idx: number; size?: number }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: "50%",
+      background: COLORES_AVATAR[idx % COLORES_AVATAR.length],
+      display: "flex", alignItems: "center", justifyContent: "center",
+      color: "white", fontWeight: 900, fontSize: size * 0.36,
+      flexShrink: 0, boxShadow: "0 2px 8px rgba(0,0,0,0.3)"
+    }}>
+      {initials}
+    </div>
+  )
+}
 
 export default function SueldokPage() {
-  const toast = useToast()
-  const [tab, setTab] = useState<Tab>("portal")
-  const [loading, setLoading] = useState(false)
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const [selectedRoute, setSelectedRoute] = useState("/payroll")
-  const [ssoUrl, setSsoUrl] = useState("")
-  const [summary, setSummary] = useState<any>(null)
+  const [selectedCompany, setSelectedCompany] = useState(EMPRESAS_DISPONIBLES[0])
+  const [tab, setTab] = useState<TabType>("dashboard")
+  const [search, setSearch] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [ssoLoading, setSsoLoading] = useState(false)
+  const [data, setData] = useState<{
+    company?: any
+    metrics?: any
+    employees?: any[]
+    todayAttendance?: any[]
+  } | null>(null)
 
-  const fetchSSOUrl = useCallback(async (route: string) => {
+  // Carga reactiva de datos desde SueldOK
+  const fetchData = useCallback(async (showRefresh = false) => {
+    if (showRefresh) setRefreshing(true)
     try {
-      const res = await api.sueldok.getSSOUrl(route)
-      if (res && res.sso_url) {
-        setSsoUrl(res.sso_url)
+      const res = await fetch(`${SUELDOK_OVERVIEW_URL}?apiKey=${selectedCompany.apiKey}`, {
+        method: "GET",
+        headers: { "Accept": "application/json" }
+      })
+      if (res.ok) {
+        const json = await res.json()
+        setData(json)
+        setLastUpdated(new Date())
+      } else {
+        console.error("Error al cargar SueldOK overview:", res.status)
       }
-    } catch {
-      // Fallback direct URL
-      setSsoUrl(`https://sueldok.com${route}`)
-    }
-  }, [])
-
-  const loadSummary = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await api.sueldok.getSummary()
-      setSummary(res)
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error("Error conectando a SueldOK:", err)
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
-  }, [])
+  }, [selectedCompany])
 
   useEffect(() => {
-    fetchSSOUrl(selectedRoute)
-    loadSummary()
-  }, [fetchSSOUrl, loadSummary, selectedRoute])
+    fetchData()
+    const interval = setInterval(() => fetchData(), 30000)
+    return () => clearInterval(interval)
+  }, [fetchData])
 
-  const handleNavigateSueldok = (route: string) => {
-    setSelectedRoute(route)
-    fetchSSOUrl(route)
-    toast.info("Cargando sección de SueldOK...", route)
+  const handleLaunchSso = async () => {
+    setSsoLoading(true)
+    try {
+      const res = await fetch(SUELDOK_SSO_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${selectedCompany.apiKey}`
+        },
+        body: JSON.stringify({ redirect: "/attendance" })
+      })
+
+      if (res.ok) {
+        const json = await res.json()
+        if (json.ssoUrl) {
+          window.open(json.ssoUrl, "_blank")
+          return
+        }
+      }
+      window.open(SUELDOK_BASE_URL, "_blank")
+    } catch (err) {
+      console.error("Error generando token SSO:", err)
+      window.open(SUELDOK_BASE_URL, "_blank")
+    } finally {
+      setSsoLoading(false)
+    }
   }
 
-  const sueldokRoutes = [
-    { label: "Liquidación de Sueldos", route: "/payroll", icon: DollarSign, badge: "Nómina" },
-    { label: "Asistencia & Marcaciones", route: "/attendance", icon: Clock, badge: "Biometría" },
-    { label: "Turnos & Horarios", route: "/shift-scheduler", icon: Layers, badge: "Cuadrante" },
-    { label: "Legajos de Personal", route: "/employees", icon: Users, badge: "IPS / MTESS" },
-    { label: "Aguinaldos & Vacaciones", route: "/aguinaldo", icon: Gift, badge: "Beneficios" },
-  ]
+  const c = {
+    bg: "#0a0f1e",
+    surface: "#0f172a",
+    surfaceAlt: "#1e293b",
+    border: "#1e293b",
+    borderLight: "rgba(255,255,255,0.08)",
+    text: "white",
+    muted: "#94a3b8",
+    accent: "#6366f1",
+    green: "#10b981",
+  }
 
-  const masaSalarial = summary?.masa_salarial_estimada_gs || 110400000
-  const aporteIps = summary?.aporte_ips_estimado_gs || 18216000
-  const hsExtras = summary?.horas_extras_mes || 68
-  const costoHsExtras = summary?.costo_horas_extras_gs || 1938000
-  const bonosProd = summary?.bonos_productividad_mes_gs || 2850000
+  const metrics = data?.metrics || {
+    totalEmployees: 0,
+    activeEmployees: 0,
+    presentToday: 0,
+    lateToday: 0,
+    absentToday: 0,
+    attendanceRate: 0,
+    totalPayroll: 0,
+  }
+
+  const employees = data?.employees || []
+  const todayAttendance = data?.todayAttendance || []
+
+  const filteredEmployees = employees.filter((e: any) =>
+    (e.nombre || "").toLowerCase().includes(search.toLowerCase()) ||
+    (e.cargo || "").toLowerCase().includes(search.toLowerCase()) ||
+    (e.depto || "").toLowerCase().includes(search.toLowerCase()) ||
+    (e.ci || "").includes(search)
+  )
+
+  const card = (children: React.ReactNode, style: React.CSSProperties = {}) => (
+    <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 20, padding: 20, ...style }}>
+      {children}
+    </div>
+  )
 
   return (
-    <div className={`space-y-6 ${isFullscreen ? "fixed inset-0 z-50 bg-slate-950 p-6 overflow-auto" : ""}`}>
-      {/* ── COMMAND DECK HERO HEADER ── */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/50">
-        <div className="absolute -right-10 -bottom-10 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute top-0 right-1/4 w-64 h-64 bg-violet-500/10 rounded-full blur-2xl pointer-events-none" />
+    <div style={{ display: "flex", flexDirection: "column", gap: 20, fontFamily: "system-ui, -apple-system, sans-serif" }}>
 
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="flex items-center gap-5">
-            <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 border border-indigo-400/30 flex items-center justify-center shadow-lg shadow-indigo-500/30 flex-shrink-0">
-              <Building className="w-7 h-7 text-white" />
-              <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-400 border-2 border-slate-950 rounded-full animate-pulse" />
-            </div>
-            <div>
-              <div className="space-y-1">
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
-                    GESTIÓN DE NÓMINA & RRHH
-                  </span>
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5 backdrop-blur-sm">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                    SSO Activo & Biometría
-                  </span>
-                </div>
-                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
-                  Sueld<span className="text-indigo-400">OK</span> · Liquidación Salarial & RRHH
-                </h1>
-              </div>
-              <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl font-normal">
-                GRUPO SANTA TERESA E.A.S. (RUC 80150377-9) — Liquidación salarial, aporte patronal IPS (16.5%), obrero (9%), horas extras y bonos de productividad en cajas POS.
-              </p>
-              <div className="flex flex-wrap gap-2 mt-3">
-                <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-[11px] text-slate-300">
-                  🏬 Sede: Extra Supermercado Matriz
-                </span>
-                <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-[11px] text-indigo-300">
-                  👥 32 Colaboradores en Nómina
-                </span>
-                <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-[11px] text-emerald-300">
-                  ⚖️ Cumplimiento MTESS / IPS
-                </span>
-              </div>
-            </div>
+      {/* ── HEADER PRINCIPAL ── */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ width: 54, height: 54, background: "linear-gradient(135deg, #4f46e5, #7c3aed)", borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 25px rgba(99,102,241,0.4)" }}>
+            <Briefcase style={{ width: 28, height: 28, color: "white" }} />
           </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              onClick={() => loadSummary()}
-              disabled={loading}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-200 transition shadow-sm hover:border-slate-600 disabled:opacity-50"
-            >
-              <RefreshCcw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-              Sincronizar
-            </button>
-            <a
-              href={ssoUrl || "https://sueldok.com"}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-black shadow-lg shadow-indigo-600/30 transition active:scale-95"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              Abrir SueldOK
-            </a>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <h1 style={{ color: "white", fontWeight: 900, fontSize: 24, letterSpacing: "-0.5px", margin: 0 }}>SueldOK · RRHH</h1>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(16,185,129,0.15)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 800 }}>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981" }} />
+                En Vivo: {selectedCompany.relojInfo}
+              </span>
+            </div>
+            <p style={{ color: "#a5b4fc", fontSize: 13, fontWeight: 600, marginTop: 4, margin: 0 }}>
+              Gestión de Nómina & Asistencia Facial Integrada · {data?.company?.name || selectedCompany.nombre}
+            </p>
           </div>
         </div>
 
-        {/* ── EXECUTIVE KPIS ROW ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-6 pt-6 border-t border-slate-800/80">
-          <div className="bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80 backdrop-blur-sm">
-            <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Masa Salarial Mensual</span>
-              <DollarSign className="w-4 h-4 text-emerald-400" />
-            </div>
-            <p className="text-lg sm:text-xl font-black font-mono tracking-tight text-white">
-              {formatPYG(masaSalarial)}
-            </p>
-            <span className="text-[10px] text-slate-400 font-medium">32 contratos vigentes</span>
-          </div>
+        {/* Acciones del Header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {/* Selector de Empresa */}
+          <select
+            value={selectedCompany.id}
+            onChange={(e) => {
+              const emp = EMPRESAS_DISPONIBLES.find(item => item.id === e.target.value)
+              if (emp) setSelectedCompany(emp)
+            }}
+            style={{
+              background: c.surface,
+              border: `1px solid ${c.border}`,
+              color: "white",
+              padding: "10px 14px",
+              borderRadius: 12,
+              fontWeight: 700,
+              fontSize: 13,
+              cursor: "pointer",
+              outline: "none"
+            }}
+          >
+            {EMPRESAS_DISPONIBLES.map(emp => (
+              <option key={emp.id} value={emp.id} style={{ background: "#0f172a", color: "white" }}>
+                {emp.nombre}
+              </option>
+            ))}
+          </select>
 
-          <div className="bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80 backdrop-blur-sm">
-            <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Aporte Patronal IPS (16.5%)</span>
-              <ShieldCheck className="w-4 h-4 text-blue-400" />
-            </div>
-            <p className="text-lg sm:text-xl font-black font-mono tracking-tight text-white">
-              {formatPYG(aporteIps)}
-            </p>
-            <span className="text-[10px] text-blue-300 font-medium">Cumplimiento legal Paraguay</span>
-          </div>
+          {/* Botón Refrescar */}
+          <button
+            onClick={() => fetchData(true)}
+            disabled={refreshing}
+            title="Actualizar datos ahora"
+            style={{
+              display: "flex", alignItems: "center", gap: 6, background: c.surface, border: `1px solid ${c.border}`,
+              color: c.muted, padding: "10px 14px", borderRadius: 12, fontWeight: 700, fontSize: 13, cursor: "pointer",
+              transition: "all 0.2s"
+            }}
+          >
+            <RefreshCw style={{ width: 15, height: 15, animation: refreshing ? "spin 1s linear infinite" : "none" }} />
+            {lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Actualizar"}
+          </button>
 
-          <div className="bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80 backdrop-blur-sm">
-            <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Horas Extras Período</span>
-              <Clock className="w-4 h-4 text-amber-400" />
-            </div>
-            <p className="text-lg sm:text-xl font-black font-mono tracking-tight text-white">
-              {hsExtras} hs <span className="text-xs text-amber-400 font-normal">({formatPYG(costoHsExtras)})</span>
-            </p>
-            <span className="text-[10px] text-amber-300 font-medium">Cajas & Reposición</span>
-          </div>
-
-          <div className="bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80 backdrop-blur-sm">
-            <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Incentivos & Bonos POS</span>
-              <Award className="w-4 h-4 text-purple-400" />
-            </div>
-            <p className="text-lg sm:text-xl font-black font-mono tracking-tight text-white">
-              {formatPYG(bonosProd)}
-            </p>
-            <span className="text-[10px] text-purple-300 font-medium">10 cajeros premiados</span>
-          </div>
+          {/* Botón Abrir SueldOK con SSO */}
+          <button
+            onClick={handleLaunchSso}
+            disabled={ssoLoading}
+            style={{
+              display: "flex", alignItems: "center", gap: 8, background: "linear-gradient(135deg, #4f46e5, #7c3aed)",
+              color: "white", padding: "10px 18px", borderRadius: 12, fontWeight: 800, fontSize: 14,
+              border: "none", cursor: "pointer", boxShadow: "0 4px 18px rgba(99,102,241,0.35)",
+              transition: "transform 0.15s, opacity 0.2s", opacity: ssoLoading ? 0.7 : 1
+            }}
+          >
+            <ExternalLink style={{ width: 16, height: 16 }} />
+            {ssoLoading ? "Iniciando SSO..." : "Abrir SueldOK"}
+          </button>
         </div>
       </div>
 
-      {/* ── NAVIGATION TABS ── */}
-      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
-        {[
-          { key: "portal", label: "Portal SueldOK en Vivo", icon: Building },
-          { key: "resumen", label: "Resumen Nómina & Costos Laborales", icon: DollarSign },
-          { key: "novedades", label: "Novedades & Ajustes de Caja", icon: FileSpreadsheet },
-        ].map(t => {
-          const active = tab === t.key
-          const Icon = t.icon
-          return (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key as Tab)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                active
-                  ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-md border border-slate-200/80 dark:border-slate-700"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-700/50"
-              }`}
-            >
-              <Icon className={`w-4 h-4 ${active ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400"}`} />
-              {t.label}
-            </button>
-          )
-        })}
+      {/* ── TABS DE NAVEGACIÓN ── */}
+      <div style={{ display: "flex", gap: 6, background: c.surface, border: `1px solid ${c.border}`, borderRadius: 14, padding: 6, width: "fit-content" }}>
+        {([
+          { id: "dashboard", label: "Dashboard Ejecutivo", icon: Activity },
+          { id: "asistencia", label: `Marcaciones de Hoy (${todayAttendance.length})`, icon: Clock },
+          { id: "funcionarios", label: `Funcionarios (${employees.length})`, icon: Users },
+        ] as { id: TabType; label: string; icon: any }[]).map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            style={{
+              display: "flex", alignItems: "center", gap: 7, padding: "9px 18px", borderRadius: 10,
+              background: tab === id ? c.accent : "transparent",
+              color: tab === id ? "white" : c.muted,
+              border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13, transition: "all 0.2s"
+            }}
+          >
+            <Icon style={{ width: 15, height: 15 }} />
+            {label}
+          </button>
+        ))}
       </div>
 
-      {/* ── TAB 1: PORTAL EMBEDDED CON SSO ── */}
-      {tab === "portal" && (
-        <div className="space-y-4">
-          {/* Barra de Acceso Rápido a Secciones de SueldOK */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
-            {sueldokRoutes.map(r => (
-              <button
-                key={r.route}
-                onClick={() => handleNavigateSueldok(r.route)}
-                className={`p-3.5 rounded-2xl border text-left transition flex flex-col justify-between ${
-                  selectedRoute === r.route
-                    ? "bg-indigo-50/90 dark:bg-indigo-950/50 border-indigo-500 shadow-md shadow-indigo-500/10 ring-1 ring-indigo-500"
-                    : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-850"
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <r.icon className={`w-4 h-4 ${selectedRoute === r.route ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400"}`} />
-                  <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                    {r.badge}
-                  </span>
+      {/* ── DASHBOARD TAB ── */}
+      {tab === "dashboard" && (
+        <>
+          {/* Fila de KPIs Principales */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14 }}>
+            {[
+              {
+                label: "Funcionarios Activos",
+                value: metrics.activeEmployees,
+                sub: `Empresa: ${selectedCompany.nombre.split(" ")[0]}`,
+                icon: Users,
+                color: "#6366f1",
+                glow: "rgba(99,102,241,0.15)"
+              },
+              {
+                label: "Presentes Hoy",
+                value: metrics.presentToday + metrics.lateToday,
+                sub: `${metrics.presentToday} a tiempo · ${metrics.lateToday} tardanzas`,
+                icon: UserCheck,
+                color: "#10b981",
+                glow: "rgba(16,185,129,0.15)"
+              },
+              {
+                label: "Tasa de Asistencia",
+                value: `${metrics.attendanceRate}%`,
+                sub: `de ${metrics.activeEmployees} funcionarios`,
+                icon: TrendingUp,
+                color: metrics.attendanceRate > 70 ? "#10b981" : "#f59e0b",
+                glow: "rgba(16,185,129,0.15)"
+              },
+              {
+                label: "Ausentes Pendientes",
+                value: metrics.absentToday,
+                sub: "sin marcación registrada hoy",
+                icon: UserX,
+                color: "#ef4444",
+                glow: "rgba(239,68,68,0.15)"
+              },
+              {
+                label: "Masa Salarial Mensual",
+                value: `Gs. ${(metrics.totalPayroll / 1000000).toFixed(1)}M`,
+                sub: "nómina bruta activa",
+                icon: DollarSign,
+                color: "#8b5cf6",
+                glow: "rgba(139,92,246,0.15)"
+              },
+            ].map(({ label, value, sub, icon: Icon, color, glow }) => (
+              <div key={label} style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 18, padding: 18, display: "flex", flexDirection: "column", gap: 10, boxShadow: `0 0 20px ${glow}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <span style={{ color: c.muted, fontSize: 12, fontWeight: 700 }}>{label}</span>
+                  <div style={{ width: 34, height: 34, background: `${color}18`, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Icon style={{ width: 17, height: 17, color }} />
+                  </div>
                 </div>
-                <p className="text-xs font-bold text-slate-900 dark:text-white line-clamp-1">{r.label}</p>
-              </button>
+                <div style={{ color: "white", fontWeight: 900, fontSize: 26, letterSpacing: "-0.5px" }}>{value}</div>
+                <span style={{ color: c.muted, fontSize: 12, fontWeight: 500 }}>{sub}</span>
+              </div>
             ))}
           </div>
 
-          {/* Marco Iframe con Controles de Vista */}
-          <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xl">
-            <div className="flex items-center justify-between px-5 py-3 bg-slate-50 dark:bg-slate-850 border-b border-slate-200 dark:border-slate-800 text-xs">
-              <div className="flex items-center gap-2.5 text-slate-600 dark:text-slate-400 font-mono">
-                <Lock className="w-3.5 h-3.5 text-emerald-500" />
-                <span className="font-semibold text-slate-900 dark:text-slate-200">sueldok.com{selectedRoute}</span>
-                <span className="hidden sm:inline text-slate-400 dark:text-slate-500">| Canal TLS Encriptado</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setIsFullscreen(!isFullscreen)}
-                  className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white rounded-xl bg-slate-200/50 dark:bg-slate-800 transition"
-                  title={isFullscreen ? "Restaurar" : "Pantalla Completa"}
-                >
-                  {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            <div className="relative w-full bg-slate-950" style={{ height: isFullscreen ? "calc(100vh - 120px)" : "740px" }}>
-              {ssoUrl ? (
-                <iframe
-                  src={ssoUrl}
-                  title="SueldOK Portal"
-                  className="w-full h-full border-0"
-                  allow="camera; microphone; geolocation"
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-3">
-                  <Building className="w-12 h-12 stroke-[1.5] text-slate-600 animate-pulse" />
-                  <p className="text-sm font-medium text-slate-300">Generando sesión SSO con SueldOK...</p>
+          {/* Sección de 2 Columnas: Marcaciones en Vivo + Enlace Dahua */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+            {/* Columna Izquierda: Últimas Marcaciones del Reloj */}
+            {card(
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <Fingerprint style={{ width: 20, height: 20, color: "#818cf8" }} />
+                    <h3 style={{ color: "white", fontWeight: 800, fontSize: 16, margin: 0 }}>Últimas Marcaciones en Vivo</h3>
+                  </div>
+                  <span style={{ color: c.muted, fontSize: 12 }}>Reloj Facial Dahua</span>
                 </div>
-              )}
-            </div>
+
+                {todayAttendance.length === 0 ? (
+                  <div style={{ padding: "30px 20px", textAlign: "center", color: c.muted }}>
+                    <Clock style={{ width: 32, height: 32, margin: "0 auto 10px", opacity: 0.4 }} />
+                    <p style={{ margin: 0, fontSize: 14 }}>No hay marcaciones registradas todavía en la jornada de hoy.</p>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 380, overflowY: "auto" }}>
+                    {todayAttendance.slice(0, 8).map((att: any, idx: number) => {
+                      const cfg = estadoConfig[att.status] || estadoConfig.Late
+                      const Icon = cfg.icon
+                      return (
+                        <div key={att.id || idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(30,41,59,0.5)", border: `1px solid ${c.borderLight}`, borderRadius: 12, padding: "10px 14px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            <div style={{ background: "#4f46e5", color: "white", borderRadius: 8, padding: "4px 8px", fontSize: 12, fontWeight: 800, fontFamily: "monospace" }}>
+                              {att.horaEntrada || "—"}
+                            </div>
+                            <div>
+                              <p style={{ color: "white", fontWeight: 700, fontSize: 14, margin: 0 }}>{att.nombre}</p>
+                              <p style={{ color: c.muted, fontSize: 11, margin: "2px 0 0" }}>{att.cargo} · {att.depto}</p>
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, background: cfg.bg, border: `1px solid ${cfg.color}30`, borderRadius: 8, padding: "4px 10px" }}>
+                            <Icon style={{ width: 13, height: 13, color: cfg.color }} />
+                            <span style={{ color: cfg.color, fontSize: 11, fontWeight: 800 }}>{cfg.label}</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Columna Derecha: Estado de la Integración y Hardware */}
+            {card(
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <ShieldCheck style={{ width: 20, height: 20, color: "#10b981" }} />
+                  <h3 style={{ color: "white", fontWeight: 800, fontSize: 16, margin: 0 }}>Integración y Hardware</h3>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ background: "rgba(30,41,59,0.5)", borderRadius: 14, padding: 14, border: `1px solid ${c.borderLight}` }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                      <span style={{ color: c.muted, fontSize: 12, fontWeight: 600 }}>DISPOSITIVO PRINCIPAL</span>
+                      <span style={{ color: "#10b981", fontSize: 12, fontWeight: 800 }}>Online 🟢</span>
+                    </div>
+                    <p style={{ color: "white", fontWeight: 800, fontSize: 14, margin: 0 }}>Dahua DHI-ASI3214A-W (Facial / Biométrico)</p>
+                    <p style={{ color: c.muted, fontSize: 12, margin: "4px 0 0" }}>IP: 192.168.0.122 · Subnet Router Tailscale activo</p>
+                  </div>
+
+                  <div style={{ background: "rgba(30,41,59,0.5)", borderRadius: 14, padding: 14, border: `1px solid ${c.borderLight}` }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                      <span style={{ color: c.muted, fontSize: 12, fontWeight: 600 }}>VINCULACIÓN DE PERSONAL</span>
+                      <span style={{ color: "#818cf8", fontSize: 12, fontWeight: 800 }}>30 Vinculados</span>
+                    </div>
+                    <p style={{ color: "white", fontWeight: 800, fontSize: 14, margin: 0 }}>30 de 37 funcionarios cruzados con ID del reloj</p>
+                    <p style={{ color: c.muted, fontSize: 12, margin: "4px 0 0" }}>Los rostros marcados en pared ingresan directo a la nómina</p>
+                  </div>
+
+                  <div style={{ background: "rgba(30,41,59,0.5)", borderRadius: 14, padding: 14, border: `1px solid ${c.borderLight}` }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                      <span style={{ color: c.muted, fontSize: 12, fontWeight: 600 }}>TOLERANCIA Y JORNADA</span>
+                      <span style={{ color: "#f59e0b", fontSize: 12, fontWeight: 800 }}>10 min tolerancia</span>
+                    </div>
+                    <p style={{ color: "white", fontWeight: 800, fontSize: 14, margin: 0 }}>Entrada: 08:00 · Salida: 18:00</p>
+                    <p style={{ color: c.muted, fontSize: 12, margin: "4px 0 0" }}>Cálculo automático de llegadas tardías y horas extras en IPS</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
+        </>
       )}
 
-      {/* ── TAB 2: RESUMEN DE NÓMINA ── */}
-      {tab === "resumen" && (
-        <div className="space-y-6">
-          {/* Plantilla de Personal por Departamento */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-xl space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-4">
-              <div>
-                <h2 className="text-base font-black text-slate-900 dark:text-white tracking-tight">
-                  Estructura Organizacional & Distribución Salarial
-                </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Plantilla activa clasificada por centros de costo en Extra Supermercado
-                </p>
-              </div>
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 self-start sm:self-auto">
-                32 Colaboradores Totales
-              </span>
-            </div>
+      {/* ── ASISTENCIA TAB ── */}
+      {tab === "asistencia" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <h3 style={{ color: "white", fontWeight: 800, fontSize: 18, margin: 0 }}>
+              Registro de Marcaciones de Hoy ({todayAttendance.length})
+            </h3>
+            <span style={{ color: c.muted, fontSize: 13 }}>
+              Capturadas vía Reloj Facial Dahua & App SueldOK
+            </span>
+          </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {[
-                { depto: "Cajas & Atención al Cliente", count: 15, lider: "Nilda Aquino", turno: "Rotativo (M / T / C)", salarioPromedio: 3200000, icon: Users, color: "from-blue-500 to-indigo-600" },
-                { depto: "Reposición & Salón", count: 10, lider: "Juan Gabriel Ruiz", turno: "Turno Tarde / Cierre", salarioPromedio: 3100000, icon: Briefcase, color: "from-emerald-500 to-teal-600" },
-                { depto: "Carnicería & Fiambrería", count: 4, lider: "Marcos Centurión", turno: "Turno Apertura", salarioPromedio: 3800000, icon: Sparkles, color: "from-amber-500 to-orange-600" },
-                { depto: "Administración & Tesorería", count: 3, lider: "Gerencia General", turno: "Turno Central", salarioPromedio: 5500000, icon: Building, color: "from-purple-500 to-violet-600" },
-              ].map(d => {
-                const Icon = d.icon
+          {todayAttendance.length === 0 ? (
+            card(
+              <div style={{ textAlign: "center", padding: "40px 20px", color: c.muted }}>
+                <Clock style={{ width: 40, height: 40, margin: "0 auto 12px", opacity: 0.4 }} />
+                <p style={{ fontSize: 15, margin: 0 }}>No hay marcaciones para mostrar en la fecha actual.</p>
+              </div>
+            )
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {todayAttendance.map((att: any, idx: number) => {
+                const cfg = estadoConfig[att.status] || estadoConfig.Late
+                const Icon = cfg.icon
                 return (
-                  <div key={d.depto} className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-850 border border-slate-200/80 dark:border-slate-800 space-y-3 hover:border-indigo-400 dark:hover:border-indigo-600 transition shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <div className={`p-2.5 rounded-xl bg-gradient-to-tr ${d.color} text-white shadow-md`}>
-                        <Icon className="w-4 h-4" />
+                  <div
+                    key={att.id || idx}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12,
+                      background: c.surface, border: `1px solid ${c.border}`, borderRadius: 16, padding: "14px 20px"
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                      <div style={{ background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)", color: "#818cf8", borderRadius: 10, padding: "6px 12px", fontFamily: "monospace", fontSize: 14, fontWeight: 900 }}>
+                        {att.horaEntrada || "—"}
                       </div>
-                      <span className="px-2.5 py-0.5 text-xs font-black rounded-full bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200">
-                        {d.count} pers.
-                      </span>
+                      <div>
+                        <p style={{ color: "white", fontWeight: 800, fontSize: 15, margin: 0 }}>{att.nombre}</p>
+                        <p style={{ color: c.muted, fontSize: 12, margin: "3px 0 0" }}>{att.cargo} · {att.depto}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-xs font-black text-slate-900 dark:text-white">{d.depto}</p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                        Líder: <strong className="text-slate-700 dark:text-slate-300 font-semibold">{d.lider}</strong>
-                      </p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Esquema: {d.turno}</p>
-                    </div>
-                    <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between">
-                      <span className="text-[10px] uppercase font-bold text-slate-400">Promedio:</span>
-                      <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                        {formatPYG(d.salarioPromedio)}
-                      </span>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      {att.notes && (
+                        <span style={{ color: c.muted, fontSize: 12, background: "rgba(255,255,255,0.05)", borderRadius: 8, padding: "4px 8px" }}>
+                          {att.notes}
+                        </span>
+                      )}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, background: cfg.bg, border: `1px solid ${cfg.color}30`, borderRadius: 10, padding: "6px 12px" }}>
+                        <Icon style={{ width: 14, height: 14, color: cfg.color }} />
+                        <span style={{ color: cfg.color, fontSize: 12, fontWeight: 800 }}>{cfg.label}</span>
+                      </div>
                     </div>
                   </div>
                 )
               })}
             </div>
-          </div>
+          )}
         </div>
       )}
 
-      {/* ── TAB 3: NOVEDADES & DESCUENTOS DE CAJA ── */}
-      {tab === "novedades" && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-xl space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
-            <div>
-              <h2 className="text-base font-black text-slate-900 dark:text-white tracking-tight">
-                Novedades Salariales & Ajustes de Caja
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Cálculo automático de horas extras trabajadas y diferencias de arqueo para la liquidación
-              </p>
+      {/* ── FUNCIONARIOS TAB ── */}
+      {tab === "funcionarios" && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div style={{ position: "relative", flex: 1, maxWidth: 380 }}>
+              <Search style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", width: 16, height: 16, color: c.muted }} />
+              <input
+                style={{
+                  width: "100%", background: c.surface, border: `1px solid ${c.border}`, color: "white",
+                  padding: "10px 14px 10px 40px", borderRadius: 12, outline: "none", fontSize: 14, boxSizing: "border-box"
+                }}
+                placeholder="Buscar funcionario por nombre, CI, cargo…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
             </div>
-            <button
-              onClick={() => toast.success("¡Novedades Sincronizadas!", "Horas extras y diferencias enviadas a SueldOK")}
-              className="px-4 py-2.5 text-xs font-black text-white bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 rounded-xl shadow-lg shadow-indigo-600/20 transition active:scale-95 flex items-center gap-2 self-start sm:self-auto"
-            >
-              <Zap className="w-3.5 h-3.5" />
-              Sincronizar a SueldOK
-            </button>
+            <span style={{ color: c.muted, fontSize: 13, fontWeight: 600 }}>
+              {filteredEmployees.length} de {employees.length} funcionario(s)
+            </span>
           </div>
 
-          <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 uppercase text-[10px] font-black tracking-wider">
-                <tr>
-                  <th className="p-3.5">Colaborador</th>
-                  <th className="p-3.5">Cargo / Sección</th>
-                  <th className="p-3.5 text-center">Horas Extras</th>
-                  <th className="p-3.5 text-right">Monto Hs. Extras</th>
-                  <th className="p-3.5 text-right">Diferencia Arqueo</th>
-                  <th className="p-3.5 text-center">Estado</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-                {[
-                  { nombre: "NILDA AQUINO", cargo: "Cajera Principal", hs: 4, montoHs: 114000, dif: -80100, estado: "Listo" },
-                  { nombre: "LILIANA CRISTALDO", cargo: "Cajera Turno Tarde", hs: 2, montoHs: 57000, dif: -90450, estado: "Listo" },
-                  { nombre: "EVELIN HERRERO", cargo: "Cajera / Cobros", hs: 8, montoHs: 228000, dif: -77240, estado: "Listo" },
-                  { nombre: "JESSICA FERRARI", cargo: "Cajera Refuerzo", hs: 6, montoHs: 171000, dif: -67270, estado: "Listo" },
-                  { nombre: "MARISTELA IBARRA", cargo: "Cajera Mañana", hs: 4, montoHs: 114000, dif: -48550, estado: "Listo" },
-                ].map(r => (
-                  <tr key={r.nombre} className="hover:bg-slate-50 dark:hover:bg-slate-850/50 transition">
-                    <td className="p-3.5 font-bold text-slate-900 dark:text-white">{r.nombre}</td>
-                    <td className="p-3.5 text-slate-500 dark:text-slate-400">{r.cargo}</td>
-                    <td className="p-3.5 text-center font-bold font-mono text-amber-600 dark:text-amber-400">+{r.hs} hs</td>
-                    <td className="p-3.5 text-right font-bold font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(r.montoHs)}</td>
-                    <td className="p-3.5 text-right font-bold font-mono text-rose-500">{formatPYG(r.dif)}</td>
-                    <td className="p-3.5 text-center">
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                        {r.estado}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
+            {filteredEmployees.map((emp: any, i: number) => {
+              const cfg = emp.hoy !== "—" ? (estadoConfig[emp.hoy] || estadoConfig.presente) : null
+              return (
+                <div
+                  key={emp.id || i}
+                  style={{
+                    background: c.surface, border: `1px solid ${c.border}`, borderRadius: 18, padding: 18,
+                    display: "flex", flexDirection: "column", gap: 14
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <AvatarCircle initials={emp.foto || "OK"} idx={i} size={48} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ color: "white", fontWeight: 800, fontSize: 15, margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {emp.nombre}
+                      </p>
+                      <p style={{ color: c.muted, fontSize: 12, margin: "2px 0 0" }}>
+                        CI: {emp.ci || "—"} · {emp.cargo}
+                      </p>
+                    </div>
+                    {emp.biometricId && (
+                      <span
+                        title={`Enrolado en el Reloj Dahua con ID ${emp.biometricId}`}
+                        style={{
+                          background: "rgba(99,102,241,0.15)", color: "#a5b4fc", border: "1px solid rgba(99,102,241,0.3)",
+                          borderRadius: 8, padding: "3px 8px", fontSize: 11, fontWeight: 800
+                        }}
+                      >
+                        Dahua #{emp.biometricId}
                       </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    )}
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div style={{ background: "rgba(30,41,59,0.5)", borderRadius: 10, padding: "8px 12px" }}>
+                      <p style={{ color: c.muted, fontSize: 10, fontWeight: 700, margin: 0 }}>DEPARTAMENTO</p>
+                      <p style={{ color: "white", fontSize: 13, fontWeight: 700, margin: "2px 0 0" }}>{emp.depto}</p>
+                    </div>
+                    <div style={{ background: "rgba(30,41,59,0.5)", borderRadius: 10, padding: "8px 12px" }}>
+                      <p style={{ color: c.muted, fontSize: 10, fontWeight: 700, margin: 0 }}>SALARIO BASE</p>
+                      <p style={{ color: "#10b981", fontSize: 13, fontWeight: 700, margin: "2px 0 0" }}>
+                        Gs. {Number(emp.salario || 0).toLocaleString("es-PY")}
+                      </p>
+                    </div>
+                  </div>
+
+                  {cfg && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, background: cfg.bg, borderRadius: 10, padding: "8px 12px", border: `1px solid ${cfg.color}30` }}>
+                      <cfg.icon style={{ width: 14, height: 14, color: cfg.color }} />
+                      <span style={{ color: cfg.color, fontSize: 12, fontWeight: 800 }}>{cfg.label}</span>
+                      {emp.entrada && emp.entrada !== "—" && (
+                        <span style={{ color: cfg.color, fontSize: 12, fontWeight: 700, marginLeft: "auto" }}>
+                          Entrada: {emp.entrada}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
-        </div>
+        </>
       )}
     </div>
   )

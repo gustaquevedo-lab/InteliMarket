@@ -1780,6 +1780,12 @@ async def generate_promotion_report_pdf(
         for prod in prods_res.scalars().all():
             costo = float(prod.costo_promedio or prod.ultimo_costo or 0)
             reg = float(prod.precio_regular or prod.precio_venta or 0)
+            precio_especifico = None
+            if promo.precios_por_producto and isinstance(promo.precios_por_producto, dict):
+                p_val = promo.precios_por_producto.get(str(prod.id))
+                if p_val is not None and float(p_val) > 0:
+                    precio_especifico = Decimal(str(p_val))
+
             promo_p = float(calcular_precio_promocional(
                 tipo=promo.tipo,
                 precio_regular=Decimal(str(reg)),
@@ -1787,7 +1793,8 @@ async def generate_promotion_report_pdf(
                 precio_fijo_promocional=promo.precio_fijo_promocional,
                 costo_unitario_referencia=Decimal(str(costo)),
                 base_calculo_pct=getattr(promo, 'base_calculo_pct', 'venta') or 'venta',
-                terminacion_psicologica=promo.terminacion_psicologica
+                terminacion_psicologica=promo.terminacion_psicologica,
+                precio_producto_especifico=precio_especifico,
             ))
             desc_u = max(0.0, reg - promo_p)
             margen_g = promo_p - costo
@@ -1905,6 +1912,12 @@ async def _build_products_pdf(
         for prod in prods_res.scalars().all():
             costo = float(prod.costo_promedio or prod.ultimo_costo or 0)
             reg = float(prod.precio_regular or prod.precio_venta or 0)
+            precio_especifico = None
+            if promo.precios_por_producto and isinstance(promo.precios_por_producto, dict):
+                p_val = promo.precios_por_producto.get(str(prod.id))
+                if p_val is not None and float(p_val) > 0:
+                    precio_especifico = Decimal(str(p_val))
+
             promo_p = float(calcular_precio_promocional(
                 tipo=promo.tipo,
                 precio_regular=Decimal(str(reg)),
@@ -1912,7 +1925,8 @@ async def _build_products_pdf(
                 precio_fijo_promocional=promo.precio_fijo_promocional,
                 costo_unitario_referencia=Decimal(str(costo)),
                 base_calculo_pct=getattr(promo, 'base_calculo_pct', 'venta') or 'venta',
-                terminacion_psicologica=promo.terminacion_psicologica
+                terminacion_psicologica=promo.terminacion_psicologica,
+                precio_producto_especifico=precio_especifico,
             ))
             desc_u = max(0.0, reg - promo_p)
             margen_g = promo_p - costo

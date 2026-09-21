@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
+from api.src.config import settings
+import httpx
 from api.src.whatsapp.schemas import (
     WhatsAppConfigCreate, WhatsAppConfigUpdate, WhatsAppConfigResponse,
     WhatsAppConversationResponse, WhatsAppMessageResponse,
@@ -34,6 +36,9 @@ from api.src.whatsapp.evolution_client import (
 )
 
 logger = logging.getLogger("whatsapp.router")
+
+# Conjunto en memoria para evitar ejecuciones concurrentes del Agente IA en la misma conversación
+_active_agent_conversations: set = set()
 
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp"])
@@ -205,7 +210,7 @@ async def toggle_auto_reply(
     user: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    """Activa o desactiva de inmediato el auto-responder de WhatsApp."""
+    """Activa o desactiva de inmediato el Agente IA de WhatsApp."""
     from api.src.tenants.models import Tenant
     from sqlalchemy.orm.attributes import flag_modified
     tenant_id = UUID(user["tenant_id"])
@@ -219,14 +224,15 @@ async def toggle_auto_reply(
     t_cfg = dict(tenant.config or {})
     bot_cfg = dict(t_cfg.get("chatbot", {}))
     bot_cfg["auto_reply"] = active
+    bot_cfg["mode"] = "ai_agent"
     if "flow" in bot_cfg and isinstance(bot_cfg["flow"], dict):
-        bot_cfg["flow"]["active"] = active
+        bot_cfg["flow"]["active"] = False  # Flujo legado desactivado permanentemente
     t_cfg["chatbot"] = bot_cfg
     tenant.config = t_cfg
     flag_modified(tenant, "config")
     await db.commit()
-    logger.info(f"[Chatbot] Auto-responder cambiado a: {active} para tenant {tenant_id}")
-    return {"status": "ok", "auto_reply": active}
+    logger.info(f"[Agente IA] Auto-responder cambiado a: {active} (mode=ai_agent) para tenant {tenant_id}")
+    return {"status": "ok", "auto_reply": active, "mode": "ai_agent"}
 
 
 @router.put("/chatbot-config")
@@ -250,8 +256,9 @@ async def save_chatbot_config(
     if "flow" in existing_bot_cfg and "flow" not in body:
         body["flow"] = existing_bot_cfg["flow"]
     if isinstance(body.get("flow"), dict):
-        body["flow"]["active"] = auto_reply
+        body["flow"]["active"] = False  # Flujo legado desactivado permanentemente
 
+    body["mode"] = "ai_agent"  # Exclusivamente Agente de IA Conversacional
     t_cfg["chatbot"] = body
     tenant.config = t_cfg
     flag_modified(tenant, "config")
@@ -1081,128 +1088,109 @@ async def evolution_webhook(
         conv.last_message_at = datetime.now(timezone.utc)
         await db.commit()
 
-        # Si el chatbot o respuesta automática está configurada
+        # Si el Agente IA de WhatsApp está activo
         try:
             t_cfg = (tenant.config or {}) if tenant else {}
             bot_cfg = t_cfg.get("chatbot", {})
-            flow_cfg = bot_cfg.get("flow") or {}
 
-            # Modo de operación: "ai_agent" (default) o "flow_legacy"
-            mode = bot_cfg.get("mode", "ai_agent")
-
-            flow_active = flow_cfg.get("active", True)
+            # Auto-responder del Agente IA (verdadero por defecto a menos que se pause)
             auto_reply_active = bot_cfg.get("auto_reply", True)
-            should_reply = bool(auto_reply_active and flow_active)
+            should_reply = bool(auto_reply_active)
 
             # Verificar si la conversación está en modo atención humana (human_takeover)
             session_data = conv.session_data or {}
             if session_data.get("human_takeover"):
-                # Si el usuario pide explícitamente reactivar el bot
-                if content.strip().lower() in ["bot", "reactivar", "asistente", "menu"]:
+                # Si el usuario pide explícitamente reactivar el agente
+                if content.strip().lower() in ["bot", "reactivar", "asistente", "menu", "reiniciar"]:
                     session_data["human_takeover"] = False
+                    session_data.pop("human_takeover_reason", None)
                     conv.session_data = session_data
                     conv.session_state = "idle"
                     await db.commit()
-                    logger.info(f"[Evolution Webhook] Bot reactivado por cliente en '{clean_phone}'")
+                    logger.info(f"[Evolution Webhook] Agente IA reactivado por cliente en '{clean_phone}'")
                 else:
-                    logger.info(f"[Evolution Webhook] Conversación '{clean_phone}' en ATENCIÓN HUMANA (bot en pausa)")
+                    logger.info(f"[Evolution Webhook] Conversación '{clean_phone}' en ATENCIÓN HUMANA (Agente IA en pausa)")
                     should_reply = False
 
             if not should_reply:
-                logger.info(f"[Evolution Webhook] Chatbot en PAUSA para '{clean_phone}'. (auto_reply={auto_reply_active}, flow_active={flow_active})")
+                logger.info(f"[Evolution Webhook] Agente IA en PAUSA para '{clean_phone}' (auto_reply={auto_reply_active}).")
             else:
-                from api.src.companies.models import Company
-                comp_res = await db.execute(select(Company).where(Company.tenant_id == tenant.id).limit(1))
-                company = comp_res.scalar_one_or_none()
-                if not company:
-                    comp_res = await db.execute(select(Company).limit(1))
-                    company = comp_res.scalar_one_or_none()
+                # Evitar ejecuciones simultáneas/solapadas si el cliente envía mensajes seguidos
+                if conv.id in _active_agent_conversations:
+                    logger.info(f"[Evolution Webhook] Conversación {conv.id} ('{clean_phone}') ya está siendo procesada por el Agente IA. Omitiendo despacho concurrente.")
+                else:
+                    _active_agent_conversations.add(conv.id)
+                    try:
+                        from api.src.companies.models import Company
+                        comp_res = await db.execute(select(Company).where(Company.tenant_id == tenant.id).limit(1))
+                        company = comp_res.scalar_one_or_none()
+                        if not company:
+                            comp_res = await db.execute(select(Company).limit(1))
+                            company = comp_res.scalar_one_or_none()
 
-                if company:
-                    if mode == "ai_agent":
-                        from api.src.whatsapp.ai_agent import CustomerAIAgent
-                        import base64
+                        if company:
+                            from api.src.whatsapp.ai_agent import CustomerAIAgent
+                            import base64
 
-                        ai_cfg = bot_cfg.get("ai_agent", {})
-                        custom_instructions = ai_cfg.get("custom_instructions", "")
-                        emphasis_promotions = ai_cfg.get("emphasis_promotions", "")
+                            ai_cfg = bot_cfg.get("ai_agent", {})
+                            custom_instructions = ai_cfg.get("custom_instructions", "")
+                            emphasis_promotions = ai_cfg.get("emphasis_promotions", "")
 
-                        agent = CustomerAIAgent(db, company.id, tenant.id)
-                        logger.info(f"[Evolution Webhook] Disparando Agente de IA (Qwen 2.5) para '{clean_phone}' mensaje: '{content}'")
-                        ai_res = await agent.process_message(
-                            conv,
-                            content,
-                            custom_instructions=custom_instructions,
-                            emphasis_promotions=emphasis_promotions,
-                        )
-
-                        # 1. Despachar texto si hay respuesta
-                        if ai_res and ai_res.get("text"):
-                            logger.info(f"[Evolution Webhook] Despachando texto de IA a '{clean_phone}'")
-                            await evolution_client.send_text_message(clean_phone, ai_res["text"])
-
-                            outbound_msg = WhatsAppMessage(
-                                tenant_id=tenant.id,
-                                conversation_id=conv.id,
-                                direction=MessageDirection.outbound,
-                                content=ai_res["text"],
-                                message_id=f"ai-{datetime.now(timezone.utc).timestamp()}",
-                                status=MessageStatus.sent,
-                            )
-                            db.add(outbound_msg)
-                            conv.last_message_at = datetime.now(timezone.utc)
-                            await db.commit()
-
-                        # 2. Despachar documento PDF si se generó un pedido
-                        if ai_res and ai_res.get("pdf_bytes"):
-                            pdf_fn = ai_res.get("pdf_filename") or "Presupuesto_ExtraSupermercado.pdf"
-                            b64_pdf = base64.b64encode(ai_res["pdf_bytes"]).decode("ascii")
-                            media_data = f"data:application/pdf;base64,{b64_pdf}"
-                            logger.info(f"[Evolution Webhook] Despachando PDF de pedido a '{clean_phone}': {pdf_fn}")
-
-                            await evolution_client.send_media_message(
-                                phone=clean_phone,
-                                media_url=media_data,
-                                caption=f"📄 Presupuesto oficial generado #{ai_res.get('order_code', '')}. ¡En instantes un asesor humano coordinará contigo!",
-                                file_name=pdf_fn,
-                                media_type="document",
+                            agent = CustomerAIAgent(db, company.id, tenant.id)
+                            logger.info(f"[Evolution Webhook] Disparando Agente de IA (Qwen 2.5) para '{clean_phone}' mensaje: '{content}'")
+                            ai_res = await agent.process_message(
+                                conv,
+                                content,
+                                custom_instructions=custom_instructions,
+                                emphasis_promotions=emphasis_promotions,
                             )
 
-                            pdf_msg = WhatsAppMessage(
-                                tenant_id=tenant.id,
-                                conversation_id=conv.id,
-                                direction=MessageDirection.outbound,
-                                content=f"[Documento Adjunto: {pdf_fn}]",
-                                message_id=f"ai-pdf-{datetime.now(timezone.utc).timestamp()}",
-                                status=MessageStatus.sent,
-                            )
-                            db.add(pdf_msg)
-                            await db.commit()
+                            # 1. Despachar texto si hay respuesta
+                            if ai_res and ai_res.get("text"):
+                                logger.info(f"[Evolution Webhook] Despachando texto de Agente IA a '{clean_phone}'")
+                                await evolution_client.send_text_message(clean_phone, ai_res["text"])
 
-                    else:
-                        # Modo legado por flujos y botones rígidos
-                        from api.src.whatsapp.chatbot import ChatbotEngine
-                        chatbot = ChatbotEngine(db, company.id)
-                        logger.info(f"[Evolution Webhook] Disparando motor de flujo clásico para '{clean_phone}'")
-                        resp_data = await chatbot.process_message(conv, content)
-                        if resp_data and resp_data.get("text"):
-                            await evolution_client.send_text_message(clean_phone, resp_data["text"])
+                                outbound_msg = WhatsAppMessage(
+                                    tenant_id=tenant.id,
+                                    conversation_id=conv.id,
+                                    direction=MessageDirection.outbound,
+                                    content=ai_res["text"],
+                                    message_id=f"ai-{datetime.now(timezone.utc).timestamp()}",
+                                    status=MessageStatus.sent,
+                                )
+                                db.add(outbound_msg)
+                                conv.last_message_at = datetime.now(timezone.utc)
+                                await db.commit()
 
-                            outbound_msg = WhatsAppMessage(
-                                tenant_id=tenant.id,
-                                conversation_id=conv.id,
-                                direction=MessageDirection.outbound,
-                                content=resp_data["text"],
-                                message_id=f"bot-{datetime.now(timezone.utc).timestamp()}",
-                                status=MessageStatus.sent,
-                            )
-                            db.add(outbound_msg)
-                            conv.last_message_at = datetime.now(timezone.utc)
-                            if resp_data.get("next_state"):
-                                conv.session_state = resp_data["next_state"]
-                            await db.commit()
-        except Exception as bot_err:
-            logger.error(f"[Evolution Webhook] Error en respuesta de chatbot: {bot_err}", exc_info=True)
+                            # 2. Despachar documento PDF si se generó un pedido
+                            if ai_res and ai_res.get("pdf_bytes"):
+                                pdf_fn = ai_res.get("pdf_filename") or "Presupuesto_ExtraSupermercado.pdf"
+                                b64_pdf = base64.b64encode(ai_res["pdf_bytes"]).decode("ascii")
+                                media_data = f"data:application/pdf;base64,{b64_pdf}"
+                                logger.info(f"[Evolution Webhook] Despachando PDF de pedido a '{clean_phone}': {pdf_fn}")
+
+                                await evolution_client.send_media_message(
+                                    phone=clean_phone,
+                                    media_url=media_data,
+                                    caption=f"📄 Presupuesto oficial generado #{ai_res.get('order_code', '')}. ¡En instantes un asesor humano coordinará contigo!",
+                                    file_name=pdf_fn,
+                                    media_type="document",
+                                )
+
+                                pdf_msg = WhatsAppMessage(
+                                    tenant_id=tenant.id,
+                                    conversation_id=conv.id,
+                                    direction=MessageDirection.outbound,
+                                    content=f"[Documento Adjunto: {pdf_fn}]",
+                                    message_id=f"ai-pdf-{datetime.now(timezone.utc).timestamp()}",
+                                    status=MessageStatus.sent,
+                                )
+                                db.add(pdf_msg)
+                                await db.commit()
+                    finally:
+                        _active_agent_conversations.discard(conv.id)
+        except Exception as agent_err:
+            logger.error(f"[Evolution Webhook] Error en respuesta de Agente IA: {agent_err}", exc_info=True)
 
         return {"status": "ok", "conversation_id": str(conv.id), "message_id": key.get("id")}
 

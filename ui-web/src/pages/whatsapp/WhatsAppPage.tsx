@@ -682,9 +682,9 @@ export default function WhatsAppPage() {
         setBotFlow({ ...botFlow, active: newActive })
       }
       if (newActive) {
-        toast.success("Auto-Responder Encendido", "El bot responderá a los mensajes entrantes según el flujo.")
+        toast.success("Agente IA Activado", "El Agente IA responderá automáticamente a las consultas de los clientes.")
       } else {
-        toast.info("Auto-Responder Apagado", "El bot está completamente apagado. No enviará respuestas automáticas.")
+        toast.info("Agente IA en Pausa", "El Agente IA está en pausa. No responderá automáticamente.")
       }
     } catch (e: any) {
       toast.error("Error", e?.response?.data?.detail || e?.message || "No se pudo cambiar el estado del autorespondedor")
@@ -1421,7 +1421,7 @@ export default function WhatsAppPage() {
         {[
           { key: "connection", label: "Conexión QR", icon: Smartphone, count: null },
           { key: "conversations", label: "Chat en Vivo", icon: MessageSquare, count: conversations.length },
-          { key: "chatbot", label: "Chatbot IA & Flujos", icon: Bot, count: null },
+          { key: "chatbot", label: "Agente IA (InteliZapp)", icon: Bot, count: null },
           { key: "campaigns", label: "Campañas Masivas", icon: Megaphone, count: campaigns.length },
           { key: "automations", label: "Automatizaciones", icon: Zap, count: rules.length },
           { key: "templates", label: "Plantillas Oficiales", icon: FileText, count: templates.length },
@@ -2116,14 +2116,14 @@ export default function WhatsAppPage() {
                     ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/25 ring-2 ring-emerald-400/40"
                     : "bg-rose-600 hover:bg-rose-700 text-white shadow-rose-500/25 ring-2 ring-rose-400/40 animate-pulse"
                 }`}
-                title={chatbotConfig.auto_reply ? "Hacé clic para apagar el autorespondedor" : "Hacé clic para encender el autorespondedor"}
+                title={chatbotConfig.auto_reply ? "Hacé clic para pausar el Agente IA" : "Hacé clic para activar el Agente IA"}
               >
                 {togglingAutoReply ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
                   <Power className="w-3.5 h-3.5" />
                 )}
-                <span>{chatbotConfig.auto_reply ? "Auto-Responder: ENCENDIDO" : "Auto-Responder: APAGADO"}</span>
+                <span>{chatbotConfig.auto_reply ? "Agente IA: ACTIVO" : "Agente IA: EN PAUSA"}</span>
               </button>
             </div>
           </div>
