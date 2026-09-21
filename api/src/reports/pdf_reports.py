@@ -612,6 +612,7 @@ def generate_sales_by_supplier_pdf(
 
 def _base_doc_landscape(buffer, title: str, company: dict, generated_by: str = "") -> tuple:
     from reportlab.lib.pagesizes import landscape, A4
+    from reportlab.platypus import SimpleDocTemplate
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_RIGHT, TA_LEFT
     from api.src.integrated_finance.pdf_reports import (
