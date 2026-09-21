@@ -79,6 +79,8 @@ from api.src.dinelco.router import router as dinelco_router
 from api.src.bancard_qr.router import router as bancard_qr_router
 from api.src.loyalty.router import router as loyalty_router
 from api.src.salud_sistema.router import router as salud_sistema_router
+from api.src.plataforma.router import router as plataforma_router
+from api.src.plataforma.monitor_router import router as monitor_router
 from api.src.quotes.router import router as quotes_router
 from api.src.sales_orders.router import router as sales_orders_router
 from api.src.returns.router import router as returns_router
@@ -150,6 +152,9 @@ from api.src.donaciones.router import router as donaciones_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     start_scheduler()
+    from api.src.plataforma import capture as _capture
+    _capture.install_log_handler()
+    _capture.start_background()
     yield
 
 
@@ -381,6 +386,8 @@ app.include_router(dinelco_router)
 app.include_router(bancard_qr_router)
 app.include_router(loyalty_router)
 app.include_router(salud_sistema_router)
+app.include_router(plataforma_router)
+app.include_router(monitor_router)
 app.include_router(quotes_router)
 app.include_router(sales_orders_router)
 app.include_router(returns_router)

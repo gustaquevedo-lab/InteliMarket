@@ -24,6 +24,7 @@ from api.src.db import Base
 
 # Import all models so Alembic can detect them
 import api.src.auth.models
+import api.src.plataforma.models
 import api.src.tenants.models
 import api.src.companies.models
 import api.src.products.models
