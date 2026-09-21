@@ -7,16 +7,11 @@ from typing import Optional
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
+from api.src.common.superadmin import require_superadmin
 from api.src.pos_terminals import service
 from api.src.pos_terminals.schemas import PosTerminalAssignmentCreate, PosTerminalAssignmentUpdate, PosTerminalAssignmentResponse
 
 router = APIRouter(prefix="/api/v1/pos-terminals", tags=["pos-terminals"])
-
-
-def _require_admin(user: dict):
-    rol = (user.get("rol") or "").lower()
-    if rol not in ("admin", "supervisor") and not user.get("is_superadmin"):
-        raise HTTPException(status_code=403, detail="Solo un administrador o supervisor puede asignar cajas")
 
 
 @router.get("", response_model=list[PosTerminalAssignmentResponse])
@@ -57,8 +52,7 @@ async def get_by_ip(ip_address: str, db: AsyncSession = Depends(get_db), user=De
 
 
 @router.post("", response_model=PosTerminalAssignmentResponse, status_code=201)
-async def create_assignment(body: PosTerminalAssignmentCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
-    _require_admin(user)
+async def create_assignment(body: PosTerminalAssignmentCreate, db: AsyncSession = Depends(get_db), user=Depends(require_superadmin)):
     try:
         return await service.create_assignment(db, user["company_id"], body)
     except ValueError as e:
@@ -67,8 +61,7 @@ async def create_assignment(body: PosTerminalAssignmentCreate, db: AsyncSession 
 
 @router.patch("/{assignment_id}", response_model=PosTerminalAssignmentResponse)
 @router.put("/{assignment_id}", response_model=PosTerminalAssignmentResponse)
-async def update_assignment(assignment_id: str, body: PosTerminalAssignmentUpdate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
-    _require_admin(user)
+async def update_assignment(assignment_id: str, body: PosTerminalAssignmentUpdate, db: AsyncSession = Depends(get_db), user=Depends(require_superadmin)):
     result = await service.update_assignment(db, assignment_id, body)
     if not result:
         raise HTTPException(status_code=404, detail="Asignación no encontrada")
@@ -76,8 +69,7 @@ async def update_assignment(assignment_id: str, body: PosTerminalAssignmentUpdat
 
 
 @router.delete("/{assignment_id}", status_code=204)
-async def delete_assignment(assignment_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
-    _require_admin(user)
+async def delete_assignment(assignment_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_superadmin)):
     ok = await service.delete_assignment(db, assignment_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Asignación no encontrada")

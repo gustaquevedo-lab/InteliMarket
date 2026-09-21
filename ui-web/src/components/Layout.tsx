@@ -159,7 +159,7 @@ const navGroups: NavGroup[] = [
       // DESACTIVADO 2026-09-04: cero llamadas a backend, plataformas/pedidos 100%
       // hardcodeados incluido el badge "3 Canales Conectados". Ver auditoria de sidebar.
       // { icon: Globe, label: "Delivery Apps", path: "/delivery-integrations" },
-      { icon: CreditCard, label: "Integración Medios de Pago", path: "/integrations" },
+      { icon: CreditCard, label: "Integración Medios de Pago", path: "/integrations", superadminOnly: true },
     ]
   },
   {

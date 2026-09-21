@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
+from api.src.common.superadmin import require_superadmin
 from api.src.payment_integrations import service
 from api.src.payment_integrations.schemas import PaymentIntegrationConfigUpsert, PaymentIntegrationConfigResponse
 
@@ -25,7 +26,7 @@ async def get_provider_config(provider: str, db: AsyncSession = Depends(get_db),
 
 
 @router.put("/{provider}", response_model=PaymentIntegrationConfigResponse)
-async def upsert_provider_config(provider: str, data: PaymentIntegrationConfigUpsert, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def upsert_provider_config(provider: str, data: PaymentIntegrationConfigUpsert, db: AsyncSession = Depends(get_db), user=Depends(require_superadmin)):
     if provider not in ALLOWED_PROVIDERS:
         raise HTTPException(status_code=404, detail="Proveedor desconocido")
     row = await service.upsert_config(db, user["company_id"], provider, data)

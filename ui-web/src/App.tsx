@@ -174,6 +174,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function SuperadminRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth()
+  if (loading) return <PageLoader />
+  if (!user?.is_superadmin) return <Navigate to="/" replace />
+  return <>{children}</>
+}
+
 function FeatureRoute({ feature, children }: { feature: string; children: React.ReactNode }) {
   const { hasFeature, loading } = useFeatures()
   if (loading) return <PageLoader />
@@ -304,7 +311,7 @@ function AppRoutes() {
           ["marketing-agent", <MarketingAgentPage />],
           ["notifications", <NotificationsPage />],
           ["intelicont", <InteliContPage />],
-          ["integrations", <IntegrationsPage />],
+          ["integrations", <SuperadminRoute><IntegrationsPage /></SuperadminRoute>],
           ["sueldok", <SueldokPage />],
           ["promociones", <PromotionsPage />],
           ["cupones", <CapturaCuponesPage />],

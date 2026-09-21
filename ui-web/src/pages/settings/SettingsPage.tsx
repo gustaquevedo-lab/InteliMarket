@@ -9,9 +9,11 @@ import {
 } from "lucide-react"
 import { api, COMPANY_ID, type Company } from "../../api"
 import { useToast } from "../../context/ToastContext"
+import { useAuth } from "../../context/AuthContext"
 import { formatPYG } from "../../utils/format"
 import { type ReceiptTemplateConfig, DEFAULT_RECEIPT_CONFIG } from "../../constants/receiptDefaults"
 
+const SOLO_SUPERADMIN = ["payments", "cajas"]
 type Tab = "company" | "currencies" | "payments" | "fiscal" | "receipt_builder" | "kiosk" | "cajas"
 
 export interface KioskBanner {
@@ -77,6 +79,7 @@ export { type ReceiptTemplateConfig, DEFAULT_RECEIPT_CONFIG }
 
 export default function SettingsPage() {
   const toast = useToast()
+  const { user } = useAuth()
   const [tab, setTab] = useState<Tab>("receipt_builder")
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -836,7 +839,7 @@ export default function SettingsPage() {
           { key: "fiscal", label: "⚙️ Parámetros Operativos & Fiscales", icon: Sliders },
           { key: "kiosk", label: "📺 Kiosco Verificador & Pantallas", icon: Monitor },
           { key: "cajas", label: "🖥️ Cajas y Puntos de Emisión", icon: Store },
-        ].map(t => (
+        ].filter(t => !SOLO_SUPERADMIN.includes(t.key) || user?.is_superadmin).map(t => (
           <button
             key={t.key}
             onClick={() => setTab(t.key as Tab)}
