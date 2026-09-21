@@ -1246,11 +1246,22 @@ class SupplierReturnRejectInput(BaseModel):
     motivo_rechazo: str
 
 
+class SupplierReturnUpdateInput(BaseModel):
+    proveedor_id: Optional[UUID] = None
+    warehouse_id: Optional[UUID] = None
+    tipo: Optional[str] = "devolucion"
+    fecha_estimada_retiro: Optional[date] = None
+    observaciones: Optional[str] = None
+    items: List[SupplierReturnItemInput]
+
+
 class SupplierReturnCompleteInput(BaseModel):
     nota_credito_numero: Optional[str] = None
 
 
 SupplierReturnItemInput.model_rebuild()
 SupplierReturnCreateInput.model_rebuild()
+SupplierReturnUpdateInput.model_rebuild()
 SupplierReturnRejectInput.model_rebuild()
 SupplierReturnCompleteInput.model_rebuild()
+

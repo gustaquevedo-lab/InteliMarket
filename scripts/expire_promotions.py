@@ -38,6 +38,15 @@ async def run():
             print(f"Vencida: {v[1]} (valido_hasta {v[2]})")
         print(f"Total promociones marcadas vencidas: {len(vencidas)}")
 
+        # Tocar updated_at de los productos afectados para que las cajas delta-sync reviertan precio
+        all_expired_pids = [pid for v in vencidas if v[5] for pid in v[5]]
+        if all_expired_pids:
+            await conn.execute(text("""
+                UPDATE products
+                SET updated_at = NOW()
+                WHERE id = ANY(:pids);
+            """), {"pids": all_expired_pids})
+
     pesables_a_revertir = [
         v for v in vencidas if v[4] == "precio_fijo_oferta" and v[5]
     ]

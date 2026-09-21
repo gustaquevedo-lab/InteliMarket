@@ -8,7 +8,7 @@ from typing import Optional, List, Dict, Any
 
 from zoneinfo import ZoneInfo
 from fastapi import HTTPException
-from sqlalchemy import select, and_, or_, func, text
+from sqlalchemy import select, and_, or_, func, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -34,6 +34,38 @@ from api.src.promotions.pdf_reports import (
 logger = logging.getLogger(__name__)
 
 PY_TZ = ZoneInfo("America/Asuncion")
+
+
+async def _touch_products_for_promo(
+    db: AsyncSession,
+    promo: Promotion,
+    previous_producto_ids: Optional[List[uuid.UUID]] = None,
+    previous_categoria_ids: Optional[List[uuid.UUID]] = None,
+) -> None:
+    """Actualiza updated_at de los productos vinculados a la promoción para que el
+    POS offline-first reconozca la novedad inmediatamente en su siguiente delta sync."""
+    try:
+        pids = set(promo.producto_ids or [])
+        if previous_producto_ids:
+            pids.update(previous_producto_ids)
+        if pids:
+            await db.execute(
+                update(Product)
+                .where(Product.id.in_(list(pids)))
+                .values(updated_at=func.now())
+            )
+
+        cids = set(promo.categoria_ids or [])
+        if previous_categoria_ids:
+            cids.update(previous_categoria_ids)
+        if cids:
+            await db.execute(
+                update(Product)
+                .where(Product.categoria_id.in_(list(cids)))
+                .values(updated_at=func.now())
+            )
+    except Exception as e:
+        logger.warning("No se pudo actualizar updated_at de productos para promo %s: %s", promo.id, e)
 
 
 async def _sync_balanza_si_aplica(db: AsyncSession, promo: Promotion) -> None:
@@ -230,6 +262,7 @@ async def create_promotion(db: AsyncSession, company_id: str, data: PromotionCre
     await db.flush()
     await db.refresh(promo)
     await _sync_balanza_si_aplica(db, promo)
+    await _touch_products_for_promo(db, promo)
     return promo
 
 
@@ -250,8 +283,8 @@ async def get_promotion(db: AsyncSession, promo_id: str) -> Promotion | None:
                     Product.id.in_(promo.producto_ids)
                 )
             )
-            promo.productos_detalle = [
-                {
+            prods_map = {
+                str(row[0]): {
                     "id": str(row[0]),
                     "nombre": row[1],
                     "sku": row[2],
@@ -260,6 +293,9 @@ async def get_promotion(db: AsyncSession, promo_id: str) -> Promotion | None:
                     "costo_promedio": float(row[5]) if row[5] is not None else 0,
                 }
                 for row in prods_res.all()
+            }
+            promo.productos_detalle = [
+                prods_map[str(pid)] for pid in promo.producto_ids if str(pid) in prods_map
             ]
         else:
             promo.productos_detalle = []
@@ -273,7 +309,7 @@ async def list_promotions(
     tipo: str | None = None,
     estado: str | None = None,
     origen_fuente: str | None = None,
-    limit: int = 100,
+    limit: int = 50,
     offset: int = 0,
 ) -> list[Promotion]:
     try:
@@ -345,6 +381,9 @@ async def update_promotion(db: AsyncSession, promo_id: str, data: PromotionUpdat
     if company_id and str(promo.company_id) != company_id:
         return None
 
+    prev_pids = list(promo.producto_ids or [])
+    prev_cids = list(promo.categoria_ids or [])
+
     update_data = data.model_dump(exclude_unset=True)
 
     # Convertir UUIDs — permitir desasociar supplier/invoices pasando None explícito
@@ -379,6 +418,7 @@ async def update_promotion(db: AsyncSession, promo_id: str, data: PromotionUpdat
 
     await db.flush()
     await _sync_balanza_si_aplica(db, promo)
+    await _touch_products_for_promo(db, promo, prev_pids, prev_cids)
 
     # Retornar objeto con productos_detalle cargado
     return await get_promotion(db, promo_id)
@@ -400,6 +440,7 @@ async def toggle_promotion_status(db: AsyncSession, company_id: str, promo_id: s
     await db.flush()
     await db.refresh(promo)
     await _sync_balanza_si_aplica(db, promo)
+    await _touch_products_for_promo(db, promo)
     return promo
 
 
@@ -422,6 +463,7 @@ async def reactivate_promotion(db: AsyncSession, company_id: str, promo_id: str,
     await db.flush()
     await db.refresh(promo)
     await _sync_balanza_si_aplica(db, promo)
+    await _touch_products_for_promo(db, promo)
     return promo
 
 
@@ -438,6 +480,7 @@ async def approve_promotion_loss(db: AsyncSession, company_id: str, promo_id: st
     await db.flush()
     await db.refresh(promo)
     await _sync_balanza_si_aplica(db, promo)
+    await _touch_products_for_promo(db, promo)
     return promo
 
 
