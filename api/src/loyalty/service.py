@@ -21,14 +21,14 @@ async def ensure_premios_warehouse(db: AsyncSession, company_id: str) -> Warehou
     result = await db.execute(
         select(Warehouse).where(
             Warehouse.company_id == cid,
-            Warehouse.codigo == "DEP-PREMIOS"
+            Warehouse.codigo == "PREMIOS"
         )
     )
     wh = result.scalar_one_or_none()
     if not wh:
         wh = Warehouse(
             company_id=cid,
-            codigo="DEP-PREMIOS",
+            codigo="PREMIOS",
             nombre="Depósito Central de Premios Extra Club",
             tipo="premios",
             responsable="Marketing & Fidelidad Extra Club",

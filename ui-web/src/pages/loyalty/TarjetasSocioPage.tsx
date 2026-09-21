@@ -58,6 +58,7 @@ const fmtGs = (v: number | null | undefined) => (v == null ? "—" : `Gs. ${Math
 export default function TarjetasSocioPage() {
   const [q, setQ] = useState("")
   const [soloSocios, setSoloSocios] = useState(true)
+  const [limiteSocios, setLimiteSocios] = useState(500)
   const [socios, setSocios] = useState<Socio[]>([])
   const [buscando, setBuscando] = useState(false)
   const [activo, setActivo] = useState<Socio | null>(null)
@@ -117,7 +118,7 @@ export default function TarjetasSocioPage() {
     const t = setTimeout(async () => {
       setBuscando(true)
       try {
-        const r = await api.loyalty.tarjetasSocios({ q: q.trim() || undefined, solo_con_numero: soloSocios, limit: 60 })
+        const r = await api.loyalty.tarjetasSocios({ q: q.trim() || undefined, solo_con_numero: soloSocios, limit: limiteSocios })
         setSocios(r || [])
       } catch (e: any) {
         mostrar("error", `No se pudo buscar: ${e?.message || "error desconocido"}`)
@@ -126,7 +127,7 @@ export default function TarjetasSocioPage() {
       }
     }, 300)
     return () => clearTimeout(t)
-  }, [q, soloSocios])
+  }, [q, soloSocios, limiteSocios])
 
   // Vista previa: la misma funcion que genera la imagen que se imprime.
   useEffect(() => {
@@ -420,6 +421,23 @@ export default function TarjetasSocioPage() {
               <input type="checkbox" checked={soloSocios} onChange={(e) => setSoloSocios(e.target.checked)} className="accent-amber-500" />
               Solo socios con número
             </label>
+            <select
+              value={limiteSocios}
+              onChange={(e) => setLimiteSocios(Number(e.target.value))}
+              className="px-2.5 py-1.5 text-xs font-bold rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 outline-none focus:border-amber-500"
+              title="Cantidad de socios a consultar"
+            >
+              <option value={100}>100 socios</option>
+              <option value={250}>250 socios</option>
+              <option value={500}>500 socios</option>
+              <option value={1000}>1.000 socios</option>
+              <option value={5000}>5.000 socios</option>
+            </select>
+          </div>
+
+          <div className="flex items-center justify-between text-[11px] text-slate-500 px-1 font-medium">
+            <span>Mostrando {socios.length} socio{socios.length === 1 ? "" : "s"}</span>
+            {seleccionados.length > 0 && <span className="font-bold text-amber-600">{seleccionados.length} seleccionados</span>}
           </div>
 
           <div className="rounded-2xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900 max-h-[60vh] overflow-y-auto">

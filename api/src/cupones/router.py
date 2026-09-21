@@ -71,7 +71,7 @@ async def list_clientes(
     company_id: Optional[str] = Query(None, description="UUID de empresa"),
     search: Optional[str] = Query(None, description="Buscar por nombre, documento o teléfono"),
     barrio: Optional[str] = Query(None, description="Filtrar por barrio"),
-    limit: int = Query(100, ge=1, le=2000),
+    limit: int = Query(500, ge=1, le=20000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db)
 ):

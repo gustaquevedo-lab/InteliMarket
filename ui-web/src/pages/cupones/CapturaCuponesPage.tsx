@@ -133,7 +133,7 @@ export default function CapturaCuponesPage() {
   const [stats, setStats] = useState<CuponStats | null>(null)
   const [loadingData, setLoadingData] = useState(false)
   const [limiteTickets, setLimiteTickets] = useState<number>(250)
-  const [limiteClientes, setLimiteClientes] = useState<number>(250)
+  const [limiteClientes, setLimiteClientes] = useState<number>(1000)
 
   // Sincronización por Lotes
   const [syncBatchLoading, setSyncBatchLoading] = useState(false)
@@ -261,7 +261,7 @@ export default function CapturaCuponesPage() {
   const loadClientes = useCallback(async () => {
     setLoadingData(true)
     try {
-      const effectiveLimit = filtroSearch.trim() ? Math.max(500, limiteClientes) : limiteClientes
+      const effectiveLimit = filtroSearch.trim() ? Math.max(5000, limiteClientes) : limiteClientes
       const list = await api.cupones.clientes({
         barrio: filtroBarrio || undefined,
         search: filtroSearch.trim() || undefined,
@@ -1400,7 +1400,7 @@ export default function CapturaCuponesPage() {
                   Base Fidelizada & Segmentación RFM
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  {clientes.length} clientes participantes acumulando historial de compras en Extra Supermercado.
+                  Mostrando {clientes.length.toLocaleString("es-PY")} de {stats?.total_clientes?.toLocaleString("es-PY") || "7.000"} clientes acumulando compras en Extra Supermercado.
                 </p>
               </div>
             </div>
@@ -1427,6 +1427,9 @@ export default function CapturaCuponesPage() {
                 <option value={250}>Ver 250 clientes</option>
                 <option value={500}>Ver 500 clientes</option>
                 <option value={1000}>Ver 1.000 clientes</option>
+                <option value={2500}>Ver 2.500 clientes</option>
+                <option value={5000}>Ver 5.000 clientes</option>
+                <option value={10000}>Ver Todos ({stats?.total_clientes?.toLocaleString("es-PY") || "7.000+"})</option>
               </select>
 
               <button
@@ -1505,6 +1508,12 @@ export default function CapturaCuponesPage() {
               </div>
             ))}
           </div>
+
+          {clientes.length > 0 && (
+            <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl text-center text-xs text-slate-500 dark:text-slate-400 shadow-sm">
+              Mostrando {clientes.length.toLocaleString("es-PY")} clientes de {stats?.total_clientes?.toLocaleString("es-PY") || "7.000"} registrados. Podés seleccionar una cantidad mayor en el selector superior o buscar por CI, teléfono o nombre.
+            </div>
+          )}
         </div>
       )}
 

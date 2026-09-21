@@ -1,5 +1,6 @@
 """Service layer for Cupones Sorteo, Sales Matching and Gemini 2.5 Flash Profiling"""
 
+import asyncio
 import json
 import logging
 import os
@@ -477,8 +478,19 @@ async def analizar_perfil_con_gemini(
         return {"analizados": analizados, "fallidos": 0, "detalles": detalles, "mensaje": "Análisis completado (Modo Heurístico)"}
 
     client = genai.Client(api_key=gemini_key)
+    sem = asyncio.Semaphore(5)
 
-    for c in clientes:
+    def _sync_gemini_call(prompt_text: str):
+        return client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt_text,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.2,
+            )
+        )
+
+    async def _analizar_un_cliente(c: CuponCliente):
         # Recopilar lista de productos comprados en todos sus tickets
         items_summary = []
         for t in c.tickets:
@@ -510,28 +522,31 @@ Responde ÚNICAMENTE en formato JSON con la siguiente estructura exacta:
   "segmentos_tags": ["Tag1", "Tag2", "Tag3"]
 }}
 """
-        try:
-            response = client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.2,
-                )
-            )
-            raw_text = response.text or "{}"
-            parsed = json.loads(raw_text)
-            parsed["fecha_analisis"] = datetime.now(timezone.utc).isoformat()
+        async with sem:
+            try:
+                response = await asyncio.to_thread(_sync_gemini_call, prompt)
+                raw_text = response.text or "{}"
+                parsed = json.loads(raw_text)
+                parsed["fecha_analisis"] = datetime.now(timezone.utc).isoformat()
 
-            c.ia_analisis = parsed
-            tags = parsed.get("segmentos_tags", [])
-            if tags and isinstance(tags, list):
-                c.segmentos = ",".join(tags)
+                c.ia_analisis = parsed
+                tags = parsed.get("segmentos_tags", [])
+                if tags and isinstance(tags, list):
+                    c.segmentos = ",".join(tags)
 
-            detalles.append({"cliente_id": str(c.id), "nombre": c.nombre, "perfil": parsed})
+                return {"cliente_id": str(c.id), "nombre": c.nombre, "perfil": parsed, "success": True}
+            except Exception as e:
+                logger.error(f"Error al analizar cliente {c.id} con Gemini: {e}")
+                return {"cliente_id": str(c.id), "nombre": c.nombre, "success": False, "error": str(e)}
+
+    tasks = [_analizar_un_cliente(c) for c in clientes]
+    results = await asyncio.gather(*tasks)
+
+    for r in results:
+        if r.get("success"):
             analizados += 1
-        except Exception as e:
-            logger.error(f"Error al analizar cliente {c.id} con Gemini: {e}")
+            detalles.append({"cliente_id": r["cliente_id"], "nombre": r["nombre"], "perfil": r["perfil"]})
+        else:
             fallidos += 1
 
     await db.commit()
@@ -770,14 +785,17 @@ REGLAS OBLIGATORIAS:
 3. Menciona la sucursal de Extra Supermercado.
 4. Genera ÚNICAMENTE el texto final del mensaje, sin introducciones ni explicaciones adicionales.
 """
-    try:
-        response = client.models.generate_content(
+    def _sync_campana_call():
+        return client.models.generate_content(
             model=GEMINI_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.7,
             )
         )
+
+    try:
+        response = await asyncio.to_thread(_sync_campana_call)
         msg = response.text.strip()
     except Exception as e:
         logger.error(f"Error generando campaña con Gemini: {e}")

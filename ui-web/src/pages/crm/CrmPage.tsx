@@ -200,7 +200,7 @@ export default function CrmPage() {
     setLoading(true)
     try {
       const [custRes, rewRes, confRes, supRes, whRes, redRes, prodRes, ptsMapRes] = await Promise.allSettled([
-        api.customers.list({ limit: 1000, exclude_proveedores: true } as any),
+        api.customers.list({ limit: 50000, exclude_proveedores: true } as any),
         api.loyalty.rewards(companyId),
         api.loyalty.getConfig(companyId),
         api.purchases.listSuppliers(),

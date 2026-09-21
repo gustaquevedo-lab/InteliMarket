@@ -196,7 +196,7 @@ async def marcar_tarjeta_impresa(cola_id: int, user=Depends(require_auth)):
 async def tarjetas_socios(
     q: str | None = None,
     solo_con_numero: bool = False,
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(500, ge=1, le=10000),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
