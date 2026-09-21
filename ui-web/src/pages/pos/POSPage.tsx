@@ -11306,7 +11306,7 @@ export default function POSPage() {
                               <div className="w-full max-w-sm flex flex-col items-center gap-2">
                                 {bancardCloudQrData.qrUrl && (
                                   <div className="p-2 bg-white rounded-xl shadow-xs border border-slate-200 dark:border-slate-700 shrink-0">
-                                    <img src={bancardCloudQrData.qrUrl} alt="QR Bancard" className="w-36 h-36 sm:w-44 sm:h-44 object-contain rounded-md" />
+                                    <img src={bancardCloudQrData.qrUrl} alt="QR Bancard" className="w-72 h-72 sm:w-80 sm:h-80 object-contain rounded-md" />
                                   </div>
                                 )}
                                 <div className="flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400">
