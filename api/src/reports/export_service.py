@@ -629,3 +629,236 @@ def export_sales_by_supplier(
     return buf.getvalue()
 
 
+def export_sales_detailed_day(data: dict, fecha: date, company_info: Optional[dict] = None) -> bytes:
+    """Genera archivo Excel (.xlsx) con la planilla de detalle producto por producto
+    del día seleccionado, con formato moneda PYG, porcentajes y totales.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Detalle Ventas Día"
+
+    razon_social = company_info.get("razon_social", "Extra Supermercado Mayorista") if company_info else "Extra Supermercado Mayorista"
+    ruc = company_info.get("ruc", "80150377-9") if company_info else "80150377-9"
+
+    fecha_fmt = fecha.strftime("%d/%m/%Y")
+    ws.cell(row=1, column=1, value=f"{razon_social} · RUC {ruc}").font = SUBTITLE_FONT
+    ws.cell(row=2, column=1, value=f"PLANILLA DETALLADA DE VENTAS, COSTOS Y RENTABILIDAD — DÍA {fecha_fmt}").font = TITLE_FONT
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=17)
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=17)
+
+    resumen = data.get("resumen", {})
+    ws.cell(row=3, column=1, value=f"Tickets: {resumen.get('total_tickets', 0):,}  |  SKUs: {resumen.get('total_skus', 0):,}  |  Unidades/KG: {resumen.get('total_unidades', 0):,.2f}  |  Ventas: Gs. {resumen.get('total_venta', 0):,.0f}  |  CMV: Gs. {resumen.get('total_costo', 0):,.0f}  |  Margen: Gs. {resumen.get('margen_bruto_gs', 0):,.0f} ({resumen.get('margen_bruto_pct', 0):.1f}%)").font = BOLD_FONT
+    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=17)
+
+    headers = [
+        "#",
+        "SKU",
+        "Código de Barras",
+        "Descripción del Producto",
+        "Categoría",
+        "U.M.",
+        "Cantidad Vendida",
+        "PVP Catálogo (Gs.)",
+        "PPP Venta Real (Gs.)",
+        "Último Costo (Gs.)",
+        "Costo Promedio (Gs.)",
+        "Total Ventas (Gs.)",
+        "Total Costo (Gs.)",
+        "Margen Bruto (Gs.)",
+        "Margen s/ PVP (%)",
+        "Margen Real s/ PPP (%)",
+        "Participación (%)",
+    ]
+
+    start_row = 5
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=start_row, column=col_idx, value=header)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = THIN_BORDER
+
+    items = data.get("items", [])
+    for idx, it in enumerate(items, 1):
+        curr_row = start_row + idx
+        row_vals = [
+            idx,
+            it.get("sku", "—"),
+            it.get("codigo_barra", "—"),
+            it.get("producto", ""),
+            it.get("categoria", "Sin Categoría"),
+            it.get("unidad_medida", "UN"),
+            round(it.get("cantidad", 0), 3),
+            it.get("pvp", 0),
+            it.get("ppp", 0),
+            it.get("ultimo_costo", 0),
+            it.get("costo_promedio", 0),
+            it.get("total_venta", 0),
+            it.get("total_costo", 0),
+            it.get("margen_gs", 0),
+            f"{it.get('margen_pvp_pct', 0):.1f}%",
+            f"{it.get('margen_ppp_pct', 0):.1f}%",
+            f"{it.get('participacion_pct', 0):.1f}%",
+        ]
+
+        for col_idx, val in enumerate(row_vals, 1):
+            cell = ws.cell(row=curr_row, column=col_idx, value=val)
+            cell.font = DATA_FONT
+            cell.border = THIN_BORDER
+            # Formatos numéricos
+            if col_idx in (8, 9, 10, 11, 12, 13, 14):
+                cell.number_format = CURRENCY_FMT
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx == 7:
+                cell.number_format = '#,##0.00'
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (15, 16, 17):
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (1, 2, 3, 6):
+                cell.alignment = Alignment(horizontal="center")
+
+    # Fila de Totales
+    tot_row = start_row + len(items) + 1
+    ws.cell(row=tot_row, column=4, value="TOTALES DEL DÍA").font = BOLD_FONT
+    ws.cell(row=tot_row, column=7, value=round(resumen.get("total_unidades", 0), 3)).font = BOLD_FONT
+    ws.cell(row=tot_row, column=7).number_format = '#,##0.00'
+
+    ws.cell(row=tot_row, column=12, value=resumen.get("total_venta", 0)).font = BOLD_FONT
+    ws.cell(row=tot_row, column=12).number_format = CURRENCY_FMT
+
+    ws.cell(row=tot_row, column=13, value=resumen.get("total_costo", 0)).font = BOLD_FONT
+    ws.cell(row=tot_row, column=13).number_format = CURRENCY_FMT
+
+    ws.cell(row=tot_row, column=14, value=resumen.get("margen_bruto_gs", 0)).font = BOLD_FONT
+    ws.cell(row=tot_row, column=14).number_format = CURRENCY_FMT
+
+    ws.cell(row=tot_row, column=16, value=f"{resumen.get('margen_bruto_pct', 0):.1f}%").font = BOLD_FONT
+    ws.cell(row=tot_row, column=17, value="100.0%").font = BOLD_FONT
+
+    _auto_width(ws)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def export_sales_daily_consolidation(data: dict, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, company_info: Optional[dict] = None) -> bytes:
+    """Genera archivo Excel (.xlsx) con el listado consolidado por día
+    con tickets, ventas, costos CMV, margen bruto, margen % y ticket promedio.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Consolidado Diario"
+
+    razon_social = company_info.get("razon_social", "Extra Supermercado Mayorista") if company_info else "Extra Supermercado Mayorista"
+    ruc = company_info.get("ruc", "80150377-9") if company_info else "80150377-9"
+
+    f_desde_fmt = fecha_desde.strftime("%d/%m/%Y") if fecha_desde else "Inicio"
+    f_hasta_fmt = fecha_hasta.strftime("%d/%m/%Y") if fecha_hasta else "Hoy"
+
+    ws.cell(row=1, column=1, value=f"{razon_social} · RUC {ruc}").font = SUBTITLE_FONT
+    ws.cell(row=2, column=1, value=f"CONSOLIDADO DIARIO DE VENTAS, COSTOS Y RENTABILIDAD ({f_desde_fmt} al {f_hasta_fmt})").font = TITLE_FONT
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=12)
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=12)
+
+    resumen = data.get("resumen", {})
+    ws.cell(row=3, column=1, value=f"Días evaluados: {resumen.get('total_dias', 0)}  |  Total Tickets: {resumen.get('total_tickets', 0):,}  |  Total Ventas: Gs. {resumen.get('total_venta', 0):,.0f}  |  CMV: Gs. {resumen.get('total_costo', 0):,.0f}  |  Margen Bruto: Gs. {resumen.get('margen_bruto_gs', 0):,.0f} ({resumen.get('margen_bruto_pct', 0):.1f}%)").font = BOLD_FONT
+    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=12)
+
+    headers = [
+        "Fecha",
+        "Día de la Semana",
+        "Tickets Emitidos",
+        "SKUs Vendidos",
+        "Unidades / KG",
+        "Total Ventas (Gs.)",
+        "Costo Mercadería (Gs.)",
+        "Margen Bruto (Gs.)",
+        "Margen Comercial (%)",
+        "Ticket Promedio (Gs.)",
+        "PPP Promedio (Gs.)",
+        "Descuentos POS (Gs.)",
+    ]
+
+    start_row = 5
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=start_row, column=col_idx, value=header)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = THIN_BORDER
+
+    dias = data.get("dias", [])
+    for idx, d in enumerate(dias, 1):
+        curr_row = start_row + idx
+        dia_partes = d.get("dia_nombre", d.get("dia", "")).split(", ")
+        nombre_semana = dia_partes[0] if len(dia_partes) > 1 else ""
+        fecha_str = dia_partes[1] if len(dia_partes) > 1 else d.get("dia", "")
+
+        row_vals = [
+            fecha_str,
+            nombre_semana,
+            d.get("tickets", 0),
+            d.get("total_skus", 0),
+            round(d.get("unidades_vendidas", 0), 2),
+            d.get("total_venta", 0),
+            d.get("total_costo", 0),
+            d.get("margen_bruto_gs", 0),
+            f"{d.get('margen_bruto_pct', 0):.1f}%",
+            d.get("ticket_promedio", 0),
+            d.get("ppp_promedio", 0),
+            d.get("total_descuento", 0),
+        ]
+
+        for col_idx, val in enumerate(row_vals, 1):
+            cell = ws.cell(row=curr_row, column=col_idx, value=val)
+            cell.font = DATA_FONT
+            cell.border = THIN_BORDER
+            if col_idx in (6, 7, 8, 10, 11, 12):
+                cell.number_format = CURRENCY_FMT
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (3, 4):
+                cell.number_format = '#,##0'
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx == 5:
+                cell.number_format = '#,##0.00'
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx == 9:
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (1, 2):
+                cell.alignment = Alignment(horizontal="center")
+
+    # Fila de Totales
+    tot_row = start_row + len(dias) + 1
+    ws.cell(row=tot_row, column=1, value="TOTALES / PROMEDIOS").font = BOLD_FONT
+    ws.cell(row=tot_row, column=3, value=resumen.get("total_tickets", 0)).font = BOLD_FONT
+    ws.cell(row=tot_row, column=3).number_format = '#,##0'
+
+    ws.cell(row=tot_row, column=5, value=round(resumen.get("total_unidades", 0), 2)).font = BOLD_FONT
+    ws.cell(row=tot_row, column=5).number_format = '#,##0.00'
+
+    ws.cell(row=tot_row, column=6, value=resumen.get("total_venta", 0)).font = BOLD_FONT
+    ws.cell(row=tot_row, column=6).number_format = CURRENCY_FMT
+
+    ws.cell(row=tot_row, column=7, value=resumen.get("total_costo", 0)).font = BOLD_FONT
+    ws.cell(row=tot_row, column=7).number_format = CURRENCY_FMT
+
+    ws.cell(row=tot_row, column=8, value=resumen.get("margen_bruto_gs", 0)).font = BOLD_FONT
+    ws.cell(row=tot_row, column=8).number_format = CURRENCY_FMT
+
+    ws.cell(row=tot_row, column=9, value=f"{resumen.get('margen_bruto_pct', 0):.1f}%").font = BOLD_FONT
+    ws.cell(row=tot_row, column=10, value=resumen.get("ticket_promedio", 0)).font = BOLD_FONT
+    ws.cell(row=tot_row, column=10).number_format = CURRENCY_FMT
+
+    ws.cell(row=tot_row, column=11, value=resumen.get("ppp_global", 0)).font = BOLD_FONT
+    ws.cell(row=tot_row, column=11).number_format = CURRENCY_FMT
+
+    ws.cell(row=tot_row, column=12, value=resumen.get("total_descuento", 0)).font = BOLD_FONT
+    ws.cell(row=tot_row, column=12).number_format = CURRENCY_FMT
+
+    _auto_width(ws)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+

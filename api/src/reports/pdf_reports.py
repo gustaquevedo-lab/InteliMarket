@@ -610,4 +610,339 @@ def generate_sales_by_supplier_pdf(
     return buffer.getvalue()
 
 
+def _base_doc_landscape(buffer, title: str, company: dict, generated_by: str = "") -> tuple:
+    from reportlab.lib.pagesizes import landscape, A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_RIGHT, TA_LEFT
+    from api.src.integrated_finance.pdf_reports import (
+        _AuditedCanvas, MARGIN, FONT_REGULAR, FONT_BOLD, GRAY_DARK, GRAY_MEDIUM, WHITE,
+    )
+    footer_left = "Intelimarket — ERP Hecho para crecer"
+
+    def _canvasmaker(*args, **kwargs):
+        return _AuditedCanvas(*args, footer_left=footer_left, footer_right="", **kwargs)
+
+    doc = SimpleDocTemplate(
+        buffer, pagesize=landscape(A4),
+        rightMargin=MARGIN, leftMargin=MARGIN, topMargin=10 * mm, bottomMargin=16 * mm,
+        title=title,
+    )
+    doc._audited_canvasmaker = _canvasmaker
+    styles = getSampleStyleSheet()
+    styles["Normal"].fontName = FONT_REGULAR
+    styles["Normal"].fontSize = 7.5
+    styles["Normal"].leading = 10
+    styles.add(ParagraphStyle("Header", fontName=FONT_BOLD, fontSize=12, leading=14, textColor=GRAY_DARK, spaceAfter=1))
+    styles.add(ParagraphStyle("Sub", fontName=FONT_REGULAR, fontSize=7.5, leading=9.5, textColor=GRAY_MEDIUM))
+    styles.add(ParagraphStyle("SectionTitle", fontName=FONT_BOLD, fontSize=9.5, leading=12, textColor=GRAY_DARK, spaceBefore=4, spaceAfter=2))
+    styles.add(ParagraphStyle("Small", fontName=FONT_REGULAR, fontSize=7, leading=9, textColor=GRAY_MEDIUM))
+    styles.add(ParagraphStyle("MetaRight", fontName=FONT_REGULAR, fontSize=7.5, leading=10, textColor=GRAY_MEDIUM, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle("Eyebrow", fontName=FONT_BOLD, fontSize=8, leading=10, textColor=WHITE, alignment=TA_LEFT))
+    return doc, styles
+
+
+def generate_sales_detailed_day_pdf(
+    company: dict,
+    data: dict,
+    fecha: date,
+    generated_by: str = "",
+) -> bytes:
+    """Genera informe ejecutivo y auditoría detallada de ventas en PDF Premium (formato A4 apaisado),
+    con PVP, PPP, Costos, Márgenes y participación de productos.
+    """
+    from reportlab.lib.colors import HexColor
+    buffer = io.BytesIO()
+    fecha_fmt = fecha.strftime("%d/%m/%Y")
+    doc, styles = _base_doc_landscape(buffer, f"Ventas Detalladas - {fecha_fmt}", company, generated_by)
+
+    elements = _company_header(
+        company, styles, "AUDITORÍA DETALLADA DE VENTAS, COSTOS Y RENTABILIDAD",
+        f"Día evaluado: {fecha_fmt} (Hora oficial America/Asuncion)",
+        generated_by,
+    )
+
+    resumen = data.get("resumen", {})
+    t_tickets = resumen.get("total_tickets", 0)
+    t_skus = resumen.get("total_skus", 0)
+    t_unidades = resumen.get("total_unidades", 0)
+    t_venta = resumen.get("total_venta", 0)
+    t_costo = resumen.get("total_costo", 0)
+    t_margen_gs = resumen.get("margen_bruto_gs", 0)
+    t_margen_pct = resumen.get("margen_bruto_pct", 0)
+    t_prom = resumen.get("ticket_promedio", 0)
+    ppp_glob = resumen.get("ppp_global", 0)
+
+    # Bloque de KPIs Ejecutivos del Día
+    kpi_data = [
+        [
+            Paragraph(f"<b>TICKETS EMITIDOS:</b><br/><font size=11 color='#0F172A'><b>{t_tickets:,}</b></font>", styles["Normal"]),
+            Paragraph(f"<b>SKUs VENDIDOS:</b><br/><font size=11 color='#0F172A'><b>{t_skus:,}</b></font>", styles["Normal"]),
+            Paragraph(f"<b>UNIDADES / KG:</b><br/><font size=11 color='#0F172A'><b>{t_unidades:,.2f}</b></font>", styles["Normal"]),
+            Paragraph(f"<b>VENTA TOTAL:</b><br/><font size=11 color='#047857'><b>Gs. {_fmt_gs(t_venta)}</b></font>", styles["Normal"]),
+            Paragraph(f"<b>COSTO MERCADERÍA:</b><br/><font size=11 color='#1E40AF'><b>Gs. {_fmt_gs(t_costo)}</b></font>", styles["Normal"]),
+            Paragraph(f"<b>MARGEN BRUTO:</b><br/><font size=11 color='#B45309'><b>Gs. {_fmt_gs(t_margen_gs)} ({t_margen_pct:.1f}%)</b></font>", styles["Normal"]),
+        ]
+    ]
+    kpi_table = Table(kpi_data, colWidths=[40 * mm, 38 * mm, 40 * mm, 50 * mm, 49 * mm, 50 * mm])
+    kpi_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F8FAFC")),
+        ("BOX", (0, 0), (-1, -1), 1, HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(kpi_table)
+    elements.append(Spacer(1, 3 * mm))
+
+    items = data.get("items", [])
+    if not items:
+        elements.append(Paragraph("Sin ventas registradas en el día seleccionado.", styles["Small"]))
+        _build(doc, elements)
+        return buffer.getvalue()
+
+    # Tabla Detallada
+    headers = [
+        "#",
+        "SKU",
+        "Cód. Barra",
+        "Descripción Producto",
+        "Categoría",
+        "U.M.",
+        "Cant.",
+        "PVP",
+        "PPP",
+        "Últ. Costo",
+        "Costo Prom.",
+        "Total Venta (Gs.)",
+        "Margen (Gs.)",
+        "% Mg.",
+    ]
+    t_data = [headers]
+
+    for idx, it in enumerate(items, 1):
+        cant = it.get("cantidad", 0)
+        cant_str = f"{cant:.3f}" if (cant % 1 != 0) else f"{int(cant)}"
+        prod_nombre = it.get("producto", "")[:32]
+        cat_nombre = it.get("categoria", "")[:15]
+
+        t_data.append([
+            str(idx),
+            str(it.get("sku", "—"))[:10],
+            str(it.get("codigo_barra", "—"))[:13],
+            prod_nombre,
+            cat_nombre,
+            it.get("unidad_medida", "UN")[:3],
+            cant_str,
+            _fmt_gs(it.get("pvp", 0)),
+            _fmt_gs(it.get("ppp", 0)),
+            _fmt_gs(it.get("ultimo_costo", 0)),
+            _fmt_gs(it.get("costo_promedio", 0)),
+            _fmt_gs(it.get("total_venta", 0)),
+            _fmt_gs(it.get("margen_gs", 0)),
+            f"{it.get('margen_ppp_pct', 0):.1f}%",
+        ])
+
+    # Fila de Totales
+    t_data.append([
+        "",
+        "",
+        "",
+        "TOTALES GENERALES DEL DÍA",
+        "",
+        "",
+        f"{t_unidades:,.2f}",
+        "",
+        _fmt_gs(ppp_glob),
+        "",
+        "",
+        _fmt_gs(t_venta),
+        _fmt_gs(t_margen_gs),
+        f"{t_margen_pct:.1f}%",
+    ])
+
+    col_widths = [7 * mm, 16 * mm, 22 * mm, 52 * mm, 24 * mm, 10 * mm, 14 * mm, 18 * mm, 18 * mm, 18 * mm, 18 * mm, 22 * mm, 18 * mm, 10 * mm]
+    t = Table(t_data, colWidths=col_widths, repeatRows=1)
+
+    style_cmds = [
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 6.5),
+        ("ALIGN", (0, 0), (2, -1), "CENTER"),
+        ("ALIGN", (3, 0), (4, -1), "LEFT"),
+        ("ALIGN", (5, 0), (5, -1), "CENTER"),
+        ("ALIGN", (6, 0), (-1, -1), "RIGHT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [WHITE, GRAY_LIGHT]),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
+        # Estilo para la fila final de totales
+        ("BACKGROUND", (0, -1), (-1, -1), HexColor("#E2E8F0")),
+        ("FONTNAME", (0, -1), (-1, -1), FONT_BOLD),
+        ("FONTSIZE", (0, -1), (-1, -1), 7),
+    ]
+    t.setStyle(TableStyle(style_cmds))
+    elements.append(t)
+    elements.append(Spacer(1, 3 * mm))
+
+    elements.append(Paragraph(
+        "<b>Nota:</b> PVP = Precio de venta al público en catálogo; PPP = Precio Promedio Ponderado efectivamente cobrado en caja (Venta Neta / Cantidad). "
+        "Costo valorizado con el método promedio ponderado de inventario. Extra Supermercado (Grupo Santa Teresa E.A.S. - RUC 80150377-9).",
+        styles["Small"],
+    ))
+
+    _build(doc, elements)
+    return buffer.getvalue()
+
+
+def generate_sales_daily_consolidation_pdf(
+    company: dict,
+    data: dict,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+    generated_by: str = "",
+) -> bytes:
+    """Genera informe consolidado cronológico día a día en PDF Premium (A4 apaisado)."""
+    from reportlab.lib.colors import HexColor
+    buffer = io.BytesIO()
+    f_desde_fmt = fecha_desde.strftime("%d/%m/%Y") if fecha_desde else "Inicio"
+    f_hasta_fmt = fecha_hasta.strftime("%d/%m/%Y") if fecha_hasta else "Hoy"
+    periodo_str = f"{f_desde_fmt} al {f_hasta_fmt}"
+
+    doc, styles = _base_doc_landscape(buffer, f"Consolidado Diario - {periodo_str}", company, generated_by)
+
+    elements = _company_header(
+        company, styles, "CONSOLIDADO DIARIO DE FACTURACIÓN, COSTOS Y RENTABILIDAD",
+        f"Período evaluado: {periodo_str} (Hora oficial America/Asuncion)",
+        generated_by,
+    )
+
+    resumen = data.get("resumen", {})
+    tot_dias = resumen.get("total_dias", 0)
+    tot_tickets = resumen.get("total_tickets", 0)
+    tot_unidades = resumen.get("total_unidades", 0)
+    tot_venta = resumen.get("total_venta", 0)
+    tot_costo = resumen.get("total_costo", 0)
+    tot_margen = resumen.get("margen_bruto_gs", 0)
+    tot_margen_pct = resumen.get("margen_bruto_pct", 0)
+    t_prom_global = resumen.get("ticket_promedio", 0)
+    prom_diario = resumen.get("promedio_venta_diaria", 0)
+
+    # Bloque de KPIs
+    kpi_data = [
+        [
+            Paragraph(f"<b>DÍAS EVALUADOS:</b><br/><font size=11 color='#0F172A'><b>{tot_dias}</b></font>", styles["Normal"]),
+            Paragraph(f"<b>TOTAL TICKETS:</b><br/><font size=11 color='#0F172A'><b>{tot_tickets:,}</b></font>", styles["Normal"]),
+            Paragraph(f"<b>FACTURACIÓN PERÍODO:</b><br/><font size=11 color='#047857'><b>Gs. {_fmt_gs(tot_venta)}</b></font>", styles["Normal"]),
+            Paragraph(f"<b>COSTO MERCADERÍA:</b><br/><font size=11 color='#1E40AF'><b>Gs. {_fmt_gs(tot_costo)}</b></font>", styles["Normal"]),
+            Paragraph(f"<b>MARGEN BRUTO:</b><br/><font size=11 color='#B45309'><b>Gs. {_fmt_gs(tot_margen)} ({tot_margen_pct:.1f}%)</b></font>", styles["Normal"]),
+            Paragraph(f"<b>PROMEDIO DIARIO:</b><br/><font size=11 color='#0F172A'><b>Gs. {_fmt_gs(prom_diario)}</b></font>", styles["Normal"]),
+        ]
+    ]
+    kpi_table = Table(kpi_data, colWidths=[36 * mm, 40 * mm, 50 * mm, 48 * mm, 50 * mm, 43 * mm])
+    kpi_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F8FAFC")),
+        ("BOX", (0, 0), (-1, -1), 1, HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(kpi_table)
+    elements.append(Spacer(1, 3 * mm))
+
+    dias = data.get("dias", [])
+    if not dias:
+        elements.append(Paragraph("Sin ventas registradas en el período seleccionado.", styles["Small"]))
+        _build(doc, elements)
+        return buffer.getvalue()
+
+    headers = [
+        "Fecha",
+        "Día de la Semana",
+        "Tickets",
+        "SKUs",
+        "Unidades / KG",
+        "Total Ventas (Gs.)",
+        "Costo Mercadería (Gs.)",
+        "Margen Bruto (Gs.)",
+        "Margen (%)",
+        "Ticket Prom. (Gs.)",
+        "PPP Prom. (Gs.)",
+    ]
+    t_data = [headers]
+
+    for d in dias:
+        dia_partes = d.get("dia_nombre", d.get("dia", "")).split(", ")
+        nombre_semana = dia_partes[0] if len(dia_partes) > 1 else ""
+        fecha_str = dia_partes[1] if len(dia_partes) > 1 else d.get("dia", "")
+
+        t_data.append([
+            fecha_str,
+            nombre_semana,
+            f"{d.get('tickets', 0):,}",
+            f"{d.get('total_skus', 0):,}",
+            f"{d.get('unidades_vendidas', 0):,.2f}",
+            _fmt_gs(d.get("total_venta", 0)),
+            _fmt_gs(d.get("total_costo", 0)),
+            _fmt_gs(d.get("margen_bruto_gs", 0)),
+            f"{d.get('margen_bruto_pct', 0):.1f}%",
+            _fmt_gs(d.get("ticket_promedio", 0)),
+            _fmt_gs(d.get("ppp_promedio", 0)),
+        ])
+
+    # Fila de Totales
+    t_data.append([
+        "TOTALES / PROMEDIO",
+        f"{tot_dias} días",
+        f"{tot_tickets:,}",
+        "",
+        f"{tot_unidades:,.2f}",
+        _fmt_gs(tot_venta),
+        _fmt_gs(tot_costo),
+        _fmt_gs(tot_margen),
+        f"{tot_margen_pct:.1f}%",
+        _fmt_gs(t_prom_global),
+        "",
+    ])
+
+    col_widths = [22 * mm, 26 * mm, 18 * mm, 16 * mm, 22 * mm, 32 * mm, 32 * mm, 32 * mm, 20 * mm, 24 * mm, 23 * mm]
+    t = Table(t_data, colWidths=col_widths, repeatRows=1)
+
+    style_cmds = [
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("ALIGN", (1, 0), (1, -1), "LEFT"),
+        ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [WHITE, GRAY_LIGHT]),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
+        ("BACKGROUND", (0, -1), (-1, -1), HexColor("#E2E8F0")),
+        ("FONTNAME", (0, -1), (-1, -1), FONT_BOLD),
+        ("FONTSIZE", (0, -1), (-1, -1), 7.5),
+    ]
+    t.setStyle(TableStyle(style_cmds))
+    elements.append(t)
+    elements.append(Spacer(1, 3 * mm))
+
+    elements.append(Paragraph(
+        "<b>Nota de Auditoría:</b> Informe generado en base a los tickets emitidos en cajas registradoras autorizadas. "
+        "Grupo Santa Teresa E.A.S. - RUC 80150377-9 - Extra Supermercado Mayorista.",
+        styles["Small"],
+    ))
+
+    _build(doc, elements)
+    return buffer.getvalue()
+
+
+
 

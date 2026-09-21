@@ -3,7 +3,8 @@ import {
   BarChart3, TrendingUp, DollarSign, ShoppingCart, Percent,
   FileSpreadsheet, FileText, RefreshCcw, Loader2, Filter, Layers, CreditCard,
   Calendar, CheckCircle2, AlertTriangle, ArrowUpRight, ArrowDownRight, UserCheck,
-  ShieldCheck, HelpCircle, ChevronRight, ChevronDown, Download, Building2, Search, X, ArrowLeft, PackageCheck
+  ShieldCheck, HelpCircle, ChevronRight, ChevronDown, Download, Building2, Search, X, ArrowLeft, PackageCheck,
+  TableProperties, CalendarRange
 } from "lucide-react"
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -12,14 +13,16 @@ import {
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
+import PlanillaDetalleDiaTab from "./PlanillaDetalleDiaTab"
+import ConsolidadoDiarioTab from "./ConsolidadoDiarioTab"
 
 const COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#64748b", "#14b8a6", "#f97316"]
 
-type TabKey = "utilidad_7_lineas" | "medios_pago" | "proveedores" | "cajeras" | "categorias"
+type TabKey = "planilla_dia" | "consolidado_diario" | "utilidad_7_lineas" | "proveedores" | "medios_pago" | "cajeras" | "categorias"
 
 export default function ReportsPage() {
   const toast = useToast()
-  const [activeTab, setActiveTab] = useState<TabKey>("utilidad_7_lineas")
+  const [activeTab, setActiveTab] = useState<TabKey>("planilla_dia")
   const [loading, setLoading] = useState(false)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [downloadingXlsx, setDownloadingXlsx] = useState(false)
@@ -44,6 +47,7 @@ export default function ReportsPage() {
   const [fechaPreset, setFechaPreset] = useState<"hoy" | "ayer" | "7d" | "mes" | "mes_ant" | "custom">("mes")
   const [fechaDesde, setFechaDesde] = useState<string>(firstDayMonthStr)
   const [fechaHasta, setFechaHasta] = useState<string>(todayStr)
+  const [selectedDia, setSelectedDia] = useState<string>(todayStr)
 
   // Datos ejecutivos
   const [executiveData, setExecutiveData] = useState<any>(null)
@@ -162,7 +166,16 @@ export default function ReportsPage() {
   const handleExportPdf = async () => {
     setDownloadingPdf(true)
     try {
-      if (activeTab === "proveedores") {
+      if (activeTab === "planilla_dia") {
+        await api.reports.downloadSalesDetailedDayPdf({ fecha: selectedDia })
+        toast.success("PDF Descargado", `Planilla de ventas del día ${selectedDia} generada con membrete fiscal`)
+      } else if (activeTab === "consolidado_diario") {
+        await api.reports.downloadSalesDailyConsolidationPdf({
+          fecha_desde: fechaDesde || undefined,
+          fecha_hasta: fechaHasta || undefined,
+        })
+        toast.success("PDF Descargado", `Consolidado diario ${fechaDesde} al ${fechaHasta}`)
+      } else if (activeTab === "proveedores") {
         await api.reports.downloadSalesBySupplierPdf({
           fecha_desde: fechaDesde || undefined,
           fecha_hasta: fechaHasta || undefined,
@@ -192,7 +205,16 @@ export default function ReportsPage() {
   const handleExportXlsx = async () => {
     setDownloadingXlsx(true)
     try {
-      if (activeTab === "proveedores") {
+      if (activeTab === "planilla_dia") {
+        await api.reports.downloadSalesDetailedDayXlsx({ fecha: selectedDia })
+        toast.success("Excel Descargado", `Planilla de ventas del día ${selectedDia}`)
+      } else if (activeTab === "consolidado_diario") {
+        await api.reports.downloadSalesDailyConsolidationXlsx({
+          fecha_desde: fechaDesde || undefined,
+          fecha_hasta: fechaHasta || undefined,
+        })
+        toast.success("Excel Descargado", `Consolidado diario ${fechaDesde} al ${fechaHasta}`)
+      } else if (activeTab === "proveedores") {
         await api.reports.downloadSalesBySupplierXlsx({
           fecha_desde: fechaDesde || undefined,
           fecha_hasta: fechaHasta || undefined,
@@ -406,7 +428,13 @@ export default function ReportsPage() {
               className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white text-xs font-black shadow-lg shadow-red-500/20 transition cursor-pointer active:scale-95 disabled:opacity-50"
             >
               {downloadingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-              {activeTab === "proveedores" ? "PDF Proveedores" : "PDF Oficial"}
+              {activeTab === "planilla_dia"
+                ? "PDF Día"
+                : activeTab === "consolidado_diario"
+                ? "PDF Consolidado"
+                : activeTab === "proveedores"
+                ? "PDF Proveedores"
+                : "PDF Oficial"}
             </button>
             <button
               onClick={handleExportXlsx}
@@ -414,13 +442,20 @@ export default function ReportsPage() {
               className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black shadow-lg shadow-emerald-500/25 transition cursor-pointer active:scale-95 disabled:opacity-50"
             >
               {downloadingXlsx ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
-              {activeTab === "proveedores" ? "Excel Proveedores" : "Exportar Excel"}
+              {activeTab === "planilla_dia"
+                ? "Excel Día"
+                : activeTab === "consolidado_diario"
+                ? "Excel Consolidado"
+                : activeTab === "proveedores"
+                ? "Excel Proveedores"
+                : "Exportar Excel"}
             </button>
           </div>
         </div>
       </div>
 
-      {/* ── BARRA DE FILTRO TEMPORAL ── */}
+      {/* ── BARRA DE FILTRO TEMPORAL (OCULTA EN PLANILLA DÍA PORQUE TIENE SU PROPIO SELECTOR) ── */}
+      {activeTab !== "planilla_dia" && (
       <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mr-1">
@@ -472,88 +507,113 @@ export default function ReportsPage() {
           </div>
         </div>
       </div>
+      )}
 
-      {/* ── 4 KPIS SUPERIORES ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1 */}
-        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
-          <div className="h-1 w-full bg-gradient-to-r from-emerald-500 to-teal-500 absolute top-0 left-0" />
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">1. Total Vendido</span>
-            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600">
-              <DollarSign className="w-4 h-4" />
+      {/* ── 4 KPIS SUPERIORES (SOLO EN VISTAS EJECUTIVAS) ── */}
+      {activeTab !== "planilla_dia" && activeTab !== "consolidado_diario" && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* KPI 1 */}
+          <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+            <div className="h-1 w-full bg-gradient-to-r from-emerald-500 to-teal-500 absolute top-0 left-0" />
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">1. Total Vendido</span>
+              <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600">
+                <DollarSign className="w-4 h-4" />
+              </div>
+            </div>
+            <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+              {formatPYG(resumen.total_vendido)}
+            </p>
+            <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <span>{resumen.total_tickets.toLocaleString("es-PY")} tickets</span>
+              <span className="text-emerald-600 font-bold font-mono">POS Facturado</span>
             </div>
           </div>
-          <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
-            {formatPYG(resumen.total_vendido)}
-          </p>
-          <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span>{resumen.total_tickets.toLocaleString("es-PY")} tickets</span>
-            <span className="text-emerald-600 font-bold font-mono">POS Facturado</span>
-          </div>
-        </div>
 
-        {/* KPI 2 */}
-        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
-          <div className="h-1 w-full bg-gradient-to-r from-blue-500 to-indigo-500 absolute top-0 left-0" />
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">2. Costo Mercadería (CMV)</span>
-            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600">
-              <ShoppingCart className="w-4 h-4" />
+          {/* KPI 2 */}
+          <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+            <div className="h-1 w-full bg-gradient-to-r from-blue-500 to-indigo-500 absolute top-0 left-0" />
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">2. Costo Mercadería (CMV)</span>
+              <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600">
+                <ShoppingCart className="w-4 h-4" />
+              </div>
+            </div>
+            <p className="text-2xl font-black font-mono text-blue-600 dark:text-blue-400">
+              {formatPYG(resumen.cmv)}
+            </p>
+            <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <span>Reposición Ponderada</span>
+              <span className="text-blue-600 font-bold font-mono">
+                {resumen.total_vendido > 0 ? ((resumen.cmv / resumen.total_vendido) * 100).toFixed(1) : 0}% de venta
+              </span>
             </div>
           </div>
-          <p className="text-2xl font-black font-mono text-blue-600 dark:text-blue-400">
-            {formatPYG(resumen.cmv)}
-          </p>
-          <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span>Reposición Ponderada</span>
-            <span className="text-blue-600 font-bold font-mono">
-              {resumen.total_vendido > 0 ? ((resumen.cmv / resumen.total_vendido) * 100).toFixed(1) : 0}% de venta
-            </span>
-          </div>
-        </div>
 
-        {/* KPI 3 */}
-        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
-          <div className="h-1 w-full bg-gradient-to-r from-amber-500 to-orange-500 absolute top-0 left-0" />
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">3. Utilidad Bruta & Margen</span>
-            <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600">
-              <Percent className="w-4 h-4" />
+          {/* KPI 3 */}
+          <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+            <div className="h-1 w-full bg-gradient-to-r from-amber-500 to-orange-500 absolute top-0 left-0" />
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">3. Utilidad Bruta & Margen</span>
+              <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600">
+                <Percent className="w-4 h-4" />
+              </div>
+            </div>
+            <p className="text-2xl font-black font-mono text-amber-600 dark:text-amber-400">
+              {formatPYG(resumen.utilidad_bruta)}
+            </p>
+            <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <span>Margen Comercial</span>
+              <span className="text-amber-600 font-bold font-mono">{resumen.margen_bruto_pct.toFixed(2)}%</span>
             </div>
           </div>
-          <p className="text-2xl font-black font-mono text-amber-600 dark:text-amber-400">
-            {formatPYG(resumen.utilidad_bruta)}
-          </p>
-          <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span>Margen Comercial</span>
-            <span className="text-amber-600 font-bold font-mono">{resumen.margen_bruto_pct.toFixed(2)}%</span>
-          </div>
-        </div>
 
-        {/* KPI 4 */}
-        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
-          <div className="h-1 w-full bg-gradient-to-r from-emerald-600 to-teal-600 absolute top-0 left-0" />
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">7. Resultado Comercial Neto</span>
-            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600">
-              <TrendingUp className="w-4 h-4" />
+          {/* KPI 4 */}
+          <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+            <div className="h-1 w-full bg-gradient-to-r from-emerald-600 to-teal-600 absolute top-0 left-0" />
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">7. Resultado Comercial Neto</span>
+              <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600">
+                <TrendingUp className="w-4 h-4" />
+              </div>
+            </div>
+            <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+              {formatPYG(resumen.resultado_neto)}
+            </p>
+            <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <span>Línea 7 Ejecutiva</span>
+              <span className="text-emerald-600 font-bold font-mono">
+                {resumen.resultado_neto_pct ? resumen.resultado_neto_pct.toFixed(2) : resumen.margen_bruto_pct.toFixed(2)}% Neto
+              </span>
             </div>
           </div>
-          <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
-            {formatPYG(resumen.resultado_neto)}
-          </p>
-          <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span>Línea 7 Ejecutiva</span>
-            <span className="text-emerald-600 font-bold font-mono">
-              {resumen.resultado_neto_pct ? resumen.resultado_neto_pct.toFixed(2) : resumen.margen_bruto_pct.toFixed(2)}% Neto
-            </span>
-          </div>
         </div>
-      </div>
+      )}
 
       {/* ── TABS DE NAVEGACIÓN ── */}
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab("planilla_dia")}
+          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
+            activeTab === "planilla_dia"
+              ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/25"
+              : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+          }`}
+        >
+          <TableProperties className="w-4 h-4" />
+          Planilla Detallada por Día
+        </button>
+        <button
+          onClick={() => setActiveTab("consolidado_diario")}
+          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
+            activeTab === "consolidado_diario"
+              ? "bg-teal-600 text-white shadow-md shadow-teal-500/25"
+              : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+          }`}
+        >
+          <CalendarRange className="w-4 h-4" />
+          Consolidado por Día
+        </button>
         <button
           onClick={() => setActiveTab("utilidad_7_lineas")}
           className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
@@ -563,13 +623,13 @@ export default function ReportsPage() {
           }`}
         >
           <Layers className="w-4 h-4" />
-          Ventas con Utilidad (7 Líneas Ejecutivas)
+          Ventas con Utilidad (7 Líneas)
         </button>
         <button
           onClick={() => setActiveTab("proveedores")}
           className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
             activeTab === "proveedores"
-              ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/20"
+              ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow"
               : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
           }`}
         >
@@ -585,7 +645,7 @@ export default function ReportsPage() {
           }`}
         >
           <CreditCard className="w-4 h-4" />
-          Medios de Pago & Gaveta (PYG / R$ / US$)
+          Medios de Pago & Gaveta
         </button>
         <button
           onClick={() => setActiveTab("cajeras")}
@@ -596,7 +656,7 @@ export default function ReportsPage() {
           }`}
         >
           <UserCheck className="w-4 h-4" />
-          Rendimiento por Cajera & Turnos
+          Rendimiento por Cajera
         </button>
         <button
           onClick={() => setActiveTab("categorias")}
@@ -610,6 +670,24 @@ export default function ReportsPage() {
           Familias & Categorías
         </button>
       </div>
+
+      {/* ── CONTENIDO TAB NUEVO: PLANILLA DETALLADA POR DÍA ── */}
+      {activeTab === "planilla_dia" && (
+        <PlanillaDetalleDiaTab
+          initialFecha={selectedDia}
+          onFechaChange={setSelectedDia}
+        />
+      )}
+
+      {/* ── CONTENIDO TAB NUEVO: CONSOLIDADO POR DÍA ── */}
+      {activeTab === "consolidado_diario" && (
+        <ConsolidadoDiarioTab
+          onVerDetalleDia={(dia) => {
+            setSelectedDia(dia)
+            setActiveTab("planilla_dia")
+          }}
+        />
+      )}
 
       {/* ── CONTENIDO TAB 1: 7 LÍNEAS EJECUTIVAS ── */}
       {activeTab === "utilidad_7_lineas" && (

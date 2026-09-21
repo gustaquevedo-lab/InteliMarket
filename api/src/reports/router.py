@@ -417,3 +417,99 @@ async def export_sales_executive_xlsx(
     xlsx_bytes = export_service.export_sales_executive_xlsx(data, fecha_desde, fecha_hasta)
     return _excel_response(xlsx_bytes, f"informe_ventas_utilidad_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.xlsx")
 
+
+@router.get("/sales/detailed-day")
+async def sales_detailed_day(
+    fecha: date = Query(...),
+    categoria_id: str | None = Query(None),
+    search: str | None = Query(None),
+    branch_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_sales_detailed_day(
+        db, user["company_id"], fecha, categoria_id, search, branch_id
+    )
+
+
+@router.get("/sales/daily-consolidation")
+async def sales_daily_consolidation(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    branch_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_sales_daily_consolidation(
+        db, user["company_id"], fecha_desde, fecha_hasta, branch_id
+    )
+
+
+@router.get("/export/sales-detailed-day.xlsx")
+async def export_sales_detailed_day_xlsx(
+    fecha: date = Query(...),
+    categoria_id: str | None = Query(None),
+    search: str | None = Query(None),
+    branch_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company_id = user["company_id"]
+    data = await service.get_sales_detailed_day(db, company_id, fecha, categoria_id, search, branch_id)
+    company = await _get_company_info(db, company_id)
+    xlsx_bytes = export_service.export_sales_detailed_day(data, fecha, company)
+    filename = f"ventas_detalladas_{fecha.strftime('%Y%m%d')}.xlsx"
+    return _excel_response(xlsx_bytes, filename)
+
+
+@router.get("/export/sales-detailed-day.pdf")
+async def export_sales_detailed_day_pdf(
+    fecha: date = Query(...),
+    categoria_id: str | None = Query(None),
+    search: str | None = Query(None),
+    branch_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company_id = user["company_id"]
+    data = await service.get_sales_detailed_day(db, company_id, fecha, categoria_id, search, branch_id)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Auditoría Interna"
+    pdf_bytes = pdf_reports.generate_sales_detailed_day_pdf(company, data, fecha, generated_by)
+    filename = f"ventas_detalladas_{fecha.strftime('%Y%m%d')}.pdf"
+    return _pdf_response(pdf_bytes, filename)
+
+
+@router.get("/export/sales-daily-consolidation.xlsx")
+async def export_sales_daily_consolidation_xlsx(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    branch_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company_id = user["company_id"]
+    data = await service.get_sales_daily_consolidation(db, company_id, fecha_desde, fecha_hasta, branch_id)
+    company = await _get_company_info(db, company_id)
+    xlsx_bytes = export_service.export_sales_daily_consolidation(data, fecha_desde, fecha_hasta, company)
+    filename = f"consolidado_diario_ventas_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.xlsx"
+    return _excel_response(xlsx_bytes, filename)
+
+
+@router.get("/export/sales-daily-consolidation.pdf")
+async def export_sales_daily_consolidation_pdf(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    branch_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company_id = user["company_id"]
+    data = await service.get_sales_daily_consolidation(db, company_id, fecha_desde, fecha_hasta, branch_id)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Auditoría Interna"
+    pdf_bytes = pdf_reports.generate_sales_daily_consolidation_pdf(company, data, fecha_desde, fecha_hasta, generated_by)
+    filename = f"consolidado_diario_ventas_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.pdf"
+    return _pdf_response(pdf_bytes, filename)
+
+
