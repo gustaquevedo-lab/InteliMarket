@@ -1554,3 +1554,263 @@ async def get_executive_sales_profitability(
         "cajeras": cajeras,
     }
 
+
+async def get_sales_detailed_day(
+    db: AsyncSession,
+    company_id: str,
+    fecha: date,
+    categoria_id: Optional[str] = None,
+    search: Optional[str] = None,
+    branch_id: Optional[str] = None,
+) -> dict:
+    """Reporte detallado de ventas por producto para un día específico (hora oficial America/Asuncion).
+    Incluye SKU, PVP catálogo, PPP de venta real, último costo, costo promedio,
+    costo total, margen Gs., % margen s/ PVP y s/ PPP, y % participación.
+    """
+    params = {"company_id": company_id, "fecha": fecha}
+    where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
+    where += " AND v.fecha >= CAST(:fecha AS TIMESTAMP) AT TIME ZONE 'America/Asuncion'"
+    where += " AND v.fecha < (CAST(:fecha AS DATE) + interval '1 day') AT TIME ZONE 'America/Asuncion'"
+
+    if branch_id:
+        where += " AND v.branch_id = :branch_id"
+        params["branch_id"] = branch_id
+
+    if categoria_id and categoria_id != "todas":
+        if categoria_id == "sin_categoria":
+            where += " AND p.categoria_id IS NULL"
+        else:
+            where += " AND p.categoria_id = :categoria_id"
+            params["categoria_id"] = categoria_id
+
+    if search and search.strip():
+        where += " AND (p.nombre ILIKE :search OR p.sku ILIKE :search OR p.codigo_barra ILIKE :search)"
+        params["search"] = f"%{search.strip()}%"
+
+    # 1. Resumen global del día
+    q_resumen = f"""
+        SELECT
+            COUNT(DISTINCT v.id) as total_tickets,
+            COUNT(DISTINCT vi.product_id) as total_skus,
+            COALESCE(SUM(vi.cantidad), 0) as total_unidades,
+            COALESCE(SUM(vi.total), 0) as total_venta,
+            COALESCE(SUM(COALESCE(vi.descuento_monto, 0)), 0) as total_descuento,
+            COALESCE(SUM(vi.cantidad * COALESCE(NULLIF(vi.costo_unitario, 0), NULLIF(p.costo_promedio, 0), p.ultimo_costo, 0)), 0) as total_costo
+        FROM sales v
+        JOIN sale_items vi ON vi.sale_id = v.id
+        LEFT JOIN products p ON p.id = vi.product_id
+        LEFT JOIN product_categories c ON c.id = p.categoria_id
+        WHERE {where}
+    """
+    res_summary = (await _exec(db, q_resumen, params)).first()
+    total_tickets = int(res_summary["total_tickets"] or 0)
+    total_skus = int(res_summary["total_skus"] or 0)
+    total_unidades = float(res_summary["total_unidades"] or 0)
+    total_venta = float(res_summary["total_venta"] or 0)
+    total_costo = float(res_summary["total_costo"] or 0)
+    total_descuento = float(res_summary["total_descuento"] or 0)
+    margen_bruto_gs = total_venta - total_costo
+    margen_bruto_pct = round((margen_bruto_gs / max(total_venta, 1.0)) * 100, 2)
+    ticket_promedio = round(total_venta / max(total_tickets, 1), 0)
+    ppp_global = round(total_venta / max(total_unidades, 1.0), 2)
+
+    # 2. Detalle de productos
+    q_items = f"""
+        SELECT
+            p.id::text as product_id,
+            COALESCE(p.sku, '—') as sku,
+            COALESCE(p.codigo_barra, '—') as codigo_barra,
+            p.nombre as producto,
+            COALESCE(c.nombre, 'Sin Categoría') as categoria,
+            COALESCE(p.unidad_medida, 'UN') as unidad_medida,
+            COALESCE(p.precio_venta, 0) as pvp,
+            COALESCE(p.ultimo_costo, 0) as ultimo_costo,
+            COALESCE(p.costo_promedio, 0) as costo_promedio,
+            SUM(vi.cantidad) as cantidad,
+            SUM(vi.total) as total_venta,
+            SUM(COALESCE(vi.descuento_monto, 0)) as total_descuento,
+            SUM(vi.cantidad * COALESCE(NULLIF(vi.costo_unitario, 0), NULLIF(p.costo_promedio, 0), p.ultimo_costo, 0)) as total_costo
+        FROM sales v
+        JOIN sale_items vi ON vi.sale_id = v.id
+        LEFT JOIN products p ON p.id = vi.product_id
+        LEFT JOIN product_categories c ON c.id = p.categoria_id
+        WHERE {where}
+        GROUP BY p.id, p.sku, p.codigo_barra, p.nombre, c.nombre, p.unidad_medida, p.precio_venta, p.ultimo_costo, p.costo_promedio
+        ORDER BY total_venta DESC
+    """
+    res_items = (await _exec(db, q_items, params)).all()
+    items = []
+    base_venta = max(total_venta, 1.0)
+
+    for r in res_items:
+        cant = float(r["cantidad"] or 0)
+        v_monto = float(r["total_venta"] or 0)
+        c_monto = float(r["total_costo"] or 0)
+        pvp = float(r["pvp"] or 0)
+        ult_c = float(r["ultimo_costo"] or 0)
+        c_prom = float(r["costo_promedio"] or 0)
+        # PPP = Precio Promedio Ponderado de venta real (efectivamente cobrado por unidad/kg)
+        ppp = round(v_monto / cant, 2) if cant > 0 else 0.0
+        margen_gs = round(v_monto - c_monto, 2)
+        # Margen s/ PVP teórico usando costo promedio (o último costo si no hay prom)
+        costo_base = c_prom if c_prom > 0 else ult_c
+        margen_pvp_pct = round(((pvp - costo_base) / pvp) * 100, 2) if pvp > 0 else 0.0
+        # Margen real promedio s/ lo facturado (PPP vs costo real)
+        margen_ppp_pct = round((margen_gs / v_monto) * 100, 2) if v_monto > 0 else 0.0
+        participacion = round((v_monto / base_venta) * 100, 2)
+
+        items.append({
+            "product_id": r["product_id"],
+            "sku": r["sku"],
+            "codigo_barra": r["codigo_barra"],
+            "producto": r["producto"],
+            "categoria": r["categoria"],
+            "unidad_medida": r["unidad_medida"],
+            "cantidad": cant,
+            "pvp": pvp,
+            "ppp": ppp,
+            "ultimo_costo": ult_c,
+            "costo_promedio": c_prom,
+            "total_venta": v_monto,
+            "total_costo": c_monto,
+            "total_descuento": float(r["total_descuento"] or 0),
+            "margen_gs": margen_gs,
+            "margen_pvp_pct": margen_pvp_pct,
+            "margen_ppp_pct": margen_ppp_pct,
+            "participacion_pct": participacion,
+        })
+
+    return {
+        "fecha": str(fecha),
+        "resumen": {
+            "fecha": str(fecha),
+            "total_tickets": total_tickets,
+            "total_skus": total_skus,
+            "total_unidades": total_unidades,
+            "total_venta": total_venta,
+            "total_costo": total_costo,
+            "total_descuento": total_descuento,
+            "margen_bruto_gs": margen_bruto_gs,
+            "margen_bruto_pct": margen_bruto_pct,
+            "ticket_promedio": ticket_promedio,
+            "ppp_global": ppp_global,
+        },
+        "items": items,
+    }
+
+
+async def get_sales_daily_consolidation(
+    db: AsyncSession,
+    company_id: str,
+    fecha_desde: Optional[date] = None,
+    fecha_hasta: Optional[date] = None,
+    branch_id: Optional[str] = None,
+) -> dict:
+    """Reporte consolidado cronológico día a día con volumen de ventas, costos,
+    utilidad bruta, margen promedio, tickets y precio promedio ponderado.
+    """
+    params = {"company_id": company_id}
+    where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
+    where += _build_tz_filter(fecha_desde, fecha_hasta, params, "v.fecha")
+
+    if branch_id:
+        where += " AND v.branch_id = :branch_id"
+        params["branch_id"] = branch_id
+
+    query = f"""
+        SELECT
+            TO_CHAR(v.fecha AT TIME ZONE 'America/Asuncion', 'YYYY-MM-DD') as dia,
+            COUNT(DISTINCT v.id) as tickets,
+            COUNT(DISTINCT vi.product_id) as total_skus,
+            COALESCE(SUM(vi.cantidad), 0) as total_cant,
+            COALESCE(SUM(vi.total), 0) as total_venta,
+            COALESCE(SUM(COALESCE(vi.descuento_monto, 0)), 0) as total_descuento,
+            COALESCE(SUM(vi.cantidad * COALESCE(NULLIF(vi.costo_unitario, 0), NULLIF(p.costo_promedio, 0), p.ultimo_costo, 0)), 0) as total_costo
+        FROM sales v
+        JOIN sale_items vi ON vi.sale_id = v.id
+        LEFT JOIN products p ON p.id = vi.product_id
+        WHERE {where}
+        GROUP BY TO_CHAR(v.fecha AT TIME ZONE 'America/Asuncion', 'YYYY-MM-DD')
+        ORDER BY dia DESC
+    """
+    results = (await _exec(db, query, params)).all()
+
+    dias_list = []
+    tot_tickets = 0
+    tot_unidades = 0.0
+    tot_venta = 0.0
+    tot_costo = 0.0
+    tot_descuento = 0.0
+
+    DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+
+    for r in results:
+        d_str = str(r["dia"])
+        tickets = int(r["tickets"] or 0)
+        cant = float(r["total_cant"] or 0)
+        v_monto = float(r["total_venta"] or 0)
+        c_monto = float(r["total_costo"] or 0)
+        desc = float(r["total_descuento"] or 0)
+        margen_gs = round(v_monto - c_monto, 2)
+        margen_pct = round((margen_gs / max(v_monto, 1.0)) * 100, 2)
+        t_prom = round(v_monto / max(tickets, 1), 0)
+        ppp = round(v_monto / max(cant, 1.0), 2)
+
+        # Nombre del día de la semana
+        try:
+            parsed_d = date.fromisoformat(d_str)
+            dia_nombre = f"{DIAS_SEMANA[parsed_d.weekday()]}, {parsed_d.strftime('%d/%m/%Y')}"
+        except Exception:
+            dia_nombre = d_str
+
+        tot_tickets += tickets
+        tot_unidades += cant
+        tot_venta += v_monto
+        tot_costo += c_monto
+        tot_descuento += desc
+
+        dias_list.append({
+            "dia": d_str,
+            "dia_nombre": dia_nombre,
+            "tickets": tickets,
+            "total_skus": int(r["total_skus"] or 0),
+            "unidades_vendidas": cant,
+            "total_venta": v_monto,
+            "total_costo": c_monto,
+            "total_descuento": desc,
+            "margen_bruto_gs": margen_gs,
+            "margen_bruto_pct": margen_pct,
+            "ticket_promedio": t_prom,
+            "ppp_promedio": ppp,
+        })
+
+    tot_margen = tot_venta - tot_costo
+    tot_margen_pct = round((tot_margen / max(tot_venta, 1.0)) * 100, 2)
+    t_prom_global = round(tot_venta / max(tot_tickets, 1), 0)
+    ppp_global = round(tot_venta / max(tot_unidades, 1.0), 2)
+    cant_dias = len(dias_list)
+    prom_venta_diaria = round(tot_venta / max(cant_dias, 1), 0)
+
+    return {
+        "periodo": {
+            "fecha_desde": str(fecha_desde) if fecha_desde else None,
+            "fecha_hasta": str(fecha_hasta) if fecha_hasta else None,
+            "total_dias": cant_dias,
+        },
+        "resumen": {
+            "total_dias": cant_dias,
+            "total_tickets": tot_tickets,
+            "total_unidades": tot_unidades,
+            "total_venta": tot_venta,
+            "total_costo": tot_costo,
+            "total_descuento": tot_descuento,
+            "margen_bruto_gs": tot_margen,
+            "margen_bruto_pct": tot_margen_pct,
+            "ticket_promedio": t_prom_global,
+            "ppp_global": ppp_global,
+            "promedio_venta_diaria": prom_venta_diaria,
+        },
+        "dias": dias_list,
+    }
+
+

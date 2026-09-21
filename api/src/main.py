@@ -81,6 +81,9 @@ from api.src.loyalty.router import router as loyalty_router
 from api.src.salud_sistema.router import router as salud_sistema_router
 from api.src.plataforma.router import router as plataforma_router
 from api.src.plataforma.monitor_router import router as monitor_router
+from api.src.plataforma.integraciones_router import router as plat_integraciones_router
+from api.src.plataforma.cajas_router import router as plat_cajas_router
+from api.src.plataforma.tenants_router import router as plat_tenants_router
 from api.src.quotes.router import router as quotes_router
 from api.src.sales_orders.router import router as sales_orders_router
 from api.src.returns.router import router as returns_router
@@ -388,6 +391,9 @@ app.include_router(loyalty_router)
 app.include_router(salud_sistema_router)
 app.include_router(plataforma_router)
 app.include_router(monitor_router)
+app.include_router(plat_integraciones_router)
+app.include_router(plat_cajas_router)
+app.include_router(plat_tenants_router)
 app.include_router(quotes_router)
 app.include_router(sales_orders_router)
 app.include_router(returns_router)

@@ -2496,6 +2496,82 @@ export const api = {
       downloadAuthenticated("/api/reports/export/sales-by-supplier.pdf", params, `ventas_proveedor_${params?.supplier_id || "general"}_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.pdf`),
     downloadSalesBySupplierXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string; supplier_id?: string }) =>
       downloadAuthenticated("/api/reports/export/sales-by-supplier.xlsx", params, `ventas_proveedor_${params?.supplier_id || "general"}_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.xlsx`),
+    salesDetailedDay: (params: { fecha: string; categoria_id?: string; search?: string; branch_id?: string }) =>
+      client.get<{
+        fecha: string;
+        resumen: {
+          fecha: string;
+          total_tickets: number;
+          total_skus: number;
+          total_unidades: number;
+          total_venta: number;
+          total_costo: number;
+          total_descuento: number;
+          margen_bruto_gs: number;
+          margen_bruto_pct: number;
+          ticket_promedio: number;
+          ppp_global: number;
+        };
+        items: Array<{
+          product_id: string;
+          sku: string;
+          codigo_barra: string;
+          producto: string;
+          categoria: string;
+          unidad_medida: string;
+          cantidad: number;
+          pvp: number;
+          ppp: number;
+          ultimo_costo: number;
+          costo_promedio: number;
+          total_venta: number;
+          total_costo: number;
+          total_descuento: number;
+          margen_gs: number;
+          margen_pvp_pct: number;
+          margen_ppp_pct: number;
+          participacion_pct: number;
+        }>;
+      }>("/api/reports/sales/detailed-day", params),
+    salesDailyConsolidation: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
+      client.get<{
+        periodo: { fecha_desde: string | null; fecha_hasta: string | null; total_dias: number };
+        resumen: {
+          total_dias: number;
+          total_tickets: number;
+          total_unidades: number;
+          total_venta: number;
+          total_costo: number;
+          total_descuento: number;
+          margen_bruto_gs: number;
+          margen_bruto_pct: number;
+          ticket_promedio: number;
+          ppp_global: number;
+          promedio_venta_diaria: number;
+        };
+        dias: Array<{
+          dia: string;
+          dia_nombre: string;
+          tickets: number;
+          total_skus: number;
+          unidades_vendidas: number;
+          total_venta: number;
+          total_costo: number;
+          total_descuento: number;
+          margen_bruto_gs: number;
+          margen_bruto_pct: number;
+          ticket_promedio: number;
+          ppp_promedio: number;
+        }>;
+      }>("/api/reports/sales/daily-consolidation", params),
+    downloadSalesDetailedDayXlsx: (params: { fecha: string; categoria_id?: string; search?: string; branch_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-detailed-day.xlsx", params, `ventas_detalladas_${params.fecha}.xlsx`),
+    downloadSalesDetailedDayPdf: (params: { fecha: string; categoria_id?: string; search?: string; branch_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-detailed-day.pdf", params, `ventas_detalladas_${params.fecha}.pdf`),
+    downloadSalesDailyConsolidationXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-daily-consolidation.xlsx", params, `consolidado_diario_ventas_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.xlsx`),
+    downloadSalesDailyConsolidationPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-daily-consolidation.pdf", params, `consolidado_diario_ventas_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.pdf`),
     salesByPaymentMethod: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/sales/by-payment-method", params),
     expensesByCategory: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ categoria: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/expenses/by-category", params),
     getDashboardAllKPIs: async (params?: { fecha_desde?: string; fecha_hasta?: string }) => {
