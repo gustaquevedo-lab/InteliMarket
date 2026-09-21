@@ -184,8 +184,77 @@ export default function AccountsReceivablePage() {
   // ⚡ Modal de Inicio Rápido de Cobro (Cabecera)
   const [showQuickCobroModal, setShowQuickCobroModal] = useState(false)
   const [quickCustomerSearch, setQuickCustomerSearch] = useState("")
-  const [quickCustomerResults, setQuickCustomerResults] = useState<any[]>([])
+  const [quickCustomerApiResults, setQuickCustomerApiResults] = useState<any[]>([])
   const [quickCustomerLoading, setQuickCustomerLoading] = useState(false)
+
+  // Clientes con saldo pendiente provenientes del aging
+  const debtorCustomers = useMemo(() => {
+    if (!aging?.por_clientes) return []
+    return aging.por_clientes.map(c => ({
+      id: c.customer_id,
+      razon_social: c.customer_name || "Cliente sin nombre",
+      ruc: c.customer_ruc,
+      empresa_vinculada_nombre: c.empresa_vinculada_nombre,
+      saldo_total: Number(c.saldo_total || 0),
+      total_documentos: c.total_documentos || 0,
+      has_debt: true,
+    }))
+  }, [aging?.por_clientes])
+
+  // Mapa de deudas para lookup rápido
+  const customerDebtMap = useMemo(() => {
+    const map = new Map<string, { saldo_total: number; total_documentos: number }>()
+    debtorCustomers.forEach(c => {
+      map.set(c.id, { saldo_total: c.saldo_total, total_documentos: c.total_documentos })
+    })
+    return map
+  }, [debtorCustomers])
+
+  // Clientes a mostrar en el modal de cobro rápido
+  const displayedQuickCustomers = useMemo(() => {
+    const term = quickCustomerSearch.trim().toLowerCase()
+    if (!term) {
+      if (debtorCustomers.length > 0) return debtorCustomers
+      return quickCustomerApiResults.map(r => ({
+        id: r.id,
+        razon_social: r.razon_social || "Cliente sin nombre",
+        ruc: r.ruc,
+        empresa_vinculada_nombre: r.empresa_vinculada_nombre,
+        saldo_total: 0,
+        total_documentos: 0,
+        has_debt: false,
+      }))
+    }
+
+    // Filtrar deudores locales en tiempo real
+    const localMatches = debtorCustomers.filter(c =>
+      (c.razon_social && c.razon_social.toLowerCase().includes(term)) ||
+      (c.ruc && c.ruc.toLowerCase().includes(term)) ||
+      (c.empresa_vinculada_nombre && c.empresa_vinculada_nombre.toLowerCase().includes(term))
+    )
+
+    // Fusionar con resultados de API
+    const seenIds = new Set(localMatches.map(c => c.id))
+    const apiMatches: typeof debtorCustomers = []
+
+    for (const r of quickCustomerApiResults) {
+      if (!seenIds.has(r.id)) {
+        seenIds.add(r.id)
+        const debtInfo = customerDebtMap.get(r.id)
+        apiMatches.push({
+          id: r.id,
+          razon_social: r.razon_social || "Cliente sin nombre",
+          ruc: r.ruc,
+          empresa_vinculada_nombre: r.empresa_vinculada_nombre,
+          saldo_total: debtInfo ? debtInfo.saldo_total : 0,
+          total_documentos: debtInfo ? debtInfo.total_documentos : 0,
+          has_debt: !!debtInfo && debtInfo.saldo_total > 0,
+        })
+      }
+    }
+
+    return [...localMatches, ...apiMatches]
+  }, [quickCustomerSearch, debtorCustomers, quickCustomerApiResults, customerDebtMap])
 
   // 🏢 Convenios Corporativos y Nóminas (Empresas Vinculadas)
   const [agreements, setAgreements] = useState<any[]>([])
@@ -297,16 +366,30 @@ export default function AccountsReceivablePage() {
 
   // Buscador rápido de clientes para el modal de cabecera "Registrar Cobro"
   useEffect(() => {
-    if (!quickCustomerSearch.trim()) { setQuickCustomerResults([]); return }
+    const term = quickCustomerSearch.trim()
+    if (!term) {
+      setQuickCustomerApiResults([])
+      setQuickCustomerLoading(false)
+      // Si el aging no tiene clientes deudores y el modal se abre, precargar clientes generales
+      if (showQuickCobroModal && debtorCustomers.length === 0) {
+        setQuickCustomerLoading(true)
+        api.customers.list({ limit: 30 })
+          .then(rows => setQuickCustomerApiResults(rows || []))
+          .catch(() => setQuickCustomerApiResults([]))
+          .finally(() => setQuickCustomerLoading(false))
+      }
+      return
+    }
+
     setQuickCustomerLoading(true)
     const t = setTimeout(() => {
-      api.customers.list({ search: quickCustomerSearch.trim(), limit: 15 })
-        .then(rows => setQuickCustomerResults(rows))
-        .catch(() => setQuickCustomerResults([]))
+      api.customers.list({ search: term, limit: 30 })
+        .then(rows => setQuickCustomerApiResults(rows || []))
+        .catch(() => setQuickCustomerApiResults([]))
         .finally(() => setQuickCustomerLoading(false))
-    }, 300)
+    }, 250)
     return () => clearTimeout(t)
-  }, [quickCustomerSearch])
+  }, [quickCustomerSearch, showQuickCobroModal, debtorCustomers.length])
 
   // Buscador de cliente para Reporte "Estado de Cuenta"
   useEffect(() => {
@@ -993,8 +1076,10 @@ export default function AccountsReceivablePage() {
             <button
               onClick={() => {
                 setQuickCustomerSearch("")
-                setQuickCustomerResults([])
                 setShowQuickCobroModal(true)
+                if (!aging && !loading) {
+                  fetchData()
+                }
               }}
               className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-950/40 border border-emerald-400/30 ring-2 ring-emerald-500/20 active:scale-95"
               title="Registrar cobro directo de cliente con imputación bimonetaria / tesorería"
@@ -3157,15 +3242,31 @@ export default function AccountsReceivablePage() {
       {/* MODAL: Inicio Rápido de Cobro desde Cabecera */}
       {showQuickCobroModal && (
         <div className="modal-overlay" onClick={() => setShowQuickCobroModal(false)}>
-          <div className="modal-content max-w-lg" onClick={e => e.stopPropagation()}>
+          <div className="modal-content max-w-xl" onClick={e => e.stopPropagation()}>
             <div className="p-6 border-b">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <Wallet className="w-5 h-5 text-emerald-500" />
-                Registrar Cobro · Seleccionar Cliente
-              </h3>
-              <p className="text-xs text-gray-500 mt-1">
-                Buscá al cliente o socio Extra Club por nombre o documento para imputar su pago en cascada FIFO.
-              </p>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center border border-emerald-500/20 shadow-sm">
+                    <Wallet className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-gray-900 dark:text-white flex items-center gap-2">
+                      Registrar Cobro · Seleccionar Cliente
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {quickCustomerSearch.trim()
+                        ? `Filtrando resultados para "${quickCustomerSearch.trim()}"`
+                        : `Mostrando clientes con saldo pendiente de cobro (${debtorCustomers.length})`}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowQuickCobroModal(false)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             <div className="p-6 space-y-4">
@@ -3173,23 +3274,54 @@ export default function AccountsReceivablePage() {
                 <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Nombre del cliente, RUC o cédula de identidad..."
-                  className="input-field text-xs pl-9 w-full font-medium"
+                  placeholder="Escribí nombre, RUC o empresa vinculada..."
+                  className="input-field text-xs pl-9 pr-8 w-full font-medium"
                   value={quickCustomerSearch}
                   onChange={e => setQuickCustomerSearch(e.target.value)}
                   autoFocus
                 />
+                {quickCustomerSearch && (
+                  <button
+                    onClick={() => setQuickCustomerSearch("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
 
-              {quickCustomerLoading ? (
-                <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
-              ) : quickCustomerResults.length === 0 ? (
-                <div className="text-center py-6 text-gray-400 text-xs">
-                  {quickCustomerSearch.trim() ? "No se encontraron clientes con ese criterio" : "Escribí al menos 2 letras para buscar clientes..."}
+              <div className="flex items-center justify-between text-[11px] px-1 font-semibold text-gray-500">
+                <span>
+                  {quickCustomerSearch.trim()
+                    ? `Coincidencias encontradas (${displayedQuickCustomers.length})`
+                    : `Clientes con saldo pendiente (${displayedQuickCustomers.length})`}
+                </span>
+                {quickCustomerLoading && (
+                  <span className="flex items-center gap-1 text-emerald-500">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Buscando...
+                  </span>
+                )}
+              </div>
+
+              {quickCustomerLoading && displayedQuickCustomers.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-gray-400 gap-2">
+                  <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
+                  <span className="text-xs">Buscando clientes...</span>
+                </div>
+              ) : displayedQuickCustomers.length === 0 ? (
+                <div className="text-center py-10 border border-dashed rounded-xl text-gray-400 space-y-1">
+                  <p className="text-xs font-semibold text-gray-500">
+                    {quickCustomerSearch.trim()
+                      ? `No se encontraron clientes para "${quickCustomerSearch.trim()}"`
+                      : "No hay clientes con saldo pendiente en este momento"}
+                  </p>
+                  <p className="text-[11px]">
+                    Podés buscar por RUC o Razón Social para imputar un cobro anticipado.
+                  </p>
                 </div>
               ) : (
-                <div className="max-h-64 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 border rounded-xl">
-                  {quickCustomerResults.map(c => (
+                <div className="max-h-80 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 border rounded-xl shadow-inner">
+                  {displayedQuickCustomers.map(c => (
                     <button
                       key={c.id}
                       onClick={() => {
@@ -3200,20 +3332,50 @@ export default function AccountsReceivablePage() {
                           empresa_vinculada: c.empresa_vinculada_nombre,
                         })
                       }}
-                      className="w-full text-left p-3 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition flex items-center justify-between text-xs"
+                      className="w-full text-left p-3 hover:bg-emerald-50/70 dark:hover:bg-emerald-950/30 transition flex items-center justify-between text-xs group"
                     >
-                      <div>
-                        <div className="font-extrabold text-gray-900 dark:text-white">{c.razon_social || "Sin nombre"}</div>
-                        <div className="text-[11px] text-gray-400 font-mono">CI/RUC: {c.ruc || "—"}</div>
+                      <div className="min-w-0 pr-3">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-extrabold text-gray-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition truncate">
+                            {c.razon_social || "Sin nombre"}
+                          </span>
+                          {c.total_documentos > 0 && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                              {c.total_documentos} {c.total_documentos === 1 ? "factura" : "facturas"}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-gray-400 font-mono mt-0.5">
+                          CI/RUC: {c.ruc || "—"}
+                        </div>
                         {c.empresa_vinculada_nombre && (
-                          <div className="text-[10px] text-indigo-500 font-bold mt-0.5">
-                            🏛️ Empresa: {c.empresa_vinculada_nombre}
+                          <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold mt-0.5 flex items-center gap-1">
+                            <span>🏛️ Empresa: {c.empresa_vinculada_nombre}</span>
                           </div>
                         )}
                       </div>
-                      <div className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
-                        <span>Cobrar</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
+
+                      <div className="flex items-center gap-3 shrink-0">
+                        {c.saldo_total > 0 ? (
+                          <div className="text-right">
+                            <div className="text-[9px] uppercase tracking-wider font-bold text-gray-400">
+                              Saldo Pendiente
+                            </div>
+                            <div className="text-xs font-black text-rose-600 dark:text-rose-400 font-mono">
+                              {formatPYG(c.saldo_total)}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-right">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400">
+                              Al día
+                            </span>
+                          </div>
+                        )}
+                        <div className="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white font-bold flex items-center gap-1 group-hover:bg-emerald-500 transition shadow-sm">
+                          <span>Cobrar</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </div>
                       </div>
                     </button>
                   ))}
@@ -3221,8 +3383,13 @@ export default function AccountsReceivablePage() {
               )}
             </div>
 
-            <div className="p-6 border-t flex justify-end">
-              <button onClick={() => setShowQuickCobroModal(false)} className="btn-outline text-xs">Cancelar</button>
+            <div className="p-4 border-t bg-gray-50/50 dark:bg-slate-900/50 flex items-center justify-between rounded-b-2xl">
+              <span className="text-[11px] text-gray-500">
+                Tip: Imputación automática por antigüedad FIFO al seleccionar el cliente.
+              </span>
+              <button onClick={() => setShowQuickCobroModal(false)} className="btn-outline text-xs py-1.5 px-4">
+                Cerrar
+              </button>
             </div>
           </div>
         </div>
