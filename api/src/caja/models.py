@@ -333,4 +333,26 @@ class CashSessionPaymentAdjustment(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class CashSessionPunteoItem(Base):
+    """Registro individual de comprobante punteado en Tesorería.
+    Almacena la verificación física de cada voucher/comprobante de la sesión,
+    su estado (conforme, faltante, discrepante), monto en sistema, monto físico real,
+    diferencia y observación del auditor."""
+    __tablename__ = "cash_session_punteo_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("cash_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    voucher_id = Column(String(100), nullable=False, index=True)
+    estado = Column(String(20), nullable=False, default="conforme")  # conforme | faltante | discrepante
+    monto_sistema = Column(Numeric(15, 0), nullable=False, default=0)
+    monto_fisico = Column(Numeric(15, 0), nullable=False, default=0)
+    diferencia_gs = Column(Numeric(15, 0), nullable=False, default=0)
+    observacion = Column(Text)
+    auditor_nombre = Column(String(100))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+
 

@@ -16,6 +16,7 @@ import { formatPYG, formatDate } from "../../utils/format"
 import { soundAlerts } from "../../utils/audioAlerts"
 
 interface ReceptionItemDraft {
+  draft_id: string
   product_id: string
   nombre: string
   codigo_barra?: string
@@ -40,6 +41,45 @@ const PRESET_AVERIAS = [
   "Mercadería No Solicitada",
   "Calidad Deficiente / Manchas"
 ]
+
+const STORAGE_PREFIX = "deposito_receipt_draft_"
+const STORAGE_ACTIVE_PO_KEY = "deposito_active_po_id"
+
+const saveDraftToStorage = (po: PurchaseOrder, items: ReceptionItemDraft[], ref: string, obs: string) => {
+  if (!po?.id) return
+  try {
+    const data = {
+      po,
+      itemsDraft: items,
+      proveedorRef: ref,
+      observaciones: obs,
+      savedAt: new Date().toISOString(),
+    }
+    localStorage.setItem(STORAGE_PREFIX + po.id, JSON.stringify(data))
+    localStorage.setItem(STORAGE_ACTIVE_PO_KEY, po.id)
+  } catch (err) {
+    console.warn("[Deposito] No se pudo guardar borrador en localStorage", err)
+  }
+}
+
+const loadDraftFromStorage = (poId: string) => {
+  try {
+    const raw = localStorage.getItem(STORAGE_PREFIX + poId)
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+const clearDraftFromStorage = (poId: string) => {
+  try {
+    localStorage.removeItem(STORAGE_PREFIX + poId)
+    if (localStorage.getItem(STORAGE_ACTIVE_PO_KEY) === poId) {
+      localStorage.removeItem(STORAGE_ACTIVE_PO_KEY)
+    }
+  } catch {}
+}
 
 export default function DepositoRecepcionPage() {
   const { user, login, logout } = useAuth()
@@ -67,14 +107,25 @@ export default function DepositoRecepcionPage() {
   const [observaciones, setObservaciones] = useState("")
   const [confirmingReceipt, setConfirmingReceipt] = useState(false)
   const [lastReceiptCreated, setLastReceiptCreated] = useState<{ id: string; numero: string } | null>(null)
+  const [restoredFromDraft, setRestoredFromDraft] = useState(false)
+  const [draftLastSaved, setDraftLastSaved] = useState<string | null>(null)
 
   // Filtro y buscador dentro de la orden activa
   const [itemSearchQuery, setItemSearchQuery] = useState("")
-  const [itemStatusFilter, setItemStatusFilter] = useState<"todos" | "pendientes" | "completos" | "averias">("todos")
+  const [itemStatusFilter, setItemStatusFilter] = useState<"todos" | "pendientes" | "sin_lote" | "completos" | "averias">("todos")
   const [lastScannedBarcode, setLastScannedBarcode] = useState("")
 
+  // ── HERRAMIENTAS MASIVAS PARA LISTAS LARGAS ────────────────────────────────
+  const [showBatchLoteModal, setShowBatchLoteModal] = useState(false)
+  const [batchLoteInput, setBatchLoteInput] = useState("")
+  const [batchLoteScope, setBatchLoteScope] = useState<"todos" | "sin_lote" | "visibles">("sin_lote")
+
+  const [showBatchExpiryModal, setShowBatchExpiryModal] = useState(false)
+  const [batchExpiryInput, setBatchExpiryInput] = useState("")
+  const [batchExpiryScope, setBatchExpiryScope] = useState<"todos" | "visibles">("todos")
+
   // ── MODAL: REGISTRO DE AVERÍA / RECHAZO TÉCNICO ────────────────────────────
-  const [averiaModalIndex, setAveriaModalIndex] = useState<number | null>(null)
+  const [averiaModalDraftId, setAveriaModalDraftId] = useState<string | null>(null)
   const [averiaCantInput, setAveriaCantInput] = useState("1")
   const [averiaMotivoInput, setAveriaMotivoInput] = useState(PRESET_AVERIAS[0])
 
@@ -128,6 +179,59 @@ export default function DepositoRecepcionPage() {
     }
   }, [user, toast])
 
+  // Auto-restaurar borrador al abrir o recargar la página
+  useEffect(() => {
+    if (!user) return
+    const activePoId = localStorage.getItem(STORAGE_ACTIVE_PO_KEY)
+    if (activePoId && viewState === "orders" && !selectedPO) {
+      const draft = loadDraftFromStorage(activePoId)
+      if (draft && draft.po && Array.isArray(draft.itemsDraft) && draft.itemsDraft.length > 0) {
+        const validatedItems = draft.itemsDraft.map((it: any, idx: number) => ({
+          ...it,
+          draft_id: it.draft_id || `${it.product_id || "prod"}-${idx}-${Date.now()}`,
+        }))
+        setSelectedPO(draft.po)
+        setItemsDraft(validatedItems)
+        setProveedorRef(draft.proveedorRef || "")
+        setObservaciones(draft.observaciones || "")
+        setRestoredFromDraft(true)
+        setDraftLastSaved(draft.savedAt || new Date().toISOString())
+        setViewState("receiving")
+        toast.info(
+          "Recepción Restaurada",
+          `Continuando orden ${draft.po.numero || "activa"}. Lotes y fechas protegidos contra recargas.`
+        )
+      }
+    }
+  }, [user, viewState, selectedPO, toast])
+
+  // Auto-guardado en localStorage cada vez que cambian los datos de recepción
+  useEffect(() => {
+    if (viewState === "receiving" && selectedPO?.id && itemsDraft.length > 0) {
+      saveDraftToStorage(selectedPO, itemsDraft, proveedorRef, observaciones)
+      setDraftLastSaved(new Date().toISOString())
+    }
+  }, [viewState, selectedPO, itemsDraft, proveedorRef, observaciones])
+
+  // Advertencia antes de cerrar o recargar la pestaña si hay una descarga en curso
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (viewState === "receiving" && itemsDraft.length > 0) {
+        e.preventDefault()
+        e.returnValue = ""
+      }
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
+  }, [viewState, itemsDraft.length])
+
+  // Actualización inmutable y segura por draft_id
+  const updateDraftItem = useCallback((draftId: string, patch: Partial<ReceptionItemDraft>) => {
+    setItemsDraft((prev) =>
+      prev.map((it) => (it.draft_id === draftId ? { ...it, ...patch } : it))
+    )
+  }, [])
+
   useEffect(() => {
     if (user) {
       fetchOrders()
@@ -157,17 +261,41 @@ export default function DepositoRecepcionPage() {
   // ---------------------------------------------------------------------------
   // 2. INICIAR RECEPCIÓN DE UNA ORDEN CON CÓDIGOS DE BARRA COMPLETOS
   // ---------------------------------------------------------------------------
-  const handleSelectPO = async (po: PurchaseOrder) => {
+  const handleSelectPO = async (po: PurchaseOrder, forceFresh = false) => {
     try {
       soundAlerts.playScanSuccess()
       setSelectedPO(po)
 
-      // Cargar la cabecera completa y la lista de ítems detallada con códigos de barra de productos
+      // 1. Si existe un borrador guardado en localStorage y no se forzó inicio limpio, restaurarlo
+      if (!forceFresh && po.id) {
+        const savedDraft = loadDraftFromStorage(po.id)
+        if (savedDraft && Array.isArray(savedDraft.itemsDraft) && savedDraft.itemsDraft.length > 0) {
+          const validatedItems = savedDraft.itemsDraft.map((it: any, idx: number) => ({
+            ...it,
+            draft_id: it.draft_id || `${it.product_id || "prod"}-${idx}-${Date.now()}`,
+          }))
+          setSelectedPO(savedDraft.po || po)
+          setItemsDraft(validatedItems)
+          setProveedorRef(savedDraft.proveedorRef || "")
+          setObservaciones(savedDraft.observaciones || "")
+          setRestoredFromDraft(true)
+          setDraftLastSaved(savedDraft.savedAt || new Date().toISOString())
+          setItemSearchQuery("")
+          setItemStatusFilter("todos")
+          setViewState("receiving")
+          toast.info("Borrador Recuperado", "Se restauraron todos los lotes y cantidades cargadas previamente.")
+          window.scrollTo({ top: 0, behavior: "smooth" })
+          return
+        }
+      }
+
+      // 2. Cargar la cabecera completa y la lista de ítems detallada con códigos de barra
       const [fullPO, detailedItems] = await Promise.all([
         api.purchases.getOrder(po.id!),
         api.purchases.getOrderItems(po.id!).catch(() => []),
       ])
-      if (fullPO) setSelectedPO(fullPO)
+      const activePO = fullPO || po
+      setSelectedPO(activePO)
 
       const detailedMap = new Map<string, any>()
       ;(detailedItems || []).forEach((d: any) => {
@@ -175,7 +303,7 @@ export default function DepositoRecepcionPage() {
         if (d.product_id) detailedMap.set(String(d.product_id), d)
       })
 
-      const initialDraft: ReceptionItemDraft[] = (fullPO.items || []).map((it: any) => {
+      const initialDraft: ReceptionItemDraft[] = (activePO.items || []).map((it: any, idx: number) => {
         const cantOrdenada = Number(it.cantidad || 0)
         const cantRecibidaPrevia = Number(it.recibido || it.cantidad_recibida || 0)
         const pendiente = Math.max(0, cantOrdenada - cantRecibidaPrevia)
@@ -198,7 +326,12 @@ export default function DepositoRecepcionPage() {
           it.nombre ||
           "Producto"
 
+        const uniqueId = typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${prodId}-${idx}-${Date.now()}`
+
         return {
+          draft_id: uniqueId,
           product_id: prodId,
           nombre: prodNombre,
           codigo_barra: cleanCode,
@@ -217,12 +350,23 @@ export default function DepositoRecepcionPage() {
       setItemsDraft(initialDraft)
       setProveedorRef("")
       setObservaciones("")
+      setRestoredFromDraft(false)
       setItemSearchQuery("")
       setItemStatusFilter("todos")
       setViewState("receiving")
+      saveDraftToStorage(activePO, initialDraft, "", "")
       window.scrollTo({ top: 0, behavior: "smooth" })
     } catch (err: any) {
       toast.error("Error al cargar orden", err.message || "No se pudieron obtener los ítems de la orden.")
+    }
+  }
+
+  const handleDiscardDraft = () => {
+    if (!selectedPO?.id) return
+    if (window.confirm("¿Seguro que deseas descartar el borrador guardado y volver a cargar los datos originales de la orden?")) {
+      clearDraftFromStorage(selectedPO.id)
+      setRestoredFromDraft(false)
+      handleSelectPO(selectedPO, true)
     }
   }
 
@@ -466,7 +610,7 @@ export default function DepositoRecepcionPage() {
   }, [])
 
   // ---------------------------------------------------------------------------
-  // 5. ACCIONES MASIVAS: RECIBIR TODO PENDIENTE
+  // 5. ACCIONES MASIVAS: RECEPCIÓN, LOTES Y VENCIMIENTOS
   // ---------------------------------------------------------------------------
   const handleReceiveAllPending = () => {
     if (window.confirm("¿Confirmar recepción completa de todos los productos según la Orden de Compra?")) {
@@ -479,6 +623,67 @@ export default function DepositoRecepcionPage() {
       )
       toast.success("Cantidades Actualizadas", "Todos los ítems han sido marcados con su cantidad ordenada.")
     }
+  }
+
+  const handleAutoFillMissingLotes = () => {
+    let count = 0
+    setItemsDraft((prev) =>
+      prev.map((it) => {
+        if (!it.lote || it.lote.trim() === "") {
+          count++
+          return {
+            ...it,
+            lote: `L-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${String(it.product_id).slice(-4)}`,
+          }
+        }
+        return it
+      })
+    )
+    soundAlerts.playScanSuccess()
+    toast.success("Lotes Autogenerados", `${count > 0 ? `${count} productos actualizados` : "Todos los productos ya contaban con lote"}.`)
+  }
+
+  const handleApplyBatchLote = () => {
+    const val = batchLoteInput.trim()
+    if (!val) {
+      toast.error("Lote requerido", "Ingrese el número de lote a aplicar.")
+      return
+    }
+    setItemsDraft((prev) =>
+      prev.map((it) => {
+        if (batchLoteScope === "sin_lote" && it.lote && it.lote.trim() !== "") return it
+        if (batchLoteScope === "visibles") {
+          const isVisible = visibleItemsDraft.some((v) => v.draft_id === it.draft_id)
+          if (!isVisible) return it
+        }
+        return { ...it, lote: val }
+      })
+    )
+    setShowBatchLoteModal(false)
+    setBatchLoteInput("")
+    soundAlerts.playScanSuccess()
+    toast.success("Lote Masivo Aplicado", `Se asignó el lote "${val}" exitosamente.`)
+  }
+
+  const handleApplyBatchExpiry = () => {
+    const val = batchExpiryInput.trim()
+    if (!val) {
+      toast.error("Fecha requerida", "Seleccione la fecha de vencimiento a aplicar.")
+      return
+    }
+    setItemsDraft((prev) =>
+      prev.map((it) => {
+        if (batchExpiryScope === "visibles") {
+          const isVisible = visibleItemsDraft.some((v) => v.draft_id === it.draft_id)
+          if (!isVisible) return it
+        }
+        return { ...it, fecha_vencimiento: val }
+      })
+    )
+    setShowBatchExpiryModal(false)
+    setBatchExpiryInput("")
+    soundAlerts.playScanSuccess()
+    toast.success("Vencimiento Masivo Aplicado", `Se asignó la fecha ${val} exitosamente.`)
   }
 
   // ---------------------------------------------------------------------------
@@ -519,7 +724,12 @@ export default function DepositoRecepcionPage() {
     const defaultExpiry = new Date()
     defaultExpiry.setMonth(defaultExpiry.getMonth() + 6)
 
+    const uniqueId = typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `extra-${selectedExtraProduct.id}-${Date.now()}`
+
     const newItem: ReceptionItemDraft = {
+      draft_id: uniqueId,
       product_id: selectedExtraProduct.id,
       nombre: selectedExtraProduct.nombre,
       codigo_barra: selectedExtraProduct.codigo_barra,
@@ -559,34 +769,51 @@ export default function DepositoRecepcionPage() {
 
     setConfirmingReceipt(true)
     try {
+      const todayISO = new Date().toISOString().slice(2, 10).replace(/-/g, "")
+      const defaultExpiry = new Date()
+      defaultExpiry.setMonth(defaultExpiry.getMonth() + 6)
+      const defaultExpiryStr = defaultExpiry.toISOString().split("T")[0]
+
+      const firstItemWh = selectedPO.items && selectedPO.items.length > 0 ? (selectedPO.items[0] as any)?.warehouse_id : undefined
+      const targetWarehouseId = (selectedPO as any)?.warehouse_id || firstItemWh || undefined
+
       const payload: any = {
         purchase_order_id: selectedPO.id,
         supplier_id: selectedPO.supplier_id,
-        warehouse_id: (selectedPO as any)?.warehouse_id || undefined,
-        proveedor_ref: proveedorRef.trim() || `REMITO-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}`,
+        warehouse_id: targetWarehouseId,
+        proveedor_ref: proveedorRef.trim() || `REMITO-${todayISO}`,
         observaciones: `Recepción móvil de muelle por ${user?.nombre || "Encargado de Depósito"}. ${observaciones}`.trim(),
         items: itemsDraft
-          .filter((it) => it.cantidad_recibir > 0 || it.cantidad_rechazada > 0)
-          .map((it) => ({
-            product_id: it.product_id,
-            cantidad_recibida: it.cantidad_recibir,
-            precio_unitario: it.precio_unitario,
-            costo_unitario: it.precio_unitario,
-            total: it.cantidad_recibir * it.precio_unitario,
-            lote: it.lote ? it.lote.trim() : undefined,
-            fecha_vencimiento: it.fecha_vencimiento
-              ? (it.fecha_vencimiento.includes("T") ? it.fecha_vencimiento : `${it.fecha_vencimiento}T00:00:00Z`)
-              : undefined,
-            cantidad_rechazada: it.cantidad_rechazada || 0,
-            motivo_rechazo: it.motivo_rechazo ? it.motivo_rechazo.trim() : undefined,
-            es_extraordinario: it.es_extraordinario || false,
-            autorizado_por: it.autorizado_por || undefined,
-            autorizacion_motivo: it.autorizacion_motivo ? it.autorizacion_motivo.trim() : undefined,
-          })),
+          .filter((it) => (it.cantidad_recibir || 0) > 0 || (it.cantidad_rechazada || 0) > 0)
+          .map((it) => {
+            const safeLote = it.lote && it.lote.trim()
+              ? it.lote.trim()
+              : `L-${todayISO}-${String(it.product_id).slice(-4)}`
+            const safeExpiry = it.fecha_vencimiento && it.fecha_vencimiento.trim()
+              ? it.fecha_vencimiento.trim()
+              : defaultExpiryStr
+
+            return {
+              product_id: it.product_id,
+              cantidad_recibida: Number(it.cantidad_recibir || 0),
+              precio_unitario: Number(it.precio_unitario || 0),
+              costo_unitario: Number(it.precio_unitario || 0),
+              total: Number(it.cantidad_recibir || 0) * Number(it.precio_unitario || 0),
+              lote: safeLote,
+              fecha_vencimiento: safeExpiry.includes("T") ? safeExpiry : `${safeExpiry}T00:00:00Z`,
+              cantidad_rechazada: Number(it.cantidad_rechazada || 0),
+              motivo_rechazo: it.motivo_rechazo && it.motivo_rechazo !== "Ninguno" ? it.motivo_rechazo.trim() : undefined,
+              es_extraordinario: Boolean(it.es_extraordinario),
+              autorizado_por: undefined, // no enviar string en campo UUID
+              autorizacion_motivo: it.autorizacion_motivo ? it.autorizacion_motivo.trim() : undefined,
+            }
+          }),
       }
 
       const receipt = await api.purchases.createReceipt(payload)
       soundAlerts.playRestockChime()
+      clearDraftFromStorage(selectedPO.id)
+      setRestoredFromDraft(false)
       setLastReceiptCreated({
         id: receipt.id,
         numero: receipt.numero || "REC-2026",
@@ -850,6 +1077,11 @@ export default function DepositoRecepcionPage() {
   const itemsCompletados = itemsDraft.filter((it) => it.cantidad_recibir >= it.cantidad_ordenada && it.cantidad_recibir > 0).length
   const pctProgreso = itemsDraft.length > 0 ? Math.round((itemsCompletados / itemsDraft.length) * 100) : 0
 
+  const hasLocalDraft = (poId?: string) => {
+    if (!poId) return false
+    return !!localStorage.getItem(STORAGE_PREFIX + poId)
+  }
+
   // Filtrado de ítems en pantalla de recepción activa
   const visibleItemsDraft = itemsDraft.filter((it) => {
     const q = itemSearchQuery.toLowerCase()
@@ -863,6 +1095,9 @@ export default function DepositoRecepcionPage() {
 
     if (itemStatusFilter === "pendientes") {
       return it.cantidad_recibir < it.cantidad_ordenada
+    }
+    if (itemStatusFilter === "sin_lote") {
+      return !it.lote || it.lote.trim() === ""
     }
     if (itemStatusFilter === "completos") {
       return it.cantidad_recibir >= it.cantidad_ordenada && it.cantidad_recibir > 0
@@ -1166,13 +1401,20 @@ export default function DepositoRecepcionPage() {
                             RUC: <strong className="text-slate-700 dark:text-slate-300">{po.supplier?.ruc || "—"}</strong>
                           </p>
                         </div>
-                        <span className={`px-2.5 py-1 rounded-full text-xs font-mono font-black uppercase shrink-0 ${
-                          po.estado === "parcial"
-                            ? "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700"
-                            : "bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700"
-                        }`}>
-                          {po.estado}
-                        </span>
+                        <div className="flex flex-col items-end gap-1.5 shrink-0">
+                          {hasLocalDraft(po.id) && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-black bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40">
+                              ⚡ Borrador Guardado
+                            </span>
+                          )}
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-mono font-black uppercase shrink-0 ${
+                            po.estado === "parcial"
+                              ? "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700"
+                              : "bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700"
+                          }`}>
+                            {po.estado}
+                          </span>
+                        </div>
                       </div>
 
                       {/* Botón para previsualizar ítems y códigos de barra antes de descargar */}
@@ -1239,7 +1481,7 @@ export default function DepositoRecepcionPage() {
                           onClick={() => handleSelectPO(po)}
                           className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs sm:text-sm flex items-center gap-1.5 transition shadow-sm cursor-pointer"
                         >
-                          <span>Iniciar Descarga</span>
+                          <span>{hasLocalDraft(po.id) ? "Continuar Descarga" : "Iniciar Descarga"}</span>
                           <ChevronRight className="w-4 h-4" />
                         </button>
                       </div>
@@ -1256,6 +1498,32 @@ export default function DepositoRecepcionPage() {
         ==================================================================== */}
         {viewState === "receiving" && selectedPO && (
           <>
+            {/* Banner de Borrador Protegido contra Recargas */}
+            {restoredFromDraft && (
+              <div className="bg-amber-500/10 border border-amber-500/40 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm animate-fadeIn">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 shrink-0">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-amber-900 dark:text-amber-200 uppercase tracking-wider">
+                      Borrador Protegido Localmente
+                    </h4>
+                    <p className="text-xs text-amber-800/80 dark:text-amber-300/80 font-medium">
+                      Los lotes y cantidades cargadas están a salvo de recargas accidentales {draftLastSaved ? `(${new Date(draftLastSaved).toLocaleTimeString()})` : ""}.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDiscardDraft}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-800 shrink-0 cursor-pointer shadow-sm transition"
+                >
+                  Descartar borrador y reiniciar
+                </button>
+              </div>
+            )}
+
             {/* Tarjeta Resumen de la Orden Activa */}
             <div className="bg-white dark:bg-slate-900 border border-amber-500/40 rounded-3xl p-5 shadow-sm space-y-3">
               <div className="flex items-center justify-between">
@@ -1341,13 +1609,83 @@ export default function DepositoRecepcionPage() {
               )}
             </div>
 
-            {/* Barra de Filtros de Ítems y Acciones Rápidas */}
+            {/* Barra de Herramientas Masivas para Listas Largas de Supermercado */}
+            <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" /> Herramientas Rápidas de Carga
+                </span>
+                <span className="text-[11px] font-mono font-bold text-slate-400">
+                  {itemsDraft.length} ítems en orden
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleAutoFillMissingLotes}
+                  className="px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-800 dark:text-amber-300 hover:bg-amber-500/25 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Auto-generar lote trazable para todos los productos que no tengan lote"
+                >
+                  <Tag className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <span>Auto-Lotes Faltantes</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBatchLoteInput(proveedorRef ? proveedorRef.trim() : `L-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}`)
+                    setShowBatchLoteModal(true)
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-200 text-xs font-black flex items-center gap-1.5 border border-slate-300/80 dark:border-slate-700 transition cursor-pointer"
+                  title="Asignar el mismo lote a múltiples productos de una vez"
+                >
+                  <Barcode className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Lote Masivo</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = new Date()
+                    d.setMonth(d.getMonth() + 6)
+                    setBatchExpiryInput(d.toISOString().split("T")[0])
+                    setShowBatchExpiryModal(true)
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-200 text-xs font-black flex items-center gap-1.5 border border-slate-300/80 dark:border-slate-700 transition cursor-pointer"
+                  title="Asignar la misma fecha de vencimiento a múltiples productos"
+                >
+                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Vencimiento Masivo</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleReceiveAllPending}
+                  className="px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ml-auto"
+                  title="Marcar todo como recibido 100%"
+                >
+                  <CheckCheck className="w-4 h-4" />
+                  <span>Recibir Todo (100%)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowExtraordinaryModal(true)}
+                  className="px-3 py-2 rounded-xl bg-indigo-600/15 border border-indigo-500/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-600/25 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ Fuera de Orden</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Barra de Filtros de Ítems */}
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex gap-1.5 bg-slate-200/80 dark:bg-slate-900 p-1 rounded-xl border border-slate-300/80 dark:border-slate-800 text-xs">
+              <div className="flex flex-wrap gap-1.5 bg-slate-200/80 dark:bg-slate-900 p-1 rounded-xl border border-slate-300/80 dark:border-slate-800 text-xs">
                 <button
                   type="button"
                   onClick={() => setItemStatusFilter("todos")}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
                     itemStatusFilter === "todos"
                       ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
                       : "text-slate-600 dark:text-slate-400"
@@ -1358,61 +1696,52 @@ export default function DepositoRecepcionPage() {
                 <button
                   type="button"
                   onClick={() => setItemStatusFilter("pendientes")}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
                     itemStatusFilter === "pendientes"
                       ? "bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 shadow-sm"
                       : "text-slate-600 dark:text-slate-400"
                   }`}
                 >
-                  Faltantes ({itemsDraft.filter((it) => it.cantidad_recibir < it.cantidad_ordenada).length})
+                  Faltantes ({itemsDraft.filter((it) => (it.cantidad_recibir || 0) < it.cantidad_ordenada).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setItemStatusFilter("sin_lote")}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                    itemStatusFilter === "sin_lote"
+                      ? "bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 shadow-sm"
+                      : "text-slate-600 dark:text-slate-400"
+                  }`}
+                >
+                  Sin Lote ({itemsDraft.filter((it) => !it.lote || it.lote.trim() === "").length})
                 </button>
                 <button
                   type="button"
                   onClick={() => setItemStatusFilter("averias")}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
                     itemStatusFilter === "averias"
                       ? "bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 shadow-sm"
                       : "text-slate-600 dark:text-slate-400"
                   }`}
                 >
-                  Averías ({itemsDraft.filter((it) => it.cantidad_rechazada > 0).length})
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleReceiveAllPending}
-                  className="px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer"
-                  title="Marcar todo como recibido 100%"
-                >
-                  <CheckCheck className="w-4 h-4" /> Recibir Todo
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowExtraordinaryModal(true)}
-                  className="px-3 py-2 rounded-xl bg-indigo-600/15 border border-indigo-500/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-600/25 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" /> + Fuera de Orden
+                  Averías ({itemsDraft.filter((it) => (it.cantidad_rechazada || 0) > 0).length})
                 </button>
               </div>
             </div>
 
             {/* Listado de Productos a Recibir */}
             <div className="space-y-3.5">
-              {visibleItemsDraft.map((it, idx) => {
-                const originalIndex = itemsDraft.findIndex((x) => x.product_id === it.product_id && x.lote === it.lote)
-                const targetIdx = originalIndex !== -1 ? originalIndex : idx
-                const isComplete = it.cantidad_recibir >= it.cantidad_ordenada && it.cantidad_ordenada > 0
-                const isExceeded = it.cantidad_recibir > it.cantidad_ordenada
-                const hasAveria = it.cantidad_rechazada > 0
-                const isPending = it.cantidad_recibir < it.cantidad_ordenada
+              {visibleItemsDraft.map((it) => {
+                const isComplete = (it.cantidad_recibir || 0) >= it.cantidad_ordenada && it.cantidad_ordenada > 0
+                const isExceeded = (it.cantidad_recibir || 0) > it.cantidad_ordenada
+                const hasAveria = (it.cantidad_rechazada || 0) > 0
+                const isPending = (it.cantidad_recibir || 0) < it.cantidad_ordenada
+                const missingLote = !it.lote || it.lote.trim() === ""
 
                 return (
                   <div
-                    key={`${it.product_id}-${idx}`}
-                    id={`item-card-${targetIdx}`}
+                    key={it.draft_id}
+                    id={`item-card-${it.draft_id}`}
                     className={`rounded-3xl border p-5 transition-all shadow-sm space-y-4 ${
                       it.es_extraordinario
                         ? "bg-indigo-50/70 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-500/40"
@@ -1439,12 +1768,17 @@ export default function DepositoRecepcionPage() {
                           )}
                           {isExceeded && (
                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-blue-500/20 text-blue-700 dark:text-blue-400 border border-blue-500/30">
-                              EXCEDENTE (+{it.cantidad_recibir - it.cantidad_ordenada})
+                              EXCEDENTE (+{(it.cantidad_recibir || 0) - it.cantidad_ordenada})
                             </span>
                           )}
-                          {isPending && it.cantidad_recibir > 0 && (
+                          {isPending && (it.cantidad_recibir || 0) > 0 && (
                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30">
                               EN PROCESO ({it.cantidad_recibir}/{it.cantidad_ordenada})
+                            </span>
+                          )}
+                          {missingLote && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-black bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                              SIN LOTE
                             </span>
                           )}
                           {hasAveria && (
@@ -1490,10 +1824,8 @@ export default function DepositoRecepcionPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            setItemsDraft((prev) => {
-                              const next = [...prev]
-                              next[targetIdx].cantidad_recibir = Math.max(0, next[targetIdx].cantidad_recibir - 1)
-                              return next
+                            updateDraftItem(it.draft_id, {
+                              cantidad_recibir: Math.max(0, (it.cantidad_recibir || 0) - 1),
                             })
                           }}
                           className="w-12 h-12 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 active:scale-95 flex items-center justify-center font-black cursor-pointer shadow-sm hover:bg-slate-50 dark:hover:bg-slate-750"
@@ -1508,11 +1840,7 @@ export default function DepositoRecepcionPage() {
                           value={it.cantidad_recibir}
                           onChange={(e) => {
                             const val = Math.max(0, parseInt(e.target.value) || 0)
-                            setItemsDraft((prev) => {
-                              const next = [...prev]
-                              next[targetIdx].cantidad_recibir = val
-                              return next
-                            })
+                            updateDraftItem(it.draft_id, { cantidad_recibir: val })
                           }}
                           className="w-16 text-center font-mono font-black text-xl text-slate-900 dark:text-white bg-transparent outline-none"
                         />
@@ -1521,12 +1849,9 @@ export default function DepositoRecepcionPage() {
                           type="button"
                           onClick={() => {
                             soundAlerts.playScanSuccess()
-                            setItemsDraft((prev) => {
-                              const next = [...prev]
-                              next[targetIdx].cantidad_recibir += 1
-                              return next
+                            updateDraftItem(it.draft_id, {
+                              cantidad_recibir: (it.cantidad_recibir || 0) + 1,
                             })
-                            setActiveItemIndex(targetIdx)
                           }}
                           className="w-12 h-12 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 active:scale-95 flex items-center justify-center font-black cursor-pointer shadow-md"
                           title="Sumar 1 unidad"
@@ -1543,11 +1868,7 @@ export default function DepositoRecepcionPage() {
                           type="button"
                           onClick={() => {
                             soundAlerts.playScanSuccess()
-                            setItemsDraft((prev) => {
-                              const next = [...prev]
-                              next[targetIdx].cantidad_recibir = it.cantidad_ordenada
-                              return next
-                            })
+                            updateDraftItem(it.draft_id, { cantidad_recibir: it.cantidad_ordenada })
                             toast.success("Cantidad asignada", `${it.cantidad_ordenada} un. marcadas como recibidas`)
                           }}
                           className="text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
@@ -1569,11 +1890,7 @@ export default function DepositoRecepcionPage() {
                             type="button"
                             onClick={() => {
                               const autoLote = `L-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${String(it.product_id).slice(-4)}`
-                              setItemsDraft((prev) => {
-                                const next = [...prev]
-                                next[targetIdx].lote = autoLote
-                                return next
-                              })
+                              updateDraftItem(it.draft_id, { lote: autoLote })
                               toast.success("Lote asignado", autoLote)
                             }}
                             className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
@@ -1585,12 +1902,7 @@ export default function DepositoRecepcionPage() {
                           type="text"
                           value={it.lote}
                           onChange={(e) => {
-                            const val = e.target.value
-                            setItemsDraft((prev) => {
-                              const next = [...prev]
-                              next[targetIdx].lote = val
-                              return next
-                            })
+                            updateDraftItem(it.draft_id, { lote: e.target.value })
                           }}
                           className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-white font-mono font-bold focus:border-amber-500"
                         />
@@ -1614,11 +1926,7 @@ export default function DepositoRecepcionPage() {
                                   const d = new Date()
                                   d.setMonth(d.getMonth() + preset.months)
                                   const iso = d.toISOString().split("T")[0]
-                                  setItemsDraft((prev) => {
-                                    const next = [...prev]
-                                    next[targetIdx].fecha_vencimiento = iso
-                                    return next
-                                  })
+                                  updateDraftItem(it.draft_id, { fecha_vencimiento: iso })
                                 }}
                                 className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-amber-500 hover:text-slate-950 transition cursor-pointer"
                                 title={`Sumar ${preset.months} meses`}
@@ -1632,12 +1940,7 @@ export default function DepositoRecepcionPage() {
                           type="date"
                           value={it.fecha_vencimiento}
                           onChange={(e) => {
-                            const val = e.target.value
-                            setItemsDraft((prev) => {
-                              const next = [...prev]
-                              next[targetIdx].fecha_vencimiento = val
-                              return next
-                            })
+                            updateDraftItem(it.draft_id, { fecha_vencimiento: e.target.value })
                           }}
                           className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-white font-mono font-bold focus:border-amber-500"
                         />
@@ -1658,9 +1961,9 @@ export default function DepositoRecepcionPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          setAveriaModalIndex(targetIdx)
+                          setAveriaModalDraftId(it.draft_id)
                           setAveriaCantInput(String(it.cantidad_rechazada || 1))
-                          setAveriaMotivoInput(it.motivo_rechazo !== "Ninguno" ? it.motivo_rechazo : PRESET_AVERIAS[0])
+                          setAveriaMotivoInput(it.motivo_rechazo && it.motivo_rechazo !== "Ninguno" ? it.motivo_rechazo : PRESET_AVERIAS[0])
                         }}
                         className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                           hasAveria
@@ -1715,25 +2018,134 @@ export default function DepositoRecepcionPage() {
       )}
 
       {/* ── MODAL: REGISTRAR AVERÍA / RECHAZO TÉCNICO ────────────────────────── */}
-      {averiaModalIndex !== null && (
+      {averiaModalDraftId !== null && (() => {
+        const activeItem = itemsDraft.find((it) => it.draft_id === averiaModalDraftId)
+        return (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl max-w-md w-full p-6 pb-[max(2rem,env(safe-area-inset-bottom))] space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-rose-500/15 text-rose-600 dark:text-rose-400">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-base text-slate-900 dark:text-white">
+                      Registrar Avería / Rechazo
+                    </h3>
+                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 break-words mt-0.5">
+                      {activeItem?.nombre}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setAveriaModalDraftId(null)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 block mb-1.5">
+                  Cantidad Averiada o Rechazada (Unidades)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={averiaCantInput}
+                  onChange={(e) => setAveriaCantInput(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-base text-slate-900 dark:text-white font-mono font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 block mb-1.5">
+                  Motivo del Rechazo
+                </label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {PRESET_AVERIAS.map((mot) => (
+                    <button
+                      key={mot}
+                      type="button"
+                      onClick={() => setAveriaMotivoInput(mot)}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                        averiaMotivoInput === mot
+                          ? "bg-rose-500 text-white"
+                          : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
+                      }`}
+                    >
+                      {mot}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  value={averiaMotivoInput}
+                  onChange={(e) => setAveriaMotivoInput(e.target.value)}
+                  placeholder="Otro motivo específico..."
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-900 dark:text-white font-medium"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                {activeItem && (activeItem.cantidad_rechazada || 0) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateDraftItem(averiaModalDraftId, {
+                        cantidad_rechazada: 0,
+                        motivo_rechazo: "Ninguno",
+                      })
+                      setAveriaModalDraftId(null)
+                      toast.success("Avería eliminada", "El ítem no tiene averías registradas.")
+                    }}
+                    className="px-4 py-3 rounded-2xl font-bold text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 cursor-pointer"
+                  >
+                    Quitar Avería
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cant = Math.max(1, parseInt(averiaCantInput) || 1)
+                    updateDraftItem(averiaModalDraftId, {
+                      cantidad_rechazada: cant,
+                      motivo_rechazo: averiaMotivoInput.trim() || "Mercadería dañada",
+                    })
+                    setAveriaModalDraftId(null)
+                    soundAlerts.playPriceMismatchAlert()
+                    toast.warning("Avería Guardada", `${cant} un. registradas como avería/rechazo.`)
+                  }}
+                  className="flex-1 py-3.5 rounded-2xl font-black text-sm text-white bg-rose-600 hover:bg-rose-500 active:scale-95 transition-all shadow-lg shadow-rose-600/25 cursor-pointer"
+                >
+                  Guardar Avería
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── MODAL: ASIGNACIÓN DE LOTE MASIVO ──────────────────────────────────── */}
+      {showBatchLoteModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl max-w-md w-full p-6 pb-[max(2rem,env(safe-area-inset-bottom))] space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">
-                <div className="p-2.5 rounded-2xl bg-rose-500/15 text-rose-600 dark:text-rose-400">
-                  <AlertTriangle className="w-6 h-6" />
+                <div className="p-2.5 rounded-2xl bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                  <Tag className="w-6 h-6" />
                 </div>
                 <div>
                   <h3 className="font-black text-base text-slate-900 dark:text-white">
-                    Registrar Avería / Rechazo
+                    Asignar Lote Masivo
                   </h3>
-                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 break-words mt-0.5">
-                    {itemsDraft[averiaModalIndex]?.nombre}
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    Aplica un lote de forma rápida a múltiples productos
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => setAveriaModalIndex(null)}
+                onClick={() => setShowBatchLoteModal(false)}
                 className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white"
               >
                 <X className="w-5 h-5" />
@@ -1742,82 +2154,164 @@ export default function DepositoRecepcionPage() {
 
             <div>
               <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 block mb-1.5">
-                Cantidad Averiada o Rechazada (Unidades)
+                Número de Lote o Remito
               </label>
               <input
-                type="number"
-                min="1"
-                value={averiaCantInput}
-                onChange={(e) => setAveriaCantInput(e.target.value)}
+                type="text"
+                value={batchLoteInput}
+                onChange={(e) => setBatchLoteInput(e.target.value)}
+                placeholder="Ej. L-2026-SEP-01 o REM-1248"
                 className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-base text-slate-900 dark:text-white font-mono font-bold"
               />
             </div>
 
             <div>
               <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 block mb-1.5">
-                Motivo del Rechazo
+                ¿A qué productos aplicar?
               </label>
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {PRESET_AVERIAS.map((mot) => (
-                  <button
-                    key={mot}
-                    type="button"
-                    onClick={() => setAveriaMotivoInput(mot)}
-                    className={`px-2.5 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                      averiaMotivoInput === mot
-                        ? "bg-rose-500 text-white"
-                        : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
-                    }`}
+              <div className="space-y-2">
+                {[
+                  { id: "sin_lote", label: "Solo a productos que NO tienen lote cargado" },
+                  { id: "todos", label: "A TODOS los productos de la orden" },
+                  { id: "visibles", label: "Solo a los productos actualmente visibles" },
+                ].map((opt) => (
+                  <label
+                    key={opt.id}
+                    className="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50"
                   >
-                    {mot}
-                  </button>
+                    <input
+                      type="radio"
+                      name="batchLoteScope"
+                      checked={batchLoteScope === opt.id}
+                      onChange={() => setBatchLoteScope(opt.id as any)}
+                      className="accent-amber-500 w-4 h-4"
+                    />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{opt.label}</span>
+                  </label>
                 ))}
               </div>
-              <input
-                type="text"
-                value={averiaMotivoInput}
-                onChange={(e) => setAveriaMotivoInput(e.target.value)}
-                placeholder="Otro motivo específico..."
-                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-900 dark:text-white font-medium"
-              />
             </div>
 
             <div className="flex gap-2 pt-2">
-              {itemsDraft[averiaModalIndex]?.cantidad_rechazada > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setItemsDraft((prev) => {
-                      const next = [...prev]
-                      next[averiaModalIndex].cantidad_rechazada = 0
-                      next[averiaModalIndex].motivo_rechazo = "Ninguno"
-                      return next
-                    })
-                    setAveriaModalIndex(null)
-                    toast.success("Avería eliminada", "El ítem no tiene averías registradas.")
-                  }}
-                  className="px-4 py-3 rounded-2xl font-bold text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
-                >
-                  Quitar Avería
-                </button>
-              )}
               <button
                 type="button"
-                onClick={() => {
-                  const cant = Math.max(1, parseInt(averiaCantInput) || 1)
-                  setItemsDraft((prev) => {
-                    const next = [...prev]
-                    next[averiaModalIndex].cantidad_rechazada = cant
-                    next[averiaModalIndex].motivo_rechazo = averiaMotivoInput.trim() || "Mercadería dañada"
-                    return next
-                  })
-                  setAveriaModalIndex(null)
-                  soundAlerts.playPriceMismatchAlert()
-                  toast.warning("Avería Guardada", `${cant} un. registradas como avería/rechazo.`)
-                }}
-                className="flex-1 py-3.5 rounded-2xl font-black text-sm text-white bg-rose-600 hover:bg-rose-500 active:scale-95 transition-all shadow-lg shadow-rose-600/25"
+                onClick={() => setShowBatchLoteModal(false)}
+                className="px-4 py-3.5 rounded-2xl font-bold text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 cursor-pointer"
               >
-                Guardar Avería
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyBatchLote}
+                className="flex-1 py-3.5 rounded-2xl font-black text-sm text-slate-950 bg-amber-500 hover:bg-amber-400 active:scale-95 transition-all shadow-lg shadow-amber-500/25 cursor-pointer"
+              >
+                Aplicar Lote Masivo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: ASIGNACIÓN DE VENCIMIENTO MASIVO ───────────────────────────── */}
+      {showBatchExpiryModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl max-w-md w-full p-6 pb-[max(2rem,env(safe-area-inset-bottom))] space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-2xl bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                  <Calendar className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-slate-900 dark:text-white">
+                    Asignar Vencimiento Masivo
+                  </h3>
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    Aplica la misma fecha de vencimiento a la orden
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowBatchExpiryModal(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                  Fecha de Vencimiento
+                </label>
+                <div className="flex items-center gap-1">
+                  {[
+                    { label: "+6m", months: 6 },
+                    { label: "+1a", months: 12 },
+                    { label: "+2a", months: 24 },
+                  ].map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => {
+                        const d = new Date()
+                        d.setMonth(d.getMonth() + preset.months)
+                        setBatchExpiryInput(d.toISOString().split("T")[0])
+                      }}
+                      className="px-2 py-0.5 rounded text-xs font-bold bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-amber-500 hover:text-slate-950 transition cursor-pointer"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <input
+                type="date"
+                value={batchExpiryInput}
+                onChange={(e) => setBatchExpiryInput(e.target.value)}
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-base text-slate-900 dark:text-white font-mono font-bold"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 block mb-1.5">
+                ¿A qué productos aplicar?
+              </label>
+              <div className="space-y-2">
+                {[
+                  { id: "todos", label: "A TODOS los productos de la orden" },
+                  { id: "visibles", label: "Solo a los productos actualmente visibles" },
+                ].map((opt) => (
+                  <label
+                    key={opt.id}
+                    className="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                  >
+                    <input
+                      type="radio"
+                      name="batchExpiryScope"
+                      checked={batchExpiryScope === opt.id}
+                      onChange={() => setBatchExpiryScope(opt.id as any)}
+                      className="accent-amber-500 w-4 h-4"
+                    />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{opt.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowBatchExpiryModal(false)}
+                className="px-4 py-3.5 rounded-2xl font-bold text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyBatchExpiry}
+                className="flex-1 py-3.5 rounded-2xl font-black text-sm text-slate-950 bg-amber-500 hover:bg-amber-400 active:scale-95 transition-all shadow-lg shadow-amber-500/25 cursor-pointer"
+              >
+                Aplicar Vencimiento Masivo
               </button>
             </div>
           </div>

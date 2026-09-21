@@ -628,7 +628,15 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
     if not supplier_id:
         raise ValueError("Proveedor requerido para registrar la recepción")
 
-    warehouse_id = data.warehouse_id or (po.warehouse_id if po else None)
+    warehouse_id = data.warehouse_id
+    if not warehouse_id and po:
+        po_item_wh = await db.execute(
+            select(PurchaseOrderItem.warehouse_id)
+            .where(PurchaseOrderItem.purchase_order_id == po.id, PurchaseOrderItem.warehouse_id.isnot(None))
+            .limit(1)
+        )
+        warehouse_id = po_item_wh.scalars().first()
+
     if not warehouse_id:
         from api.src.inventory.models import Warehouse
         wh_res = await db.execute(
@@ -785,7 +793,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             )
             po.estado = "completado" if all_received else "parcial"
 
-            if all_received and po.fecha_entrega_estimada:
+            if all_received and getattr(po, "fecha_entrega_estimada", None):
                 for item_data in data.items:
                     await db.execute(
                         text("""

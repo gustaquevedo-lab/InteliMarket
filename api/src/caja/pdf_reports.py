@@ -712,19 +712,68 @@ def generate_cierre_sesion_individual_pdf(
         elements.append(t_cert)
         elements.append(Spacer(1, 5))
 
+        # 1.C Cotejo y Auditoría de Comprobantes No Efectivo (si fue auditada en Tesorería)
+        va = recon.get("vouchers_audit") or {}
+        tiene_auditoria_vouchers = bool(va.get("auditado"))
+        dif_vouch = float(va.get("diferencia_vouchers_gs", 0)) if tiene_auditoria_vouchers else 0.0
+        dif_global = float(recon.get("diferencia_global_turno_gs", dif_consolidada + dif_vouch)) if tiene_auditoria_vouchers else float(dif_consolidada)
+        sign_g = "+" if dif_global > 0 else ""
+        color_g = "#065F46" if abs(dif_global) < 5000 else "#991B1B"
+        estado_global = "CUADRADO" if abs(dif_global) < 5000 else ("SOBRANTE" if dif_global > 0 else "FALTANTE")
+
+        if tiene_auditoria_vouchers:
+            c_conf = va.get("count_conformes", 0)
+            c_falt = va.get("count_faltantes", 0)
+            c_disc = va.get("count_discrepantes", 0)
+            sign_v = "+" if dif_vouch > 0 else ""
+            color_v = "#059669" if dif_vouch == 0 else "#DC2626"
+            estado_v = va.get("estado_dictamen", "CONFORME")
+
+            vouch_content = [
+                [
+                    Paragraph(
+                        "<b>📋 AUDITORÍA Y COTEJO DE COMPROBANTES NO EFECTIVO (TESORERÍA)</b><br/>"
+                        f"<b>Sistema:</b> {_fmt_gs(va.get('total_vouchers_sistema_gs', 0))} &nbsp;|&nbsp; "
+                        f"<b>Físico en Sobre:</b> {_fmt_gs(va.get('total_vouchers_fisico_gs', 0))} &nbsp;|&nbsp; "
+                        f"<b>Conformes:</b> {c_conf} &nbsp;|&nbsp; <b>Faltantes:</b> {c_falt} &nbsp;|&nbsp; <b>Con Discrepancia:</b> {c_disc}<br/>"
+                        f"<b>Diferencia Comprobantes:</b> <font color='{color_v}'><b>{sign_v}{_fmt_gs(dif_vouch)} ({estado_v})</b></font> &nbsp;|&nbsp; "
+                        f"<b>DIFERENCIA GLOBAL TURNO (Efectivo + Comprobantes):</b> <font color='{color_g}'><b>{sign_g}{_fmt_gs(dif_global)} ({estado_global})</b></font>",
+                        style_cert,
+                    )
+                ]
+            ]
+            t_vouch_box = Table(vouch_content, colWidths=[186 * mm])
+            t_vouch_box.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F8FAFC")),
+                ("BOX", (0, 0), (-1, -1), 0.75, HexColor("#0284C7") if dif_vouch == 0 else HexColor("#DC2626")),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ]))
+            elements.append(t_vouch_box)
+            elements.append(Spacer(1, 5))
+
         # Banner de Conciliación Consolidada
-        bg_color = HexColor("#ECFDF5") if estado_cuadre == "CUADRADO" else (HexColor("#FEF3C7") if estado_cuadre == "SOBRANTE" else HexColor("#FEE2E2"))
-        txt_color = HexColor("#065F46") if estado_cuadre == "CUADRADO" else (HexColor("#92400E") if estado_cuadre == "SOBRANTE" else HexColor("#991B1B"))
-        txt_color_hex = "#065F46" if estado_cuadre == "CUADRADO" else ("#92400E" if estado_cuadre == "SOBRANTE" else "#991B1B")
+        final_box_estado = estado_global if (tiene_auditoria_vouchers and dif_vouch != 0) else estado_cuadre
+        bg_color = HexColor("#ECFDF5") if final_box_estado == "CUADRADO" else (HexColor("#FEF3C7") if final_box_estado == "SOBRANTE" else HexColor("#FEE2E2"))
+        txt_color = HexColor("#065F46") if final_box_estado == "CUADRADO" else (HexColor("#92400E") if final_box_estado == "SOBRANTE" else HexColor("#991B1B"))
+        txt_color_hex = "#065F46" if final_box_estado == "CUADRADO" else ("#92400E" if final_box_estado == "SOBRANTE" else "#991B1B")
 
         style_box_cell = ParagraphStyle("BoxCell", parent=styles["Normal"], alignment=TA_CENTER, leading=10)
+        
+        if tiene_auditoria_vouchers and dif_vouch != 0:
+            dif_label_p = f"<font size=5 color='{txt_color_hex}'><b>DIF. GLOBAL TURNO</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{sign_g}{_fmt_gs(dif_global)}</b></font><br/><font size=5 color='#475569'>Ef: {signo_cons}{_fmt_gs(dif_consolidada)} | Vouch: {sign_v}{_fmt_gs(dif_vouch)}</font>"
+        else:
+            dif_label_p = f"<font size=5.5 color='{txt_color_hex}'><b>DIFERENCIA RENDICIÓN</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{signo_cons}{_fmt_gs(dif_consolidada)}</b></font>"
+
         resumen_box = [
             [
                 Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>TOTAL FACTURADO</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{_fmt_gs(tot_facturado)}</b></font>", style_box_cell),
                 Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>TOTAL ESPERADO A RENDIR</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{_fmt_gs(esp_total)}</b></font>", style_box_cell),
                 Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>TOTAL RENDIDO A TESORERÍA</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{_fmt_gs(c_total)}</b></font>", style_box_cell),
-                Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>DIFERENCIA RENDICIÓN</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{signo_cons}{_fmt_gs(dif_consolidada)}</b></font>", style_box_cell),
-                Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>DICTAMEN DE ARQUEO</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{estado_cuadre}</b></font>", style_box_cell),
+                Paragraph(dif_label_p, style_box_cell),
+                Paragraph(f"<font size=5.5 color='{txt_color_hex}'><b>DICTAMEN DE ARQUEO</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{final_box_estado}</b></font>", style_box_cell),
             ]
         ]
         t_box = Table(resumen_box, colWidths=[37.2 * mm, 37.2 * mm, 37.2 * mm, 37.2 * mm, 37.2 * mm])
@@ -1359,10 +1408,14 @@ def generate_punteo_vouchers_pdf(
     summary_by_method: dict,
     vouchers: list[dict],
     generated_by: str = "",
+    punteo_audit: dict | None = None,
 ) -> bytes:
     """Planilla Oficial de Punteo de Arqueo y Control Cruzado de Comprobantes.
     Permite cotejo físico individual con casillas [ ] de verificación,
     desglose bimonetario inmutable y triple firma de responsabilidad."""
+    if punteo_audit is None:
+        punteo_audit = session_data.get("punteo_audit")
+
     buffer = io.BytesIO()
     doc, styles = _base_doc(buffer, "Planilla de Punteo de Arqueo", company, generated_by)
     s = session_data
@@ -1447,6 +1500,10 @@ def generate_punteo_vouchers_pdf(
     v_headers = ["[  ]", "Hora", "Ticket / Factura", "Medio / Tarjeta", "Boleta / Aut. / NSU", "Moneda", "Monto Orig.", "Monto Gs.", "Dictamen"]
     v_rows = [v_headers]
 
+    has_audit = (punteo_audit and punteo_audit.get("auditado")) or any(v.get("audit_estado") in ("conforme", "faltante", "discrepante") for v in vouchers)
+    tot_sistema_gs_calc = Decimal("0")
+    tot_fisico_gs_calc = Decimal("0")
+
     for v in vouchers:
         dt = v.get("fecha")
         local_dt = _to_asuncion_tz(dt) if dt else None
@@ -1465,16 +1522,47 @@ def generate_punteo_vouchers_pdf(
             aut_parts.append(f"NSU: {v['nsu']}")
         aut_info = "<br/>".join(aut_parts) if aut_parts else "—"
 
+        m_sis = Decimal(str(v.get("monto_gs") or v.get("monto", 0)))
+        tot_sistema_gs_calc += m_sis
+        st = v.get("audit_estado")
+
+        if st == "faltante":
+            m_fis = Decimal("0")
+            dif_v = -m_sis
+            tot_fisico_gs_calc += m_fis
+            chk_cell = Paragraph("<font color='#DC2626'><b>✕</b></font>", style_v_center)
+            monto_cell = Paragraph(f"<font color='#64748B'>Sis: {_fmt_gs(m_sis)}</font><br/><font color='#DC2626'><b>Fís: ₲ 0</b></font>", style_v_right)
+            dictamen_cell = Paragraph(f"<font size=5.5 color='#DC2626'><b>✕ FALTANTE<br/>(-₲ {_fmt_val(m_sis)})</b></font>", style_v_center)
+        elif st == "discrepante":
+            m_fis = Decimal(str(v.get("monto_fisico") if v.get("monto_fisico") is not None else m_sis))
+            dif_v = m_fis - m_sis
+            tot_fisico_gs_calc += m_fis
+            chk_cell = Paragraph("<font color='#D97706'><b>≠</b></font>", style_v_center)
+            monto_cell = Paragraph(f"<font color='#64748B'>Sis: {_fmt_gs(m_sis)}</font><br/><font color='#D97706'><b>Fís: {_fmt_gs(m_fis)}</b></font>", style_v_right)
+            sign_d = "+" if dif_v > 0 else ""
+            color_d = "#D97706" if dif_v > 0 else "#DC2626"
+            dictamen_cell = Paragraph(f"<font size=5 color='{color_d}'><b>≠ DISCREPANCIA<br/>Dif: {sign_d}₲ {_fmt_val(abs(dif_v))}</b></font>", style_v_center)
+        elif st == "conforme" or (has_audit and st is None):
+            tot_fisico_gs_calc += m_sis
+            chk_cell = Paragraph("<font color='#059669'><b>✓</b></font>", style_v_center)
+            monto_cell = Paragraph(f"<b>{_fmt_gs(m_sis)}</b>", style_v_right)
+            dictamen_cell = Paragraph("<font size=5.5 color='#059669'><b>✓ CONFORME</b></font>", style_v_center)
+        else:
+            tot_fisico_gs_calc += m_sis
+            chk_cell = "[   ]"
+            monto_cell = Paragraph(_fmt_gs(m_sis), style_v_right)
+            dictamen_cell = Paragraph("<font size=5 color='#334155'><b>CONF [ ]<br/>FALT [ ]</b></font>", style_v_center)
+
         v_rows.append([
-            "[   ]",
+            chk_cell,
             hora_str,
             Paragraph(str(v.get("numero_ticket") or v.get("numero_venta") or "—"), style_v_center),
             Paragraph(tarjeta_info, style_v_cell),
             Paragraph(aut_info, style_v_center),
             str(v.get("moneda") or "PYG"),
             _fmt_val(v.get("monto_original", v.get("monto", 0)), is_divisa=v.get("moneda") != "PYG"),
-            _fmt_gs(v.get("monto_gs", v.get("monto", 0))),
-            Paragraph("<font size=5 color='#334155'><b>CONF [ ]<br/>FALT [ ]</b></font>", style_v_center),
+            monto_cell,
+            dictamen_cell,
         ])
 
     if len(vouchers) == 0:
@@ -1502,16 +1590,34 @@ def generate_punteo_vouchers_pdf(
 
     # 4. Cuadro de Arqueo y Control de Diferencias de Comprobantes
     tot_vouchers_count = len(vouchers)
-    tot_vouchers_gs = sum(v.get("monto_gs", v.get("monto", 0)) for v in vouchers)
-    resumen_control = [
-        ["CONTROL DE COMPROBANTES FÍSICOS", "TOTAL EN SISTEMA", "TOTAL RENDIDO EN SOBRE", "DIFERENCIA (FALTANTE / SOBRANTE)"],
-        [
-            f"Vouchers y Comprobantes Auditados ({tot_vouchers_count} operaciones)",
-            _fmt_gs(tot_vouchers_gs),
-            "Gs. ________________________",
-            "Gs. ________________________ [  ] CONFORME   [  ] DESCUADRE",
+    if has_audit:
+        tot_v_sis = punteo_audit.get("total_sistema_gs", float(tot_sistema_gs_calc)) if punteo_audit else float(tot_sistema_gs_calc)
+        tot_v_fis = punteo_audit.get("total_fisico_gs", float(tot_fisico_gs_calc)) if punteo_audit else float(tot_fisico_gs_calc)
+        dif_v = punteo_audit.get("diferencia_vouchers_gs", tot_v_fis - tot_v_sis) if punteo_audit else (tot_v_fis - tot_v_sis)
+        estado_d = punteo_audit.get("estado_dictamen", "CONFORME" if dif_v == 0 else "OBSERVADO") if punteo_audit else ("CONFORME" if dif_v == 0 else "OBSERVADO")
+        color_d = "#059669" if estado_d == "CONFORME" else "#DC2626"
+        sign_d = "+" if dif_v > 0 else ""
+
+        resumen_control = [
+            ["CONTROL DE COMPROBANTES FÍSICOS", "TOTAL EN SISTEMA", "TOTAL RENDIDO EN SOBRE", "DIFERENCIA (FALTANTE / SOBRANTE)"],
+            [
+                Paragraph(f"<b>Vouchers Auditados ({tot_vouchers_count} operaciones)</b>", styles["Normal"]),
+                _fmt_gs(tot_v_sis),
+                Paragraph(f"<b>{_fmt_gs(tot_v_fis)}</b>", styles["Normal"]),
+                Paragraph(f"<font color='{color_d}'><b>{sign_d}{_fmt_gs(dif_v)} ({estado_d})</b></font>", styles["Normal"]),
+            ]
         ]
-    ]
+    else:
+        tot_vouchers_gs = sum(v.get("monto_gs", v.get("monto", 0)) for v in vouchers)
+        resumen_control = [
+            ["CONTROL DE COMPROBANTES FÍSICOS", "TOTAL EN SISTEMA", "TOTAL RENDIDO EN SOBRE", "DIFERENCIA (FALTANTE / SOBRANTE)"],
+            [
+                f"Vouchers y Comprobantes Auditados ({tot_vouchers_count} operaciones)",
+                _fmt_gs(tot_vouchers_gs),
+                "Gs. ________________________",
+                "Gs. ________________________ [  ] CONFORME   [  ] DESCUADRE",
+            ]
+        ]
     t_ctrl = Table(resumen_control, colWidths=[60 * mm, 34 * mm, 44 * mm, 48 * mm])
     t_ctrl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
@@ -1950,25 +2056,44 @@ def generate_acta_verificacion_tesoreria_pdf(
 
     total_cant_vouchers = 0
     total_monto_vouchers = 0
+    total_monto_esperado_vouchers = 0
+
     for g in grupos:
         cant = g.get("cantidad_esperada") or g.get("cantidad") or len(g.get("vouchers", []))
-        tot_g = g.get("total_esperado_gs") or g.get("monto_gs") or sum(float(v.get("monto_gs") or 0) for v in g.get("vouchers", []))
-        canal_lbl = g.get("canal_label") or g.get("label") or "Comprobante"
+        tot_g = float(g.get("total_esperado_gs") or g.get("monto_gs") or sum(float(v.get("monto_gs") or 0) for v in g.get("vouchers", [])))
+        tot_fis = float(g.get("monto_fisico_gs") if g.get("monto_fisico_gs") is not None else tot_g)
+        dif_g = float(g.get("diferencia_gs") if g.get("diferencia_gs") is not None else (tot_fis - tot_g))
+        cant_falt = g.get("cant_faltantes", 0)
+        cant_disc = g.get("cant_discrepantes", 0)
+
         total_cant_vouchers += cant
-        total_monto_vouchers += tot_g
+        total_monto_vouchers += tot_fis
+        total_monto_esperado_vouchers += tot_g
+
+        canal_lbl = g.get("canal_label") or g.get("label") or "Comprobante"
         tipo_label = g.get("tipo_instrumento_label") or ("Tarjeta POS" if "TARJETA" in g.get("canal_key", "") or "BANCARD" in g.get("canal_key", "") else ("Billetera / QR" if "QR" in g.get("canal_key", "") else ("PIX Brasil" if "PIX" in g.get("canal_key", "") else "Crédito")))
+
+        if dif_g != 0 or cant_falt > 0 or cant_disc > 0:
+            sign = "+" if dif_g > 0 else ""
+            dictamen_cell = Paragraph(f"<font color='#DC2626'><b>OBSERVADO ({sign}{_fmt_val(dif_g)})</b></font>", ParagraphStyle("TCD_OBS", parent=style_td_lbl, alignment=TA_CENTER))
+            monto_cell = Paragraph(f"Gs. {_fmt_val(tot_fis)}<br/><font size=5 color='#64748B'>(Sis: {_fmt_val(tot_g)})</font>", style_td_val)
+        else:
+            dictamen_cell = Paragraph("<font color='#059669'><b>✓ CONFORME</b></font>", ParagraphStyle("TCD", parent=style_td_lbl, alignment=TA_CENTER))
+            monto_cell = Paragraph(f"Gs. {_fmt_val(tot_fis)}", style_td_val)
+
         t_vouch_rows.append([
             Paragraph(f"<b>{canal_lbl}</b>", style_td_lbl),
             Paragraph(tipo_label, style_td_lbl),
             Paragraph(f"{cant} comprobantes", ParagraphStyle("TC", parent=style_td_lbl, alignment=TA_CENTER)),
-            Paragraph(f"Gs. {_fmt_val(tot_g)}", style_td_val),
-            Paragraph("<font color='#059669'><b>✓ CONFORME</b></font>", ParagraphStyle("TCD", parent=style_td_lbl, alignment=TA_CENTER)),
+            monto_cell,
+            dictamen_cell,
         ])
 
     # Reclasificaciones si las hubiere
     adjustments = punteo_data.get("adjustments") or []
     if adjustments:
         tot_adj = sum(float(a.get("monto_gs") or 0) for a in adjustments)
+        total_monto_vouchers += tot_adj
         t_vouch_rows.append([
             Paragraph("<b>Reclasificación de Efectivo en Tesorería</b>", style_td_lbl),
             Paragraph("Documento de Valor", style_td_lbl),
@@ -1984,12 +2109,15 @@ def generate_acta_verificacion_tesoreria_pdf(
         ])
 
     # Fila total
+    dif_tot_vouch = float(punteo_data.get("diferencia_vouchers_gs") or (total_monto_vouchers - total_monto_esperado_vouchers))
+    dictamen_tot = "<font color='#059669'><b>✓ AUDITADO (CONFORME)</b></font>" if dif_tot_vouch == 0 else f"<font color='#DC2626'><b>OBSERVADO ({'+' if dif_tot_vouch > 0 else ''}{_fmt_val(dif_tot_vouch)})</b></font>"
+
     t_vouch_rows.append([
         Paragraph("<b>TOTAL COMPROBANTES RECEPCIONADOS Y ARCHIVADOS EN TESORERÍA</b>", ParagraphStyle("BTV", parent=style_td_lbl, fontName=FONT_BOLD)),
         "",
         Paragraph(f"<b>{total_cant_vouchers} vouchers</b>", ParagraphStyle("TCB", parent=style_td_lbl, fontName=FONT_BOLD, alignment=TA_CENTER)),
         Paragraph(f"<b>Gs. {_fmt_val(total_monto_vouchers)}</b>", ParagraphStyle("TVB", parent=style_td_val, fontName=FONT_BOLD, textColor=HexColor("#1E40AF"))),
-        Paragraph("<font color='#059669'><b>✓ AUDITADO</b></font>", ParagraphStyle("TCD2", parent=style_td_lbl, fontName=FONT_BOLD, alignment=TA_CENTER)),
+        Paragraph(dictamen_tot, ParagraphStyle("TCD2", parent=style_td_lbl, fontName=FONT_BOLD, alignment=TA_CENTER)),
     ])
 
     t_vouchers = Table(t_vouch_rows, colWidths=[65 * mm, 30 * mm, 30 * mm, 35 * mm, 26 * mm])

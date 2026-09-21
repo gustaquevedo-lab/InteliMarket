@@ -117,6 +117,8 @@ interface SessionSummary {
     fecha_confirmacion?: string | null
     observaciones?: string | null
   } | null
+  recon?: any
+  diferencia_vouchers_gs?: number | null
 }
 
 interface PaymentBreakdownItem {
@@ -504,12 +506,24 @@ export default function CajaPage() {
       const data = await api.caja.sessionPunteo(sessionId)
       setPunteoData(data)
       const initStatuses: Record<string, "conforme" | "faltante" | "discrepante"> = {}
+      const initDiscrepancias: Record<string, number> = {}
+      const auditedItems = data?.punteo_audit?.items_dict || {}
       if (data?.vouchers) {
         data.vouchers.forEach((v: any) => {
-          initStatuses[v.id] = "conforme"
+          const auditItem = auditedItems[v.id]
+          const st = auditItem?.estado || v.audit_estado || "conforme"
+          initStatuses[v.id] = st
+          if (st === "discrepante") {
+            const mf = auditItem?.monto_fisico ?? v.monto_fisico ?? v.monto_gs
+            initDiscrepancias[v.id] = Number(mf)
+          }
         })
       }
       setPunteoStatuses(initStatuses)
+      setPunteoDiscrepanciasMonto(initDiscrepancias)
+      if (data?.punteo_audit?.observaciones) {
+        setPunteoObsDictamen(data.punteo_audit.observaciones)
+      }
 
       const recon = data?.recon || data?.session_data?.recon || {}
       const handoff = data?.handoff || data?.session_data?.handoff
@@ -2069,6 +2083,17 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                               )}
                             </div>
                           ) : null}
+                          {s.recon?.vouchers_audit && s.recon?.diferencia_vouchers_gs !== 0 && (
+                            <div className="mt-1">
+                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                (s.recon?.diferencia_vouchers_gs || 0) < 0
+                                  ? "bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800"
+                                  : "bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                              }`} title={`Auditoría de comprobantes físicos: ${formatPYG(s.recon?.diferencia_vouchers_gs || 0)}`}>
+                                ≠ Vouchers: {(s.recon?.diferencia_vouchers_gs || 0) > 0 ? `+${formatPYG(s.recon.diferencia_vouchers_gs)}` : formatPYG(s.recon?.diferencia_vouchers_gs || 0)}
+                              </span>
+                            </div>
+                          )}
                         </td>
                         <td className="p-3.5 text-right font-mono font-bold text-gray-800 dark:text-gray-200">
                           {formatPYG(s.monto_cierre || 0)}
@@ -2080,6 +2105,11 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           isPerfect ? "text-emerald-600" : isSobrante ? "text-blue-600" : "text-red-600"
                         }`}>
                           {dif !== 0 ? (dif > 0 ? `+${formatPYG(dif)}` : formatPYG(dif)) : "₲ 0 (Exacto)"}
+                          {s.recon?.diferencia_global_turno_gs !== undefined && s.recon?.diferencia_vouchers_gs !== 0 && (
+                            <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 mt-0.5" title="Diferencia global del turno (Efectivo + Vouchers)">
+                              Global: {s.recon.diferencia_global_turno_gs > 0 ? `+${formatPYG(s.recon.diferencia_global_turno_gs)}` : formatPYG(s.recon.diferencia_global_turno_gs)}
+                            </div>
+                          )}
                         </td>
                         <td className="p-3.5 text-center">
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -5972,6 +6002,20 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                           {v.moneda} {v.monto_original?.toFixed(2)}
                                         </div>
                                       )}
+                                      {isFaltante && (
+                                        <div className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-0.5">
+                                          Físico: ₲ 0 (-{formatPYG(v.monto_gs)})
+                                        </div>
+                                      )}
+                                      {isDiscrepante && (() => {
+                                        const montoFis = punteoDiscrepanciasMonto[v.id] !== undefined ? punteoDiscrepanciasMonto[v.id] : v.monto_gs
+                                        const dif = montoFis - v.monto_gs
+                                        return (
+                                          <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">
+                                            Físico: {formatPYG(montoFis)} ({dif >= 0 ? `+${formatPYG(dif)}` : `- ${formatPYG(Math.abs(dif))}`})
+                                          </div>
+                                        )
+                                      })()}
                                     </td>
                                     <td className="p-2 text-center whitespace-nowrap">
                                       <div className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 whitespace-nowrap">

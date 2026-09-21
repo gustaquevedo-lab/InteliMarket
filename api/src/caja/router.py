@@ -423,6 +423,7 @@ async def export_punteo_sesion_pdf(
         report_data["summary_by_method"],
         report_data["vouchers"],
         generated_by,
+        punteo_audit=report_data.get("punteo_audit"),
     )
     return _pdf_response(pdf_bytes, f"planilla_punteo_{session_id[:8]}.pdf")
 

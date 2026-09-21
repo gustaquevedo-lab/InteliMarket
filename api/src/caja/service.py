@@ -25,7 +25,7 @@ from api.src.caja.models import (
     VaultEntry, VaultDepositApprovalRequest, CashDropRequest,
     TreasuryRemittance, TreasuryRemittanceItem,
     PaymentMethodBankMapping, CashShortageDeductionRequest, CashShortageConfig,
-    CashSessionPaymentAdjustment,
+    CashSessionPaymentAdjustment, CashSessionPunteoItem,
 )
 from api.src.sales.models import Sale, SalePayment
 from api.src.pos_terminal_transactions.models import PosTerminalTransaction
@@ -1266,6 +1266,34 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         "medios_pago_detallados": desglose_detallado,
         "desglose_detallado": desglose_detallado,
     }
+
+    # Consultar auditoría de comprobantes físicos si existe para la sesión
+    res_p_items = await db.execute(
+        select(CashSessionPunteoItem).where(CashSessionPunteoItem.session_id == session_obj.id)
+    )
+    punteo_items = list(res_p_items.scalars().all())
+    has_punteo_audit = len(punteo_items) > 0
+    p_tot_sistema = sum(Decimal(str(it.monto_sistema)) for it in punteo_items)
+    p_tot_fisico = sum(Decimal(str(it.monto_fisico)) for it in punteo_items)
+    p_dif_vouchers = p_tot_fisico - p_tot_sistema
+    p_faltantes = sum(1 for it in punteo_items if it.estado == "faltante")
+    p_discrepantes = sum(1 for it in punteo_items if it.estado == "discrepante")
+    p_conformes = sum(1 for it in punteo_items if it.estado == "conforme")
+
+    recon_data["vouchers_audit"] = {
+        "auditado": has_punteo_audit,
+        "auditor_nombre": punteo_items[0].auditor_nombre if has_punteo_audit else None,
+        "fecha_audit": _to_asuncion_tz(punteo_items[0].updated_at or punteo_items[0].created_at).strftime("%d/%m/%Y %H:%M") if has_punteo_audit and punteo_items[0].created_at else None,
+        "total_vouchers_sistema_gs": float(p_tot_sistema),
+        "total_vouchers_fisico_gs": float(p_tot_fisico),
+        "diferencia_vouchers_gs": float(p_dif_vouchers),
+        "count_conformes": p_conformes,
+        "count_faltantes": p_faltantes,
+        "count_discrepantes": p_discrepantes,
+        "estado_dictamen": "CONFORME" if (p_faltantes == 0 and p_discrepantes == 0 and p_dif_vouchers == 0) else "OBSERVADO",
+    }
+    recon_data["diferencia_vouchers_gs"] = float(p_dif_vouchers)
+    recon_data["diferencia_global_turno_gs"] = float(Decimal(str(diferencia_consolidada_gs)) + p_dif_vouchers)
 
     escpos = generate_cierre_escpos(recon_data)
     recon_data["ticket_text"] = escpos["ticket_text"]
@@ -4196,6 +4224,91 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     }
     session_data["handoff"] = handoff_dict
 
+    # 8. Consultar auditoría previa de comprobantes persistida
+    res_audit = await db.execute(
+        select(CashSessionPunteoItem).where(CashSessionPunteoItem.session_id == sid)
+    )
+    audit_items = list(res_audit.scalars().all())
+    audit_map = {item.voucher_id: item for item in audit_items}
+    has_audit = len(audit_items) > 0
+
+    tot_vouchers_sistema_gs = Decimal("0")
+    tot_vouchers_fisico_gs = Decimal("0")
+    count_conformes = 0
+    count_faltantes = 0
+    count_discrepantes = 0
+
+    for v in vouchers:
+        vid = str(v.get("id"))
+        v_sis = Decimal(str(v.get("monto_gs") or 0))
+        tot_vouchers_sistema_gs += v_sis
+        if vid in audit_map:
+            it = audit_map[vid]
+            v["audit_estado"] = it.estado
+            v["monto_fisico"] = float(it.monto_fisico)
+            v["diferencia_gs"] = float(it.diferencia_gs)
+            v["audit_observacion"] = it.observacion
+            tot_vouchers_fisico_gs += Decimal(str(it.monto_fisico))
+            if it.estado == "conforme":
+                count_conformes += 1
+            elif it.estado == "faltante":
+                count_faltantes += 1
+            elif it.estado == "discrepante":
+                count_discrepantes += 1
+        else:
+            v["audit_estado"] = "conforme"
+            v["monto_fisico"] = float(v_sis)
+            v["diferencia_gs"] = 0.0
+            v["audit_observacion"] = None
+            tot_vouchers_fisico_gs += v_sis
+            count_conformes += 1
+
+    dif_vouchers_gs = tot_vouchers_fisico_gs - tot_vouchers_sistema_gs
+    estado_dictamen = "CONFORME" if (count_faltantes == 0 and count_discrepantes == 0 and dif_vouchers_gs == 0) else "OBSERVADO"
+
+    punteo_audit = {
+        "auditado": has_audit,
+        "auditor_nombre": audit_items[0].auditor_nombre if has_audit else None,
+        "fecha_audit": _to_asuncion_tz(audit_items[0].updated_at or audit_items[0].created_at).strftime("%d/%m/%Y %H:%M") if has_audit and audit_items[0].created_at else None,
+        "estado_dictamen": estado_dictamen,
+        "total_sistema_gs": float(tot_vouchers_sistema_gs),
+        "total_fisico_gs": float(tot_vouchers_fisico_gs),
+        "diferencia_vouchers_gs": float(dif_vouchers_gs),
+        "count_conformes": count_conformes,
+        "count_faltantes": count_faltantes,
+        "count_discrepantes": count_discrepantes,
+        "items_dict": {
+            item.voucher_id: {
+                "estado": item.estado,
+                "monto_fisico": float(item.monto_fisico),
+                "diferencia_gs": float(item.diferencia_gs),
+                "observacion": item.observacion,
+            }
+            for item in audit_items
+        },
+    }
+
+    # Actualizar canales con totales físicos y diferencias
+    for c in vouchers_by_channel.values():
+        ch_vouchers = c.get("vouchers") or []
+        ch_sis = sum(float(v.get("monto_gs") or 0) for v in ch_vouchers)
+        ch_fis = sum(float(v.get("monto_fisico") if v.get("monto_fisico") is not None else (v.get("monto_gs") or 0)) for v in ch_vouchers)
+        ch_dif = ch_fis - ch_sis
+        ch_faltantes = sum(1 for v in ch_vouchers if v.get("audit_estado") == "faltante")
+        ch_discrepantes = sum(1 for v in ch_vouchers if v.get("audit_estado") == "discrepante")
+        c["monto_fisico_gs"] = ch_fis
+        c["diferencia_gs"] = ch_dif
+        c["cant_faltantes"] = ch_faltantes
+        c["cant_discrepantes"] = ch_discrepantes
+        c["dictamen"] = "CONFORME" if (ch_dif == 0 and ch_faltantes == 0 and ch_discrepantes == 0) else "OBSERVADO"
+
+    for k, v in summary_final.items():
+        matching = vouchers_by_channel.get(k)
+        if matching:
+            v["monto_fisico_gs"] = matching["monto_fisico_gs"]
+            v["diferencia_gs"] = matching["diferencia_gs"]
+            v["dictamen"] = matching["dictamen"]
+
     canales_activos = [c for c in vouchers_by_channel.values() if c["cantidad_esperada"] > 0]
 
     return {
@@ -4210,6 +4323,10 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         "vouchers": vouchers,
         "grupos_comprobantes": canales_activos,
         "total_vouchers": len(vouchers),
+        "punteo_audit": punteo_audit,
+        "total_vouchers_sistema_gs": float(tot_vouchers_sistema_gs),
+        "total_vouchers_fisico_gs": float(tot_vouchers_fisico_gs),
+        "diferencia_vouchers_gs": float(dif_vouchers_gs),
     }
 
 
@@ -4622,17 +4739,70 @@ async def save_session_punteo_audit(
             observaciones=observaciones_efectivo,
         )
 
-    now_py = datetime.now(TZ_ASUNCION).strftime("%d/%m/%Y %H:%M")
-    conformes = [it for it in items if it.get("estado") == "conforme"]
-    faltantes = [it for it in items if it.get("estado") == "faltante"]
-    discrepantes = [it for it in items if it.get("estado") == "discrepante"]
+    # 1. Obtener los vouchers existentes para obtener sus montos de sistema con exactitud
+    punteo_raw = await get_session_punteo_data(db, session_id, company_id)
+    vouchers_map = {str(v["id"]): v for v in (punteo_raw.get("vouchers") if punteo_raw else [])}
 
-    # Si hay comprobantes faltantes o discrepancias de monto, el cotejo queda OBSERVADO
-    estado_dictamen = "CONFORME" if len(faltantes) == 0 and len(discrepantes) == 0 and abs(diferencia_vouchers_gs) == 0 else "OBSERVADO"
+    # 2. Reemplazar atómicamente los ítems de punteo para esta sesión
+    await db.execute(
+        delete(CashSessionPunteoItem).where(
+            CashSessionPunteoItem.session_id == sid,
+            CashSessionPunteoItem.company_id == cid,
+        )
+    )
+
+    tot_sistema_calc = Decimal("0")
+    tot_fisico_calc = Decimal("0")
+    punteo_items_objs = []
+
+    for it in items:
+        vid = str(it.get("voucher_id") or "")
+        if not vid:
+            continue
+        v_info = vouchers_map.get(vid, {})
+        m_sis = Decimal(str(v_info.get("monto_gs") if v_info.get("monto_gs") is not None else (it.get("monto_sistema") or 0)))
+        st = (it.get("estado") or "conforme").lower()
+
+        if st == "faltante":
+            m_fis = Decimal("0")
+        elif st == "discrepante":
+            m_fis = Decimal(str(it.get("monto_fisico") if it.get("monto_fisico") is not None else m_sis))
+        else:  # conforme
+            st = "conforme"
+            m_fis = m_sis
+
+        dif = m_fis - m_sis
+        tot_sistema_calc += m_sis
+        tot_fisico_calc += m_fis
+
+        punteo_items_objs.append(
+            CashSessionPunteoItem(
+                company_id=cid,
+                session_id=sid,
+                voucher_id=vid,
+                estado=st,
+                monto_sistema=m_sis,
+                monto_fisico=m_fis,
+                diferencia_gs=dif,
+                observacion=it.get("observacion"),
+                auditor_nombre=auditor_nombre,
+            )
+        )
+
+    if punteo_items_objs:
+        db.add_all(punteo_items_objs)
+
+    diferencia_vouchers_real = tot_fisico_calc - tot_sistema_calc
+    conformes = [it for it in punteo_items_objs if it.estado == "conforme"]
+    faltantes = [it for it in punteo_items_objs if it.estado == "faltante"]
+    discrepantes = [it for it in punteo_items_objs if it.estado == "discrepante"]
+
+    now_py = datetime.now(TZ_ASUNCION).strftime("%d/%m/%Y %H:%M")
+    estado_dictamen = "CONFORME" if len(faltantes) == 0 and len(discrepantes) == 0 and abs(diferencia_vouchers_real) == 0 else "OBSERVADO"
     nota_audit = (
         f"\n[COTEJO FÍSICO DE COMPROBANTES ({now_py}) por {auditor_nombre}]: "
         f"Dictamen Comprobantes: {estado_dictamen} | Conformes: {len(conformes)}, Faltantes: {len(faltantes)}, Con Discrepancia: {len(discrepantes)}. "
-        f"Diferencia Comprobantes: ₲ {float(diferencia_vouchers_gs):,.0f}."
+        f"Diferencia Comprobantes: ₲ {float(diferencia_vouchers_real):,.0f} (Físico: ₲ {float(tot_fisico_calc):,.0f} vs Sistema: ₲ {float(tot_sistema_calc):,.0f})."
     )
     if observaciones_dictamen:
         nota_audit += f" Detalle: {observaciones_dictamen.strip()}"
@@ -4651,7 +4821,9 @@ async def save_session_punteo_audit(
         "conformes": len(conformes),
         "faltantes": len(faltantes),
         "discrepantes": len(discrepantes),
-        "diferencia_vouchers_gs": float(diferencia_vouchers_gs),
+        "total_vouchers_sistema_gs": float(tot_sistema_calc),
+        "total_vouchers_fisico_gs": float(tot_fisico_calc),
+        "diferencia_vouchers_gs": float(diferencia_vouchers_real),
         "cash_reception": cash_reception_res,
         "observaciones_actualizadas": session_obj.observaciones,
     }
