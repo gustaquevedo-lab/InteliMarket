@@ -11303,22 +11303,39 @@ export default function POSPage() {
                             )}
 
                             {bancardCloudQrState === "esperando" && bancardCloudQrData && (
-                              <div className="w-full max-w-sm flex flex-col items-center gap-2">
-                                {bancardCloudQrData.qrUrl && (
-                                  <div className="p-2 bg-white rounded-xl shadow-xs border border-slate-200 dark:border-slate-700 shrink-0">
-                                    <img src={bancardCloudQrData.qrUrl} alt="QR Bancard" className="w-72 h-72 sm:w-80 sm:h-80 object-contain rounded-md" />
+                              <div className="w-full p-3 bg-blue-50/80 dark:bg-blue-950/40 rounded-2xl border border-blue-200 dark:border-blue-800 space-y-2.5">
+                                <div className="flex items-center justify-between border-b border-blue-200/60 dark:border-blue-800/60 pb-1.5">
+                                  <div className="flex items-center gap-1.5 text-xs font-black text-blue-700 dark:text-blue-300">
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                                    <span>Esperando el pago del cliente...</span>
                                   </div>
-                                )}
-                                <div className="flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400">
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Esperando el pago del cliente...
+                                  <button
+                                    type="button"
+                                    onClick={handleCancelBancardCloudQr}
+                                    className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer"
+                                  >
+                                    Cancelar QR
+                                  </button>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={handleCancelBancardCloudQr}
-                                  className="text-[11px] font-bold text-rose-500 hover:text-rose-600 underline cursor-pointer"
-                                >
-                                  Cancelar QR
-                                </button>
+
+                                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-3.5 min-w-0">
+                                  {bancardCloudQrData.qrUrl && (
+                                    <div className="p-2 bg-white rounded-xl shadow-xs border border-blue-300 shrink-0">
+                                      <img src={bancardCloudQrData.qrUrl} alt="QR Bancard" className="w-40 h-40 sm:w-52 sm:h-52 object-contain rounded-md" />
+                                    </div>
+                                  )}
+                                  <div className="flex-1 space-y-2 text-center sm:text-left min-w-0 w-full">
+                                    <div>
+                                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Total a pagar:</span>
+                                      <span className="text-xl font-black font-posMono text-blue-600 dark:text-blue-400">
+                                        {formatPYG(bancardCloudQrData.amount)}
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                                      Escanear con Pago Móvil o la app del banco. El QR vence en 5 minutos.
+                                    </p>
+                                  </div>
+                                </div>
                               </div>
                             )}
 
