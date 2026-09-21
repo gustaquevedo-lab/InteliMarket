@@ -144,16 +144,7 @@ const navGroups: NavGroup[] = [
   {
     title: "Recursos Humanos",
     items: [
-      // DESACTIVADO 2026-09-04: finge estar "conectado" (sueldok_connected=True
-      // hardcodeado) sin ninguna configuracion real -- riesgo alto, un gerente
-      // podria confiar en numeros de nomina/bonos inventados. Ver auditoria de sidebar.
-      // { icon: PiggyBank, label: "Nómina & Sueldos (SueldOK)", path: "/sueldok" },
-      // DESACTIVADO 2026-09-04: cuadrante de personal 100% hardcodeado, "Sincronizar"
-      // no persiste nada real. Ver auditoria de sidebar.
-      // { icon: Clock, label: "Turnos & Horarios", path: "/schedule" },
-      // DESACTIVADO 2026-09-04: 15 cajeras hardcodeadas, ignora company_id por
-      // completo. Ver auditoria de sidebar.
-      // { icon: LineChart, label: "Productividad de Cajas", path: "/productividad" },
+      { icon: PiggyBank, label: "Nómina & Sueldos (SueldOK)", path: "/sueldok", keywords: ["sueldos", "sueldok", "rrhh", "personal", "salarios", "asistencia", "reloj", "dahua"] },
     ]
   },
   {
