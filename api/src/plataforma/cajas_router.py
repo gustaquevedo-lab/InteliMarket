@@ -127,7 +127,7 @@ async def list_cajas(company_id: str | None = None, user=Depends(require_superad
             warns.append({"level": "error", "text": f"La app de caja instalada es vieja: le faltan {', '.join(missing)}. Hay que actualizarla."})
         if hb and cur and hb.release and hb.release != cur and online:
             warns.append({"level": "warning", "text": f"Tiene abierta una versión anterior de la pantalla ({hb.release}). Toma la nueva al cerrar sesión."})
-        if a.activo and not hb:
+        if a.activo and not hb and hbs:
             warns.append({"level": "warning", "text": "Nunca reportó actividad desde que existe la consola."})
         items.append({
             "id": str(a.id), "hostname": a.hostname, "caja_nombre": a.caja_nombre, "punto_emision": a.punto_emision, "activo": a.activo,
