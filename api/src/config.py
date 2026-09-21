@@ -29,6 +29,9 @@ class Settings(BaseSettings):
 
     # JWT
     jwt_secret_key: str = "dev-jwt-secret-key-change-in-production"
+    # Clave para cifrar credenciales guardadas en la base. Independiente del secreto JWT para poder rotar
+    # las sesiones sin dejar ilegibles las credenciales. Si falta, cae al JWT (comportamiento anterior).
+    encryption_key: Optional[str] = None
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 720  # 12 horas para turnos de POS y PWA de supervisión
     jwt_refresh_token_expire_days: int = 7

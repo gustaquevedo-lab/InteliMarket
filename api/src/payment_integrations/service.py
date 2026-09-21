@@ -4,6 +4,8 @@ import uuid
 
 from api.src.payment_integrations.models import PaymentIntegrationConfig
 from api.src.payment_integrations.schemas import PaymentIntegrationConfigUpsert
+from sqlalchemy.orm.attributes import set_committed_value
+
 from api.src.payment_integrations.crypto import encrypt_value, decrypt_value
 
 # Campos que nunca deben salir en una respuesta al frontend, sin importar el
@@ -42,7 +44,9 @@ async def get_config(db: AsyncSession, company_id: str, provider: str) -> Paymen
         # Descifrado solo en memoria, para quien realmente necesita las
         # credenciales reales (ej. plugpay/service.py armando el login) --
         # nunca se vuelve a escribir en texto plano.
-        row.config = _decrypt_sensitive(row.config)
+        # set_committed_value: el valor descifrado vive solo en memoria y NO marca la fila como modificada,
+        # asi el commit que hace cualquier request no la reescribe en texto plano.
+        set_committed_value(row, "config", _decrypt_sensitive(row.config))
     return row
 
 
@@ -69,7 +73,7 @@ async def upsert_config(db: AsyncSession, company_id: str, provider: str, data: 
         existing.config = _encrypt_sensitive(merged)
         await db.commit()
         await db.refresh(existing)
-        existing.config = _decrypt_sensitive(existing.config or {})
+        set_committed_value(existing, "config", _decrypt_sensitive(existing.config or {}))
         return existing
 
     row = PaymentIntegrationConfig(
@@ -82,5 +86,5 @@ async def upsert_config(db: AsyncSession, company_id: str, provider: str, data: 
     db.add(row)
     await db.commit()
     await db.refresh(row)
-    row.config = _decrypt_sensitive(row.config or {})
+    set_committed_value(row, "config", _decrypt_sensitive(row.config or {}))
     return row

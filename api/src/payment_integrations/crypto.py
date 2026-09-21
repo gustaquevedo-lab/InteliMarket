@@ -21,7 +21,7 @@ _PREFIX = "enc:"  # marca un valor como cifrado, para no romper filas viejas en 
 
 
 def _fernet() -> Fernet:
-    key_material = hashlib.sha256(settings.jwt_secret_key.encode("utf-8")).digest()
+    key_material = hashlib.sha256((settings.encryption_key or settings.jwt_secret_key).encode("utf-8")).digest()
     return Fernet(base64.urlsafe_b64encode(key_material))
 
 
