@@ -241,7 +241,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             dedup_window_seconds = 15   # 15s para 1 item en efectivo (doble clic)
 
         incoming_items_tuples = sorted([
-            (str(it.product_id), str(it.cantidad), str(it.precio_unitario))
+            (str(it.product_id), float(it.cantidad), float(it.precio_unitario))
             for it in data.items
         ])
         items_sig = hashlib.sha256(json.dumps(incoming_items_tuples).encode()).hexdigest()[:16]
@@ -280,7 +280,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             if len(c_items) != len(data.items):
                 continue
             c_tuples = sorted([
-                (str(ci.product_id), str(ci.cantidad), str(ci.precio_unitario))
+                (str(ci.product_id), float(ci.cantidad), float(ci.precio_unitario))
                 for ci in c_items
             ])
             if c_tuples != incoming_items_tuples:
