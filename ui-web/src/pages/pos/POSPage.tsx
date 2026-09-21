@@ -824,6 +824,7 @@ export default function POSPage() {
   const [remoteAuthRequestId, setRemoteAuthRequestId] = useState<string | null>(null)
   const [remoteAuthStatus, setRemoteAuthStatus] = useState<"pendiente" | "aprobado" | "rechazado">("pendiente")
   const [remoteAuthLocalSupervisorAvailable, setRemoteAuthLocalSupervisorAvailable] = useState(false)
+  const authRequestInFlightRef = useRef(false)
 
   // Ranking real de productos más vendidos (por sku, viene de reportes reales
   // de ventas) -- la pestaña "TOP"/Frecuentes antes mostraba products.slice(0,30)
@@ -5299,8 +5300,13 @@ export default function POSPage() {
       }
       case "clear_cart":
         return `Vaciar carrito completo (${cart.length} ítems, ${formatPYG(totalPyg)})`
-      case "process_return":
-        return `Aprobar devolución de venta ${devolucionSaleSeleccionada?.numero || ""} (${formatPYG(devolucionItems.reduce((s, it) => s + (devolucionSeleccion[it.id] || 0) * it.precio_unitario, 0))})`
+      case "process_return": {
+        const snap = (action as any).returnSnapshot
+        const saleD = snap ? snap.sale : devolucionSaleSeleccionada
+        const itemsD = snap ? snap.items : devolucionItems
+        const selD = snap ? snap.seleccion : devolucionSeleccion
+        return `Aprobar devolución de venta ${saleD?.numero || ""} (${formatPYG((itemsD || []).reduce((s: number, it: any) => s + (selD?.[it.id] || 0) * it.precio_unitario, 0))})`
+      }
       case "open_pos_config":
         return "Abrir configuración de terminales POS"
       case "assign_terminal":
@@ -5353,7 +5359,7 @@ export default function POSPage() {
 
   const executeApprovedRemoteAction = async (action: any, resolverId: string, resolverNombre: string) => {
     if (action.type === "process_return") {
-      await submitDevolucion(resolverId, resolverNombre)
+      await submitDevolucion(resolverId, resolverNombre, action.returnSnapshot)
     } else if (action.type === "assign_terminal") {
       await submitAssignTerminal()
     } else if (action.type === "extra_club_payment" || action.type === "otros_payment") {
@@ -5423,7 +5429,7 @@ export default function POSPage() {
     } as any).catch((err: any) => console.warn("Error grabando auditoria de supervisor:", err))
   }
 
-  const requestSupervisorAuthorization = async (action: {
+  const requestSupervisorAuthorizationImpl = async (action: {
     type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "otros_payment" | "reopen_invoice" | "reopen_payment" | "use_label_weight" | "direct_discount",
     itemId?: string,
     delta?: number,
@@ -5441,10 +5447,20 @@ export default function POSPage() {
     otrosComprobante?: string,
     otrosMonto?: number,
   }) => {
+    if (action.type === "process_return") {
+      ;(action as any).returnSnapshot = {
+        sale: devolucionSaleSeleccionada,
+        items: devolucionItems,
+        seleccion: devolucionSeleccion,
+        motivo: devolucionMotivo,
+        condicion: devolucionCondicion,
+        observaciones: devolucionObservaciones,
+      }
+    }
     if (isSupervisorUser) {
       logSupervisorRiskEvent(action, user!.id, user?.nombre || "Supervisor")
       if (action.type === "process_return") {
-        await submitDevolucion(user!.id, user?.nombre || "Supervisor")
+        await submitDevolucion(user!.id, user?.nombre || "Supervisor", (action as any).returnSnapshot)
       } else if (action.type === "assign_terminal") {
         await submitAssignTerminal()
       } else if (action.type === "reopen_invoice") {
@@ -5497,6 +5513,18 @@ export default function POSPage() {
       setShowRemoteAuthModal(true)
     } catch (e: any) {
       toast.error("No se pudo enviar la solicitud", e?.message || "Intente nuevamente.")
+    }
+  }
+
+  // Un doble clic en "Solicitar Autorizacion" creaba DOS pedidos al supervisor
+  // (21-09, Caja 4: 20:18:37 y 20:18:39); el segundo quedaba huerfano.
+  const requestSupervisorAuthorization = async (action: Parameters<typeof requestSupervisorAuthorizationImpl>[0]) => {
+    if (authRequestInFlightRef.current || showRemoteAuthModal) return
+    authRequestInFlightRef.current = true
+    try {
+      await requestSupervisorAuthorizationImpl(action)
+    } finally {
+      authRequestInFlightRef.current = false
     }
   }
 
@@ -5703,7 +5731,7 @@ export default function POSPage() {
       if (pendingSupervisorAction) {
         logSupervisorRiskEvent(pendingSupervisorAction, res.id!, res.nombre || "Supervisor")
         if (pendingSupervisorAction.type === "process_return") {
-          await submitDevolucion(res.id!, res.nombre || "Supervisor")
+          await submitDevolucion(res.id!, res.nombre || "Supervisor", (pendingSupervisorAction as any).returnSnapshot)
         } else if (pendingSupervisorAction.type === "assign_terminal") {
           await submitAssignTerminal()
         } else if (pendingSupervisorAction.type === "extra_club_payment" || pendingSupervisorAction.type === "otros_payment") {
@@ -5851,19 +5879,31 @@ export default function POSPage() {
     setDevolucionSeleccion((prev) => ({ ...prev, [itemId]: clamped }))
   }
 
-  const submitDevolucion = async (aprobadoPorId: string, aprobadoPorNombre: string) => {
-    if (!devolucionSaleSeleccionada) return
-    const itemsToReturn = devolucionItems
-      .filter((it) => (devolucionSeleccion[it.id] || 0) > 0)
+  const submitDevolucion = async (aprobadoPorId: string, aprobadoPorNombre: string, snapshot?: any) => {
+    const saleDev = snapshot?.sale ?? devolucionSaleSeleccionada
+    const itemsDev: any[] = snapshot?.items ?? devolucionItems
+    const selDev: Record<string, number> = snapshot?.seleccion ?? devolucionSeleccion
+    const motivoDev = snapshot?.motivo ?? devolucionMotivo
+    const condicionDev = snapshot?.condicion ?? devolucionCondicion
+    const obsDev = snapshot?.observaciones ?? devolucionObservaciones
+    if (!saleDev) {
+      toast.error(
+        "La devolución NO se registró",
+        "Se perdió la venta seleccionada antes de guardar. Volvé a abrir Devoluciones y repetí el proceso; pedí una nueva autorización."
+      )
+      return
+    }
+    const itemsToReturn = itemsDev
+      .filter((it) => (selDev[it.id] || 0) > 0)
       .map((it) => ({
         sale_item_id: it.id,
         product_id: it.product_id,
         descripcion: it.productName,
-        cantidad: devolucionSeleccion[it.id],
+        cantidad: selDev[it.id],
         precio_unitario: it.precio_unitario,
         iva_tasa: it.iva_tasa,
-        motivo_detalle: devolucionObservaciones || undefined,
-        condicion: devolucionCondicion,
+        motivo_detalle: obsDev || undefined,
+        condicion: condicionDev,
       }))
     if (itemsToReturn.length === 0) {
       toast.warning("Sin ítems seleccionados", "Elija al menos un producto a devolver.")
@@ -5873,10 +5913,10 @@ export default function POSPage() {
     try {
       const created = await api.returns.create({
         company_id: COMPANY_ID,
-        sale_id: devolucionSaleSeleccionada.id,
-        customer_id: (devolucionSaleSeleccionada as any).customer_id || undefined,
-        motivo: devolucionMotivo,
-        observaciones: devolucionObservaciones || undefined,
+        sale_id: saleDev.id,
+        customer_id: (saleDev as any).customer_id || undefined,
+        motivo: motivoDev,
+        observaciones: obsDev || undefined,
         warehouse_id: warehouses[0]?.id,
         user_id: user?.id,
         items: itemsToReturn,
@@ -5886,7 +5926,7 @@ export default function POSPage() {
       if (approved?.nota_credito_numero) {
         toast.success("Devolución Registrada", `NC ${approved.nota_credito_numero} aprobada por ${aprobadoPorNombre}. Imprimiendo...`)
         try {
-          await printNotaCreditoTicket(approved, itemsToReturn, devolucionSaleSeleccionada, aprobadoPorNombre)
+          await printNotaCreditoTicket(approved, itemsToReturn, saleDev, aprobadoPorNombre)
         } catch (printErr: any) {
           toast.warning("NC generada, no se pudo imprimir", printErr?.message || "Reimprima desde el historial de devoluciones.")
         }
