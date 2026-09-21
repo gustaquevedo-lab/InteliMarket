@@ -7,10 +7,12 @@ import re
 import unicodedata
 from sqlalchemy import select, update, func, cast, Integer, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from decimal import Decimal
 import uuid
+import hashlib
+import json
 
 TZ_ASUNCION = ZoneInfo("America/Asuncion")
 
@@ -194,6 +196,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         existing_sale = existing_res.scalar_one_or_none()
         if existing_sale:
             logger.info("Venta idempotente ya registrada previamente: id=%s, numero=%s", existing_sale.id, existing_sale.numero)
+            existing_sale._is_existing = True
             updated = False
             if data.recibo_html and not existing_sale.recibo_html:
                 existing_sale.recibo_html = data.recibo_html
@@ -205,6 +208,110 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
                 await db.commit()
                 await db.refresh(existing_sale)
             return existing_sale
+
+    # ── PROTECCIÓN DE IDEMPOTENCIA POR PAYLOAD Y VENTANA TEMPORAL (ANTI-DUPLICADOS POR LATENCIA/REINTENTO) ──
+    # Si el cliente no mandó ID determinístico o reintentó por lentitud de red/timeout/sincronización:
+    # 1. Previene que se consuman números de factura/ticket fiscales repetidos.
+    # 2. Previene que se descuente stock de productos múltiples veces.
+    # 3. Previene comprobantes fantasmas en el arqueo y punteo de caja.
+    if data.items:
+        exp_subtotal = Decimal("0")
+        exp_descuento = Decimal("0")
+        for it in data.items:
+            t = calculate_taxes(it.model_dump())
+            exp_subtotal += t["subtotal_bruto"]
+            exp_descuento += t["descuento_monto"]
+        expected_sale_total = exp_subtotal - exp_descuento
+
+        has_electronic_payment = any(
+            (p.forma_pago or "").upper().replace("_", " ") in (
+                "TARJETA DEBITO", "TARJETA CREDITO",
+                "BANCARD", "DINELCO", "QR", "BANCARD QR", "PIX", "PLUG PAY PIX", "TRANSFERENCIA", "CHEQUE"
+            )
+            for p in (data.payments or [])
+        )
+
+        if has_electronic_payment:
+            dedup_window_seconds = 300  # 5 min para cobros con tarjeta/QR/PIX
+        elif len(data.items) >= 3:
+            dedup_window_seconds = 120  # 2 min para carritos de 3+ items
+        elif len(data.items) >= 2:
+            dedup_window_seconds = 60   # 1 min para carritos de 2 items
+        else:
+            dedup_window_seconds = 15   # 15s para 1 item en efectivo (doble clic)
+
+        incoming_items_tuples = sorted([
+            (str(it.product_id), str(it.cantidad), str(it.precio_unitario))
+            for it in data.items
+        ])
+        items_sig = hashlib.sha256(json.dumps(incoming_items_tuples).encode()).hexdigest()[:16]
+        lock_scope = str(data.session_id or data.user_id or data.punto_emision or data.company_id)
+        lock_key = f"sale_dedup:{lock_scope}:{items_sig}"
+
+        try:
+            await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": lock_key})
+        except Exception as lock_err:
+            logger.warning("No se pudo adquirir pg_advisory_xact_lock para deduplicacion de venta: %s", lock_err)
+
+        time_cutoff = datetime.now(timezone.utc) - timedelta(seconds=dedup_window_seconds)
+        cand_stmt = (
+            select(Sale)
+            .where(
+                Sale.company_id == data.company_id,
+                Sale.estado != "cancelado",
+                Sale.created_at >= time_cutoff,
+                Sale.total == expected_sale_total,
+            )
+        )
+        if data.session_id:
+            cand_stmt = cand_stmt.where(
+                or_(
+                    Sale.session_id == data.session_id,
+                    Sale.user_id == data.user_id if data.user_id else False
+                )
+            )
+        elif data.user_id:
+            cand_stmt = cand_stmt.where(Sale.user_id == data.user_id)
+
+        candidates = (await db.execute(cand_stmt.order_by(Sale.created_at.desc()))).scalars().all()
+        for cand in candidates:
+            c_items_res = await db.execute(select(SaleItem).where(SaleItem.sale_id == cand.id))
+            c_items = c_items_res.scalars().all()
+            if len(c_items) != len(data.items):
+                continue
+            c_tuples = sorted([
+                (str(ci.product_id), str(ci.cantidad), str(ci.precio_unitario))
+                for ci in c_items
+            ])
+            if c_tuples != incoming_items_tuples:
+                continue
+
+            if data.payments:
+                c_pays_res = await db.execute(select(SalePayment).where(SalePayment.sale_id == cand.id))
+                c_pays = c_pays_res.scalars().all()
+                if c_pays:
+                    c_pay_methods = sorted([(p.forma_pago.upper().replace("_", " "), float(p.monto)) for p in c_pays])
+                    inc_pay_methods = sorted([(p.forma_pago.upper().replace("_", " "), float(p.monto)) for p in data.payments])
+                    if c_pay_methods != inc_pay_methods:
+                        continue
+
+            logger.warning(
+                "IDEMPOTENCIA ANTI-DUPLICADOS: Venta idéntica prevenida en sesión/caja (total=%s, items=%d). "
+                "Retornando venta original ya confirmada: %s (id=%s)",
+                cand.session_id, cand.total, len(data.items), cand.numero, cand.id
+            )
+            cand._is_existing = True
+            updated = False
+            if data.recibo_html and not cand.recibo_html:
+                cand.recibo_html = data.recibo_html
+                updated = True
+            if data.recibo_escpos_b64 and not cand.recibo_escpos_b64:
+                cand.recibo_escpos_b64 = data.recibo_escpos_b64
+                updated = True
+            if updated:
+                await db.commit()
+                await db.refresh(cand)
+            return cand
 
     numero = await resolve_sale_number(db, data)
     numero_interno = await generate_internal_sale_number(db, str(data.company_id))

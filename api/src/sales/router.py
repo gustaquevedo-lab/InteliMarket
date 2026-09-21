@@ -227,6 +227,11 @@ async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(sale)
 
+    # Si es una venta ya existente devuelta por idempotencia, retornar directamente
+    # sin re-ejecutar asientos contables, envios a SIFEN ni webhooks duplicados.
+    if getattr(sale, "_is_existing", False):
+        return sale
+
     if sale.estado == "pend_aprob_credito":
         return sale
 
