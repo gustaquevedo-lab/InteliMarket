@@ -1259,7 +1259,7 @@ async def registrar_cupones_multiples(
                             template=t_tmpl,
                             sorteo_nombre=c_nombre,
                             db=bg_db,
-                            company_id=data.company_id,
+                            company_id=company_id,
                         )
                         t_db = await bg_db.get(CuponTicket, t_id)
                         if t_db:
