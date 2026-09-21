@@ -13,6 +13,8 @@ Reglas de seguridad que este modulo respeta:
   recibimos numero de tarjeta.
 """
 
+import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import httpx
@@ -82,34 +84,69 @@ async def _save_tokens(db: AsyncSession, company_id: str, row: PaymentIntegratio
     ))
 
 
+# PlugPay limita el login a 10 req / 15 min por IP (RateLimit-Policy: 10;w=900) y
+# responde 429 tambien a refresh. Sin este freno, cada reintento de una caja
+# (quote/create cada ~30 s) gastaba 2 requests mas contra un limite ya agotado.
+_token_lock = asyncio.Lock()
+_auth_blocked_until = 0.0
+
+
+def _auth_blocked_error() -> PlugpayApiError:
+    wait = max(1, int(_auth_blocked_until - time.monotonic()))
+    return PlugpayApiError(429, f"PlugPay limitó los intentos de login. Reintentá en {wait} segundos.", None)
+
+
+def _block_auth(resp: httpx.Response) -> PlugpayApiError:
+    global _auth_blocked_until
+    try:
+        wait = int(resp.headers.get("Retry-After", "300"))
+    except ValueError:
+        wait = 300
+    _auth_blocked_until = time.monotonic() + wait
+    return _auth_blocked_error()
+
+
 async def get_valid_token(db: AsyncSession, company_id: str) -> tuple[str, PaymentIntegrationConfig]:
     row = await _load_config(db, company_id)
     cfg = row.config or {}
-    base_url = _base_url(row)
-
     if _is_token_valid(cfg.get("cached_token_expires_at")) and cfg.get("cached_token"):
         return cfg["cached_token"], row
 
-    async with httpx.AsyncClient(base_url=base_url, timeout=20) as client:
-        # 1. Intentar refresh si hay uno guardado -- evita gastar el rate
-        #    limit de login (10 req/15min) en cada operacion.
-        if cfg.get("cached_refresh_token"):
-            try:
-                resp = await client.post("auth/refresh", json={"refresh_token": cfg["cached_refresh_token"]})
-                if resp.status_code == 200:
-                    data = resp.json()
-                    await _save_tokens(db, company_id, row, data["token"], data["refresh_token"])
-                    return data["token"], row
-            except httpx.HTTPError:
-                pass  # cae a login de cero
+    async with _token_lock:
+        # Otra request pudo renovar el token mientras esperabamos el lock.
+        await db.refresh(row)
+        cfg = row.config or {}
+        if _is_token_valid(cfg.get("cached_token_expires_at")) and cfg.get("cached_token"):
+            return cfg["cached_token"], row
 
-        # 2. Login de cero con client_id/password.
-        resp = await client.post("auth/token", json={"client_id": cfg["client_id"], "password": cfg["password"]})
-        if resp.status_code != 200:
-            raise PlugpayApiError(resp.status_code, f"No se pudo autenticar con PlugPay: {resp.text}", None)
-        data = resp.json()
-        await _save_tokens(db, company_id, row, data["token"], data["refresh_token"])
-        return data["token"], row
+        if time.monotonic() < _auth_blocked_until:
+            raise _auth_blocked_error()
+
+        base_url = _base_url(row)
+        async with httpx.AsyncClient(base_url=base_url, timeout=20) as client:
+            # 1. Intentar refresh si hay uno guardado -- evita gastar el rate
+            #    limit de login en cada operacion.
+            if cfg.get("cached_refresh_token"):
+                try:
+                    resp = await client.post("auth/refresh", json={"refresh_token": cfg["cached_refresh_token"]})
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        await _save_tokens(db, company_id, row, data["token"], data["refresh_token"])
+                        return data["token"], row
+                    if resp.status_code == 429:
+                        raise _block_auth(resp)
+                except httpx.HTTPError:
+                    pass  # cae a login de cero
+
+            # 2. Login de cero con client_id/password.
+            resp = await client.post("auth/token", json={"client_id": cfg["client_id"], "password": cfg["password"]})
+            if resp.status_code == 429:
+                raise _block_auth(resp)
+            if resp.status_code != 200:
+                raise PlugpayApiError(resp.status_code, f"No se pudo autenticar con PlugPay: {resp.text}", None)
+            data = resp.json()
+            await _save_tokens(db, company_id, row, data["token"], data["refresh_token"])
+            return data["token"], row
 
 
 async def _authed_request(db: AsyncSession, company_id: str, method: str, path: str, json_body: dict | None = None) -> dict:
