@@ -876,6 +876,34 @@ async def settle_vales_and_pay(
     return await service.settle_vales_and_pay(db, company_id, body, user_id, user_nombre)
 
 
+@router.get("/payment-orders/batch/report.pdf")
+async def get_batch_payment_order_report_pdf(
+    company_id: str = Query(...),
+    order_ids: str | None = Query(None, description="IDs de órdenes separadas por coma"),
+    cheque_id: str | None = Query(None, description="ID del cheque emitido"),
+    user_nombre: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    ids_list = [i.strip() for i in order_ids.split(",")] if order_ids else None
+    batch_data = await service.get_batch_payment_report_data(
+        db, company_id, order_ids=ids_list, cheque_id=cheque_id
+    )
+    company = await _get_company_info(db, company_id)
+    pdf_bytes = payment_order_pdf.generate_batch_payment_report_pdf(
+        company=company,
+        batch_data=batch_data,
+        generated_by=user_nombre or "",
+    )
+    raw_id = batch_data.get("identificador", "operacion")
+    clean_id = "".join(c for c in raw_id if c.isalnum() or c in ("-", "_")).strip()
+    filename = f"reporte_lote_{clean_id}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={filename}", "Content-Length": str(len(pdf_bytes))}
+    )
+
+
 @router.get("/payment-orders/{order_id}")
 async def get_payment_order(
     order_id: str,

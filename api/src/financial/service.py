@@ -4036,7 +4036,192 @@ async def create_multi_supplier_payment_batch(
         "diferencia_cambio_total": float(diff_cambio_total),
         "cheque_id": str(cheque_obj.id) if cheque_obj else None,
         "numero_cheque": cheque_obj.numero if cheque_obj else None,
+        "order_ids": [o["order_id"] for o in created_orders],
         "orders": created_orders,
+    }
+
+
+async def get_batch_payment_report_data(
+    db: AsyncSession,
+    company_id: str,
+    order_ids: list[str] | None = None,
+    cheque_id: str | None = None,
+) -> dict:
+    """Recupera toda la información analítica de un conjunto de Órdenes de Pago
+    generadas en un Lote Multi-Proveedor para emitir el acta PDF de uso interno.
+    Soporta búsqueda por lista de order_ids o por cheque_id.
+    """
+    cid = uuid.UUID(company_id)
+    uuids = []
+    if order_ids:
+        uuids = [uuid.UUID(oid.strip()) for oid in order_ids if oid.strip()]
+    elif cheque_id:
+        chq_uuid = uuid.UUID(cheque_id.strip())
+        disbs_q = await db.execute(
+            select(SupplierPaymentOrderDisbursement.payment_order_id)
+            .where(SupplierPaymentOrderDisbursement.cheque_id == chq_uuid)
+        )
+        uuids = [r[0] for r in disbs_q.all()]
+
+    if not uuids:
+        raise HTTPException(status_code=400, detail="No se proporcionaron órdenes de pago ni un cheque válido para el lote.")
+
+    stmt = (
+        select(SupplierPaymentOrder)
+        .where(SupplierPaymentOrder.company_id == cid, SupplierPaymentOrder.id.in_(uuids))
+        .order_by(SupplierPaymentOrder.created_at.asc())
+    )
+    res = await db.execute(stmt)
+    orders_db = list(res.scalars().all())
+    if not orders_db:
+        raise HTTPException(status_code=404, detail="No se encontraron órdenes de pago para el lote especificado.")
+
+    orders_data = []
+    instrument_data = {}
+    total_desembolsado_pyg = Decimal("0")
+    total_facturas_pyg = Decimal("0")
+    total_diff_pyg = Decimal("0")
+    total_moneda_extranjera = Decimal("0")
+    moneda_ext = None
+    fecha_operacion = None
+    obs_list = []
+
+    from api.src.cheques.models import Cheque
+    from api.src.financial.models import BankAccount
+
+    for o in orders_db:
+        sup_res = await db.execute(select(Supplier).where(Supplier.id == o.supplier_id))
+        sup = sup_res.scalar_one_or_none()
+
+        allocs_res = await db.execute(
+            select(SupplierPaymentOrderAllocation, SupplierInvoice)
+            .join(SupplierInvoice, SupplierInvoice.id == SupplierPaymentOrderAllocation.invoice_id)
+            .where(SupplierPaymentOrderAllocation.payment_order_id == o.id)
+        )
+        allocs_list = []
+        for alloc, inv in allocs_res.all():
+            allocs_list.append({
+                "id": str(alloc.id),
+                "invoice_id": str(alloc.invoice_id),
+                "numero_factura": inv.numero_factura if inv else "Factura",
+                "timbrado": inv.timbrado if inv else "",
+                "monto_aplicado": float(alloc.monto_aplicado or 0),
+                "monto_retencion": float(alloc.monto_retencion or 0),
+                "saldo_anterior": float(alloc.saldo_anterior or 0),
+                "saldo_restante": float(alloc.saldo_restante or 0),
+            })
+            total_facturas_pyg += Decimal(str(alloc.monto_aplicado or 0))
+
+        disb_res = await db.execute(
+            select(SupplierPaymentOrderDisbursement)
+            .where(SupplierPaymentOrderDisbursement.payment_order_id == o.id)
+        )
+        disbs_db = list(disb_res.scalars().all())
+        disbs_list = []
+        for d in disbs_db:
+            if d.forma_pago == "diferencia_cambio":
+                continue
+            disbs_list.append({
+                "id": str(d.id),
+                "forma_pago": d.forma_pago,
+                "monto": float(d.monto or 0),
+                "moneda": d.moneda,
+                "tipo_cambio": float(d.tipo_cambio or 1),
+                "monto_pyg": float(d.monto_pyg or 0),
+                "numero_cheque": d.numero_cheque,
+                "banco_cheque": d.banco_cheque,
+                "titular_cheque": d.titular_cheque,
+                "referencia_transferencia": d.referencia_transferencia,
+            })
+            if not instrument_data:
+                instrument_data["tipo"] = d.forma_pago
+                if d.forma_pago == "cheque":
+                    instrument_data["numero_cheque"] = d.numero_cheque
+                    instrument_data["banco_cheque"] = d.banco_cheque
+                    instrument_data["titular_cheque"] = d.titular_cheque
+                    instrument_data["fecha_emision"] = d.fecha_cheque_emision or o.fecha_emision
+                    instrument_data["fecha_vencimiento"] = d.fecha_cheque_vencimiento or o.fecha_pago
+                    instrument_data["es_diferido"] = d.es_cheque_diferido
+                    if d.cheque_id:
+                        chq_res = await db.execute(select(Cheque).where(Cheque.id == d.cheque_id))
+                        chq_obj = chq_res.scalar_one_or_none()
+                        if chq_obj:
+                            instrument_data["numero_cheque"] = chq_obj.numero
+                            instrument_data["banco_cheque"] = chq_obj.banco_emisor
+                            instrument_data["titular_cheque"] = chq_obj.beneficiario
+                            instrument_data["fecha_emision"] = chq_obj.fecha_emision
+                            instrument_data["fecha_vencimiento"] = chq_obj.fecha_pago
+                            instrument_data["es_diferido"] = chq_obj.diferido
+                            if chq_obj.bank_account_id:
+                                b_res = await db.execute(select(BankAccount).where(BankAccount.id == chq_obj.bank_account_id))
+                                b_acc = b_res.scalar_one_or_none()
+                                if b_acc:
+                                    instrument_data["cuenta_bancaria"] = f"{b_acc.banco} ({b_acc.numero_cuenta or 'S/N'})"
+                elif d.forma_pago == "transferencia":
+                    instrument_data["referencia_transferencia"] = d.referencia_transferencia
+                    instrument_data["titular_cheque"] = d.titular_cheque
+                    if d.bank_account_id:
+                        b_res = await db.execute(select(BankAccount).where(BankAccount.id == d.bank_account_id))
+                        b_acc = b_res.scalar_one_or_none()
+                        if b_acc:
+                            instrument_data["banco"] = b_acc.banco
+                            instrument_data["cuenta_bancaria"] = b_acc.numero_cuenta
+
+            if d.moneda and d.moneda != "PYG":
+                moneda_ext = d.moneda
+                total_moneda_extranjera += Decimal(str(d.monto or 0))
+
+        m_neto = Decimal(str(o.monto_neto or 0))
+        m_diff = Decimal(str(o.diferencia_cambio or 0))
+        total_desembolsado_pyg += m_neto
+        total_diff_pyg += m_diff
+
+        if o.observaciones:
+            obs_clean = o.observaciones.replace("[Lote Multi-Proveedor / Brasil]", "").strip()
+            if obs_clean and obs_clean not in obs_list:
+                obs_list.append(obs_clean)
+
+        if not fecha_operacion:
+            fecha_operacion = o.fecha_pago or o.fecha_emision
+
+        orders_data.append({
+            "order_id": str(o.id),
+            "numero_orden": o.numero_orden,
+            "fecha_emision": str(o.fecha_emision),
+            "fecha_pago": str(o.fecha_pago or o.fecha_emision),
+            "estado": o.estado,
+            "supplier_id": str(sup.id) if sup else "",
+            "supplier_nombre": sup.razon_social if sup else "Proveedor",
+            "supplier_ruc": sup.ruc if sup else "",
+            "monto_pyg": float(m_neto),
+            "monto_moneda": float(disbs_list[0]["monto"]) if disbs_list else float(m_neto),
+            "moneda": disbs_list[0]["moneda"] if disbs_list else "PYG",
+            "diferencia_cambio": float(m_diff),
+            "recibo_proveedor": o.recibo_proveedor or "-",
+            "allocations": allocs_list,
+            "disbursements": disbs_list,
+        })
+
+    if instrument_data.get("tipo") == "cheque" and instrument_data.get("numero_cheque"):
+        identificador = f"CHEQUE #{instrument_data['numero_cheque']}"
+    else:
+        identificador = f"LOTE-{orders_db[0].numero_orden}-AL-{orders_db[-1].numero_orden}"
+
+    instrument_data["monto_pyg"] = float(total_desembolsado_pyg)
+
+    return {
+        "identificador": identificador,
+        "fecha_operacion": fecha_operacion,
+        "instrument": instrument_data,
+        "observaciones_generales": " | ".join(obs_list) if obs_list else "Pago agrupado a proveedores procesado exitosamente.",
+        "totales": {
+            "total_desembolsado_pyg": float(total_desembolsado_pyg),
+            "total_facturas_pyg": float(total_facturas_pyg),
+            "total_diferencia_cambio_pyg": float(total_diff_pyg),
+            "total_moneda_extranjera": float(total_moneda_extranjera) if total_moneda_extranjera > 0 else None,
+            "moneda_extranjera": moneda_ext,
+        },
+        "orders": orders_data,
     }
 
 

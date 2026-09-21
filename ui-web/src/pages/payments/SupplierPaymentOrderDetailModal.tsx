@@ -1,7 +1,7 @@
 import React from "react"
 import {
   X, Download, CheckCircle2, Clock, Building2,
-  Wallet, FileText, Calendar, CreditCard, ShieldCheck
+  Wallet, FileText, Calendar, CreditCard, ShieldCheck, Layers
 } from "lucide-react"
 import { api, SupplierPaymentOrder } from "../../api"
 import { formatPYG, formatDate } from "../../utils/format"
@@ -19,9 +19,25 @@ export default function SupplierPaymentOrderDetailModal({
 }: Props) {
   const isPaid = order.estado === "pagado"
   const isRegistrado = order.estado === "registrado"
+  const isLote = order.observaciones?.includes("[Lote") || order.disbursements?.some((d: any) => d.cheque_id)
+  const chequeDisb = order.disbursements?.find((d: any) => d.cheque_id)
 
   const handleDownloadPdf = () => {
     api.financial.paymentOrders.downloadPdf(order.id, order.numero_orden)
+  }
+
+  const handleDownloadBatchReport = () => {
+    if (chequeDisb?.cheque_id) {
+      api.financial.paymentOrders.downloadBatchReportPdf(
+        { cheque_id: chequeDisb.cheque_id },
+        `reporte_lote_cheque_${chequeDisb.numero_cheque || "operacion"}.pdf`
+      )
+    } else {
+      api.financial.paymentOrders.downloadBatchReportPdf(
+        { order_ids: [order.id] },
+        `reporte_lote_orden_${order.numero_orden}.pdf`
+      )
+    }
   }
 
   return (
@@ -54,6 +70,16 @@ export default function SupplierPaymentOrderDetailModal({
           </div>
 
           <div className="flex items-center gap-2">
+            {isLote && (
+              <button
+                onClick={handleDownloadBatchReport}
+                className="px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
+                title="Descargar Reporte Interno Completo del Lote de Pagos (PDF)"
+              >
+                <Layers className="w-4 h-4 text-emerald-300" />
+                <span>Reporte Lote (PDF)</span>
+              </button>
+            )}
             <button
               onClick={handleDownloadPdf}
               className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm"

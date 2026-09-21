@@ -833,11 +833,19 @@ export default function PaymentsPage() {
                     {filteredOrders.map((order) => {
                       const isPaid = order.estado === "pagado"
                       const isRegistrado = order.estado === "registrado"
+                      const isLote = order.observaciones?.includes("[Lote") || order.formas_pago_resumen?.toLowerCase().includes("lote")
 
                       return (
                         <tr key={order.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
                           <td className="p-3.5">
-                            <p className="font-mono font-black text-slate-900 dark:text-white text-xs">{order.numero_orden}</p>
+                            <div className="flex items-center gap-1.5">
+                              <p className="font-mono font-black text-slate-900 dark:text-white text-xs">{order.numero_orden}</p>
+                              {isLote && (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                  LOTE
+                                </span>
+                              )}
+                            </div>
                             <p className="text-[10px] text-slate-400 mt-0.5">
                               {formatDate(order.fecha_pago || order.fecha_emision)}
                             </p>
@@ -886,6 +894,15 @@ export default function PaymentsPage() {
                               >
                                 <Eye className="w-3.5 h-3.5" />
                               </button>
+                              {isLote && (
+                                <button
+                                  onClick={() => api.financial.paymentOrders.downloadBatchReportPdf({ order_ids: [order.id] })}
+                                  className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-emerald-600 dark:text-emerald-400 transition"
+                                  title="Reimprimir Reporte Completo del Lote (PDF Interno)"
+                                >
+                                  <Layers className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <button
                                 onClick={() => api.financial.paymentOrders.downloadPdf(order.id, order.numero_orden)}
                                 className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 text-rose-600 dark:text-rose-400 transition"

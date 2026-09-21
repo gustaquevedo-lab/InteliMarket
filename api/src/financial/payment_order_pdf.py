@@ -527,3 +527,344 @@ def generate_supplier_payments_report_pdf(
 
     doc.build(story, canvasmaker=lambda *args, **kwargs: _NumberedCanvas(*args, footer_left=f"Reporte Consolidado AP — Extra Supermercado", **kwargs))
     return buffer.getvalue()
+
+
+def generate_batch_payment_report_pdf(
+    company: dict,
+    batch_data: dict,
+    generated_by: str = ""
+) -> bytes:
+    """Genera el Reporte Oficial Premium de Liquidación de Pago por Lote a Proveedores.
+    Diseñado para control interno de Tesorería, Auditoría y Gerencia.
+    Incluye:
+    1. Membrete corporativo y carátula del lote.
+    2. Tarjeta / Voucher del instrumento emitido (Cheque girado o Transferencia).
+    3. Resumen macro de liquidación cambiaria (R$ / BRL / USD vs. PYG).
+    4. Nómina analítica de proveedores y facturas amortizadas.
+    5. Balance de cuadre contable (Total amortizado + Dif. Cambio = Instrumento).
+    6. Casilleros de firmas internas de conformidad.
+    """
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=10 * mm,
+        bottomMargin=14 * mm,
+        title="Reporte_Interno_Pago_Por_Lote",
+    )
+
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle("BatchTitle", fontName=FONT_BOLD, fontSize=13, leading=16, textColor=PRIMARY_COLOR))
+    styles.add(ParagraphStyle("BatchSub", fontName=FONT_REGULAR, fontSize=8, leading=11, textColor=GRAY_MEDIUM))
+    styles.add(ParagraphStyle("SectionH1", fontName=FONT_BOLD, fontSize=9, leading=12, textColor=PRIMARY_COLOR))
+    styles.add(ParagraphStyle("SectionH2", fontName=FONT_BOLD, fontSize=8, leading=10, textColor=BRAND_BLUE))
+    styles.add(ParagraphStyle("CellT", fontName=FONT_REGULAR, fontSize=7, leading=9, textColor=GRAY_DARK))
+    styles.add(ParagraphStyle("CellTBold", fontName=FONT_BOLD, fontSize=7, leading=9, textColor=GRAY_DARK))
+    styles.add(ParagraphStyle("CellTRight", fontName=FONT_REGULAR, fontSize=7, leading=9, textColor=GRAY_DARK, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle("CellTRightBold", fontName=FONT_BOLD, fontSize=7, leading=9, textColor=GRAY_DARK, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle("CellTCenter", fontName=FONT_REGULAR, fontSize=7, leading=9, textColor=GRAY_DARK, alignment=TA_CENTER))
+    styles.add(ParagraphStyle("CellTCenterBold", fontName=FONT_BOLD, fontSize=7, leading=9, textColor=GRAY_DARK, alignment=TA_CENTER))
+    styles.add(ParagraphStyle("VoucherLabel", fontName=FONT_BOLD, fontSize=7.5, leading=9.5, textColor=HexColor("#475569")))
+    styles.add(ParagraphStyle("VoucherVal", fontName=FONT_BOLD, fontSize=8.5, leading=11, textColor=PRIMARY_COLOR))
+    styles.add(ParagraphStyle("VoucherHighlight", fontName=FONT_BOLD, fontSize=11, leading=13, textColor=HexColor("#166534")))
+
+    story = []
+
+    # 1. ENCABEZADO CORPORATIVO
+    nombre_empresa = company.get("razon_social") or "GRUPO SANTA TERESA E.A.S."
+    nombre_fantasia = company.get("nombre_fantasia") or "Extra Supermercado Mayorista"
+    ruc_empresa = company.get("ruc") or "80150377-9"
+    timbrado_empresa = company.get("timbrado") or "18545636"
+
+    identificador = batch_data.get("identificador") or f"LOTE-{datetime.now(ASUNCION_TZ).strftime('%Y%m%d-%H%M')}"
+    fecha_emision = batch_data.get("fecha_operacion") or datetime.now(ASUNCION_TZ)
+    operador = generated_by or batch_data.get("usuario_operador") or "Tesorería Central"
+
+    header_table = Table([
+        [
+            Paragraph(
+                f"<b>{nombre_fantasia.upper()}</b><br/>"
+                f"<font size='7' color='#475569'>{nombre_empresa} — RUC: {ruc_empresa} | Timbrado: {timbrado_empresa}</font><br/>"
+                f"<b>ACTA DE LIQUIDACIÓN Y PAGO POR LOTE MULTI-PROVEEDOR</b><br/>"
+                f"<font size='7.5' color='#0284c7'>DOCUMENTO OFICIAL DE USO INTERNO — TESORERÍA Y FINANZAS</font>",
+                styles["BatchTitle"]
+            ),
+            Paragraph(
+                f"<b>Identificador Lote:</b> {identificador}<br/>"
+                f"<b>Fecha Operación:</b> {_format_date(fecha_emision)}<br/>"
+                f"<b>Responsable:</b> {operador}<br/>"
+                f"<b>Zona Horaria:</b> America/Asuncion",
+                styles["BatchSub"]
+            )
+        ]
+    ], colWidths=[120 * mm, 66 * mm])
+    header_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(header_table)
+    story.append(HRFlowable(width="100%", thickness=1, color=BRAND_ACCENT, spaceAfter=8, spaceBefore=2))
+
+    # 2. TARJETA DEL INSTRUMENTO FINANCIERO EMITIDO (VOUCHER)
+    inst = batch_data.get("instrument") or {}
+    totales = batch_data.get("totales") or {}
+    tipo_inst = (inst.get("tipo") or "cheque").upper()
+
+    voucher_rows = []
+    if tipo_inst == "CHEQUE":
+        num_cheque = inst.get("numero_cheque") or "SIN NÚMERO"
+        banco_emisor = inst.get("banco_cheque") or "Banco no especificado"
+        cuenta_bancaria = inst.get("cuenta_bancaria") or "-"
+        beneficiario = inst.get("titular_cheque") or "A la orden / Varios Proveedores"
+        f_emision_chq = _format_date(inst.get("fecha_emision"))
+        f_venc_chq = _format_date(inst.get("fecha_vencimiento"))
+        es_diferido = inst.get("es_diferido", False)
+        tipo_chq_str = "DIFERIDO" if es_diferido else "AL DÍA"
+        monto_chq = totales.get("total_desembolsado_pyg", 0)
+
+        voucher_rows = [
+            [
+                Paragraph(f"<b>INSTRUMENTO EMITIDO: CHEQUE BANCARIO ({tipo_chq_str})</b>", styles["SectionH1"]),
+                Paragraph(f"<b>MONTO GIRADO: ₲ {_format_gs(monto_chq)}</b>", styles["VoucherHighlight"]),
+            ],
+            [
+                Paragraph(
+                    f"<font color='#475569'>N° de Cheque:</font> <b><font size='9' color='#0F172A'>{num_cheque}</font></b> &nbsp;&nbsp;|&nbsp;&nbsp; "
+                    f"<font color='#475569'>Banco:</font> <b>{banco_emisor}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
+                    f"<font color='#475569'>Cuenta:</font> <b>{cuenta_bancaria}</b><br/>"
+                    f"<font color='#475569'>Librado a la Orden de (Beneficiario):</font> <b>{beneficiario}</b><br/>"
+                    f"<font color='#475569'>Fecha Emisión:</font> {f_emision_chq} &nbsp;&nbsp;|&nbsp;&nbsp; "
+                    f"<font color='#475569'>Fecha de Pago / Cobro:</font> <b>{f_venc_chq}</b>",
+                    styles["CellT"]
+                ),
+                Paragraph(
+                    f"<b>Estado Cheque:</b> EMITIDO<br/>"
+                    f"<b>Imputación:</b> Lote Multiprovedor<br/>"
+                    f"<b>Respaldo:</b> Ver nómina adjunta",
+                    styles["CellT"]
+                )
+            ]
+        ]
+    elif tipo_inst == "TRANSFERENCIA":
+        banco_deb = inst.get("banco_cheque") or inst.get("banco") or "Banco Débito"
+        ref_sipap = inst.get("referencia_transferencia") or "-"
+        monto_transf = totales.get("total_desembolsado_pyg", 0)
+        voucher_rows = [
+            [
+                Paragraph("<b>INSTRUMENTO: TRANSFERENCIA BANCARIA (SIPAP)</b>", styles["SectionH1"]),
+                Paragraph(f"<b>MONTO DEBITADO: ₲ {_format_gs(monto_transf)}</b>", styles["VoucherHighlight"]),
+            ],
+            [
+                Paragraph(
+                    f"<font color='#475569'>Banco Débito:</font> <b>{banco_deb}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
+                    f"<font color='#475569'>Comprobante / Ref. SIPAP:</font> <b>{ref_sipap}</b><br/>"
+                    f"<font color='#475569'>Contraparte / Destinatario:</font> <b>{inst.get('titular_cheque') or 'Lote Proveedores'}</b>",
+                    styles["CellT"]
+                ),
+                Paragraph("<b>Estado:</b> DEBITADO / CONCILIADO<br/><b>Tipo:</b> Salida de Fondos", styles["CellT"])
+            ]
+        ]
+    else:
+        monto_egr = totales.get("total_desembolsado_pyg", 0)
+        voucher_rows = [
+            [
+                Paragraph("<b>INSTRUMENTO: EGRESO DE FONDOS — BÓVEDA CENTRAL</b>", styles["SectionH1"]),
+                Paragraph(f"<b>EGRESO EFECTIVO: ₲ {_format_gs(monto_egr)}</b>", styles["VoucherHighlight"]),
+            ],
+            [
+                Paragraph("<b>Origen de Fondos:</b> Bóveda Central (Retiro formal de tesorería)<br/><b>Moneda:</b> Guaraníes (PYG)", styles["CellT"]),
+                Paragraph("<b>Estado:</b> ENTREGADO EN EFECTIVO", styles["CellT"])
+            ]
+        ]
+
+    voucher_table = Table(voucher_rows, colWidths=[126 * mm, 60 * mm])
+    voucher_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F8FAFC")),
+        ("BOX", (0, 0), (-1, -1), 1, HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(voucher_table)
+    story.append(Spacer(1, 4 * mm))
+
+    # 3. RESUMEN MACRO / METRICAS DE LIQUIDACIÓN Y CAMBIO
+    tot_fact_pyg = totales.get("total_facturas_pyg", 0)
+    tot_desemb_pyg = totales.get("total_desembolsado_pyg", 0)
+    diff_cambio = totales.get("total_diferencia_cambio_pyg", 0)
+    cant_orders = len(batch_data.get("orders", []))
+    tot_mon_ext = totales.get("total_moneda_extranjera")
+    cod_mon_ext = totales.get("moneda_extranjera") or "R$"
+    tc_prom = totales.get("tipo_cambio_promedio")
+
+    kpi_items = [
+        ("Órdenes Generadas", f"{cant_orders} Proveedor(es)"),
+        ("Facturas Amortizadas", f"₲ {_format_gs(tot_fact_pyg)}"),
+        ("Diferencia Cambiaria", f"₲ {_format_gs(diff_cambio)} ({'+ Sobrecosto' if diff_cambio > 0 else '- Favorable' if diff_cambio < 0 else 'Exacto'})"),
+        ("Total Instrumento", f"₲ {_format_gs(tot_desemb_pyg)}"),
+    ]
+    if tot_mon_ext:
+        kpi_items.insert(2, (f"Total {cod_mon_ext}", f"{cod_mon_ext} {tot_mon_ext:,.2f}"))
+
+    kpi_col_w = (186 * mm) / len(kpi_items)
+    kpi_cells = []
+    for title, val in kpi_items:
+        kpi_cells.append(Paragraph(f"<font size='6.5' color='#64748B'>{title.upper()}</font><br/><b><font size='8' color='#0F172A'>{val}</font></b>", styles["CellTCenter"]))
+
+    kpi_table = Table([kpi_cells], colWidths=[kpi_col_w] * len(kpi_items))
+    kpi_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F1F5F9")),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+    ]))
+    story.append(kpi_table)
+    story.append(Spacer(1, 4 * mm))
+
+    # 4. NÓMINA DETALLADA DE PROVEEDORES PAGADOS Y FACTURAS AMORTIZADAS
+    story.append(Paragraph("<b>DETALLE ANALÍTICO DE ÓRDENES DE PAGO Y FACTURAS AMORTIZADAS</b>", styles["SectionH1"]))
+    story.append(Spacer(1, 1.5 * mm))
+
+    table_data = [[
+        Paragraph("<b>N° OP</b>", styles["CellTBold"]),
+        Paragraph("<b>Proveedor & RUC</b>", styles["CellTBold"]),
+        Paragraph("<b>Factura(s) Imputada(s)</b>", styles["CellTBold"]),
+        Paragraph("<b>Moneda Orig.</b>", styles["CellTCenterBold"]),
+        Paragraph("<b>Dif. Cambio</b>", styles["CellTRightBold"]),
+        Paragraph("<b>Recibo Prov.</b>", styles["CellTCenterBold"]),
+        Paragraph("<b>Total Pagado (₲)</b>", styles["CellTRightBold"]),
+    ]]
+
+    total_neto_acumulado = Decimal("0")
+    total_diff_acumulado = Decimal("0")
+
+    for o in batch_data.get("orders", []):
+        num_op = o.get("numero_orden") or "-"
+        sup_nombre = o.get("supplier_nombre") or o.get("supplier", {}).get("razon_social") or "Proveedor"
+        sup_ruc = o.get("supplier_ruc") or o.get("supplier", {}).get("ruc") or "-"
+        monto_pyg = Decimal(str(o.get("monto_pyg") or o.get("monto_neto") or 0))
+        diff_item = Decimal(str(o.get("diferencia_cambio") or 0))
+        monto_mon = float(o.get("monto_moneda") or 0)
+        moneda_code = o.get("moneda") or "PYG"
+        recibo_p = o.get("recibo_proveedor") or "-"
+
+        total_neto_acumulado += monto_pyg
+        total_diff_acumulado += diff_item
+
+        # Facturas texto
+        invoices_list = o.get("allocations") or []
+        if invoices_list:
+            inv_lines = []
+            for a in invoices_list:
+                inv_num = a.get("numero_factura") or a.get("invoice", {}).get("numero_factura") or "Factura"
+                m_app = Decimal(str(a.get("monto_aplicado") or 0))
+                s_rem = Decimal(str(a.get("saldo_restante") or 0))
+                tag_rem = " (Saldo ₲ 0)" if s_rem <= 0 else f" (Resta ₲ {_format_gs(s_rem)})"
+                inv_lines.append(f"{inv_num}: ₲ {_format_gs(m_app)}{tag_rem}")
+            inv_text = "<br/>".join(inv_lines)
+        else:
+            inv_text = "Sin facturas detalladas"
+
+        mon_orig_text = f"{moneda_code} {monto_mon:,.2f}" if moneda_code != "PYG" else "-"
+        diff_text = f"₲ {_format_gs(diff_item)}" if diff_item != Decimal("0") else "-"
+
+        table_data.append([
+            Paragraph(f"<b>{num_op}</b>", styles["CellTBold"]),
+            Paragraph(f"<b>{sup_nombre[:30]}</b><br/><font size='6.5' color='#64748B'>RUC: {sup_ruc}</font>", styles["CellT"]),
+            Paragraph(inv_text, styles["CellT"]),
+            Paragraph(mon_orig_text, styles["CellTCenter"]),
+            Paragraph(diff_text, styles["CellTRight"]),
+            Paragraph(str(recibo_p)[:15], styles["CellTCenter"]),
+            Paragraph(f"<b>₲ {_format_gs(monto_pyg)}</b>", styles["CellTRightBold"]),
+        ])
+
+    # Fila de Totales de la Grilla
+    table_data.append([
+        Paragraph("<b>TOTALES</b>", styles["CellTBold"]),
+        Paragraph(f"<b>{cant_orders} Proveedores</b>", styles["CellTBold"]),
+        Paragraph("", styles["CellT"]),
+        Paragraph("", styles["CellT"]),
+        Paragraph(f"<b>₲ {_format_gs(total_diff_acumulado)}</b>", styles["CellTRightBold"]),
+        Paragraph("", styles["CellT"]),
+        Paragraph(f"<b>₲ {_format_gs(total_neto_acumulado)}</b>", styles["CellTRightBold"]),
+    ])
+
+    det_table = Table(table_data, colWidths=[22 * mm, 45 * mm, 50 * mm, 18 * mm, 18 * mm, 15 * mm, 18 * mm])
+    det_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), HexColor("#E2E8F0")),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2.5),
+        ("BACKGROUND", (0, -1), (-1, -1), HexColor("#F1F5F9")),
+    ]))
+    story.append(det_table)
+    story.append(Spacer(1, 4 * mm))
+
+    # 5. RESUMEN DE CONCILIACIÓN Y OBSERVACIONES
+    obs_general = batch_data.get("observaciones_generales") or "Liquidación agrupada aprobada sin discrepancias."
+    concil_rows = [
+        [
+            Paragraph("<b>NOTAS / OBSERVACIONES DE LA OPERACIÓN:</b>", styles["CellTBold"]),
+            Paragraph("<b>CUADRE CONTABLE:</b>", styles["CellTBold"]),
+        ],
+        [
+            Paragraph(f"{obs_general}", styles["CellT"]),
+            Paragraph(
+                f"Suma Amortizada Facturas: ₲ {_format_gs(total_neto_acumulado - total_diff_acumulado)}<br/>"
+                f"+ Dif. Cambio Imputada: ₲ {_format_gs(total_diff_acumulado)}<br/>"
+                f"<b>= Total Instrumento Girado: ₲ {_format_gs(total_neto_acumulado)}</b><br/>"
+                f"<font color='#16A34A'><b>✓ ESTADO DE CUADRE: EXACTO (₲ 0)</b></font>",
+                styles["CellT"]
+            )
+        ]
+    ]
+    concil_table = Table(concil_rows, colWidths=[110 * mm, 76 * mm])
+    concil_table.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#FAF5FF")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(concil_table)
+    story.append(Spacer(1, 5 * mm))
+
+    # 6. CASILLEROS DE FIRMAS DE CONTROL INTERNO (AUDITORÍA & GERENCIA)
+    signatures = [
+        [
+            Paragraph("____________________________<br/><b>ELABORADO / OPERADO</b><br/>Firma: Tesorería / Compras<br/>Aclaración:", styles["CellTCenter"]),
+            Paragraph("____________________________<br/><b>VERIFICADO</b><br/>Firma: Control Interno / Finanzas<br/>Aclaración:", styles["CellTCenter"]),
+            Paragraph("____________________________<br/><b>INSTRUMENTO RETIRADO POR</b><br/>Firma / C.I.:<br/>Fecha y Hora:", styles["CellTCenter"]),
+            Paragraph("____________________________<br/><b>AUTORIZADO</b><br/>Firma: Gerencia General<br/>Aclaración:", styles["CellTCenter"]),
+        ]
+    ]
+    sig_table = Table(signatures, colWidths=[46.5 * mm, 46.5 * mm, 46.5 * mm, 46.5 * mm])
+    sig_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(KeepTogether([sig_table]))
+
+    # Compilar con numeración automática
+    footer_text = f"Acta Interna de Pago por Lote {identificador} — Extra Supermercado Mayorista — Grupo Santa Teresa E.A.S."
+    doc.build(story, canvasmaker=lambda *args, **kwargs: _NumberedCanvas(*args, footer_left=footer_text, **kwargs))
+    return buffer.getvalue()
+

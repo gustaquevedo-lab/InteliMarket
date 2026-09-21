@@ -3,7 +3,7 @@ import {
   X, Check, AlertTriangle, Plus, Trash2, CreditCard,
   Building2, Wallet, FileText, Calendar, CheckCircle2,
   DollarSign, Layers, Loader2, Globe, ArrowRight, Info,
-  ArrowRightLeft
+  ArrowRightLeft, Download, Printer
 } from "lucide-react"
 import { api } from "../../api"
 import { formatPYG, formatDate } from "../../utils/format"
@@ -56,6 +56,8 @@ export default function MultiSupplierPaymentModal({
 }: Props) {
   const toast = useToast()
   const [submitting, setSubmitting] = useState(false)
+  const [batchSuccessResult, setBatchSuccessResult] = useState<any | null>(null)
+  const [downloadingReport, setDownloadingReport] = useState(false)
 
   // Cotización por defecto para Reales (R$)
   const [globalTipoCambioBRL, setGlobalTipoCambioBRL] = useState<number>(1450)
@@ -413,11 +415,29 @@ export default function MultiSupplierPaymentModal({
         "Lote Procesado con Éxito",
         `Se crearon ${res.orders?.length || groups.length} Órdenes de Pago individuales respaldadas por un único instrumento de desembolso.`
       )
-      onSuccess(res)
+      setBatchSuccessResult(res)
+      handleDownloadReport(res)
     } catch (err: any) {
       toast.error("Error al procesar lote", err.message || String(err))
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleDownloadReport = async (resData?: any) => {
+    const data = resData || batchSuccessResult
+    if (!data) return
+    const orderIds = data.order_ids || data.orders?.map((o: any) => o.order_id)
+    try {
+      setDownloadingReport(true)
+      await api.financial.paymentOrders.downloadBatchReportPdf(
+        { order_ids: orderIds, cheque_id: data.cheque_id },
+        `reporte_lote_${data.numero_cheque ? `cheque_${data.numero_cheque}` : new Date().toISOString().slice(0, 10)}.pdf`
+      )
+    } catch (err: any) {
+      toast.error("Error al descargar reporte", err.message || String(err))
+    } finally {
+      setDownloadingReport(false)
     }
   }
 
@@ -445,15 +465,141 @@ export default function MultiSupplierPaymentModal({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => {
+              if (batchSuccessResult) {
+                onSuccess(batchSuccessResult)
+              }
+              onClose()
+            }}
             className="p-2 text-white/80 hover:text-white rounded-xl hover:bg-white/10 transition"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* CONTENIDO SCROLLABLE */}
-        <form onSubmit={handleSubmitBatch} className="p-5 sm:p-6 space-y-6 overflow-y-auto flex-1 text-xs">
+        {batchSuccessResult ? (
+          /* PANTALLA DE ÉXITO Y EMISIÓN DE REPORTE INTERNO PDF */
+          <div className="p-6 sm:p-8 space-y-6 overflow-y-auto flex-1 text-xs">
+            <div className="text-center space-y-2 py-3">
+              <div className="w-16 h-16 rounded-3xl bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 mx-auto flex items-center justify-center border border-emerald-500/30 shadow-lg shadow-emerald-500/10">
+                <CheckCircle2 className="w-9 h-9" />
+              </div>
+              <h3 className="text-xl font-black text-slate-900 dark:text-white">
+                ¡Lote de Pagos Procesado con Éxito!
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-lg mx-auto">
+                Se liquidaron {batchSuccessResult.orders?.length || 0} órdenes de pago asociadas mediante un único instrumento financiero.
+              </p>
+            </div>
+
+            {/* Voucher resumen del instrumento emitido */}
+            <div className="bg-slate-50 dark:bg-slate-850/60 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4 shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <Wallet className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  <span className="font-extrabold text-slate-900 dark:text-white uppercase text-xs tracking-wider">
+                    {batchSuccessResult.forma_pago === "cheque"
+                      ? `Cheque Girado N° ${batchSuccessResult.numero_cheque || "Generado"}`
+                      : batchSuccessResult.forma_pago === "transferencia"
+                      ? "Transferencia Bancaria SIPAP"
+                      : "Retiro de Bóveda Central"}
+                  </span>
+                </div>
+                <span className="text-base font-black font-mono text-emerald-600 dark:text-emerald-400">
+                  ₲ {formatPYG(batchSuccessResult.total_pyg)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Facturas Amortizadas</span>
+                  <span className="font-mono font-bold text-slate-700 dark:text-slate-200">
+                    ₲ {formatPYG(batchSuccessResult.total_facturas_pyg)}
+                  </span>
+                </div>
+                <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Diferencia de Cambio Imputada</span>
+                  <span className={`font-mono font-bold ${
+                    Number(batchSuccessResult.diferencia_cambio_total || 0) > 0
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "text-emerald-600 dark:text-emerald-400"
+                  }`}>
+                    ₲ {formatPYG(batchSuccessResult.diferencia_cambio_total)}
+                  </span>
+                </div>
+                <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Proveedores Pagados</span>
+                  <span className="font-mono font-bold text-slate-700 dark:text-slate-200">
+                    {batchSuccessResult.orders?.length || 0} Proveedores
+                  </span>
+                </div>
+              </div>
+
+              {/* Nómina de Órdenes Generadas */}
+              <div className="space-y-2 pt-1">
+                <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">
+                  Órdenes de Pago Generadas en este Lote:
+                </span>
+                <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1">
+                  {batchSuccessResult.orders?.map((o: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <span className="font-mono font-black text-slate-900 dark:text-white">{o.numero_orden}</span>
+                        <span className="text-slate-700 dark:text-slate-300 font-bold truncate max-w-[220px]">{o.supplier_nombre}</span>
+                      </div>
+                      <div className="flex items-center gap-3 font-mono">
+                        {o.moneda && o.moneda !== "PYG" && (
+                          <span className="text-[10px] text-slate-400">{o.moneda} {Number(o.monto_moneda || 0).toLocaleString("es-PY", { minimumFractionDigits: 2 })}</span>
+                        )}
+                        <span className="font-bold text-rose-600 dark:text-rose-400">₲ {formatPYG(o.monto_pyg)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Aviso de Reporte Oficial */}
+            <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 rounded-2xl p-4 flex items-start gap-3">
+              <Info className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+              <div className="text-xs text-slate-700 dark:text-slate-300 space-y-1">
+                <p className="font-extrabold text-emerald-900 dark:text-emerald-200">
+                  Reporte PDF Premium para Uso Interno Generado
+                </p>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                  El acta interna incluye el membrete institucional de Extra Supermercado Mayorista, la nómina de facturas amortizadas, la tarjeta del cheque/instrumento girado y los espacios para firmas de Tesorería, Auditoría y Gerencia.
+                </p>
+              </div>
+            </div>
+
+            {/* Botones de acción */}
+            <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => handleDownloadReport()}
+                disabled={downloadingReport}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 transition shadow-md shadow-emerald-600/20"
+              >
+                {downloadingReport ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                <span>Descargar Reporte Interno PDF</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onSuccess(batchSuccessResult)
+                  onClose()
+                }}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-bold text-xs flex items-center justify-center gap-2 transition"
+              >
+                <span>Finalizar y Ver Órdenes de Pago</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* CONTENIDO SCROLLABLE FORMULARIO */
+          <form onSubmit={handleSubmitBatch} className="p-5 sm:p-6 space-y-6 overflow-y-auto flex-1 text-xs">
           {/* BARRA DE COTIZACIÓN R$ Y ACCIONES RÁPIDAS */}
           <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
             <div className="flex items-center gap-3">
@@ -1118,7 +1264,8 @@ export default function MultiSupplierPaymentModal({
             </div>
           </div>
         </form>
-      </div>
+      )}
+    </div>
 
       {/* MODAL SECUNDARIO: AGREGAR OTRO PROVEEDOR */}
       {showAddSupplierModal && (

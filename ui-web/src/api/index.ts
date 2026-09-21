@@ -3333,6 +3333,17 @@ export const api = {
         client.get<any[]>("/v1/financial/payment-orders/cheques-disponibles", { company_id: COMPANY_ID } as any),
       createMultiSupplierBatch: (data: any) =>
         client.post<any>(`/v1/financial/payment-orders/batch-multi-supplier?company_id=${COMPANY_ID}`, data),
+      downloadBatchReportPdf: (params: { order_ids?: string[]; cheque_id?: string }, filename?: string) => {
+        const queryParams: Record<string, any> = { company_id: COMPANY_ID }
+        if (params.order_ids && params.order_ids.length > 0) {
+          queryParams.order_ids = params.order_ids.join(",")
+        }
+        if (params.cheque_id) {
+          queryParams.cheque_id = params.cheque_id
+        }
+        const defaultFilename = filename || `reporte_lote_pago_${new Date().toISOString().slice(0, 10)}.pdf`
+        return downloadAuthenticated("/v1/financial/payment-orders/batch/report.pdf", queryParams, defaultFilename)
+      },
     },
     receptions: {
       unbilled: (params?: { supplier_id?: string }) =>
