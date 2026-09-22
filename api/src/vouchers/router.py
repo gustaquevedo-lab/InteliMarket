@@ -2,7 +2,7 @@
 
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
@@ -13,6 +13,8 @@ from api.src.vouchers.schemas import (
     VoucherRedeemResponse,
     VoucherSeedUPRequest,
     ConvenioSummaryResponse,
+    VoucherLinkInvoiceRequest,
+    VoucherBatchCreateRequest,
 )
 from api.src.vouchers import service
 
@@ -94,7 +96,7 @@ async def get_summary_endpoint(
 
 @router.post("/link-invoice")
 async def link_invoice_endpoint(
-    payload: VoucherLinkInvoiceRequest,
+    payload: VoucherLinkInvoiceRequest = Body(...),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_auth),
 ):
@@ -110,7 +112,7 @@ async def link_invoice_endpoint(
 
 @router.post("/batch")
 async def create_voucher_batch_endpoint(
-    payload: VoucherBatchCreateRequest,
+    payload: VoucherBatchCreateRequest = Body(...),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_auth),
 ):
