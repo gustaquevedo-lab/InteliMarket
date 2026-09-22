@@ -131,7 +131,19 @@ const ESCPOS_ALIGN_CENTER = ESC + 'a' + '\x01'
 const ESCPOS_DOUBLE_ON = GS + '!' + '\x11'
 const ESCPOS_HEIGHT_ON = GS + '!' + '\x10'
 const ESCPOS_DOUBLE_OFF = GS + '!' + '\x00'
+// Video inverso (texto blanco sobre fondo negro) -- lo que en la impresora
+// térmica hace de "fondo llamativo" para distinguir de un vistazo con qué
+// integración se cobró (PlugPay vs Bancard QR), sin agrandar el ticket.
+const ESCPOS_REVERSE_ON = GS + 'B' + '\x01'
+const ESCPOS_REVERSE_OFF = GS + 'B' + '\x00'
 const ESCPOS_LINE_WIDTH = 48
+
+// Etiqueta del proveedor: negrita + fondo invertido, bien chica (una sola
+// línea) para que el comprobante siga siendo mínimo pero quede clarísimo
+// con cuál de las dos integraciones "en pantalla" se cobró.
+function escposProviderBadge(label: string): string {
+  return ESCPOS_BOLD_ON + ESCPOS_REVERSE_ON + ` ${label} ` + ESCPOS_REVERSE_OFF + ESCPOS_BOLD_OFF + '\n'
+}
 
 function escposFormatDateTime(val?: string | number | Date | null): string {
   if (!val) return '-'
@@ -1435,6 +1447,7 @@ export default function POSPage() {
                 nombreCliente: plugpayCpf,
               })
               setBancardQrState("aprobada")
+              printPlugpayParceladoVoucher(txn, montoPyg, cleanCpf, plugpayCuotas)
             } else if (txn.status === 6 || txn.status === "rejected" || txn.status === "cancelled") {
               clearPlugpayPoll()
               setPlugpayState("error")
@@ -1642,6 +1655,7 @@ export default function POSPage() {
           if (st.status === "confirmed") {
             setBancardCloudQrState("aprobada")
             clearInterval(bancardCloudPollRef.current); bancardCloudPollRef.current = null
+            printBancardCloudQrVoucher({ hookAlias: res.hook_alias, amount: res.amount }, st)
           } else if (st.status === "failed" || st.status === "reverted") {
             setBancardCloudQrState("error")
             setBancardCloudQrError(st.response_description || "El pago no se pudo confirmar.")
@@ -1698,6 +1712,7 @@ export default function POSPage() {
           if (st.status === "confirmed") {
             updateExtraLeg(leg.id, { txnState: "aprobada" })
             clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+            printBancardCloudQrVoucher({ hookAlias: res.hook_alias, amount: monto }, st)
           } else if (st.status === "failed" || st.status === "reverted") {
             updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: st.response_description || "El pago no se pudo confirmar." })
             clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
@@ -5968,6 +5983,7 @@ export default function POSPage() {
 
     let t = ESCPOS_INIT
     t += ESCPOS_ALIGN_CENTER
+    t += escposProviderBadge('PLUGPAY')
     t += ESCPOS_BOLD_ON + 'COMPROBANTE PIX' + ESCPOS_BOLD_OFF + '\n'
     t += 'EXTRA SUPERMERCADO\n'
     t += ESCPOS_ALIGN_LEFT
@@ -5987,6 +6003,86 @@ export default function POSPage() {
     t += ESCPOS_BOLD_ON + 'APROBADO' + ESCPOS_BOLD_OFF + '\n'
 
     // Exactamente 2 saltos antes de cortar
+    t += '\n\n'
+    t += GS + 'V' + '\x01'
+
+    try {
+      await (window as any).electronAPI.printEscPos(escposToBase64(t), tpl.nombre_impresora_windows || "ZKP8008")
+    } catch (e) {}
+  }
+
+  // Mismo comprobante minimo que PIX, para Crédito Parcelado Brasil (tambien
+  // PlugPay, tambien 100% cloud sin voucher fisico propio) -- antes no
+  // imprimia nada al aprobarse.
+  const printPlugpayParceladoVoucher = async (txn: any, montoPyg: number, cpf: string, cuotas: number) => {
+    if (!(window as any).electronAPI?.printEscPos) return
+
+    const fmtGs = (val: number | string | null | undefined): string => {
+      const n = typeof val === "number" ? val : parseFloat(String(val ?? 0)) || 0
+      return Math.round(n).toLocaleString("es-PY")
+    }
+
+    const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
+    const W = ESCPOS_LINE_WIDTH
+
+    let t = ESCPOS_INIT
+    t += ESCPOS_ALIGN_CENTER
+    t += escposProviderBadge('PLUGPAY')
+    t += ESCPOS_BOLD_ON + 'COMPROBANTE CRÉDITO BRASIL' + ESCPOS_BOLD_OFF + '\n'
+    t += 'EXTRA SUPERMERCADO\n'
+    t += ESCPOS_ALIGN_LEFT
+    t += escposDashes(W) + '\n'
+    t += `${new Date().toLocaleString("es-PY")} - Caja (${puntoEmision})\n`
+    t += `Cajero: ${escposStripAccents(user?.nombre || '')}\n`
+    if (cpf) t += `CPF: ${cpf}\n`
+    t += `Cuotas: ${cuotas}x | Aut: ${txn?.SerialNumber || txn?.id || '-'}\n`
+    t += escposDashes(W) + '\n'
+    t += escposTwoCol('TOTAL Gs.:', fmtGs(montoPyg), W) + '\n'
+    t += escposDashes(W) + '\n'
+    t += ESCPOS_ALIGN_CENTER
+    t += ESCPOS_BOLD_ON + 'APROBADO' + ESCPOS_BOLD_OFF + '\n'
+    t += '\n\n'
+    t += GS + 'V' + '\x01'
+
+    try {
+      await (window as any).electronAPI.printEscPos(escposToBase64(t), tpl.nombre_impresora_windows || "ZKP8008")
+    } catch (e) {}
+  }
+
+  // Mismo mecanismo que PlugPay: Bancard QR "en pantalla" (cloud, no el
+  // terminal Zimple físico que ya tiene su propio voucher) tampoco entrega
+  // ningún comprobante propio -- lo generamos nosotros al confirmarse el pago.
+  const printBancardCloudQrVoucher = async (
+    data: { hookAlias: string; amount: number },
+    status?: { ticket_number?: string; authorization_code?: string; payer_name?: string; payer_lastname?: string },
+  ) => {
+    if (!(window as any).electronAPI?.printEscPos) return
+
+    const fmtGs = (val: number | string | null | undefined): string => {
+      const n = typeof val === "number" ? val : parseFloat(String(val ?? 0)) || 0
+      return Math.round(n).toLocaleString("es-PY")
+    }
+
+    const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
+    const W = ESCPOS_LINE_WIDTH
+
+    let t = ESCPOS_INIT
+    t += ESCPOS_ALIGN_CENTER
+    t += escposProviderBadge('BANCARD QR')
+    t += ESCPOS_BOLD_ON + 'COMPROBANTE QR' + ESCPOS_BOLD_OFF + '\n'
+    t += 'EXTRA SUPERMERCADO\n'
+    t += ESCPOS_ALIGN_LEFT
+    t += escposDashes(W) + '\n'
+    t += `${new Date().toLocaleString("es-PY")} - Caja (${puntoEmision})\n`
+    t += `Cajero: ${escposStripAccents(user?.nombre || '')}\n`
+    const pagador = [status?.payer_name, status?.payer_lastname].filter(Boolean).join(' ')
+    if (pagador) t += `Cliente: ${escposStripAccents(pagador)}\n`
+    t += `Aut: ${status?.authorization_code || '-'} | Bol: ${status?.ticket_number || data.hookAlias}\n`
+    t += escposDashes(W) + '\n'
+    t += escposTwoCol('TOTAL Gs.:', fmtGs(data.amount), W) + '\n'
+    t += escposDashes(W) + '\n'
+    t += ESCPOS_ALIGN_CENTER
+    t += ESCPOS_BOLD_ON + 'APROBADO' + ESCPOS_BOLD_OFF + '\n'
     t += '\n\n'
     t += GS + 'V' + '\x01'
 
