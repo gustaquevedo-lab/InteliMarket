@@ -25,8 +25,10 @@ def upgrade() -> None:
             created_at TIMESTAMPTZ DEFAULT now(),
             updated_at TIMESTAMPTZ DEFAULT now(),
             CONSTRAINT uq_settings_company_cid_key UNIQUE (company_id, key)
-        );
-        CREATE INDEX IF NOT EXISTS idx_settings_company_cid_key ON settings_company(company_id, key);
+        )
+    """)
+    op.execute("""
+        CREATE INDEX IF NOT EXISTS idx_settings_company_cid_key ON settings_company(company_id, key)
     """)
 
 
