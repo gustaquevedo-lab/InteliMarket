@@ -282,6 +282,8 @@ async def get_convenio_summary(
         for v in vouchers
     ]
 
+    first_v = vouchers[0] if vouchers else None
+
     return ConvenioSummaryResponse(
         convenio_nombre=convenio_nombre,
         total_emitidos=total_emitidos,
@@ -290,5 +292,98 @@ async def get_convenio_summary(
         monto_total_emitido=monto_total_emitido,
         monto_total_canjeado=monto_total_canjeado,
         monto_saldo_calle=monto_saldo_calle,
+        factura_emision_numero=first_v.factura_emision_numero if first_v else None,
+        cliente_ruc=first_v.cliente_ruc if first_v else "80024467-2",
+        cliente_razon_social=first_v.cliente_razon_social if first_v else "UNIVERSIDAD DEL PACÍFICO",
         vales=items,
     )
+
+
+async def link_invoice_to_convenio(
+    db: AsyncSession,
+    company_id: UUID,
+    convenio_nombre: str,
+    factura_numero: str,
+) -> dict:
+    """Vincula el número de factura legal emitida a todos los vales del convenio."""
+    from sqlalchemy import update
+    stmt = (
+        update(InstitutionalVoucher)
+        .where(
+            InstitutionalVoucher.company_id == company_id,
+            InstitutionalVoucher.convenio_nombre == convenio_nombre,
+        )
+        .values(factura_emision_numero=factura_numero.strip())
+    )
+    res = await db.execute(stmt)
+    await db.commit()
+    return {
+        "convenio": convenio_nombre,
+        "factura_numero": factura_numero.strip(),
+        "vales_actualizados": res.rowcount,
+    }
+
+
+async def create_voucher_batch(
+    db: AsyncSession,
+    company_id: UUID,
+    convenio_nombre: str,
+    total_vales: int,
+    monto_por_vale: Decimal,
+    fecha_vencimiento: date,
+    cliente_ruc: Optional[str] = None,
+    cliente_razon_social: Optional[str] = None,
+    factura_numero: Optional[str] = None,
+    prefijo_codigo: Optional[str] = None,
+) -> dict:
+    """Crea un nuevo lote de vales para un convenio."""
+    # Obtener el número máximo existente para no colisionar
+    stmt = (
+        select(InstitutionalVoucher.numero_vale)
+        .where(
+            InstitutionalVoucher.company_id == company_id,
+            InstitutionalVoucher.convenio_nombre == convenio_nombre,
+        )
+    )
+    res = await db.execute(stmt)
+    existing_nums = res.scalars().all()
+    max_num = 0
+    for num_str in existing_nums:
+        digits = re.findall(r"\d+", num_str)
+        if digits:
+            try:
+                max_num = max(max_num, int(digits[-1]))
+            except ValueError:
+                pass
+
+    creados = 0
+    pref = (prefijo_codigo or "").strip().upper()
+
+    for i in range(1, total_vales + 1):
+        actual_seq = max_num + i
+        num_str = str(actual_seq).zfill(3)
+        code = f"{pref}{num_str}" if pref else num_str
+
+        voucher = InstitutionalVoucher(
+            company_id=company_id,
+            convenio_nombre=convenio_nombre.strip(),
+            cliente_ruc=cliente_ruc.strip() if cliente_ruc else None,
+            cliente_razon_social=cliente_razon_social.strip() if cliente_razon_social else None,
+            factura_emision_numero=factura_numero.strip() if factura_numero else None,
+            numero_vale=num_str,
+            codigo_barras=code,
+            monto_inicial=monto_por_vale,
+            saldo_disponible=monto_por_vale,
+            fecha_vencimiento=fecha_vencimiento,
+            estado="ACTIVO",
+        )
+        db.add(voucher)
+        creados += 1
+
+    await db.commit()
+    return {
+        "convenio": convenio_nombre,
+        "creados": creados,
+        "monto_total": float(total_vales * monto_por_vale),
+    }
+

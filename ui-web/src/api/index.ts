@@ -4728,6 +4728,18 @@ export const api = {
       client.post<any>("/vouchers/seed-up", data || { total_vales: 75, monto_por_vale: 100000, fecha_vencimiento: "2026-12-31" }),
     summary: (convenio = "Universidad del Pacífico") =>
       client.get<any>(`/vouchers/summary?convenio=${encodeURIComponent(convenio)}`),
+    linkInvoice: (data: { convenio_nombre: string; factura_numero: string }) =>
+      client.post<any>("/vouchers/link-invoice", data),
+    createBatch: (data: {
+      convenio_nombre: string
+      total_vales: number
+      monto_por_vale: number
+      fecha_vencimiento: string
+      cliente_ruc?: string
+      cliente_razon_social?: string
+      factura_numero?: string
+      prefijo_codigo?: string
+    }) => client.post<any>("/vouchers/batch", data),
   },
 }
 

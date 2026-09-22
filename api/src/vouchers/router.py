@@ -90,3 +90,42 @@ async def get_summary_endpoint(
     """Resumen consolidado y detalle de todos los vales emitidos para el convenio."""
     company_id = uuid.UUID(str(user.get("company_id", "00000000-0000-0000-0000-000000000010")))
     return await service.get_convenio_summary(db, company_id, convenio)
+
+
+@router.post("/link-invoice")
+async def link_invoice_endpoint(
+    payload: VoucherLinkInvoiceRequest,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    """Asocia el número de factura legal emitida al lote de vales del convenio."""
+    company_id = uuid.UUID(str(user.get("company_id", "00000000-0000-0000-0000-000000000010")))
+    return await service.link_invoice_to_convenio(
+        db=db,
+        company_id=company_id,
+        convenio_nombre=payload.convenio_nombre,
+        factura_numero=payload.factura_numero,
+    )
+
+
+@router.post("/batch")
+async def create_voucher_batch_endpoint(
+    payload: VoucherBatchCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    """Crea un nuevo lote de vales para cualquier convenio institucional."""
+    company_id = uuid.UUID(str(user.get("company_id", "00000000-0000-0000-0000-000000000010")))
+    return await service.create_voucher_batch(
+        db=db,
+        company_id=company_id,
+        convenio_nombre=payload.convenio_nombre,
+        total_vales=payload.total_vales,
+        monto_por_vale=payload.monto_por_vale,
+        fecha_vencimiento=payload.fecha_vencimiento,
+        cliente_ruc=payload.cliente_ruc,
+        cliente_razon_social=payload.cliente_razon_social,
+        factura_numero=payload.factura_numero,
+        prefijo_codigo=payload.prefijo_codigo,
+    )
+
