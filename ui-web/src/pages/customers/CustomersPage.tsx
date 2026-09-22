@@ -1,3 +1,4 @@
+import { copyToClipboard } from "../../utils/clipboard"
 import { useState, useEffect, useMemo, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import {
@@ -1655,7 +1656,7 @@ export default function CustomersPage() {
                             type="button"
                             onClick={() => {
                               if (form.extra_club_numero) {
-                                navigator.clipboard.writeText(form.extra_club_numero)
+                                void copyToClipboard(form.extra_club_numero)
                                 toast.success("Copiado", "UUID copiado al portapapeles")
                               }
                             }}
@@ -1862,7 +1863,7 @@ export default function CustomersPage() {
                           type="button"
                           onClick={() => {
                             if (form.extra_club_numero) {
-                              navigator.clipboard.writeText(form.extra_club_numero)
+                              void copyToClipboard(form.extra_club_numero)
                               toast.success("Copiado", "UUID copiado")
                             }
                           }}

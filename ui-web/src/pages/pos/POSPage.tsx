@@ -1,3 +1,4 @@
+import { copyToClipboard } from "../../utils/clipboard"
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { createPortal } from "react-dom"
 import {
@@ -12089,7 +12090,7 @@ export default function POSPage() {
                                         <button
                                           type="button"
                                           onClick={() => {
-                                            navigator.clipboard.writeText(plugpayResult.qrCodeCopiaCola)
+                                            void copyToClipboard(plugpayResult.qrCodeCopiaCola)
                                             toast.success("Copiado", "Código PIX Copia y Cola copiado.")
                                           }}
                                           className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-orange-600/15 hover:bg-orange-600/25 text-orange-700 dark:text-orange-400 border border-orange-500/30 rounded-lg text-[11px] font-bold transition cursor-pointer shadow-xs"

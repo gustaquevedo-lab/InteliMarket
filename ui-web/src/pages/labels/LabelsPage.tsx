@@ -1,3 +1,4 @@
+import { copyToClipboard } from "../../utils/clipboard"
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import {
   Tags,
@@ -1184,7 +1185,7 @@ export default function LabelsPage() {
                     <div className="flex gap-1.5">
                       <input readOnly value={enlaceEstacion} onFocus={(e) => e.currentTarget.select()}
                         className="flex-1 px-2 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[10px] font-mono outline-none" />
-                      <button onClick={() => { navigator.clipboard.writeText(enlaceEstacion); toast.success("Copiado", "Pegalo en el navegador de la máquina de la Zebra.") }}
+                      <button onClick={() => { void copyToClipboard(enlaceEstacion); toast.success("Copiado", "Pegalo en el navegador de la máquina de la Zebra.") }}
                         className="px-3 rounded-lg bg-slate-800 text-white text-[10px] font-bold cursor-pointer">Copiar</button>
                     </div>
                   </div>

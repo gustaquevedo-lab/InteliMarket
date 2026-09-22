@@ -1,3 +1,4 @@
+import { copyToClipboard } from "../../utils/clipboard"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts"
 import {
@@ -279,7 +280,7 @@ function Drawer({ id, onClose, onChanged }: { id: string; onClose: () => void; o
               ) : (
                 <button disabled={busy} onClick={() => setSt("unresolved")} className="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-black flex items-center gap-1.5 cursor-pointer"><RotateCcw className="w-3.5 h-3.5" />Reabrir</button>
               )}
-              <button onClick={() => { void navigator.clipboard.writeText(issueAsText(issue, ev)); setCopied(true); setTimeout(() => setCopied(false), 1800) }} className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-black text-slate-600 dark:text-slate-300 flex items-center gap-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer" title="Copia el resumen con el error y las últimas acciones, listo para pegar en un chat">
+              <button onClick={() => { void copyToClipboard(issueAsText(issue, ev)).then((ok) => { setCopied(ok); setTimeout(() => setCopied(false), 1800) }) }} className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-black text-slate-600 dark:text-slate-300 flex items-center gap-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer" title="Copia el resumen con el error y las últimas acciones, listo para pegar en un chat">
                 <ClipboardCopy className="w-3.5 h-3.5" />{copied ? "¡Copiado!" : "Copiar resumen"}
               </button>
               <div className="ml-auto">

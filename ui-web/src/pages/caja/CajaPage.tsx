@@ -1,3 +1,4 @@
+import { copyToClipboard } from "../../utils/clipboard"
 import { useState, useEffect } from "react"
 import {
   Plus, Search, Loader2, Wallet, Banknote, Award, TrendingUp, ArrowUpRight, ArrowDownRight,
@@ -4851,7 +4852,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     <button
                       type="button"
                       onClick={() => {
-                        navigator.clipboard.writeText(escposTicketData.ticket_text)
+                        void copyToClipboard(escposTicketData.ticket_text)
                         toast.success("Copiado", "Texto del ticket copiado al portapapeles.")
                       }}
                       className="btn-ghost text-xs text-slate-300 hover:text-white"

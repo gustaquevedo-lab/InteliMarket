@@ -1,3 +1,4 @@
+import { copyToClipboard } from "../../utils/clipboard"
 import { useState, useEffect } from "react"
 import { CreditCard, ExternalLink, Search, CheckCircle, XCircle, Clock, Loader2, DollarSign, Eye } from "lucide-react"
 import { api } from "../../api"
@@ -224,7 +225,7 @@ export default function BancardPage() {
           <p className="text-sm text-green-600 dark:text-green-300 mb-3">Se abrió en una nueva pestaña.</p>
           <div className="flex gap-2">
             <input className="input-field flex-1 font-mono text-xs" value={checkoutUrl} readOnly />
-            <button className="btn-outline" onClick={() => { navigator.clipboard.writeText(checkoutUrl); toast.success("Copiado", "Enlace copiado") }}>Copiar</button>
+            <button className="btn-outline" onClick={() => { void copyToClipboard(checkoutUrl); toast.success("Copiado", "Enlace copiado") }}>Copiar</button>
           </div>
         </div>
       )}

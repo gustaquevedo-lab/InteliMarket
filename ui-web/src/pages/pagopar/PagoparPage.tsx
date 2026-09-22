@@ -1,4 +1,5 @@
 ﻿import { useState, useEffect } from "react"
+import { copyToClipboard } from "../../utils/clipboard"
 import { CreditCard, ExternalLink, Search, CheckCircle, XCircle, Clock, Loader2, DollarSign } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -188,7 +189,7 @@ export default function PagoparPage() {
           <p className="text-sm text-green-600 dark:text-green-300 mb-3">El enlace de pago fue generado. Se abrió en una nueva pestaña.</p>
           <div className="flex gap-2">
             <input className="input-field flex-1 font-mono text-xs" value={checkoutUrl} readOnly />
-            <button className="btn-outline" onClick={() => { navigator.clipboard.writeText(checkoutUrl); toast.success("Copiado", "Enlace copiado") }}>Copiar</button>
+            <button className="btn-outline" onClick={() => { void copyToClipboard(checkoutUrl); toast.success("Copiado", "Enlace copiado") }}>Copiar</button>
           </div>
         </div>
       )}

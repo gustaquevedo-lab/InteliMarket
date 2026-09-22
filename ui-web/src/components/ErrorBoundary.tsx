@@ -36,6 +36,23 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     this.setState({ errorInfo })
+
+    // Un modulo lazy que no carga ("Failed to fetch dynamically imported module", "Loading chunk")
+    // casi siempre es una pestana vieja apuntando a una version ya reemplazada en el servidor --
+    // no un bug real. Se resuelve solo con una recarga, asi que se hace automatico UNA vez en vez
+    // de mostrar la pantalla de error y esperar que alguien la lea y haga clic.
+    const esVersionVieja = /failed to fetch dynamically imported module|loading chunk|dynamically imported module/i.test(error?.message || "")
+    if (esVersionVieja) {
+      const key = "im_reload_version_vieja_en"
+      const ultimo = Number(sessionStorage.getItem(key) || 0)
+      if (Date.now() - ultimo > 15000) {
+        sessionStorage.setItem(key, String(Date.now()))
+        try { captureException(error, { componentStack: (errorInfo.componentStack || "").slice(0, 1500), modulo: this.props.moduleName || "raiz", auto_recargado: true }, "warning") } catch { /* nada */ }
+        window.location.reload()
+        return
+      }
+    }
+
     try { captureException(error, { componentStack: (errorInfo.componentStack || "").slice(0, 1500), modulo: this.props.moduleName || "raiz" }, "fatal") } catch { /* nada */ }
     console.error("🚨 [InteliMarket ErrorBoundary Caught]:", error, errorInfo)
   }

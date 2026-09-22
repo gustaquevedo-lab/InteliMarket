@@ -1,3 +1,4 @@
+import { copyToClipboard } from "../../utils/clipboard"
 import { useState, useEffect, useRef, useMemo } from "react"
 import {
   api,
@@ -2771,7 +2772,7 @@ export default function WhatsAppPage() {
                           </p>
                           <button
                             onClick={() => {
-                              navigator.clipboard.writeText(tmpl.content || "")
+                              void copyToClipboard(tmpl.content || "")
                               toast.success("Copiado", "Texto copiado al portapapeles")
                             }}
                             className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm border border-slate-200 dark:border-slate-700 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity hover:text-emerald-600"

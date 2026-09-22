@@ -136,7 +136,11 @@ export async function flush(keepalive = false) {
 }
 
 function errText(e: unknown): { kind: string; message: string; stack?: string } {
-  if (e instanceof Error) return { kind: e.name || "Error", message: e.message || String(e), stack: e.stack }
+  if (e instanceof Error) {
+    const kind = e.name || "Error"
+    const message = (e.message || String(e)).replace(new RegExp(`^${kind}:\\s*`), "")
+    return { kind, message, stack: e.stack }
+  }
   if (typeof e === "string") return { kind: "Error", message: e }
   try { return { kind: "Error", message: JSON.stringify(e).slice(0, 500) } } catch { return { kind: "Error", message: String(e) } }
 }
@@ -237,6 +241,9 @@ export function initMonitor() {
   console.error = (...args: any[]) => {
     origConsoleError(...args)
     try {
+      // El ErrorBoundary ya reporta el error real via captureException (nivel fatal);
+      // su propio console.error es solo para la consola del navegador, no una incidencia nueva.
+      if (typeof args[0] === "string" && args[0].includes("[InteliMarket ErrorBoundary")) return
       const text = args.map((a) => (a instanceof Error ? `${a.name}: ${a.message}` : typeof a === "string" ? a : (() => { try { return JSON.stringify(a) } catch { return String(a) } })())).join(" ").slice(0, 300)
       addBreadcrumb("console", text)
       const err = args.find((a) => a instanceof Error) as Error | undefined

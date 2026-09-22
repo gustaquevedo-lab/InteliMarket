@@ -1,3 +1,4 @@
+import { copyToClipboard } from "../../utils/clipboard"
 import React, { useState, useEffect, useRef, useCallback } from "react"
 import {
   Ticket, Sparkles, User, Phone, MapPin, Send, CheckCircle2,
@@ -570,7 +571,7 @@ export default function CapturaCuponesPage() {
   }
 
   const handleCopiarTexto = (texto: string, id: string) => {
-    navigator.clipboard.writeText(texto)
+    void copyToClipboard(texto)
     setCopiedId(id)
     toast.info("Copiado al portapapeles", "Listo para enviar por WhatsApp")
     setTimeout(() => setCopiedId(null), 2000)

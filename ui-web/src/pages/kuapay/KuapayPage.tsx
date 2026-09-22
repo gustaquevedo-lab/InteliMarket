@@ -1,3 +1,4 @@
+import { copyToClipboard } from "../../utils/clipboard"
 import { useState, useEffect } from "react"
 import { QrCode, ExternalLink, Search, CheckCircle, XCircle, Clock, Loader2, DollarSign, Copy } from "lucide-react"
 import { api } from "../../api"
@@ -199,7 +200,7 @@ export default function KuapayPage() {
           {checkoutResult.checkout_url && (
             <div className="flex gap-2">
               <input className="input-field flex-1 font-mono text-xs" value={checkoutResult.checkout_url} readOnly />
-              <button className="btn-ghost" onClick={() => { navigator.clipboard.writeText(checkoutResult.checkout_url!); toast.success("Copiado", "Enlace copiado") }}><Copy className="w-4 h-4" /></button>
+              <button className="btn-ghost" onClick={() => { void copyToClipboard(checkoutResult.checkout_url!); toast.success("Copiado", "Enlace copiado") }}><Copy className="w-4 h-4" /></button>
             </div>
           )}
         </div>
