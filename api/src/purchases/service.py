@@ -1773,6 +1773,279 @@ async def get_supplier_price_history(db: AsyncSession, supplier_id: str, product
     return list(result.scalars().all())
 
 
+async def get_product_supplier_comparison(
+    db: AsyncSession,
+    company_id: str | uuid.UUID,
+    product_id: str | uuid.UUID,
+) -> dict:
+    """
+    Consolida las ofertas y el historial de precios de todos los proveedores
+    para un producto, determinando quién lo vende más barato y el ahorro potencial.
+    """
+    cid = uuid.UUID(str(company_id))
+    pid = uuid.UUID(str(product_id))
+
+    # 1. Producto base
+    prod = await db.get(Product, pid)
+    if not prod:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    habitual_sup_id = prod.supplier_id
+    habitual_sup_nombre = None
+    hab_sup = None
+    if habitual_sup_id:
+        hab_sup = await db.get(Supplier, habitual_sup_id)
+        if hab_sup:
+            habitual_sup_nombre = hab_sup.razon_social or hab_sup.nombre_fantasia
+
+    suppliers_data: dict[str, dict] = {}
+
+    # Registrar proveedor habitual base
+    if habitual_sup_id:
+        sid_str = str(habitual_sup_id)
+        costo_base = prod.ultimo_costo or prod.costo_unitario or Decimal("0")
+        suppliers_data[sid_str] = {
+            "supplier_id": habitual_sup_id,
+            "razon_social": habitual_sup_nombre or "Proveedor Habitual",
+            "nombre_fantasia": getattr(hab_sup, "nombre_fantasia", None),
+            "ruc": getattr(hab_sup, "ruc", None),
+            "telefono": getattr(hab_sup, "telefono", None),
+            "es_habitual": True,
+            "ultimo_precio": Decimal(str(costo_base)),
+            "mejor_precio": Decimal(str(costo_base)),
+            "moneda": "PYG",
+            "fecha_ultima_compra": None,
+            "origen": "catalogo",
+            "referencia_doc": "Ficha Técnica",
+        }
+
+    # 2. Órdenes de Compra
+    po_query = (
+        select(
+            PurchaseOrder.supplier_id,
+            PurchaseOrderItem.precio_unitario,
+            PurchaseOrder.moneda,
+            PurchaseOrder.fecha,
+            PurchaseOrder.numero,
+            Supplier.razon_social,
+            Supplier.nombre_fantasia,
+            Supplier.ruc,
+            Supplier.telefono,
+        )
+        .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderItem.purchase_order_id)
+        .outerjoin(Supplier, Supplier.id == PurchaseOrder.supplier_id)
+        .where(
+            PurchaseOrderItem.product_id == pid,
+            PurchaseOrder.company_id == cid,
+            PurchaseOrder.estado != "cancelado",
+        )
+        .order_by(PurchaseOrder.fecha.desc())
+    )
+    po_results = (await db.execute(po_query)).all()
+    for row in po_results:
+        sid = row.supplier_id
+        if not sid:
+            continue
+        sid_str = str(sid)
+        precio = Decimal(str(row.precio_unitario or 0))
+        if precio <= 0:
+            continue
+
+        if sid_str not in suppliers_data:
+            suppliers_data[sid_str] = {
+                "supplier_id": sid,
+                "razon_social": row.razon_social or "Proveedor",
+                "nombre_fantasia": row.nombre_fantasia,
+                "ruc": row.ruc,
+                "telefono": row.telefono,
+                "es_habitual": (sid == habitual_sup_id),
+                "ultimo_precio": precio,
+                "mejor_precio": precio,
+                "moneda": row.moneda or "PYG",
+                "fecha_ultima_compra": row.fecha,
+                "origen": "orden_compra",
+                "referencia_doc": f"OC #{row.numero}",
+            }
+        else:
+            sd = suppliers_data[sid_str]
+            if sd["fecha_ultima_compra"] is None or (row.fecha and row.fecha > sd["fecha_ultima_compra"]):
+                sd["ultimo_precio"] = precio
+                sd["fecha_ultima_compra"] = row.fecha
+                sd["referencia_doc"] = f"OC #{row.numero}"
+            if precio < sd["mejor_precio"]:
+                sd["mejor_precio"] = precio
+            if row.razon_social:
+                sd["razon_social"] = row.razon_social
+                sd["ruc"] = row.ruc
+                sd["telefono"] = row.telefono
+
+    # 3. Historial de Precios (SupplierPriceHistory)
+    sph_query = (
+        select(
+            SupplierPriceHistory.supplier_id,
+            SupplierPriceHistory.precio,
+            SupplierPriceHistory.moneda,
+            SupplierPriceHistory.fecha,
+            SupplierPriceHistory.notas,
+            Supplier.razon_social,
+            Supplier.nombre_fantasia,
+            Supplier.ruc,
+            Supplier.telefono,
+        )
+        .outerjoin(Supplier, Supplier.id == SupplierPriceHistory.supplier_id)
+        .where(
+            SupplierPriceHistory.product_id == pid,
+            SupplierPriceHistory.company_id == cid,
+        )
+        .order_by(SupplierPriceHistory.fecha.desc())
+    )
+    sph_results = (await db.execute(sph_query)).all()
+    for row in sph_results:
+        sid = row.supplier_id
+        if not sid:
+            continue
+        sid_str = str(sid)
+        precio = Decimal(str(row.precio or 0))
+        if precio <= 0:
+            continue
+        if sid_str not in suppliers_data:
+            suppliers_data[sid_str] = {
+                "supplier_id": sid,
+                "razon_social": row.razon_social or "Proveedor",
+                "nombre_fantasia": row.nombre_fantasia,
+                "ruc": row.ruc,
+                "telefono": row.telefono,
+                "es_habitual": (sid == habitual_sup_id),
+                "ultimo_precio": precio,
+                "mejor_precio": precio,
+                "moneda": row.moneda or "PYG",
+                "fecha_ultima_compra": row.fecha,
+                "origen": "historial_precios",
+                "referencia_doc": row.notas or "Historial",
+            }
+        else:
+            sd = suppliers_data[sid_str]
+            if precio < sd["mejor_precio"]:
+                sd["mejor_precio"] = precio
+            if row.razon_social and not sd.get("razon_social"):
+                sd["razon_social"] = row.razon_social
+
+    # 4. Acuerdos y Contratos de Proveedor
+    contr_query = (
+        select(
+            SupplierContract.supplier_id,
+            SupplierContractItem.precio_acordado,
+            SupplierContractItem.moneda,
+            SupplierContract.numero,
+            SupplierContract.fecha_inicio,
+            Supplier.razon_social,
+            Supplier.nombre_fantasia,
+            Supplier.ruc,
+            Supplier.telefono,
+        )
+        .join(SupplierContract, SupplierContract.id == SupplierContractItem.contract_id)
+        .outerjoin(Supplier, Supplier.id == SupplierContract.supplier_id)
+        .where(
+            SupplierContractItem.product_id == pid,
+            SupplierContract.company_id == cid,
+            SupplierContract.activo == True,
+        )
+    )
+    contr_results = (await db.execute(contr_query)).all()
+    for row in contr_results:
+        sid = row.supplier_id
+        if not sid:
+            continue
+        sid_str = str(sid)
+        precio = Decimal(str(row.precio_acordado or 0))
+        if precio <= 0:
+            continue
+        if sid_str not in suppliers_data:
+            suppliers_data[sid_str] = {
+                "supplier_id": sid,
+                "razon_social": row.razon_social or "Proveedor",
+                "nombre_fantasia": row.nombre_fantasia,
+                "ruc": row.ruc,
+                "telefono": row.telefono,
+                "es_habitual": (sid == habitual_sup_id),
+                "ultimo_precio": precio,
+                "mejor_precio": precio,
+                "moneda": row.moneda or "PYG",
+                "fecha_ultima_compra": row.fecha_inicio,
+                "origen": "contrato",
+                "referencia_doc": f"Contrato #{row.numero}",
+            }
+        else:
+            sd = suppliers_data[sid_str]
+            if precio < sd["mejor_precio"]:
+                sd["mejor_precio"] = precio
+                sd["origen"] = "contrato"
+                sd["referencia_doc"] = f"Contrato #{row.numero}"
+
+    # Resolver nombres faltantes si los hay
+    for sid_str, item in suppliers_data.items():
+        if not item.get("razon_social") or item["razon_social"] in ("Proveedor", "Proveedor Habitual"):
+            s_obj = await db.get(Supplier, item["supplier_id"])
+            if s_obj:
+                item["razon_social"] = s_obj.razon_social or s_obj.nombre_fantasia or "Proveedor"
+                item["ruc"] = s_obj.ruc
+                item["telefono"] = s_obj.telefono
+
+    # Determinar costo de referencia
+    costo_referencia = prod.ultimo_costo or prod.costo_unitario or Decimal("0")
+    if habitual_sup_id and str(habitual_sup_id) in suppliers_data:
+        hab_p = suppliers_data[str(habitual_sup_id)]["ultimo_precio"]
+        if hab_p and hab_p > 0:
+            costo_referencia = hab_p
+
+    valid_items = list(suppliers_data.values())
+    min_price: Decimal | None = None
+    best_supplier: dict | None = None
+
+    for it in valid_items:
+        if it["mejor_precio"] > 0:
+            if min_price is None or it["mejor_precio"] < min_price:
+                min_price = it["mejor_precio"]
+                best_supplier = it
+
+    for it in valid_items:
+        it["es_mas_barato"] = (min_price is not None and it["mejor_precio"] == min_price)
+        if costo_referencia > 0 and it["mejor_precio"] < costo_referencia:
+            diff = costo_referencia - it["mejor_precio"]
+            it["ahorro_vs_habitual"] = diff
+            it["ahorro_pct"] = ((diff / costo_referencia) * 100).quantize(Decimal("0.1"))
+        else:
+            it["ahorro_vs_habitual"] = Decimal("0")
+            it["ahorro_pct"] = Decimal("0")
+
+    # Ordenar: más barato primero
+    valid_items.sort(key=lambda x: (x["mejor_precio"] if x["mejor_precio"] > 0 else Decimal("999999999999")))
+
+    max_ahorro_gs = Decimal("0")
+    max_ahorro_pct = Decimal("0")
+    if best_supplier and costo_referencia > 0 and best_supplier["mejor_precio"] < costo_referencia:
+        max_ahorro_gs = costo_referencia - best_supplier["mejor_precio"]
+        max_ahorro_pct = ((max_ahorro_gs / costo_referencia) * 100).quantize(Decimal("0.1"))
+
+    return {
+        "product_id": pid,
+        "nombre": prod.nombre,
+        "sku": prod.sku,
+        "codigo_barra": prod.codigo_barra,
+        "costo_unitario_actual": prod.costo_unitario or Decimal("0"),
+        "ultimo_costo": prod.ultimo_costo or Decimal("0"),
+        "habitual_supplier_id": habitual_sup_id,
+        "habitual_supplier_nombre": habitual_sup_nombre,
+        "mejor_precio": min_price,
+        "mejor_supplier_id": best_supplier["supplier_id"] if best_supplier else None,
+        "mejor_supplier_nombre": best_supplier["razon_social"] if best_supplier else None,
+        "ahorro_maximo_gs": max_ahorro_gs,
+        "ahorro_maximo_pct": max_ahorro_pct,
+        "proveedores": valid_items,
+    }
+
+
+
 async def get_supplier_performance(db: AsyncSession, supplier_id: str) -> dict:
     supplier = await get_supplier(db, supplier_id)
     if not supplier:
@@ -2521,16 +2794,15 @@ async def calculate_smart_replenishment_preview(
         where_clauses.append("""
             (
                 p.supplier_id = :supplier_id
-                OR (
-                    p.supplier_id IS NULL
-                    AND (
-                        last_sup.last_sup_id = :supplier_id
-                        OR EXISTS (
-                            SELECT 1 FROM purchase_order_items poi2
-                            JOIN purchase_orders po2 ON po2.id = poi2.purchase_order_id
-                            WHERE po2.supplier_id = :supplier_id AND poi2.product_id = p.id
-                        )
-                    )
+                OR last_sup.last_sup_id = :supplier_id
+                OR EXISTS (
+                    SELECT 1 FROM purchase_order_items poi2
+                    JOIN purchase_orders po2 ON po2.id = poi2.purchase_order_id
+                    WHERE po2.supplier_id = :supplier_id AND poi2.product_id = p.id
+                )
+                OR EXISTS (
+                    SELECT 1 FROM supplier_price_history sph2
+                    WHERE sph2.supplier_id = :supplier_id AND sph2.product_id = p.id
                 )
             )
         """)
