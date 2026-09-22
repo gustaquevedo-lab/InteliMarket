@@ -2598,6 +2598,52 @@ export const api = {
     lifoCosting: () => client.get<LifoReport[]>("/api/reports/inventory/lifo"),
     costComparison: () => client.get<CostComparisonReport[]>("/api/reports/inventory/cost-comparison"),
     fiscalBook: (params?: { tipo_libro?: string; fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/fiscal/book", params),
+    fiscalRg90Ventas: (params?: { fecha_desde?: string; fecha_hasta?: string; punto_emision?: string }) =>
+      client.get<{
+        company: { razon_social: string; ruc: string; timbrado: string };
+        periodo: { fecha_desde: string | null; fecha_hasta: string | null; punto_emision: string };
+        totales: {
+          cantidad_facturas: number;
+          cantidad_nc: number;
+          total_gravada_10: number;
+          total_iva_10: number;
+          total_gravada_5: number;
+          total_iva_5: number;
+          total_exenta: number;
+          total_general: number;
+        };
+        registros: Array<{
+          tipo_registro: number;
+          tipo_identificacion: number;
+          numero_identificacion: string;
+          dv: string;
+          nombre_comprador: string;
+          tipo_comprobante: number;
+          tipo_comprobante_label: string;
+          fecha_emision: string;
+          fecha_asuncion: string;
+          timbrado: string;
+          numero_comprobante: string;
+          gravada_10: number;
+          iva_10: number;
+          gravada_5: number;
+          iva_5: number;
+          exenta: number;
+          total: number;
+          condicion: number;
+          condicion_label: string;
+          moneda_extranjera: string;
+          imputa_iva: string;
+          imputa_ire: string;
+          imputa_irp: string;
+          comprobante_asociado_timbrado: string;
+          comprobante_asociado_numero: string;
+        }>;
+      }>("/api/reports/fiscal/rg90/ventas", params),
+    downloadRg90VentasXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string; punto_emision?: string }, filename?: string) =>
+      downloadAuthenticated("/api/reports/export/rg90/ventas.xlsx", params, filename || `libro_ventas_rg90_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.xlsx`),
+    downloadRg90VentasZip: (params?: { fecha_desde?: string; fecha_hasta?: string; punto_emision?: string }, filename?: string) =>
+      downloadAuthenticated("/api/reports/export/rg90/ventas.zip", params, filename || "RG90_MARANGATU_VENTAS.zip"),
     financialSummary: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/financial/summary", params),
     salesExecutiveProfitability: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
       client.get<{

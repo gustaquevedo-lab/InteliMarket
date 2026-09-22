@@ -1,6 +1,8 @@
 """Export service — generates Excel (XLSX) files for reports"""
 
 import io
+import csv
+import zipfile
 from datetime import date
 from typing import Optional
 
@@ -859,6 +861,187 @@ def export_sales_daily_consolidation(data: dict, fecha_desde: Optional[date] = N
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def export_fiscal_rg90_ventas_xlsx(data: dict) -> bytes:
+    """Genera la planilla Excel oficial para auditoría de Libro de Ventas RG 90 (DNIT)."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Libro Ventas RG90"
+
+    company = data.get("company", {})
+    periodo = data.get("periodo", {})
+    totales = data.get("totales", {})
+    registros = data.get("registros", [])
+
+    razon_social = company.get("razon_social", "GRUPO SANTA TERESA E.A.S.")
+    ruc = company.get("ruc", "80150377-9")
+    timbrado = company.get("timbrado", "18545636")
+    desde = periodo.get("fecha_desde") or "Inicio"
+    hasta = periodo.get("fecha_hasta") or "Actual"
+    boca = periodo.get("punto_emision") or "Todos"
+
+    ws.cell(row=1, column=1, value=f"EXTRA SUPERMERCADO MAYORISTA — {razon_social}").font = TITLE_FONT
+    ws.cell(row=2, column=1, value=f"RUC: {ruc}  |  TIMBRADO OFICIAL Nº: {timbrado}").font = Font(name="Inter", bold=True, size=11, color="1E3A8A")
+    ws.cell(row=3, column=1, value="LIBRO DE VENTAS — REGISTRO DE COMPROBANTES (RESOLUCIÓN GENERAL Nº 90/2021 DNIT)").font = Font(name="Inter", bold=True, size=11, color="047857")
+    ws.cell(row=4, column=1, value=f"Período Evaluado: {desde} al {hasta}  |  Boca / Caja: {boca}  |  Zona Horaria Oficial: America/Asuncion (Paraguay)").font = SUBTITLE_FONT
+
+    for r in range(1, 5):
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=20)
+
+    headers = [
+        "Tipo Reg.",
+        "Fecha Emisión",
+        "Tipo Comp.",
+        "Denominación",
+        "Timbrado",
+        "Nº Comprobante",
+        "Tipo Ident.",
+        "Nº Identificación",
+        "DV",
+        "Cliente / Razón Social",
+        "Condición",
+        "Gravada 10% (Gs.)",
+        "IVA 10% (Gs.)",
+        "Gravada 5% (Gs.)",
+        "IVA 5% (Gs.)",
+        "Exenta (Gs.)",
+        "Total Facturado (Gs.)",
+        "IVA",
+        "IRE",
+        "IRP"
+    ]
+
+    start_row = 6
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=start_row, column=col_idx, value=h)
+        cell.font = HEADER_FONT
+        cell.fill = PatternFill(start_color="065F46", end_color="065F46", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = THIN_BORDER
+
+    data_start = start_row + 1
+    for idx, reg in enumerate(registros):
+        r_idx = data_start + idx
+        row_values = [
+            reg.get("tipo_registro", 1),
+            reg.get("fecha_emision", ""),
+            reg.get("tipo_comprobante", 109),
+            reg.get("tipo_comprobante_label", "Factura"),
+            reg.get("timbrado", timbrado),
+            reg.get("numero_comprobante", ""),
+            reg.get("tipo_identificacion", 15),
+            reg.get("numero_identificacion", "44444401"),
+            reg.get("dv", ""),
+            reg.get("nombre_comprador", "Sin Nombre"),
+            reg.get("condicion_label", "Contado"),
+            reg.get("gravada_10", 0),
+            reg.get("iva_10", 0),
+            reg.get("gravada_5", 0),
+            reg.get("iva_5", 0),
+            reg.get("exenta", 0),
+            reg.get("total", 0),
+            reg.get("imputa_iva", "S"),
+            reg.get("imputa_ire", "S"),
+            reg.get("imputa_irp", "N"),
+        ]
+
+        for col_idx, val in enumerate(row_values, 1):
+            cell = ws.cell(row=r_idx, column=col_idx, value=val)
+            cell.font = DATA_FONT
+            cell.border = THIN_BORDER
+            if col_idx in (12, 13, 14, 15, 16, 17):
+                cell.number_format = CURRENCY_FMT
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (1, 2, 3, 5, 6, 7, 8, 9, 11, 18, 19, 20):
+                cell.alignment = Alignment(horizontal="center")
+
+    last_data_row = data_start + len(registros) - 1 if registros else data_start
+    tot_row = last_data_row + 1
+
+    ws.cell(row=tot_row, column=10, value="TOTALES GENERALES").font = BOLD_FONT
+    ws.cell(row=tot_row, column=10).alignment = Alignment(horizontal="right")
+
+    for c_idx in range(12, 18):
+        col_letter = ws.cell(row=tot_row, column=c_idx).column_letter
+        tot_cell = ws.cell(row=tot_row, column=c_idx)
+        if registros:
+            tot_cell.value = f"=SUM({col_letter}{data_start}:{col_letter}{last_data_row})"
+        else:
+            tot_cell.value = 0
+        tot_cell.font = BOLD_FONT
+        tot_cell.number_format = CURRENCY_FMT
+        tot_cell.fill = PatternFill(start_color="ECFDF5", end_color="ECFDF5", fill_type="solid")
+        tot_cell.border = Border(top=Side(style="thin", color="065F46"), bottom=Side(style="double", color="065F46"))
+
+    _auto_width(ws)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def export_fiscal_rg90_ventas_zip(data: dict) -> tuple[bytes, str]:
+    """Genera el paquete ZIP con el archivo CSV oficial para Marangatú (RG 90).
+    Estructura de nombre reglamentaria: <RUC_SIN_DV>_REG_<MMAAAA>_00001.zip
+    """
+    company = data.get("company", {})
+    periodo = data.get("periodo", {})
+    registros = data.get("registros", [])
+
+    ruc_raw = company.get("ruc", "80150377-9")
+    ruc_sin_dv = ruc_raw.split("-")[0].strip() if "-" in ruc_raw else ruc_raw.strip()
+
+    desde = periodo.get("fecha_desde")
+    hasta = periodo.get("fecha_hasta")
+    target_date = desde or hasta
+    if target_date:
+        parts = str(target_date).split("-")
+        mmaaaa = f"{parts[1]}{parts[0]}" if len(parts) >= 2 else "082026"
+    else:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        now_py = datetime.now(ZoneInfo("America/Asuncion"))
+        mmaaaa = now_py.strftime("%m%Y")
+
+    base_name = f"{ruc_sin_dv}_REG_{mmaaaa}_00001"
+    csv_filename = f"{base_name}.csv"
+    zip_filename = f"{base_name}.zip"
+
+    csv_buffer = io.StringIO()
+    writer = csv.writer(csv_buffer, delimiter=",", quoting=csv.QUOTE_MINIMAL)
+
+    for reg in registros:
+        writer.writerow([
+            reg.get("tipo_registro", 1),
+            reg.get("tipo_identificacion", 15),
+            reg.get("numero_identificacion", "44444401"),
+            reg.get("dv", ""),
+            reg.get("nombre_comprador", "Sin Nombre"),
+            reg.get("tipo_comprobante", 109),
+            reg.get("fecha_emision", ""),
+            reg.get("timbrado", "18545636"),
+            reg.get("numero_comprobante", ""),
+            reg.get("gravada_10", 0),
+            reg.get("gravada_5", 0),
+            reg.get("exenta", 0),
+            reg.get("total", 0),
+            reg.get("condicion", 1),
+            reg.get("moneda_extranjera", "N"),
+            reg.get("imputa_iva", "S"),
+            reg.get("imputa_ire", "S"),
+            reg.get("imputa_irp", "N"),
+            reg.get("comprobante_asociado_timbrado", ""),
+            reg.get("comprobante_asociado_numero", ""),
+        ])
+
+    csv_bytes = csv_buffer.getvalue().encode("utf-8")
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(csv_filename, csv_bytes)
+
+    return zip_buffer.getvalue(), zip_filename
+
 
 
 

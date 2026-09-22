@@ -12,6 +12,7 @@ Nota: consultas migradas a los nombres reales del esquema (modelos ORM):
 """
 
 import uuid
+import re
 from datetime import date
 from typing import Optional
 from sqlalchemy import text, select, func
@@ -638,6 +639,184 @@ async def get_fiscal_summary(db: AsyncSession, company_id: str, tipo_libro: str 
         "total_iva_10": float(result["total_iva_10"] or 0),
         "total_general": float(result["total_general"] or 0),
     }
+
+
+async def get_fiscal_rg90_ventas(
+    db: AsyncSession,
+    company_id: str,
+    fecha_desde: Optional[date] = None,
+    fecha_hasta: Optional[date] = None,
+    punto_emision: Optional[str] = None,
+) -> dict:
+    """Libro de Ventas bajo la Resolución General Nº 90/2021 (DNIT / SET Paraguay).
+
+    Genera la estructura reglamentaria de comprobantes para su posterior auditoría
+    y carga/importación masiva al sistema Marangatú.
+    Zona horaria inmutable: America/Asuncion.
+    """
+    comp_row = (await db.execute(
+        text("SELECT razon_social, ruc, timbrado_numero, config FROM companies WHERE id = :cid"),
+        {"cid": company_id}
+    )).first()
+
+    company_timbrado = "18545636"
+    company_ruc = "80150377-9"
+    company_razon = "GRUPO SANTA TERESA E.A.S."
+
+    if comp_row:
+        company_razon = comp_row.razon_social or company_razon
+        company_ruc = comp_row.ruc or company_ruc
+        config_dict = comp_row.config if isinstance(comp_row.config, dict) else {}
+        company_timbrado = comp_row.timbrado_numero or config_dict.get("timbrado_dnit") or company_timbrado
+
+    params = {"company_id": company_id}
+    where = "v.company_id = :company_id AND v.estado <> 'borrador'"
+    where += _build_tz_filter(fecha_desde, fecha_hasta, params, "v.fecha")
+
+    if punto_emision and punto_emision != "todos":
+        where += " AND v.numero LIKE :punto_emision"
+        params["punto_emision"] = f"{punto_emision}%"
+
+    query = f"""
+        SELECT
+            v.id,
+            v.numero as nro_comprobante,
+            TO_CHAR(v.fecha AT TIME ZONE 'America/Asuncion', 'DD/MM/YYYY') as fecha_emision_str,
+            TO_CHAR(v.fecha AT TIME ZONE 'America/Asuncion', 'YYYY-MM-DD HH24:MI:SS') as fecha_asuncion_full,
+            v.tipo_comprobante,
+            v.condicion,
+            v.estado,
+            c.ruc as cliente_ruc,
+            c.ci as cliente_ci,
+            COALESCE(c.razon_social, c.nombre_fantasia, 'Sin Nombre') as cliente_razon_social,
+            v.base_gravada_10 as base_10,
+            v.base_gravada_5 as base_5,
+            v.base_exenta as base_exenta,
+            v.iva_10 as iva_10,
+            v.iva_5 as iva_5,
+            v.total as total
+        FROM sales v
+        LEFT JOIN customers c ON c.id = v.customer_id
+        WHERE {where}
+        ORDER BY v.fecha ASC, v.numero ASC
+    """
+    rows = (await _exec(db, query, params)).all()
+
+    registros = []
+    totales = {
+        "cantidad_facturas": 0,
+        "cantidad_nc": 0,
+        "total_gravada_10": 0,
+        "total_iva_10": 0,
+        "total_gravada_5": 0,
+        "total_iva_5": 0,
+        "total_exenta": 0,
+        "total_general": 0,
+    }
+
+    for r in rows:
+        es_nc = (r["estado"] == "cancelado" or r["tipo_comprobante"] in ("nota_credito", "nc"))
+        tipo_comprobante_cod = 110 if es_nc else 109  # 109 = Factura, 110 = Nota de Crédito
+
+        raw_ruc = (r["cliente_ruc"] or "").strip()
+        raw_ci = (r["cliente_ci"] or "").strip()
+        raw_nombre = (r["cliente_razon_social"] or "Sin Nombre").strip()
+
+        tipo_ident = 15
+        num_ident = "44444401"
+        dv = "7"
+
+        if raw_ruc and raw_ruc not in ("44444401-7", "44444401", "XXX"):
+            tipo_ident = 11
+            if "-" in raw_ruc:
+                parts = raw_ruc.split("-", 1)
+                num_ident = re.sub(r"\D", "", parts[0])
+                dv = parts[1].strip()[:1]
+            else:
+                num_ident = re.sub(r"\D", "", raw_ruc)
+                dv = ""
+        elif raw_ci:
+            clean_ci = re.sub(r"\D", "", raw_ci)
+            if clean_ci:
+                tipo_ident = 12
+                num_ident = clean_ci
+                dv = ""
+
+        raw_num = str(r["nro_comprobante"] or "").strip()
+        if "-" not in raw_num and len(raw_num) <= 7:
+            formatted_num = f"001-011-{int(raw_num):07d}" if raw_num.isdigit() else raw_num
+        elif raw_num.count("-") == 2:
+            parts = raw_num.split("-")
+            formatted_num = f"{parts[0]:0>3}-{parts[1]:0>3}-{int(parts[2]):07d}" if parts[2].isdigit() else raw_num
+        else:
+            formatted_num = raw_num
+
+        base_10 = round(float(r["base_10"] or 0))
+        iva_10 = round(float(r["iva_10"] or 0))
+        base_5 = round(float(r["base_5"] or 0))
+        iva_5 = round(float(r["iva_5"] or 0))
+        exenta = round(float(r["base_exenta"] or 0))
+        total = round(float(r["total"] or 0))
+
+        condicion = str(r["condicion"] or "").lower()
+        condicion_cod = 2 if condicion in ("credito", "credito_extra_club") else 1
+
+        registro = {
+            "tipo_registro": 1,
+            "tipo_identificacion": tipo_ident,
+            "numero_identificacion": num_ident,
+            "dv": dv,
+            "nombre_comprador": raw_nombre,
+            "tipo_comprobante": tipo_comprobante_cod,
+            "tipo_comprobante_label": "Nota de Crédito" if es_nc else "Factura",
+            "fecha_emision": r["fecha_emision_str"],
+            "fecha_asuncion": r["fecha_asuncion_full"],
+            "timbrado": company_timbrado,
+            "numero_comprobante": formatted_num,
+            "gravada_10": base_10,
+            "iva_10": iva_10,
+            "gravada_5": base_5,
+            "iva_5": iva_5,
+            "exenta": exenta,
+            "total": total,
+            "condicion": condicion_cod,
+            "condicion_label": "Crédito" if condicion_cod == 2 else "Contado",
+            "moneda_extranjera": "N",
+            "imputa_iva": "S",
+            "imputa_ire": "S",
+            "imputa_irp": "N",
+            "comprobante_asociado_timbrado": company_timbrado if es_nc else "",
+            "comprobante_asociado_numero": formatted_num if es_nc else "",
+        }
+        registros.append(registro)
+
+        if es_nc:
+            totales["cantidad_nc"] += 1
+        else:
+            totales["cantidad_facturas"] += 1
+
+        totales["total_gravada_10"] += base_10
+        totales["total_iva_10"] += iva_10
+        totales["total_gravada_5"] += base_5
+        totales["total_iva_5"] += iva_5
+        totales["total_exenta"] += exenta
+        totales["total_general"] += total
+
+    return {
+        "company": {
+            "razon_social": company_razon,
+            "ruc": company_ruc,
+            "timbrado": company_timbrado,
+        },
+        "periodo": {
+            "fecha_desde": str(fecha_desde) if fecha_desde else None,
+            "fecha_hasta": str(fecha_hasta) if fecha_hasta else None,
+            "punto_emision": punto_emision or "todos",
+        },
+        "totales": totales,
+        "registros": registros,
+    }
+
 
 
 async def get_financial_summary(db: AsyncSession, company_id: str, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> dict:

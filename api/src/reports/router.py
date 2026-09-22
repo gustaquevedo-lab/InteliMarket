@@ -40,6 +40,12 @@ def _excel_response(data: bytes, filename: str):
     return StreamingResponse(io.BytesIO(data), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers=headers)
 
 
+def _zip_response(data: bytes, filename: str):
+    headers = {"Content-Disposition": f"attachment; filename={filename}", "Content-Length": str(len(data))}
+    return StreamingResponse(io.BytesIO(data), media_type="application/zip", headers=headers)
+
+
+
 @router.get("/sales/summary")
 async def sales_summary(fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), branch_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     return await service.get_sales_summary(db, user["company_id"], fecha_desde, fecha_hasta, branch_id)
@@ -143,6 +149,18 @@ async def fiscal_book(tipo_libro: str = Query("ventas", pattern="^(ventas|compra
 @router.get("/fiscal/summary")
 async def fiscal_summary(tipo_libro: str = Query("ventas", pattern="^(ventas|compras)$"), fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth), _=Depends(require_permission("reports:fiscal"))):
     return await service.get_fiscal_summary(db, user["company_id"], tipo_libro, fecha_desde, fecha_hasta)
+
+
+@router.get("/fiscal/rg90/ventas")
+async def fiscal_rg90_ventas(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    punto_emision: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_fiscal_rg90_ventas(db, user["company_id"], fecha_desde, fecha_hasta, punto_emision)
+
 
 
 @router.get("/financial/summary")
@@ -325,6 +343,36 @@ async def export_fiscal_book(tipo_libro: str = Query("ventas", pattern="^(ventas
     data = await service.get_fiscal_book(db, user["company_id"], tipo_libro, fecha_desde, fecha_hasta)
     xlsx = export_service.export_fiscal_book(data, tipo_libro, fecha_desde, fecha_hasta)
     return _excel_response(xlsx, f"libro_{tipo_libro}.xlsx")
+
+
+@router.get("/export/rg90/ventas.xlsx")
+async def export_rg90_ventas_xlsx(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    punto_emision: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    data = await service.get_fiscal_rg90_ventas(db, user["company_id"], fecha_desde, fecha_hasta, punto_emision)
+    xlsx = export_service.export_fiscal_rg90_ventas_xlsx(data)
+    desde_str = str(fecha_desde or "inicio")
+    hasta_str = str(fecha_hasta or "hoy")
+    filename = f"libro_ventas_rg90_{desde_str}_{hasta_str}.xlsx"
+    return _excel_response(xlsx, filename)
+
+
+@router.get("/export/rg90/ventas.zip")
+async def export_rg90_ventas_zip(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    punto_emision: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    data = await service.get_fiscal_rg90_ventas(db, user["company_id"], fecha_desde, fecha_hasta, punto_emision)
+    zip_bytes, zip_filename = export_service.export_fiscal_rg90_ventas_zip(data)
+    return _zip_response(zip_bytes, zip_filename)
+
 
 
 @router.get("/export/financial")

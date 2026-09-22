@@ -11,6 +11,7 @@ import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG, formatDate } from "../../utils/format"
 import FacturaA4Modal from "./FacturaA4Modal"
+import Rg90ExportModal from "./Rg90ExportModal"
 
 type SalesTab = "comprobantes" | "cierres_caja" | "notas_credito" | "extra_club_credito"
 type StatusFilter = "todas" | "contado" | "credito" | "canceladas"
@@ -72,6 +73,7 @@ export default function SalesPage() {
   // Cierre de Caja X/Z
   const [cierreTipo, setCierreTipo] = useState<"X" | "Z">("Z")
   const [showCierreModal, setShowCierreModal] = useState(false)
+  const [showRg90Modal, setShowRg90Modal] = useState(false)
   const [paymentBreakdown, setPaymentBreakdown] = useState<{ forma_pago: string; monto: number; cantidad: number }[]>([])
   const [loadingBreakdown, setLoadingBreakdown] = useState(false)
   const [rates, setRates] = useState({ BRL: 1380, USD: 7550 })
@@ -300,11 +302,18 @@ export default function SalesPage() {
 
           <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
             <button
+              onClick={() => setShowRg90Modal(true)}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-emerald-300 hover:text-white bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 backdrop-blur-md transition flex items-center gap-2 shadow-sm shadow-emerald-950/40 cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+              Libro Ventas RG 90 (DNIT)
+            </button>
+            <button
               onClick={() => {
                 setCierreTipo("X")
                 setShowCierreModal(true)
               }}
-              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm cursor-pointer"
             >
               <Clock className="w-3.5 h-3.5 text-blue-400" />
               Arqueo Parcial X
@@ -314,7 +323,7 @@ export default function SalesPage() {
                 setCierreTipo("Z")
                 setShowCierreModal(true)
               }}
-              className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-blue-400 to-indigo-300 hover:from-blue-300 hover:to-indigo-200 transition shadow-lg shadow-blue-500/25 flex items-center gap-2"
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-blue-400 to-indigo-300 hover:from-blue-300 hover:to-indigo-200 transition shadow-lg shadow-blue-500/25 flex items-center gap-2 cursor-pointer"
             >
               <Receipt className="w-4 h-4" />
               Cierre de Caja Z (Fin de Turno)
@@ -812,6 +821,14 @@ export default function SalesPage() {
           </div>
         </div>
       )}
+      {/* ── MODAL LIBRO DE VENTAS RG 90 (DNIT / MARANGATÚ) ───────────────────── */}
+      <Rg90ExportModal
+        isOpen={showRg90Modal}
+        onClose={() => setShowRg90Modal(false)}
+        initialFechaDesde={allDates ? undefined : dateFrom}
+        initialFechaHasta={allDates ? undefined : dateTo}
+        timbrado={timbradoFacturas}
+      />
     </div>
   )
 }
