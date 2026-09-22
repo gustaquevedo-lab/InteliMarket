@@ -265,6 +265,11 @@ async def record(ev: dict) -> dict:
         if not is_new:
             issue.occurrences = (issue.occurrences or 0) + 1
             issue.last_seen = now
+            # el titulo se recalcula en cada ocurrencia: si el formato de kind/message
+            # mejora del lado del cliente, una incidencia agrupada vieja no se queda
+            # pegada con el texto formateado con el bug viejo (ej. "TypeError: TypeError: ...")
+            if title:
+                issue.title = title
             if ev.get("release"):
                 issue.last_release = _cap(ev["release"], 60)
             if ev["level"] == "fatal" and issue.level != "fatal":
