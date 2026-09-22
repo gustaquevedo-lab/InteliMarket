@@ -12,8 +12,8 @@ class VoucherCheckResponse(BaseModel):
     convenio_nombre: str
     numero_vale: str
     codigo_barras: str
-    monto_inicial: Decimal
-    saldo_disponible: Decimal
+    monto_inicial: float
+    saldo_disponible: float
     estado: str
     fecha_vencimiento: date
     es_valido: bool
@@ -36,8 +36,8 @@ class VoucherRedeemResponse(BaseModel):
     voucher_id: UUID
     convenio_nombre: str
     numero_vale: str
-    monto_aplicado: Decimal
-    saldo_restante: Decimal
+    monto_aplicado: float
+    saldo_restante: float
 
 
 class VoucherSeedUPRequest(BaseModel):
@@ -51,8 +51,8 @@ class VoucherItemSummary(BaseModel):
     id: UUID
     numero_vale: str
     codigo_barras: str
-    monto_inicial: Decimal
-    saldo_disponible: Decimal
+    monto_inicial: float
+    saldo_disponible: float
     estado: str
     canjeado_at: Optional[datetime] = None
     canjeado_caja_numero: Optional[str] = None
@@ -65,13 +65,14 @@ class ConvenioSummaryResponse(BaseModel):
     total_emitidos: int
     total_canjeados: int
     total_activos: int
-    monto_total_emitido: Decimal
-    monto_total_canjeado: Decimal
-    monto_saldo_calle: Decimal
+    monto_total_emitido: float
+    monto_total_canjeado: float
+    monto_saldo_calle: float
     factura_emision_numero: Optional[str] = None
     cliente_ruc: Optional[str] = None
     cliente_razon_social: Optional[str] = None
     vales: list[VoucherItemSummary]
+
 
 
 class VoucherLinkInvoiceRequest(BaseModel):

@@ -20,8 +20,8 @@ export function formatPYG(value: number | string | null | undefined): string {
   let num: number
   if (typeof value === "string") {
     const trimmed = value.trim()
-    if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-      num = Math.round(parseFloat(trimmed))
+    if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/i.test(trimmed)) {
+      num = Math.round(Number(trimmed))
     } else {
       num = Math.round(parseFloat(trimmed.replace(/\./g, "").replace(",", ".")))
     }

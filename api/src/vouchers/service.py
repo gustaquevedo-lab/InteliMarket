@@ -68,8 +68,8 @@ async def check_voucher(
             convenio_nombre="Desconocido",
             numero_vale="---",
             codigo_barras=barcode_or_number,
-            monto_inicial=Decimal("0"),
-            saldo_disponible=Decimal("0"),
+            monto_inicial=0.0,
+            saldo_disponible=0.0,
             estado="NO_EXISTE",
             fecha_vencimiento=date.today(),
             es_valido=False,
@@ -83,8 +83,8 @@ async def check_voucher(
             convenio_nombre=voucher.convenio_nombre,
             numero_vale=voucher.numero_vale,
             codigo_barras=voucher.codigo_barras,
-            monto_inicial=voucher.monto_inicial,
-            saldo_disponible=voucher.saldo_disponible,
+            monto_inicial=float(voucher.monto_inicial),
+            saldo_disponible=float(voucher.saldo_disponible),
             estado="VENCIDO",
             fecha_vencimiento=voucher.fecha_vencimiento,
             es_valido=False,
@@ -100,8 +100,8 @@ async def check_voucher(
             convenio_nombre=voucher.convenio_nombre,
             numero_vale=voucher.numero_vale,
             codigo_barras=voucher.codigo_barras,
-            monto_inicial=voucher.monto_inicial,
-            saldo_disponible=voucher.saldo_disponible,
+            monto_inicial=float(voucher.monto_inicial),
+            saldo_disponible=float(voucher.saldo_disponible),
             estado=voucher.estado,
             fecha_vencimiento=voucher.fecha_vencimiento,
             es_valido=False,
@@ -114,8 +114,8 @@ async def check_voucher(
         convenio_nombre=voucher.convenio_nombre,
         numero_vale=voucher.numero_vale,
         codigo_barras=voucher.codigo_barras,
-        monto_inicial=voucher.monto_inicial,
-        saldo_disponible=voucher.saldo_disponible,
+        monto_inicial=float(voucher.monto_inicial),
+        saldo_disponible=float(voucher.saldo_disponible),
         estado="ACTIVO",
         fecha_vencimiento=voucher.fecha_vencimiento,
         es_valido=True,
@@ -181,8 +181,8 @@ async def redeem_voucher(
         voucher_id=voucher.id,
         convenio_nombre=voucher.convenio_nombre,
         numero_vale=voucher.numero_vale,
-        monto_aplicado=monto_a_aplicar,
-        saldo_restante=Decimal("0"),
+        monto_aplicado=float(monto_a_aplicar),
+        saldo_restante=0.0,
     )
 
 
@@ -209,34 +209,35 @@ async def seed_convenio_up(
             InstitutionalVoucher.numero_vale == num_str,
         )
         res = await db.execute(stmt)
-        found = res.scalars().first()
-
-        if found:
+        if res.scalars().first():
             existentes += 1
             continue
 
-        voucher = InstitutionalVoucher(
+        barcode = f"V-UP-{num_str}"
+        nuevo = InstitutionalVoucher(
             company_id=company_id,
             convenio_nombre=convenio,
-            cliente_ruc="80024467-2",  # RUC UP
+            cliente_ruc="80024467-2",
             cliente_razon_social="UNIVERSIDAD DEL PACÍFICO",
-            factura_emision_numero=factura_numero,
             numero_vale=num_str,
-            codigo_barras=num_str,  # Código de barras correspondiente al número
+            codigo_barras=barcode,
             monto_inicial=monto_por_vale,
             saldo_disponible=monto_por_vale,
-            fecha_vencimiento=fecha_vencimiento,
             estado="ACTIVO",
+            fecha_emision=date.today(),
+            fecha_vencimiento=fecha_vencimiento,
+            factura_emision_numero=factura_numero,
         )
-        db.add(voucher)
+        db.add(nuevo)
         creados += 1
 
     await db.commit()
     return {
         "convenio": convenio,
-        "total_solicitados": total_vales,
+        "total_solicitado": total_vales,
         "creados": creados,
-        "existentes": existentes,
+        "existentes_previamente": existentes,
+        "monto_por_vale": float(monto_por_vale),
         "monto_total": float(total_vales * monto_por_vale),
     }
 
@@ -262,17 +263,17 @@ async def get_convenio_summary(
     total_canjeados = sum(1 for v in vouchers if v.estado == "CANJEADO")
     total_activos = sum(1 for v in vouchers if v.estado == "ACTIVO")
 
-    monto_total_emitido = sum(v.monto_inicial for v in vouchers) if vouchers else Decimal("0")
-    monto_total_canjeado = sum(v.monto_inicial - v.saldo_disponible for v in vouchers if v.estado == "CANJEADO") if vouchers else Decimal("0")
-    monto_saldo_calle = sum(v.saldo_disponible for v in vouchers if v.estado == "ACTIVO") if vouchers else Decimal("0")
+    monto_total_emitido = sum(float(v.monto_inicial) for v in vouchers) if vouchers else 0.0
+    monto_total_canjeado = sum(float(v.monto_inicial - v.saldo_disponible) for v in vouchers if v.estado == "CANJEADO") if vouchers else 0.0
+    monto_saldo_calle = sum(float(v.saldo_disponible) for v in vouchers if v.estado == "ACTIVO") if vouchers else 0.0
 
     items = [
         VoucherItemSummary(
             id=v.id,
             numero_vale=v.numero_vale,
             codigo_barras=v.codigo_barras,
-            monto_inicial=v.monto_inicial,
-            saldo_disponible=v.saldo_disponible,
+            monto_inicial=float(v.monto_inicial),
+            saldo_disponible=float(v.saldo_disponible),
             estado=v.estado,
             canjeado_at=v.canjeado_at,
             canjeado_caja_numero=v.canjeado_caja_numero,
