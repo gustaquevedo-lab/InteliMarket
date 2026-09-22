@@ -83,6 +83,7 @@ export default function SupplierPaymentOrderModal({
   const [pettyCashFunds, setPettyCashFunds] = useState<any[]>([])
   const [creditNotes, setCreditNotes] = useState<any[]>([])
   const [vaultBalance, setVaultBalance] = useState<number>(0)
+  const [vaultBalanceBRL, setVaultBalanceBRL] = useState<number>(0)
   const [availableCheques, setAvailableCheques] = useState<any[]>([])
   const [loadingAux, setLoadingAux] = useState(true)
 
@@ -149,6 +150,7 @@ export default function SupplierPaymentOrderModal({
         }
         if (vaultRes.status === "fulfilled" && vaultRes.value) {
           setVaultBalance(Number(vaultRes.value.saldo_en_boveda_pyg || 0))
+          setVaultBalanceBRL(Number(vaultRes.value.saldo_en_boveda_brl || 0))
         }
         if (chequesRes.status === "fulfilled" && Array.isArray(chequesRes.value)) {
           setAvailableCheques(chequesRes.value)
@@ -175,16 +177,38 @@ export default function SupplierPaymentOrderModal({
     return { subtotal, retenciones, neto }
   }, [selectedInvoicesMap])
 
-  // Totales calculados de desembolsos
+  // Cotización sugerida para BRL (desde facturas o 1.450 Gs./R$)
+  const defaultExchangeRateBRL = useMemo(() => {
+    for (const item of Object.values(selectedInvoicesMap)) {
+      if ((item.inv as any).tipo_cambio && Number((item.inv as any).tipo_cambio) > 1) {
+        return Number((item.inv as any).tipo_cambio)
+      }
+    }
+    return 1450
+  }, [selectedInvoicesMap])
+
+  // Detección de proveedor BR o facturas con Reales
+  const isSupplierBR = useMemo(() => {
+    const s = supplier as any
+    return s.tipo_proveedor === "brasilero" || s.tipo_proveedor === "br" || s.moneda_default === "BRL" ||
+      Object.values(selectedInvoicesMap).some(it => (it.inv as any).moneda === "BRL" || Number((it.inv as any).total_brl || 0) > 0)
+  }, [supplier, selectedInvoicesMap])
+
+  // Totales calculados de desembolsos (convirtiendo BRL a PYG si corresponde)
   const summaryDesembolsos = useMemo(() => {
     let total = 0
     disbursements.forEach(d => {
-      total += Number(d.monto || 0)
+      if (d.forma_pago === "boveda" && d.moneda === "BRL") {
+        const tc = Number(d.tipo_cambio || defaultExchangeRateBRL || 1450)
+        total += Math.round(Number(d.monto || 0) * tc)
+      } else {
+        total += Number(d.monto || 0)
+      }
     })
     const diferencia = summaryFacturas.neto - total
     const cuadra = Math.abs(diferencia) <= 50 && total > 0
     return { total, diferencia, cuadra }
-  }, [disbursements, summaryFacturas.neto])
+  }, [disbursements, summaryFacturas.neto, defaultExchangeRateBRL])
 
   // Inicializar un renglón de desembolso por defecto si pasa a step 2
   const handleGoToStep2 = () => {
@@ -198,19 +222,36 @@ export default function SupplierPaymentOrderModal({
     }
 
     if (disbursements.length === 0) {
-      // Sugerir un medio por defecto (transferencia si hay banco, o boveda)
-      const defaultBank = bankAccounts[0]?.id
-      setDisbursements([
-        {
-          forma_pago: defaultBank ? "transferencia" : "boveda",
-          monto: summaryFacturas.neto,
-          bank_account_id: defaultBank || undefined,
-          titular_cheque: supplier.razon_social,
-          fecha_cheque_emision: fechaPago,
-          fecha_cheque_vencimiento: fechaPago,
-          es_cheque_diferido: false,
-        }
-      ])
+      if (isSupplierBR) {
+        const tc = defaultExchangeRateBRL
+        const montoReales = Math.round((summaryFacturas.neto / tc) * 100) / 100
+        setDisbursements([
+          {
+            forma_pago: "boveda",
+            moneda: "BRL",
+            monto: montoReales,
+            tipo_cambio: tc,
+            titular_cheque: supplier.razon_social,
+            fecha_cheque_emision: fechaPago,
+            fecha_cheque_vencimiento: fechaPago,
+            es_cheque_diferido: false,
+          }
+        ])
+      } else {
+        const defaultBank = bankAccounts[0]?.id
+        setDisbursements([
+          {
+            forma_pago: defaultBank ? "transferencia" : "boveda",
+            moneda: "PYG",
+            monto: summaryFacturas.neto,
+            bank_account_id: defaultBank || undefined,
+            titular_cheque: supplier.razon_social,
+            fecha_cheque_emision: fechaPago,
+            fecha_cheque_vencimiento: fechaPago,
+            es_cheque_diferido: false,
+          }
+        ])
+      }
     }
     setStep("step2_desembolso")
   }
@@ -608,10 +649,14 @@ export default function SupplierPaymentOrderModal({
               </div>
 
               {/* BARRA DE DISPONIBILIDAD DE FONDOS */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-2xl bg-slate-900 text-white text-xs border border-slate-800">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 p-3 rounded-2xl bg-slate-900 text-white text-xs border border-slate-800">
                 <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Bóveda Central</span>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Bóveda (₲)</span>
                   <span className="font-mono font-bold text-emerald-400">{formatPYG(vaultBalance)}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Bóveda (R$)</span>
+                  <span className="font-mono font-bold text-teal-400">R$ {vaultBalanceBRL.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Cuentas Bancarias</span>
@@ -656,59 +701,140 @@ export default function SupplierPaymentOrderModal({
                         <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Forma de Pago *</label>
                         <select
                           value={d.forma_pago}
-                          onChange={e => updateDisbursementRow(index, { forma_pago: e.target.value as any })}
+                          onChange={e => {
+                            const newFp = e.target.value as any
+                            const isBr = isSupplierBR && newFp === "boveda"
+                            updateDisbursementRow(index, {
+                              forma_pago: newFp,
+                              moneda: isBr ? "BRL" : "PYG",
+                              tipo_cambio: isBr ? defaultExchangeRateBRL : 1,
+                            })
+                          }}
                           className="w-full p-2 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold"
                         >
                           <option value="transferencia">🏦 Banco - Transferencia SIPAP</option>
                           <option value="cheque">📜 Banco - Cheque Emitido (Al día o Diferido)</option>
-                          <option value="boveda">🔒 Efectivo Bóveda Central</option>
+                          <option value="boveda">🔒 Efectivo Bóveda Central (₲ / R$)</option>
                           <option value="fondo_fijo">💼 Efectivo Fondo Fijo (Caja Chica)</option>
                           <option value="nota_credito">📄 Nota de Crédito (Saldo a Favor)</option>
                         </select>
                       </div>
 
-                      {/* IMPORTE PYG */}
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Importe en Guaraníes (₲) *</label>
-                        <CurrencyInput
-                          required
-                          currency="PYG"
-                          value={d.monto}
-                          onChangeValue={(num) => updateDisbursementRow(index, { monto: num })}
-                          placeholder="0"
-                          className="w-full p-2 text-xs font-mono font-black text-rose-600 dark:text-rose-400 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-right"
-                        />
-                      </div>
+                      {/* MONEDA Y MONTO SEGÚN FORMA DE PAGO */}
+                      {d.forma_pago === "boveda" ? (
+                        <>
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-[10px] font-bold text-slate-500 uppercase">Moneda & Monto Bóveda *</label>
+                              <div className="flex gap-1 bg-slate-200 dark:bg-slate-800 p-0.5 rounded-lg">
+                                <button
+                                  type="button"
+                                  onClick={() => updateDisbursementRow(index, { moneda: "PYG", tipo_cambio: 1 })}
+                                  className={`px-2 py-0.5 text-[9px] font-bold rounded transition ${d.moneda !== "BRL" ? "bg-white dark:bg-slate-700 text-rose-600 dark:text-white shadow-xs" : "text-slate-500"}`}
+                                >
+                                  ₲ PYG
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateDisbursementRow(index, { moneda: "BRL", tipo_cambio: d.tipo_cambio || defaultExchangeRateBRL })}
+                                  className={`px-2 py-0.5 text-[9px] font-bold rounded transition ${d.moneda === "BRL" ? "bg-emerald-600 text-white shadow-xs" : "text-slate-500"}`}
+                                >
+                                  R$ BRL
+                                </button>
+                              </div>
+                            </div>
 
-                      {/* DETALLES DINÁMICOS SEGÚN MEDIO DE PAGO */}
-                      {d.forma_pago === "transferencia" && (
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Cuenta Bancaria de Débito *</label>
-                          <select
-                            value={d.bank_account_id || ""}
-                            onChange={e => updateDisbursementRow(index, { bank_account_id: e.target.value })}
-                            className="w-full p-2 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl"
-                          >
-                            <option value="">Seleccione cuenta...</option>
-                            {bankAccounts.map((b: any) => (
-                              <option key={b.id} value={b.id}>
-                                {b.alias ? `[${b.alias}] ` : ""}{b.banco} ({b.numero_cuenta})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-
-                      {d.forma_pago === "boveda" && (
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Validación de Saldo</label>
-                          <div className={`p-2 rounded-xl text-xs font-mono font-bold ${
-                            vaultBalance >= d.monto ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-500"
-                          }`}>
-                            Disponible: {formatPYG(vaultBalance)}
+                            {d.moneda === "BRL" ? (
+                              <div className="space-y-1.5">
+                                <CurrencyInput
+                                  required
+                                  currency="BRL"
+                                  allowDecimals
+                                  value={d.monto}
+                                  onChangeValue={(num) => updateDisbursementRow(index, { monto: num })}
+                                  placeholder="0.00"
+                                  className="w-full p-2 text-xs font-mono font-black text-emerald-600 dark:text-emerald-400 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-right"
+                                />
+                                <div className="flex items-center justify-between text-[10px] text-slate-500 px-1">
+                                  <span>Cotiz: 1 R$ =</span>
+                                  <input
+                                    type="number"
+                                    value={d.tipo_cambio || defaultExchangeRateBRL}
+                                    onChange={e => updateDisbursementRow(index, { tipo_cambio: Number(e.target.value) || 1 })}
+                                    className="w-16 p-1 text-[10px] font-mono font-bold text-right bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded"
+                                  />
+                                  <span className="font-bold text-slate-700 dark:text-slate-300">₲</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <CurrencyInput
+                                required
+                                currency="PYG"
+                                value={d.monto}
+                                onChangeValue={(num) => updateDisbursementRow(index, { monto: num })}
+                                placeholder="0"
+                                className="w-full p-2 text-xs font-mono font-black text-rose-600 dark:text-rose-400 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-right"
+                              />
+                            )}
                           </div>
-                        </div>
-                      )}
+
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                              {d.moneda === "BRL" ? "Validación Bóveda R$ & Equivalente" : "Validación Bóveda ₲"}
+                            </label>
+                            {d.moneda === "BRL" ? (
+                              <div className="space-y-1">
+                                <div className={`p-2 rounded-xl text-xs font-mono font-bold ${
+                                  vaultBalanceBRL >= Number(d.monto || 0) ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-500"
+                                }`}>
+                                  Disponible R$: {vaultBalanceBRL.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                                <div className="text-[10px] font-mono text-slate-500 px-1">
+                                  Amortiza a la Factura: <strong className="text-slate-800 dark:text-slate-200">{formatPYG(Math.round(Number(d.monto || 0) * (d.tipo_cambio || defaultExchangeRateBRL)))}</strong>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className={`p-2 rounded-xl text-xs font-mono font-bold ${
+                                vaultBalance >= d.monto ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-500"
+                              }`}>
+                                Disponible ₲: {formatPYG(vaultBalance)}
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          {/* IMPORTE PYG */}
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Importe en Guaraníes (₲) *</label>
+                            <CurrencyInput
+                              required
+                              currency="PYG"
+                              value={d.monto}
+                              onChangeValue={(num) => updateDisbursementRow(index, { monto: num })}
+                              placeholder="0"
+                              className="w-full p-2 text-xs font-mono font-black text-rose-600 dark:text-rose-400 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-right"
+                            />
+                          </div>
+
+                          {/* DETALLES DINÁMICOS SEGÚN MEDIO DE PAGO */}
+                          {d.forma_pago === "transferencia" && (
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Cuenta Bancaria de Débito *</label>
+                              <select
+                                value={d.bank_account_id || ""}
+                                onChange={e => updateDisbursementRow(index, { bank_account_id: e.target.value })}
+                                className="w-full p-2 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl"
+                              >
+                                <option value="">Seleccione cuenta...</option>
+                                {bankAccounts.map((b: any) => (
+                                  <option key={b.id} value={b.id}>
+                                    {b.alias ? `[${b.alias}] ` : ""}{b.banco} ({b.numero_cuenta})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
 
                       {d.forma_pago === "fondo_fijo" && (
                         <div>
@@ -954,10 +1080,12 @@ export default function SupplierPaymentOrderModal({
                           />
                         </div>
                       )}
-                    </div>
-                  </div>
-                ))}
+                    </>
+                  )}
+                </div>
               </div>
+            ))}
+          </div>
 
               {/* RESUMEN DE CUADRE EN VIVO */}
               <div className={`p-4 rounded-2xl border transition-all flex flex-col sm:flex-row items-center justify-between gap-3 ${

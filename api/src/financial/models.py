@@ -27,6 +27,8 @@ class SupplierInvoice(Base):
     saldo_pendiente = Column(Numeric(15, 0), nullable=False)
     moneda = Column(String(3), default="PYG")
     tipo_cambio = Column(Numeric(10, 2), default=1)
+    total_brl = Column(Numeric(12, 2), nullable=True)
+    saldo_pendiente_brl = Column(Numeric(12, 2), nullable=True)
     purchase_order_id = Column(UUID(as_uuid=True))
     receipt_id = Column(UUID(as_uuid=True))
     condicion = Column(String(20), default="credito")

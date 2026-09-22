@@ -91,6 +91,8 @@ export default function MultiSupplierPaymentModal({
   const [bankAccounts, setBankAccounts] = useState<any[]>([])
   const [availableCheques, setAvailableCheques] = useState<any[]>([])
   const [vaultBalance, setVaultBalance] = useState<number>(0)
+  const [vaultBalanceBRL, setVaultBalanceBRL] = useState<number>(0)
+  const [monedaBoveda, setMonedaBoveda] = useState<"PYG" | "BRL">("PYG")
   const [loadingAux, setLoadingAux] = useState(true)
 
   // Modal para agregar facturas de otros proveedores
@@ -152,6 +154,7 @@ export default function MultiSupplierPaymentModal({
         }
         if (vaultRes.status === "fulfilled" && vaultRes.value) {
           setVaultBalance(Number(vaultRes.value.saldo_en_boveda_pyg || 0))
+          setVaultBalanceBRL(Number(vaultRes.value.saldo_en_boveda_brl || 0))
         }
       } catch (e) {
         console.error("Error al cargar auxiliares para Lote Multi-Proveedor", e)
@@ -351,9 +354,25 @@ export default function MultiSupplierPaymentModal({
     }
 
     // Validar bóveda
-    if (formaPago === "boveda" && vaultBalance < montoDesembolsoFinal) {
-      toast.error("Saldo Bóveda Insuficiente", `Bóveda Central solo dispone de ${formatPYG(vaultBalance)}. Requerido: ${formatPYG(montoDesembolsoFinal)}`)
-      return
+    if (formaPago === "boveda") {
+      if (monedaBoveda === "BRL") {
+        if (summary.totalBrl <= 0) {
+          toast.error("Sin Monto en R$", "No hay saldo en Reales en este lote para pagar en BRL desde bóveda.")
+          return
+        }
+        if (vaultBalanceBRL < summary.totalBrl) {
+          toast.error(
+            "Saldo Bóveda R$ Insuficiente",
+            `Bóveda Central solo dispone de R$ ${vaultBalanceBRL.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}. Requerido: R$ ${summary.totalBrl.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`
+          )
+          return
+        }
+      } else {
+        if (vaultBalance < montoDesembolsoFinal) {
+          toast.error("Saldo Bóveda Insuficiente", `Bóveda Central solo dispone de ${formatPYG(vaultBalance)}. Requerido: ${formatPYG(montoDesembolsoFinal)}`)
+          return
+        }
+      }
     }
 
     setSubmitting(true)
@@ -364,7 +383,7 @@ export default function MultiSupplierPaymentModal({
         fecha_pago: fechaPago,
         observaciones: observacionesLote,
         forma_pago: formaPago,
-        moneda_desembolso: "PYG",
+        moneda_desembolso: formaPago === "boveda" ? monedaBoveda : "PYG",
         bank_account_id: formaPago === "transferencia" ? transferBankAccountId : (formaPago === "cheque" ? (useExistingCheque ? undefined : bancoChequeId) : undefined),
         referencia_transferencia: formaPago === "transferencia" ? referenciaTransferencia : undefined,
         // Cheque
@@ -376,6 +395,7 @@ export default function MultiSupplierPaymentModal({
         fecha_cheque_vencimiento: formaPago === "cheque" && !useExistingCheque ? (esChequeDiferido ? fechaChequeVencimiento : fechaChequeEmision) : undefined,
         es_cheque_diferido: formaPago === "cheque" && !useExistingCheque ? esChequeDiferido : false,
         monto_total_desembolso_pyg: montoDesembolsoFinal,
+        monto_total_desembolso_brl: formaPago === "boveda" && monedaBoveda === "BRL" ? summary.totalBrl : undefined,
         diferencia_cambio_total: diferenciaCambio,
         items: groups.map((g, idx) => {
           const groupMontoPyg = g.invoices.reduce((s, i) => s + i.monto_pyg, 0)
@@ -1093,16 +1113,64 @@ export default function MultiSupplierPaymentModal({
             )}
 
             {formaPago === "boveda" && (
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-4 flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-xs text-slate-800 dark:text-slate-200">Disponibilidad en Bóveda Central</p>
-                  <p className="text-[11px] text-slate-400">Se registrará el egreso físico consolidado en el arqueo de bóveda</p>
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <p className="font-bold text-xs text-slate-800 dark:text-slate-200">Disponibilidad y Moneda de Bóveda Central</p>
+                    <p className="text-[11px] text-slate-400">Seleccioná si el egreso físico de bóveda se retira en Guaraníes o en Reales brasileños</p>
+                  </div>
+                  <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setMonedaBoveda("PYG")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                        monedaBoveda === "PYG"
+                          ? "bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white"
+                          : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-300"
+                      }`}
+                    >
+                      🇵🇾 En Guaraníes (₲)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMonedaBoveda("BRL")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                        monedaBoveda === "BRL"
+                          ? "bg-emerald-600 shadow-sm text-white font-extrabold"
+                          : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-300"
+                      }`}
+                    >
+                      🇧🇷 En Reales (R$)
+                    </button>
+                  </div>
                 </div>
-                <div className={`p-2.5 rounded-xl font-mono font-black text-sm ${
-                  vaultBalance >= montoDesembolsoFinal ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-500"
-                }`}>
-                  Disponible: {formatPYG(vaultBalance)}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-slate-100 dark:border-slate-800">
+                  <div className={`p-2.5 rounded-xl font-mono text-xs flex items-center justify-between border ${
+                    monedaBoveda === "PYG" ? "border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/20" : "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 opacity-70"
+                  }`}>
+                    <span className="font-bold text-slate-600 dark:text-slate-300">Bóveda ₲ (PYG):</span>
+                    <span className={`font-black ${vaultBalance >= montoDesembolsoFinal ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500"}`}>
+                      {formatPYG(vaultBalance)}
+                    </span>
+                  </div>
+
+                  <div className={`p-2.5 rounded-xl font-mono text-xs flex items-center justify-between border ${
+                    monedaBoveda === "BRL" ? "border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/20" : "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 opacity-70"
+                  }`}>
+                    <span className="font-bold text-slate-600 dark:text-slate-300">Bóveda R$ (BRL):</span>
+                    <span className={`font-black ${vaultBalanceBRL >= summary.totalBrl ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500"}`}>
+                      R$ {vaultBalanceBRL.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
                 </div>
+
+                {monedaBoveda === "BRL" && summary.totalBrl > 0 && (
+                  <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/50 rounded-xl text-[11px] text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
+                    <span>Monto a deducir físicamente de Bóveda: <strong>R$ {summary.totalBrl.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                    <span className="font-mono text-[10px] opacity-80">(Eq. {formatPYG(montoDesembolsoFinal)})</span>
+                  </div>
+                )}
               </div>
             )}
 

@@ -175,6 +175,7 @@ class Expense(Base):
     category_id = Column(UUID(as_uuid=True))
     cost_center_id = Column(UUID(as_uuid=True), ForeignKey("cost_centers.id"))
     monto = Column(Numeric(15, 2), nullable=False)
+    monto_brl = Column(Numeric(12, 2), nullable=True)
     descripcion = Column(String(300), nullable=False)
     proveedor = Column(String(100))
     comprobante_url = Column(String(500))  # receipt photo / pdf

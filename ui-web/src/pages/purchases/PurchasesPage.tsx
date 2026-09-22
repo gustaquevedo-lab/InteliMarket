@@ -36,6 +36,7 @@ import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatCurrency } from "../../utils/format"
 import { DevolucionProveedorPrintModal } from "./DevolucionProveedorPrintModal"
+import CurrencyInput from "../../components/CurrencyInput"
 
 type MainTab = "asistente_ia" | "demandas_clientes" | "ordenes" | "recepciones" | "facturas_p2p" | "devoluciones" | "matching" | "proveedores" | "requisiciones" | "cotizaciones" | "presupuestos" | "reportes"
 
@@ -247,6 +248,23 @@ export default function PurchasesPage() {
   const [targetPoIdForAssociation, setTargetPoIdForAssociation] = useState<string>("")
   const [associatingPo, setAssociatingPo] = useState(false)
 
+  // Carga manual de Facturas de Compra (Nacional / Proveedores BR)
+  const [showManualInvoiceModal, setShowManualInvoiceModal] = useState(false)
+  const [manualInvoiceForm, setManualInvoiceForm] = useState({
+    supplier_id: "",
+    numero_factura: "",
+    timbrado: "",
+    fecha_emision: new Date().toISOString().split("T")[0],
+    fecha_vencimiento: new Date().toISOString().split("T")[0],
+    condicion: "credito",
+    moneda: "PYG" as "PYG" | "BRL",
+    total_brl: "",
+    tipo_cambio: "1350",
+    total_pyg: "",
+    concepto: "",
+  })
+  const [savingManualInvoice, setSavingManualInvoice] = useState(false)
+
   // Adición extraordinaria en recepción
   const [extraordinarySearch, setExtraordinarySearch] = useState("")
   const [extraordinaryResults, setExtraordinaryResults] = useState<Product[]>([])
@@ -348,6 +366,9 @@ export default function PurchasesPage() {
     purchase_order_id: string
     proveedor_ref: string
     observaciones: string
+    es_br?: boolean
+    total_brl?: string
+    tipo_cambio?: string
     items: {
       product_id: string
       nombre: string
@@ -369,6 +390,9 @@ export default function PurchasesPage() {
     purchase_order_id: "",
     proveedor_ref: "",
     observaciones: "",
+    es_br: false,
+    total_brl: "",
+    tipo_cambio: "1350",
     items: [],
   })
   const [savingReceipt, setSavingReceipt] = useState(false)
@@ -950,10 +974,16 @@ export default function PurchasesPage() {
       }
       setPackBarcodesByProduct(byProduct)
 
+      const sup = suppliers.find(s => s.id === targetPO.supplier_id)
+      const isBr = Boolean(((sup as any)?.pais || "").toUpperCase().includes("BR") || (sup?.razon_social || "").toUpperCase().includes("BRASIL"))
+
       setReceiptForm({
         purchase_order_id: targetPO.id,
         proveedor_ref: "",
         observaciones: "",
+        es_br: isBr,
+        total_brl: "",
+        tipo_cambio: "1350",
         items: (items || []).map(it => {
           const cantidadRecibir = Math.max(0, Number(it.cantidad || 0) - Number(it.recibido || (it as any).cantidad_recibida || 0))
           return {
@@ -1033,6 +1063,8 @@ export default function PurchasesPage() {
         purchase_order_id: receiptForm.purchase_order_id,
         proveedor_ref: receiptForm.proveedor_ref || undefined,
         observaciones: receiptForm.observaciones || undefined,
+        total_brl: (receiptForm.es_br && receiptForm.total_brl) ? Number(receiptForm.total_brl) : undefined,
+        tipo_cambio: (receiptForm.es_br && receiptForm.tipo_cambio) ? Number(receiptForm.tipo_cambio) : undefined,
         items: validItems.map(it => ({
           product_id: it.product_id,
           cantidad_recibida: Number(it.cantidad_recibir),
@@ -1054,6 +1086,60 @@ export default function PurchasesPage() {
       toast.error("Error al registrar recepción", e.message)
     } finally {
       setSavingReceipt(false)
+    }
+  }
+
+  const handleSaveManualInvoice = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!manualInvoiceForm.supplier_id) {
+      toast.error("Proveedor Requerido", "Debe seleccionar un proveedor.")
+      return
+    }
+    if (!manualInvoiceForm.numero_factura.trim()) {
+      toast.error("Número de Factura", "Debe ingresar el número de comprobante o factura fiscal.")
+      return
+    }
+
+    const isBrl = manualInvoiceForm.moneda === "BRL"
+    const totalBrl = isBrl ? Number(manualInvoiceForm.total_brl) : 0
+    const tc = isBrl ? Number(manualInvoiceForm.tipo_cambio || 1) : 1
+    const totalPyg = isBrl ? Math.round(totalBrl * tc) : Number(manualInvoiceForm.total_pyg)
+
+    if (totalPyg <= 0) {
+      toast.error("Importe Inválido", "El monto de la factura debe ser mayor a 0.")
+      return
+    }
+
+    setSavingManualInvoice(true)
+    try {
+      await api.financial.invoices.create({
+        supplier_id: manualInvoiceForm.supplier_id,
+        numero_factura: manualInvoiceForm.numero_factura.trim(),
+        timbrado: manualInvoiceForm.timbrado.trim() || undefined,
+        fecha_emision: manualInvoiceForm.fecha_emision,
+        fecha_vencimiento: manualInvoiceForm.fecha_vencimiento,
+        condicion: manualInvoiceForm.condicion,
+        moneda: isBrl ? "BRL" : "PYG",
+        tipo_cambio: tc,
+        total: totalPyg,
+        total_brl: isBrl ? totalBrl : undefined,
+        saldo_pendiente: totalPyg,
+        saldo_pendiente_brl: isBrl ? totalBrl : undefined,
+        concepto: manualInvoiceForm.concepto.trim() || undefined,
+      })
+
+      toast.success(
+        "Factura de Compra Registrada",
+        isBrl
+          ? `Factura en Reales registrada por R$ ${totalBrl.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} (Eq. ${formatPYG(totalPyg)}). Disponible para cancelar desde Bóveda.`
+          : `Factura registrada por ${formatPYG(totalPyg)}.`
+      )
+      setShowManualInvoiceModal(false)
+      fetchAll()
+    } catch (err: any) {
+      toast.error("Error al registrar factura", err.message || String(err))
+    } finally {
+      setSavingManualInvoice(false)
     }
   }
 
@@ -3767,6 +3853,30 @@ export default function PurchasesPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setManualInvoiceForm({
+                    supplier_id: suppliers[0]?.id || "",
+                    numero_factura: "",
+                    timbrado: "",
+                    fecha_emision: new Date().toISOString().split("T")[0],
+                    fecha_vencimiento: new Date().toISOString().split("T")[0],
+                    condicion: "credito",
+                    moneda: "PYG",
+                    total_brl: "",
+                    tipo_cambio: "1350",
+                    total_pyg: "",
+                    concepto: "",
+                  })
+                  setShowManualInvoiceModal(true)
+                }}
+                className="btn-primary text-xs px-3.5 py-2 flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5 text-white" />
+                <span>+ Cargar Factura (Nac. / BR)</span>
+              </button>
+
               <div className="relative w-full sm:w-64">
                 <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
@@ -3863,10 +3973,20 @@ export default function PurchasesPage() {
                           {inv.fecha_vencimiento ? formatDate(inv.fecha_vencimiento) : "—"}
                         </td>
                         <td className="p-3 text-right font-mono font-extrabold text-gray-900 dark:text-white">
-                          {formatPYG(inv.total || 0)}
+                          <div>{formatPYG(inv.total || 0)}</div>
+                          {Number(inv.total_brl || 0) > 0 && (
+                            <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                              R$ {Number(inv.total_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                          )}
                         </td>
                         <td className="p-3 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                          {formatPYG(inv.saldo_pendiente || 0)}
+                          <div>{formatPYG(inv.saldo_pendiente || 0)}</div>
+                          {Number(inv.saldo_pendiente_brl ?? inv.total_brl ?? 0) > 0 && (
+                            <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                              R$ {Number(inv.saldo_pendiente_brl ?? inv.total_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                          )}
                           {inv.monto_retenido_nc > 0 && (
                             <div className="text-[10px] text-red-500 font-normal">
                               Retenido NC: -{formatPYG(inv.monto_retenido_nc)}
@@ -5646,6 +5766,65 @@ export default function PurchasesPage() {
                 </div>
               </div>
 
+              {/* Sección Proveedor Brasileño / Importación R$ */}
+              <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(receiptForm.es_br)}
+                      onChange={(e) => setReceiptForm(prev => ({ ...prev, es_br: e.target.checked }))}
+                      className="rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>🇧🇷 Compra de Proveedor Brasileño (Registro en Reales - R$)</span>
+                  </label>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                    Registra la deuda en Reales para cancelación en Bóveda
+                  </span>
+                </div>
+
+                {receiptForm.es_br && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-emerald-200/60 dark:border-emerald-800/40">
+                    <div>
+                      <label className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 block mb-1">
+                        Monto Final Alcanzado en Reales (R$) *
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required={receiptForm.es_br}
+                        placeholder="Ej: 450.00"
+                        value={receiptForm.total_brl || ""}
+                        onChange={(e) => setReceiptForm(prev => ({ ...prev, total_brl: e.target.value }))}
+                        className="input-field w-full text-xs font-mono font-bold text-right border-emerald-400 text-emerald-600"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Cotización R$ (₲ / R$) *
+                      </label>
+                      <CurrencyInput
+                        currency="PYG"
+                        required={receiptForm.es_br}
+                        value={receiptForm.tipo_cambio || "1350"}
+                        onChangeValue={(tc) => setReceiptForm(prev => ({ ...prev, tipo_cambio: String(tc || 1) }))}
+                        className="input-field w-full text-xs font-mono font-bold text-right"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Equivalente Estimado (₲)
+                      </label>
+                      <div className="input-field w-full text-xs font-mono font-black text-right bg-white dark:bg-slate-800 flex items-center justify-end px-3">
+                        {formatPYG(Math.round((Number(receiptForm.total_brl) || 0) * (Number(receiptForm.tipo_cambio) || 1)))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Barra de Adición Extraordinaria en Muelle */}
               <div className="p-3 bg-amber-50/80 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/60 rounded-xl space-y-2">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
@@ -5875,6 +6054,266 @@ export default function PurchasesPage() {
                 >
                   {savingReceipt ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
                   {savingReceipt ? "Registrando..." : "Confirmar Recepción & Actualizar Stock"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: CARGAR FACTURA DE COMPRA MANUAL (NACIONAL / PROVEEDOR BR)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showManualInvoiceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-emerald-600" /> Cargar Factura de Compra (Nacional / Proveedor BR)
+              </h3>
+              <button
+                onClick={() => setShowManualInvoiceModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveManualInvoice} className="space-y-4 text-xs">
+              {/* Selector de Proveedor */}
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase block mb-1">
+                  Proveedor *
+                </label>
+                <select
+                  required
+                  value={manualInvoiceForm.supplier_id}
+                  onChange={(e) => {
+                    const sId = e.target.value
+                    const sup = suppliers.find(s => s.id === sId)
+                    const isBr = Boolean((sup?.pais || "").toUpperCase().includes("BR") || (sup?.razon_social || "").toUpperCase().includes("BRASIL"))
+                    setManualInvoiceForm(prev => ({
+                      ...prev,
+                      supplier_id: sId,
+                      moneda: isBr ? "BRL" : prev.moneda,
+                    }))
+                  }}
+                  className="input-field w-full text-xs font-semibold"
+                >
+                  <option value="">-- Seleccione Proveedor --</option>
+                  {suppliers.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.razon_social || s.nombre} {s.ruc ? `(RUC: ${s.ruc})` : ""} {s.pais ? `[${s.pais}]` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Nro Factura, Timbrado y Condición */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-1">
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                    N° Factura Fiscal *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej: 001-001-0045892 o NF 1204"
+                    value={manualInvoiceForm.numero_factura}
+                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, numero_factura: e.target.value }))}
+                    className="input-field w-full font-mono font-bold text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                    Timbrado (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej: 18545636"
+                    value={manualInvoiceForm.timbrado}
+                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, timbrado: e.target.value }))}
+                    className="input-field w-full font-mono text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                    Condición de Pago
+                  </label>
+                  <select
+                    value={manualInvoiceForm.condicion}
+                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, condicion: e.target.value }))}
+                    className="input-field w-full text-xs font-semibold"
+                  >
+                    <option value="credito">Crédito (A Pagar)</option>
+                    <option value="contado">Contado</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Fechas */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                    Fecha de Emisión *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={manualInvoiceForm.fecha_emision}
+                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, fecha_emision: e.target.value }))}
+                    className="input-field w-full text-xs font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                    Fecha de Vencimiento *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={manualInvoiceForm.fecha_vencimiento}
+                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, fecha_vencimiento: e.target.value }))}
+                    className="input-field w-full text-xs font-mono font-bold"
+                  />
+                </div>
+              </div>
+
+              {/* Moneda y Montos */}
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                    Moneda de la Factura
+                  </label>
+                  <div className="flex items-center bg-slate-200 dark:bg-slate-800 p-0.5 rounded-lg text-xs font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setManualInvoiceForm(prev => ({ ...prev, moneda: "PYG", total_brl: "" }))}
+                      className={`px-3 py-1 rounded transition ${
+                        manualInvoiceForm.moneda === "PYG"
+                          ? "bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white"
+                          : "text-slate-500"
+                      }`}
+                    >
+                      🇵🇾 Guaraníes (₲)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setManualInvoiceForm(prev => ({ ...prev, moneda: "BRL" }))}
+                      className={`px-3 py-1 rounded transition ${
+                        manualInvoiceForm.moneda === "BRL"
+                          ? "bg-emerald-600 text-white shadow-xs"
+                          : "text-slate-500"
+                      }`}
+                    >
+                      🇧🇷 Reales (R$)
+                    </button>
+                  </div>
+                </div>
+
+                {manualInvoiceForm.moneda === "BRL" ? (
+                  <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 block mb-1">
+                          Monto Total Reales (R$) *
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          required
+                          placeholder="Ej: 350.00"
+                          value={manualInvoiceForm.total_brl}
+                          onChange={(e) => {
+                            const brl = e.target.value
+                            const tc = Number(manualInvoiceForm.tipo_cambio || 1350)
+                            const pyg = Math.round(Number(brl) * tc)
+                            setManualInvoiceForm(prev => ({ ...prev, total_brl: brl, total_pyg: String(pyg) }))
+                          }}
+                          className="input-field w-full text-xs font-mono font-bold text-right border-emerald-400 text-emerald-600 dark:text-emerald-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                          Cotización R$ (₲ / R$) *
+                        </label>
+                        <CurrencyInput
+                          currency="PYG"
+                          required
+                          value={manualInvoiceForm.tipo_cambio}
+                          onChangeValue={(tc) => {
+                            const validTc = tc || 1
+                            const pyg = Math.round(Number(manualInvoiceForm.total_brl || 0) * validTc)
+                            setManualInvoiceForm(prev => ({ ...prev, tipo_cambio: String(validTc), total_pyg: String(pyg) }))
+                          }}
+                          className="input-field w-full text-xs font-mono font-bold text-right"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                          Eq. Fiscal en Guaraníes (₲)
+                        </label>
+                        <div className="input-field w-full text-xs font-mono font-black text-right bg-white dark:bg-slate-800 flex items-center justify-end px-3">
+                          {formatPYG(Math.round((Number(manualInvoiceForm.total_brl) || 0) * (Number(manualInvoiceForm.tipo_cambio) || 1)))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 p-2 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                      ℹ️ La factura quedará registrada con su saldo en Reales (R$) para poder liquidarse directamente desde el efectivo en R$ de Bóveda Central o amortizarse por Orden de Pago.
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                      Monto Total en Guaraníes (₲) *
+                    </label>
+                    <CurrencyInput
+                      currency="PYG"
+                      required
+                      placeholder="Ej: 1.500.000"
+                      value={manualInvoiceForm.total_pyg}
+                      onChangeValue={(val) => setManualInvoiceForm(prev => ({ ...prev, total_pyg: String(val) }))}
+                      className="input-field w-full text-xs font-mono font-bold text-right"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Concepto */}
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                  Concepto / Observaciones
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej: Compra de frutas y verduras frescas de Foz / CDE"
+                  value={manualInvoiceForm.concepto}
+                  onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, concepto: e.target.value }))}
+                  className="input-field w-full text-xs"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setShowManualInvoiceModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingManualInvoice}
+                  className="btn-primary text-xs flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                >
+                  {savingManualInvoice ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  {savingManualInvoice ? "Guardando..." : "Guardar Factura en Cartera"}
                 </button>
               </div>
             </form>

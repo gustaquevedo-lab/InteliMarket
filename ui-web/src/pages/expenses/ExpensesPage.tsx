@@ -78,6 +78,9 @@ export default function ExpensesPage() {
     es_pago_proveedor: false,
     supplier_id: "",
     supplier_invoice_id: "",
+    moneda: "PYG",
+    monto_brl: "",
+    tipo_cambio: "1350",
   })
   const [catForm, setCatForm] = useState({ nombre: "", descripcion: "", presupuesto_mensual: "" })
   const [sectorForm, setSectorForm] = useState({ nombre: "", tipo: "sector", peso_prorateo: "1" })
@@ -461,6 +464,7 @@ export default function ExpensesPage() {
           es_pago_proveedor: form.es_pago_proveedor || false,
           supplier_id: form.supplier_id || undefined,
           supplier_invoice_id: form.supplier_invoice_id || undefined,
+          monto_brl: form.moneda === "BRL" && form.monto_brl ? Number(form.monto_brl) : undefined,
           ...(comprobante_url ? { comprobante_url } : {})
         })
         toast.success("Comprobante Actualizado", "Los cambios en el gasto fueron guardados exitosamente.")
@@ -471,6 +475,7 @@ export default function ExpensesPage() {
           category_id: form.category_id || undefined,
           cost_center_id: form.cost_center_id || undefined,
           monto: Number(form.monto),
+          monto_brl: form.moneda === "BRL" && form.monto_brl ? Number(form.monto_brl) : undefined,
           iva_10: form.iva_10 ? Number(form.iva_10) : undefined,
           iva_5: form.iva_5 ? Number(form.iva_5) : undefined,
           exentas: form.exentas ? Number(form.exentas) : undefined,
@@ -513,6 +518,9 @@ export default function ExpensesPage() {
         es_pago_proveedor: false,
         supplier_id: "",
         supplier_invoice_id: "",
+        moneda: "PYG",
+        monto_brl: "",
+        tipo_cambio: "1350",
       })
       setComprobanteFile(null)
       fetchAll()
@@ -2944,28 +2952,109 @@ export default function ExpensesPage() {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Monto Total (PYG) *</label>
-                  <CurrencyInput
-                    required
-                    currency="PYG"
-                    placeholder="ej: 150.000"
-                    className="input-field w-full text-xs font-mono font-bold text-right"
-                    value={form.monto}
-                    onChangeValue={(num, formatted) => setForm({ ...form, monto: String(num) })}
-                  />
+              {/* Moneda y Montos */}
+              <div className="space-y-2 p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase">
+                    Moneda de Facturación / Compra
+                  </label>
+                  <div className="flex items-center bg-slate-200 dark:bg-slate-800 p-0.5 rounded-lg text-[11px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setForm((prev: any) => ({ ...prev, moneda: "PYG", monto_brl: "" }))}
+                      className={`px-3 py-1 rounded transition ${
+                        form.moneda === "PYG" ? "bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white" : "text-slate-500"
+                      }`}
+                    >
+                      🇵🇾 En Guaraníes (₲)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const tc = Number(form.tipo_cambio) || 1350
+                        const brlVal = form.monto ? (Number(form.monto) / tc).toFixed(2) : ""
+                        setForm((prev: any) => ({ ...prev, moneda: "BRL", monto_brl: brlVal, tipo_cambio: String(tc) }))
+                      }}
+                      className={`px-3 py-1 rounded transition ${
+                        form.moneda === "BRL" ? "bg-emerald-600 text-white shadow-xs" : "text-slate-500"
+                      }`}
+                    >
+                      🇧🇷 En Reales (R$)
+                    </button>
+                  </div>
                 </div>
 
-                <div>
-                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Fecha de Emisión</label>
-                  <input
-                    type="date"
-                    className="input-field w-full text-xs font-mono"
-                    value={form.fecha_gasto}
-                    onChange={e => setForm({ ...form, fecha_gasto: e.target.value })}
-                  />
-                </div>
+                {form.moneda === "BRL" ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <div>
+                      <label className="font-bold text-emerald-800 dark:text-emerald-300 block mb-1">
+                        Monto Final Reales (R$) *
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        placeholder="Ej: 250.00"
+                        className="input-field w-full text-xs font-mono font-bold text-right border-emerald-400 dark:border-emerald-600 text-emerald-600"
+                        value={form.monto_brl || ""}
+                        onChange={(e) => {
+                          const brl = e.target.value
+                          const tc = Number(form.tipo_cambio) || 1350
+                          const pyg = Math.round(Number(brl) * tc)
+                          setForm((prev: any) => ({ ...prev, monto_brl: brl, monto: String(pyg) }))
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Cotización R$ (₲ / R$) *
+                      </label>
+                      <CurrencyInput
+                        currency="PYG"
+                        required
+                        value={form.tipo_cambio || "1350"}
+                        onChangeValue={(tc) => {
+                          const validTc = tc || 1
+                          const pyg = Math.round(Number(form.monto_brl || 0) * validTc)
+                          setForm((prev: any) => ({ ...prev, tipo_cambio: String(validTc), monto: String(pyg) }))
+                        }}
+                        className="input-field w-full text-xs font-mono font-bold text-right"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Eq. Fiscal Guaraníes (₲)
+                      </label>
+                      <div className="input-field w-full text-xs font-mono font-black text-right bg-slate-100 dark:bg-slate-800 flex items-center justify-end px-3">
+                        {formatPYG(Number(form.monto) || 0)}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Monto Total (PYG) *</label>
+                    <CurrencyInput
+                      required
+                      currency="PYG"
+                      placeholder="ej: 150.000"
+                      className="input-field w-full text-xs font-mono font-bold text-right"
+                      value={form.monto}
+                      onChangeValue={(num) => setForm({ ...form, monto: String(num) })}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Fecha de Emisión</label>
+                <input
+                  type="date"
+                  className="input-field w-full text-xs font-mono"
+                  value={form.fecha_gasto}
+                  onChange={e => setForm({ ...form, fecha_gasto: e.target.value })}
+                />
               </div>
 
               <div>

@@ -133,6 +133,7 @@ class ExpenseCreate(BaseModel):
     es_pago_proveedor: Optional[bool] = False
     supplier_id: Optional[str] = None
     supplier_invoice_id: Optional[str] = None
+    monto_brl: Optional[Decimal] = None
     notas: Optional[str] = None
 
 
@@ -161,6 +162,7 @@ class ExpenseUpdate(BaseModel):
     es_pago_proveedor: Optional[bool] = None
     supplier_id: Optional[str] = None
     supplier_invoice_id: Optional[str] = None
+    monto_brl: Optional[Decimal] = None
     fecha_gasto: Optional[date] = None
     notas: Optional[str] = None
 
@@ -229,6 +231,7 @@ class ExpenseResponse(BaseModel):
     cost_center_id: Optional[UUID] = None
     cost_center_nombre: Optional[str] = None
     monto: float
+    monto_brl: Optional[float] = None
     descripcion: str
     proveedor: Optional[str] = None
     comprobante_url: Optional[str] = None
@@ -290,6 +293,9 @@ class ExpenseDisbursementLineCreate(BaseModel):
     fecha_cheque_vencimiento: Optional[date] = None
     titular_cheque: Optional[str] = None
     es_cheque_diferido: Optional[bool] = False
+    moneda: Optional[str] = "PYG"
+    monto_moneda: Optional[Decimal] = None
+    tipo_cambio: Optional[Decimal] = None
     detalles: Optional[dict] = None
 
 

@@ -519,6 +519,7 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         es_pago_proveedor=bool(data.es_pago_proveedor),
         supplier_id=uuid.UUID(data.supplier_id) if data.supplier_id else None,
         supplier_invoice_id=uuid.UUID(data.supplier_invoice_id) if data.supplier_invoice_id else None,
+        monto_brl=Decimal(str(data.monto_brl)) if data.monto_brl else None,
         auditoria_estado=auditoria_estado,
         auditoria_motivo=auditoria_motivo,
         registrado_por=uuid.UUID(user_id),
@@ -604,87 +605,170 @@ async def disburse_expense(
         # ── A. EFECTIVO BÓVEDA CENTRAL ───────────────────────────────────────
         if fp in ("boveda", "efectivo_boveda"):
             from api.src.caja.models import VaultEntry, CashRegisterMovement
-            q_vault = select(sa_func.coalesce(sa_func.sum(VaultEntry.monto_pyg), Decimal("0"))).where(
-                VaultEntry.company_id == cid,
-                VaultEntry.estado == "en_boveda"
-            )
-            saldo_vault = (await db.execute(q_vault)).scalar() or Decimal("0")
-            if saldo_vault < m_pyg:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Saldo insuficiente en Bóveda Central. Disponible: ₲ {saldo_vault:,.0f} | Requerido: ₲ {m_pyg:,.0f}"
-                )
+            d_moneda = (d.moneda or "PYG").upper()
+            now_dt = datetime.now(TZ_ASUNCION)
 
-            # Consumir entradas FIFO de bóveda
-            entries_res = await db.execute(
-                select(VaultEntry).where(
+            if d_moneda == "BRL":
+                q_vault_brl = select(sa_func.coalesce(sa_func.sum(VaultEntry.monto_brl), Decimal("0"))).where(
                     VaultEntry.company_id == cid,
                     VaultEntry.estado == "en_boveda"
-                ).order_by(VaultEntry.created_at.asc())
-            )
-            entries = entries_res.scalars().all()
+                )
+                saldo_vault_brl = (await db.execute(q_vault_brl)).scalar() or Decimal("0")
+                req_brl = Decimal(str(d.monto_moneda or exp.monto_brl or (m_pyg / (d.tipo_cambio or Decimal("1")))))
+                if saldo_vault_brl < req_brl:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Saldo insuficiente en Bóveda Central (Reales). Disponible: R$ {saldo_vault_brl:,.2f} | Requerido: R$ {req_brl:,.2f}"
+                    )
 
-            remaining = m_pyg
-            now_dt = datetime.now(TZ_ASUNCION)
-            for e in entries:
-                if remaining <= Decimal("0"):
-                    break
-                e_monto = Decimal(str(e.monto_pyg or 0))
-                if e_monto <= remaining:
-                    e.estado = "egreso_gasto"
-                    e.fecha_deposito = now_dt
-                    e.observaciones = f"Egreso por Pago Gasto {exp.numero_factura or exp.id} - {exp.proveedor or exp.descripcion}"
-                    remaining -= e_monto
-                else:
-                    remanente_monto = e_monto - remaining
-                    db.add(VaultEntry(
+                # Consumir entradas FIFO de bóveda en Reales
+                entries_res = await db.execute(
+                    select(VaultEntry).where(
+                        VaultEntry.company_id == cid,
+                        VaultEntry.estado == "en_boveda",
+                        VaultEntry.monto_brl > Decimal("0")
+                    ).order_by(VaultEntry.created_at.asc())
+                )
+                entries = entries_res.scalars().all()
+                remaining_brl = req_brl
+                for e in entries:
+                    if remaining_brl <= Decimal("0"):
+                        break
+                    e_brl = Decimal(str(e.monto_brl or 0))
+                    if e_brl <= remaining_brl:
+                        e.estado = "egreso_gasto"
+                        e.fecha_deposito = now_dt
+                        e.observaciones = f"Egreso R$ por Pago Gasto {exp.numero_factura or exp.id} - {exp.proveedor or exp.descripcion}"
+                        remaining_brl -= e_brl
+                    else:
+                        remanente_brl = e_brl - remaining_brl
+                        db.add(VaultEntry(
+                            company_id=cid,
+                            branch_id=e.branch_id,
+                            origen="remanente",
+                            handoff_id=e.handoff_id,
+                            monto_pyg=Decimal("0"),
+                            monto_usd=Decimal("0"),
+                            monto_brl=remanente_brl,
+                            estado="en_boveda",
+                            registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
+                            observaciones=f"Remanente en bóveda tras pago de gasto en R$ {exp.numero_factura or exp.id}",
+                        ))
+                        e.monto_brl = remaining_brl
+                        e.estado = "egreso_gasto"
+                        e.fecha_deposito = now_dt
+                        e.observaciones = f"Egreso R$ por Pago Gasto {exp.numero_factura or exp.id}"
+                        remaining_brl = Decimal("0")
+
+                from api.src.caja.models import CashRegister
+                reg_res = await db.execute(
+                    select(CashRegister).where(CashRegister.company_id == cid).order_by(CashRegister.activo.desc(), CashRegister.created_at.asc()).limit(1)
+                )
+                main_reg = reg_res.scalar_one_or_none()
+                if main_reg:
+                    db.add(CashRegisterMovement(
                         company_id=cid,
-                        branch_id=e.branch_id,
-                        origen="remanente",
-                        handoff_id=e.handoff_id,
-                        monto_pyg=remanente_monto,
-                        monto_usd=Decimal("0"),
-                        monto_brl=Decimal("0"),
-                        estado="en_boveda",
-                        registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
-                        observaciones=f"Remanente en bóveda tras pago de gasto {exp.numero_factura or exp.id}",
+                        register_id=main_reg.id,
+                        tipo="retiro",
+                        monto=req_brl,
+                        moneda="BRL",
+                        fecha=now_dt,
+                        usuario=user_nombre or "Tesorería",
+                        observaciones=f"Pago Gasto R$ {exp.numero_factura or ''} - {exp.proveedor or exp.descripcion}",
                     ))
-                    e.monto_pyg = remaining
-                    e.estado = "egreso_gasto"
-                    e.fecha_deposito = now_dt
-                    e.observaciones = f"Egreso por Pago Gasto {exp.numero_factura or exp.id}"
-                    remaining = Decimal("0")
 
-            # Movimiento de caja/bóveda
-            from api.src.caja.models import CashRegister
-            reg_res = await db.execute(
-                select(CashRegister).where(CashRegister.company_id == cid).order_by(CashRegister.activo.desc(), CashRegister.created_at.asc()).limit(1)
-            )
-            main_reg = reg_res.scalar_one_or_none()
-
-            if main_reg:
-                db.add(CashRegisterMovement(
+                db.add(ExpenseDisbursement(
                     company_id=cid,
-                    register_id=main_reg.id,
-                    tipo="retiro",
+                    expense_id=exp.id,
+                    medio_pago="boveda",
+                    monto=m_pyg,
+                    moneda="BRL",
+                    numero_comprobante=d.numero_comprobante,
+                    fecha_efectiva=d.fecha_efectiva or fecha_efectiva_pago,
+                    created_by=uuid.UUID(user_id) if user_id else None,
+                ))
+                resumen_medios.append(f"BOVEDA (R$ {req_brl:,.2f})")
+            else:
+                q_vault = select(sa_func.coalesce(sa_func.sum(VaultEntry.monto_pyg), Decimal("0"))).where(
+                    VaultEntry.company_id == cid,
+                    VaultEntry.estado == "en_boveda"
+                )
+                saldo_vault = (await db.execute(q_vault)).scalar() or Decimal("0")
+                if saldo_vault < m_pyg:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Saldo insuficiente en Bóveda Central. Disponible: ₲ {saldo_vault:,.0f} | Requerido: ₲ {m_pyg:,.0f}"
+                    )
+
+                # Consumir entradas FIFO de bóveda
+                entries_res = await db.execute(
+                    select(VaultEntry).where(
+                        VaultEntry.company_id == cid,
+                        VaultEntry.estado == "en_boveda"
+                    ).order_by(VaultEntry.created_at.asc())
+                )
+                entries = entries_res.scalars().all()
+
+                remaining = m_pyg
+                for e in entries:
+                    if remaining <= Decimal("0"):
+                        break
+                    e_monto = Decimal(str(e.monto_pyg or 0))
+                    if e_monto <= remaining:
+                        e.estado = "egreso_gasto"
+                        e.fecha_deposito = now_dt
+                        e.observaciones = f"Egreso por Pago Gasto {exp.numero_factura or exp.id} - {exp.proveedor or exp.descripcion}"
+                        remaining -= e_monto
+                    else:
+                        remanente_monto = e_monto - remaining
+                        db.add(VaultEntry(
+                            company_id=cid,
+                            branch_id=e.branch_id,
+                            origen="remanente",
+                            handoff_id=e.handoff_id,
+                            monto_pyg=remanente_monto,
+                            monto_usd=Decimal("0"),
+                            monto_brl=Decimal("0"),
+                            estado="en_boveda",
+                            registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
+                            observaciones=f"Remanente en bóveda tras pago de gasto {exp.numero_factura or exp.id}",
+                        ))
+                        e.monto_pyg = remaining
+                        e.estado = "egreso_gasto"
+                        e.fecha_deposito = now_dt
+                        e.observaciones = f"Egreso por Pago Gasto {exp.numero_factura or exp.id}"
+                        remaining = Decimal("0")
+
+                # Movimiento de caja/bóveda
+                from api.src.caja.models import CashRegister
+                reg_res = await db.execute(
+                    select(CashRegister).where(CashRegister.company_id == cid).order_by(CashRegister.activo.desc(), CashRegister.created_at.asc()).limit(1)
+                )
+                main_reg = reg_res.scalar_one_or_none()
+
+                if main_reg:
+                    db.add(CashRegisterMovement(
+                        company_id=cid,
+                        register_id=main_reg.id,
+                        tipo="retiro",
+                        monto=m_pyg,
+                        moneda="PYG",
+                        fecha=now_dt,
+                        usuario=user_nombre or "Tesorería",
+                        observaciones=f"Pago Gasto {exp.numero_factura or ''} - {exp.proveedor or exp.descripcion}",
+                    ))
+
+                db.add(ExpenseDisbursement(
+                    company_id=cid,
+                    expense_id=exp.id,
+                    medio_pago="boveda",
                     monto=m_pyg,
                     moneda="PYG",
-                    fecha=datetime.now(TZ_ASUNCION),
-                    usuario=user_nombre or "Tesorería",
-                    observaciones=f"Pago Gasto {exp.numero_factura or ''} - {exp.proveedor or exp.descripcion}",
+                    numero_comprobante=d.numero_comprobante,
+                    fecha_efectiva=d.fecha_efectiva or fecha_efectiva_pago,
+                    created_by=uuid.UUID(user_id) if user_id else None,
                 ))
-
-            db.add(ExpenseDisbursement(
-                company_id=cid,
-                expense_id=exp.id,
-                medio_pago="boveda",
-                monto=m_pyg,
-                moneda="PYG",
-                numero_comprobante=d.numero_comprobante,
-                fecha_efectiva=d.fecha_efectiva or fecha_efectiva_pago,
-                created_by=uuid.UUID(user_id) if user_id else None,
-            ))
-            resumen_medios.append("BOVEDA")
+                resumen_medios.append("BOVEDA")
 
         # ── B. EFECTIVO FONDO FIJO (CAJA CHICA) ──────────────────────────────
         elif fp in ("fondo_fijo", "caja_chica"):

@@ -21,6 +21,9 @@ interface DisbursementRow {
   id: string
   medio_pago: "boveda" | "fondo_fijo" | "transferencia" | "cheque" | "otro"
   monto: string
+  moneda?: "PYG" | "BRL"
+  monto_brl?: string
+  tipo_cambio?: string
   bank_account_id?: string
   petty_cash_fund_id?: string
   numero_comprobante?: string
@@ -43,6 +46,7 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
   const [funds, setFunds] = useState<PettyCashFund[]>([])
   const [vaultBalance, setVaultBalance] = useState<number>(0)
+  const [vaultBalanceBRL, setVaultBalanceBRL] = useState<number>(0)
 
   // Formulario
   const [fechaPago, setFechaPago] = useState(getTodayAsuncion())
@@ -64,7 +68,7 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
       const [banksRes, fundsRes, vaultRes] = await Promise.all([
         api.financial.banks.list().catch(() => []),
         api.expenses.funds.list({ activo: true }).catch(() => []),
-        api.vault.dashboard().catch(() => ({ saldo_en_boveda_pyg: 0 } as any)),
+        api.vault.dashboard().catch(() => ({ saldo_en_boveda_pyg: 0, saldo_en_boveda_brl: 0 } as any)),
       ])
 
       const activeBanks = (banksRes || []).filter((b: any) => b.activo)
@@ -72,18 +76,22 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
       setBankAccounts(activeBanks)
       setFunds(activeFunds)
       setVaultBalance(Number((vaultRes as any)?.saldo_en_boveda_pyg || (vaultRes as any)?.saldo_boveda || 0))
+      setVaultBalanceBRL(Number((vaultRes as any)?.saldo_en_boveda_brl || 0))
 
       // Pre-cargar una fila inicial con el monto total del gasto
       const defaultFund = expense.fund_id ? activeFunds.find((f: any) => f.id === expense.fund_id) : activeFunds[0]
       const defaultBank = activeBanks[0]
 
-      let initialMedio: "boveda" | "fondo_fijo" | "transferencia" = "fondo_fijo"
-      if (expense.fund_id || defaultFund) {
-        initialMedio = "fondo_fijo"
-      } else if (activeBanks.length > 0) {
-        initialMedio = "transferencia"
-      } else {
-        initialMedio = "boveda"
+      const hasBrl = Boolean(expense.monto_brl && Number(expense.monto_brl) > 0)
+      let initialMedio: "boveda" | "fondo_fijo" | "transferencia" = hasBrl ? "boveda" : "fondo_fijo"
+      if (!hasBrl) {
+        if (expense.fund_id || defaultFund) {
+          initialMedio = "fondo_fijo"
+        } else if (activeBanks.length > 0) {
+          initialMedio = "transferencia"
+        } else {
+          initialMedio = "boveda"
+        }
       }
 
       setDisbursements([
@@ -91,6 +99,8 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
           id: Math.random().toString(),
           medio_pago: initialMedio,
           monto: String(expense.monto || 0),
+          moneda: hasBrl ? "BRL" : "PYG",
+          monto_brl: hasBrl ? String(expense.monto_brl) : "",
           bank_account_id: defaultBank?.id || "",
           petty_cash_fund_id: defaultFund?.id || "",
           numero_comprobante: "",
@@ -170,6 +180,27 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
         return
       }
 
+      if (row.medio_pago === "boveda") {
+        if (row.moneda === "BRL") {
+          const reqBrl = Number(row.monto_brl) || (expense?.monto_brl ? Number(expense.monto_brl) : (Number(row.monto) / 1350))
+          if (vaultBalanceBRL < reqBrl) {
+            toast.error(
+              "Saldo Bóveda R$ Insuficiente",
+              `Bóveda Central solo dispone de R$ ${vaultBalanceBRL.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}. Requerido: R$ ${reqBrl.toFixed(2)}`
+            )
+            return
+          }
+        } else {
+          if (vaultBalance < Number(row.monto)) {
+            toast.error(
+              "Saldo Bóveda ₲ Insuficiente",
+              `Bóveda Central solo dispone de ${formatPYG(vaultBalance)}. Requerido: ${formatPYG(Number(row.monto))}`
+            )
+            return
+          }
+        }
+      }
+
       if (row.medio_pago === "fondo_fijo" && !row.petty_cash_fund_id) {
         toast.error("Fondo requerido", `Debe seleccionar la caja chica en la línea #${i + 1}.`)
         return
@@ -194,6 +225,10 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
         disbursements: disbursements.map(row => ({
           medio_pago: row.medio_pago,
           monto: Number(row.monto),
+          moneda: row.medio_pago === "boveda" ? (row.moneda || "PYG") : "PYG",
+          monto_moneda: row.medio_pago === "boveda" && row.moneda === "BRL"
+            ? (Number(row.monto_brl) || (expense?.monto_brl ? Number(expense.monto_brl) : undefined))
+            : undefined,
           bank_account_id: (row.medio_pago === "transferencia" || row.medio_pago === "cheque") ? (row.bank_account_id || undefined) : undefined,
           petty_cash_fund_id: row.medio_pago === "fondo_fijo" ? (row.petty_cash_fund_id || undefined) : undefined,
           numero_comprobante: row.numero_comprobante || undefined,
@@ -411,13 +446,64 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
                         {/* Campo de Contexto según el medio */}
                         <div>
                           {row.medio_pago === "boveda" && (
-                            <div>
-                              <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                                Saldo Disponible en Bóveda
-                              </label>
-                              <div className="text-xs px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-lg font-bold text-slate-700 dark:text-slate-300">
-                                ₲ {vaultBalance.toLocaleString("es-PY")}
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400">
+                                  Moneda Bóveda
+                                </label>
+                                <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg text-[10px]">
+                                  <button
+                                    type="button"
+                                    onClick={() => updateDisbursementRow(idx, { moneda: "PYG" })}
+                                    className={`px-2 py-0.5 rounded font-bold ${
+                                      (row.moneda || "PYG") === "PYG" ? "bg-white dark:bg-slate-700 shadow-xs text-slate-900 dark:text-white" : "text-slate-400"
+                                    }`}
+                                  >
+                                    ₲ PYG
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateDisbursementRow(idx, {
+                                      moneda: "BRL",
+                                      monto_brl: row.monto_brl || (expense.monto_brl ? String(expense.monto_brl) : "")
+                                    })}
+                                    className={`px-2 py-0.5 rounded font-bold ${
+                                      row.moneda === "BRL" ? "bg-emerald-600 text-white shadow-xs" : "text-slate-400"
+                                    }`}
+                                  >
+                                    R$ BRL
+                                  </button>
+                                </div>
                               </div>
+
+                              {row.moneda === "BRL" ? (
+                                <div className="space-y-1">
+                                  <div className="flex items-center justify-between text-[11px]">
+                                    <span className="text-slate-400 font-medium">Disponible R$:</span>
+                                    <span className={`font-mono font-bold ${vaultBalanceBRL >= (Number(row.monto_brl) || 0) ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
+                                      R$ {vaultBalanceBRL.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] text-slate-400 block">Deducción en R$ de Bóveda</label>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      placeholder="Monto en R$"
+                                      value={row.monto_brl || ""}
+                                      onChange={(e) => updateDisbursementRow(idx, { monto_brl: e.target.value })}
+                                      className="w-full text-xs font-mono font-bold p-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-emerald-600"
+                                    />
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="text-xs px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-lg font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                                  <span>Disp. ₲:</span>
+                                  <span className={`font-mono ${vaultBalance >= Number(row.monto) ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
+                                    ₲ {vaultBalance.toLocaleString("es-PY")}
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           )}
 

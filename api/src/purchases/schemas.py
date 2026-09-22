@@ -284,6 +284,8 @@ class ReceiptCreate(BaseModel):
     supplier_id: Optional[UUID] = None
     warehouse_id: Optional[UUID] = None
     proveedor_ref: Optional[str] = None
+    total_brl: Optional[Decimal] = None
+    tipo_cambio: Optional[Decimal] = None
     items: list[ReceiptItemInput]
     observaciones: Optional[str] = None
     user_id: Optional[UUID] = None

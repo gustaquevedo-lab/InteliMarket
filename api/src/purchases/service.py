@@ -823,6 +823,13 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         invoice_num = (data.proveedor_ref or receipt.numero).strip()
         iva_10 = (receipt.total / Decimal("11")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
+        is_br_sup = bool(sup and (sup.tipo_proveedor in ("brasilero", "br") or (getattr(sup, "moneda_default", "") == "BRL"))) or (data.total_brl is not None)
+        inv_moneda = "BRL" if is_br_sup else "PYG"
+        inv_tc = data.tipo_cambio or Decimal("1")
+        inv_total_brl = data.total_brl
+        if is_br_sup and inv_total_brl is None and inv_tc > 1:
+            inv_total_brl = (receipt.total / inv_tc).quantize(Decimal("0.01"))
+
         inv = SupplierInvoice(
             company_id=company_id,
             supplier_id=supplier_id,
@@ -836,8 +843,10 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             iva_5=Decimal("0"),
             total=receipt.total,
             saldo_pendiente=receipt.total,
-            moneda="PYG",
-            tipo_cambio=Decimal("1"),
+            moneda=inv_moneda,
+            tipo_cambio=inv_tc,
+            total_brl=inv_total_brl,
+            saldo_pendiente_brl=inv_total_brl,
             purchase_order_id=data.purchase_order_id,
             receipt_id=receipt.id,
             condicion="credito" if plazo_dias > 0 else "contado",

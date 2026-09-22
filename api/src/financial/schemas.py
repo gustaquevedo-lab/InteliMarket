@@ -25,6 +25,8 @@ class SupplierInvoiceCreate(BaseModel):
     total: Decimal = Field(ge=0)
     moneda: str = "PYG"
     tipo_cambio: Decimal = Decimal("1")
+    total_brl: Optional[Decimal] = None
+    saldo_pendiente_brl: Optional[Decimal] = None
     purchase_order_id: Optional[UUID] = None
     receipt_id: Optional[UUID] = None
     condicion: str = "credito"
@@ -39,6 +41,8 @@ class SupplierInvoiceUpdate(BaseModel):
     cdc: Optional[str] = None
     fecha_recepcion: Optional[date] = None
     fecha_vencimiento: Optional[date] = None
+    total_brl: Optional[Decimal] = None
+    saldo_pendiente_brl: Optional[Decimal] = None
     notas: Optional[str] = None
     concepto: Optional[str] = None
 
@@ -62,6 +66,8 @@ class SupplierInvoiceResponse(BaseModel):
     saldo_pendiente: Decimal
     moneda: str
     tipo_cambio: Optional[Decimal] = None
+    total_brl: Optional[Decimal] = None
+    saldo_pendiente_brl: Optional[Decimal] = None
     purchase_order_id: Optional[UUID] = None
     receipt_id: Optional[UUID] = None
     condicion: Optional[str] = None
@@ -581,6 +587,7 @@ class MultiSupplierPaymentBatchCreate(BaseModel):
     fecha_cheque_vencimiento: Optional[date] = None
     es_cheque_diferido: bool = False
     monto_total_desembolso_pyg: Decimal  # Monto total del cheque/transferencia matriz
+    monto_total_desembolso_brl: Optional[Decimal] = None
     diferencia_cambio_total: Optional[Decimal] = Decimal("0")
     items: list[MultiSupplierBatchItem]
 
