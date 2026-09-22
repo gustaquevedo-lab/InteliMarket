@@ -211,8 +211,8 @@ async def revert_supplier_invoice_payment(
     if inv.total_brl:
         inv.saldo_pendiente_brl = inv.total_brl
 
-    nota_rev = f" [Reversión condición pagada: {motivo}]" if motivo else " [Reversión condición pagada para gestionar en InteliMarket]"
-    inv.notas = ((inv.notas or "") + nota_rev).strip()
+    nota_rev = f" [Reversión: {motivo}]" if motivo else " [Reversión condición pagada]"
+    inv.concepto = (((inv.concepto or "") + nota_rev)[:295]).strip()
 
     await db.commit()
     await db.refresh(inv)
@@ -373,7 +373,7 @@ async def list_paid_invoices(
             "supplier_id": inv.supplier_id,
             "supplier_nombre": s_info.get("nombre") or "Proveedor Desconocido",
             "supplier_ruc": s_info.get("ruc") or "",
-            "notas": inv.notas,
+            "notas": inv.concepto,
             "concepto": inv.concepto,
             "ultimo_pago_fecha": p_info.get("fecha_pago") or inv.fecha_emision,
             "ultimo_pago_metodo": p_info.get("payment_method") or "LEGACY",
