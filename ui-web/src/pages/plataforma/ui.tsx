@@ -53,40 +53,59 @@ export function Chip({ className, children, title }: { className?: string; child
 
 export function Card({ title, right, children, className, pad = true }: { title?: ReactNode; right?: ReactNode; children: ReactNode; className?: string; pad?: boolean }) {
   return (
-    <section className={cx("bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border border-slate-200/80 dark:border-slate-800/80 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden", className)}>
+    <section className={cx("p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow space-y-4", className)}>
       {(title || right) && (
-        <header className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-800/25">
-          <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">{title}</h3>
+        <header className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-700/60">
+          <h3 className="text-base font-black text-gray-900 dark:text-white">{title}</h3>
           {right}
         </header>
       )}
-      <div className={pad ? "p-5" : ""}>{children}</div>
+      <div className={pad ? "" : "-mx-5 -mb-5"}>{children}</div>
     </section>
   )
 }
 
-export function Stat({ icon, label, value, sub, tone = "slate" }: { icon: ReactNode; label: string; value: ReactNode; sub?: ReactNode; tone?: "slate" | "rose" | "amber" | "emerald" | "sky" }) {
+export function Stat({
+  icon,
+  label,
+  value,
+  sub,
+  tone = "indigo",
+}: {
+  icon: ReactNode
+  label: string
+  value: ReactNode
+  sub?: ReactNode
+  tone?: "slate" | "rose" | "amber" | "emerald" | "sky" | "indigo" | "blue" | "purple"
+}) {
   const tones = {
-    slate: { bg: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700", ring: "group-hover:border-slate-300 dark:group-hover:border-slate-700" },
-    rose: { bg: "bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400 border-rose-200/60 dark:border-rose-500/30", ring: "group-hover:border-rose-300 dark:group-hover:border-rose-800" },
-    amber: { bg: "bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400 border-amber-200/60 dark:border-amber-500/30", ring: "group-hover:border-amber-300 dark:group-hover:border-amber-800" },
-    emerald: { bg: "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400 border-emerald-200/60 dark:border-emerald-500/30", ring: "group-hover:border-emerald-300 dark:group-hover:border-emerald-800" },
-    sky: { bg: "bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-400 border-sky-200/60 dark:border-sky-500/30", ring: "group-hover:border-sky-300 dark:group-hover:border-sky-800" },
+    slate: { iconBg: "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300", valColor: "text-slate-900 dark:text-white" },
+    rose: { iconBg: "bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400", valColor: "text-rose-600 dark:text-rose-400" },
+    amber: { iconBg: "bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400", valColor: "text-amber-600 dark:text-amber-400" },
+    emerald: { iconBg: "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400", valColor: "text-emerald-600 dark:text-emerald-400" },
+    sky: { iconBg: "bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400", valColor: "text-sky-600 dark:text-sky-400" },
+    indigo: { iconBg: "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400", valColor: "text-indigo-600 dark:text-indigo-400" },
+    blue: { iconBg: "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400", valColor: "text-blue-600 dark:text-blue-400" },
+    purple: { iconBg: "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400", valColor: "text-purple-600 dark:text-purple-400" },
   }
-  const t = tones[tone] || tones.slate
+  const t = tones[tone] || tones.indigo
+
   return (
-    <div className={cx(
-      "bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 sm:p-5 shadow-sm hover:shadow-md transition-all duration-200 group flex items-start gap-3.5",
-      t.ring
-    )}>
-      <div className={cx("w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border shadow-xs transition-transform duration-200 group-hover:scale-105", t.bg)}>
-        {icon}
+    <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{label}</span>
+        <div className={cx("p-2 rounded-xl", t.iconBg)}>
+          {icon}
+        </div>
       </div>
-      <div className="min-w-0 flex-1">
-        <div className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-white leading-none tabular-nums">{value}</div>
-        <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1.5 truncate">{label}</div>
-        {sub && <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">{sub}</div>}
-      </div>
+      <p className={cx("text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate", t.valColor)}>
+        {value}
+      </p>
+      {sub && (
+        <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
+          {typeof sub === "string" ? <span>{sub}</span> : sub}
+        </div>
+      )}
     </div>
   )
 }

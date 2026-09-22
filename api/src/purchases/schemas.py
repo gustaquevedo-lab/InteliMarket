@@ -12,9 +12,17 @@ from decimal import Decimal
 class SupplierCreate(BaseModel):
     company_id: UUID
     tipo_persona: str = "juridica"
-    ruc: Optional[str] = Field(default=None, max_length=15)
-    ci: Optional[str] = Field(default=None, max_length=20)
+    ruc: Optional[str] = Field(default=None, max_length=30)
+    ci: Optional[str] = Field(default=None, max_length=30)
     razon_social: str = Field(min_length=2, max_length=255)
+    nombre_fantasia: Optional[str] = None
+    contacto: Optional[str] = None
+    tipo_provision: str = "bienes"  # bienes | servicios | mixto
+    rubro: Optional[str] = None
+    pais: str = "Paraguay"
+    limite_credito: Decimal = Decimal("0")
+    dia_visita: Optional[str] = None
+    frecuencia_entrega: Optional[str] = None
     condicion_iva: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
@@ -32,12 +40,29 @@ class SupplierCreate(BaseModel):
     contacto_email: Optional[str] = None
     banco: Optional[str] = None
     cuenta_bancaria: Optional[str] = None
+    titular_cuenta_bancaria: Optional[str] = None
+    tipo_cuenta_bancaria: Optional[str] = None
+    identificacion_bancaria: Optional[str] = None
     tipo_contribuyente: Optional[str] = None
     retencion_irp: bool = False
     retencion_iva: bool = False
+    porcentaje_retencion_iva: int = 30
+    agente_retencion: bool = False
 
 
 class SupplierUpdate(BaseModel):
+    razon_social: Optional[str] = None
+    nombre_fantasia: Optional[str] = None
+    contacto: Optional[str] = None
+    ruc: Optional[str] = None
+    ci: Optional[str] = None
+    tipo_persona: Optional[str] = None
+    tipo_provision: Optional[str] = None  # bienes | servicios | mixto
+    rubro: Optional[str] = None
+    pais: Optional[str] = None
+    limite_credito: Optional[Decimal] = None
+    dia_visita: Optional[str] = None
+    frecuencia_entrega: Optional[str] = None
     condicion_iva: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
@@ -56,9 +81,14 @@ class SupplierUpdate(BaseModel):
     contacto_email: Optional[str] = None
     banco: Optional[str] = None
     cuenta_bancaria: Optional[str] = None
+    titular_cuenta_bancaria: Optional[str] = None
+    tipo_cuenta_bancaria: Optional[str] = None
+    identificacion_bancaria: Optional[str] = None
     tipo_contribuyente: Optional[str] = None
     retencion_irp: Optional[bool] = None
     retencion_iva: Optional[bool] = None
+    porcentaje_retencion_iva: Optional[int] = None
+    agente_retencion: Optional[bool] = None
 
 
 class SupplierResponse(BaseModel):
@@ -68,13 +98,21 @@ class SupplierResponse(BaseModel):
     ruc: Optional[str] = None
     ci: Optional[str] = None
     razon_social: str
+    nombre_fantasia: Optional[str] = None
+    contacto: Optional[str] = None
+    tipo_provision: Optional[str] = "bienes"
+    rubro: Optional[str] = None
+    pais: Optional[str] = "Paraguay"
+    limite_credito: Optional[Decimal] = Decimal("0")
+    dia_visita: Optional[str] = None
+    frecuencia_entrega: Optional[str] = None
     condicion_iva: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
     telefono: Optional[str] = None
     email: Optional[str] = None
-    plazo_pago_dias: int
-    activo: bool
+    plazo_pago_dias: int = 0
+    activo: bool = True
     tipo_proveedor: str = "nacional"
     grupo: Optional[str] = None
     categoria_ids: Optional[list[UUID]] = None
@@ -87,9 +125,14 @@ class SupplierResponse(BaseModel):
     contacto_email: Optional[str] = None
     banco: Optional[str] = None
     cuenta_bancaria: Optional[str] = None
+    titular_cuenta_bancaria: Optional[str] = None
+    tipo_cuenta_bancaria: Optional[str] = None
+    identificacion_bancaria: Optional[str] = None
     tipo_contribuyente: Optional[str] = None
     retencion_irp: bool = False
     retencion_iva: bool = False
+    porcentaje_retencion_iva: int = 30
+    agente_retencion: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -130,6 +173,7 @@ class POCreate(BaseModel):
     otros_costos: Decimal = Decimal("0")
     created_by_name: Optional[str] = None
     seguimiento_numero: Optional[str] = None
+    update_default_supplier: bool = False
 
 
 class POUpdate(BaseModel):
@@ -148,6 +192,7 @@ class POUpdate(BaseModel):
     customs_cost: Optional[Decimal] = None
     otros_costos: Optional[Decimal] = None
     updated_by_name: Optional[str] = None
+    update_default_supplier: bool = False
 
 
 class POResponse(BaseModel):
@@ -1287,4 +1332,40 @@ SupplierReturnCreateInput.model_rebuild()
 SupplierReturnUpdateInput.model_rebuild()
 SupplierReturnRejectInput.model_rebuild()
 SupplierReturnCompleteInput.model_rebuild()
+
+
+class SupplierPriceComparisonItem(BaseModel):
+    supplier_id: UUID
+    razon_social: str
+    nombre_fantasia: Optional[str] = None
+    ruc: Optional[str] = None
+    telefono: Optional[str] = None
+    es_habitual: bool = False
+    ultimo_precio: Decimal
+    mejor_precio: Decimal
+    moneda: str = "PYG"
+    fecha_ultima_compra: Optional[datetime] = None
+    origen: str = "orden_compra"  # "orden_compra", "factura", "contrato", "catalogo"
+    referencia_doc: Optional[str] = None
+    es_mas_barato: bool = False
+    ahorro_vs_habitual: Optional[Decimal] = None
+    ahorro_pct: Optional[Decimal] = None
+
+
+class ProductSupplierComparisonResponse(BaseModel):
+    product_id: UUID
+    nombre: str
+    sku: Optional[str] = None
+    codigo_barra: Optional[str] = None
+    costo_unitario_actual: Decimal
+    ultimo_costo: Decimal
+    habitual_supplier_id: Optional[UUID] = None
+    habitual_supplier_nombre: Optional[str] = None
+    mejor_precio: Optional[Decimal] = None
+    mejor_supplier_id: Optional[UUID] = None
+    mejor_supplier_nombre: Optional[str] = None
+    ahorro_maximo_gs: Decimal = Decimal("0")
+    ahorro_maximo_pct: Decimal = Decimal("0")
+    proveedores: list[SupplierPriceComparisonItem]
+
 

@@ -72,12 +72,21 @@ async def get_supplier(supplier_id: str, db: AsyncSession = Depends(get_db)):
     return supplier
 
 
+@router.put("/suppliers/{supplier_id}", response_model=SupplierResponse)
 @router.patch("/suppliers/{supplier_id}", response_model=SupplierResponse)
 async def update_supplier(supplier_id: str, body: SupplierUpdate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("suppliers:update"))):
     result = await service.update_supplier(db, supplier_id, body)
     if not result:
         raise HTTPException(status_code=404, detail="Proveedor no encontrado")
     return result
+
+
+@router.delete("/suppliers/{supplier_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_supplier(supplier_id: str, db: AsyncSession = Depends(get_db), _=Depends(require_permission("suppliers:delete"))):
+    success = await service.delete_supplier(db, supplier_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+
 
 
 # ── Supplier Intelligence ─────────────────────────────────────────────────────

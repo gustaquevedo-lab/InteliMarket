@@ -69,7 +69,7 @@ export default function IncidenciasTab({ env, initialIssueId, initialProvider, o
   const counts = useMemo(() => ({ open: items.filter((i) => i.status === "unresolved").length }), [items])
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="space-y-6">
       {/* filtros */}
       <div className="flex flex-wrap items-center gap-2.5">
         <Segmented<StatusFilter>

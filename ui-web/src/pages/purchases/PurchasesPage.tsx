@@ -10,7 +10,7 @@ import {
   Sparkles, Sun, CloudRain, Snowflake, Flame, ShieldAlert, Scale, CheckCircle,
   HelpCircle, AlertCircle, Box, Layers, Building2, Phone, Mail, MapPin, SlidersHorizontal,
   ChevronRight, ArrowUpDown, ChevronLeft, CheckSquare, Square, PieChart, Undo2, Receipt, History, Star,
-  Lock, Unlock, FileCheck, Barcode, RotateCcw
+  Lock, Unlock, FileCheck, Barcode, RotateCcw, CreditCard, Briefcase, Wrench, Globe, LayoutGrid, Table
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import {
@@ -49,6 +49,36 @@ const poStatusMap: Record<string, { label: string; bg: string; text: string }> =
   completado: { label: "Completada", bg: "bg-emerald-50 dark:bg-emerald-900/30", text: "text-emerald-600 dark:text-emerald-400" },
   cancelado: { label: "Cancelada", bg: "bg-red-50 dark:bg-red-900/30", text: "text-red-600 dark:text-red-400" },
 }
+
+export const RUBROS_PROVEEDORES = [
+  "Carnicería y Frigorífico",
+  "Lácteos y Derivados",
+  "Bebidas, Cervezas y Licores",
+  "Abarrotes y Almacén Seco",
+  "Frutas, Verduras y Frescos",
+  "Panadería, Confitería e Insumos",
+  "Limpieza, Hogar y Químicos",
+  "Cuidado Personal y Perfumería",
+  "Bazar, Textil y Descartables",
+  "Alimentos para Mascotas",
+  "Equipamiento, Maquinarias y Balanzas",
+  "Tecnología, Software e Informática",
+  "Logística, Fletes y Transporte",
+  "Seguridad, Alarmas y Vigilancia",
+  "Servicios Profesionales, Contables y Legales",
+  "Servicios Públicos, Energía y Alquileres",
+  "Mantenimiento, Refrigeración y Obras",
+  "Marketing, Publicidad y Cartelería",
+  "Otros Insumos y Servicios Generales"
+]
+
+export const BANCOS_PROVEEDORES = [
+  "BANCO CONTINENTAL", "BANCO ITAÚ PARAGUAY", "BANCO GNB PARAGUAY",
+  "BANCO ATLAS", "BANCOP", "BANCO SUDAMERIS", "BANCO BASA",
+  "BANCO FAMILIAR", "BANCO INTERFISA", "BANCO NACIONAL DE FOMENTO (BNF)",
+  "SOLAR BANCO", "UENO BANK", "ZETA BANCO",
+  "BANCO DO BRASIL", "BRADESCO", "ITAU UNIBANCO (BR)", "CAIXA ECONOMICA", "SANTANDER (BR)", "SICOOB / SICREDI", "CLAVE PIX"
+]
 
 export default function PurchasesPage() {
   const { user } = useAuth()
@@ -412,25 +442,159 @@ export default function PurchasesPage() {
   })
   const [savingReq, setSavingReq] = useState(false)
 
-  // Alta y filtro de Proveedores (Nacional vs BR)
-  const [showCreateSupplierModal, setShowCreateSupplierModal] = useState(false)
+  // Gestión Integral de Proveedores (Alta, Edición y Clasificación Bienes/Servicios)
+  const [showSupplierModal, setShowSupplierModal] = useState(false)
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
   const [savingSupplier, setSavingSupplier] = useState(false)
+  const [supplierModalTab, setSupplierModalTab] = useState<"general" | "clasificacion" | "comercial" | "bancario" | "contacto">("general")
   const [supplierFilterType, setSupplierFilterType] = useState<"todos" | "nacional" | "brasilero">("todos")
-  const [newSupplierForm, setNewSupplierForm] = useState({
+  const [supplierFilterProvision, setSupplierFilterProvision] = useState<"todos" | "bienes" | "servicios" | "mixto">("todos")
+  const [supplierViewMode, setSupplierViewMode] = useState<"grid" | "table">("grid")
+
+  const initialSupplierForm = {
     razon_social: "",
     nombre_fantasia: "",
     ruc: "",
+    ci: "",
+    tipo_persona: "juridica",
     tipo_proveedor: "nacional",
+    tipo_provision: "bienes", // "bienes" | "servicios" | "mixto"
+    rubro: "Abarrotes y Almacén Seco",
+    pais: "Paraguay",
     moneda_default: "PYG",
+    plazo_pago_dias: 30,
+    limite_credito: 0,
+    dia_visita: "",
+    frecuencia_entrega: "Semanal",
     telefono: "",
     email: "",
     contacto_nombre: "",
     contacto_telefono: "",
-    plazo_pago_dias: 30,
+    contacto_email: "",
     direccion: "",
     ciudad: "",
-    tipo_persona: "juridica",
-  })
+    condicion_iva: "10",
+    banco: "",
+    tipo_cuenta_bancaria: "cuenta_corriente",
+    cuenta_bancaria: "",
+    titular_cuenta_bancaria: "",
+    identificacion_bancaria: "",
+    retencion_iva: true,
+    porcentaje_retencion_iva: 30,
+    agente_retencion: false,
+    notas: "",
+    activo: true,
+  }
+
+  const [supplierForm, setSupplierForm] = useState(initialSupplierForm)
+
+  const handleOpenCreateSupplier = () => {
+    setEditingSupplier(null)
+    setSupplierForm(initialSupplierForm)
+    setSupplierModalTab("general")
+    setShowSupplierModal(true)
+  }
+
+  const handleOpenEditSupplier = (s: Supplier) => {
+    setEditingSupplier(s)
+    setSupplierForm({
+      razon_social: s.razon_social || "",
+      nombre_fantasia: s.nombre_fantasia || "",
+      ruc: s.ruc || "",
+      ci: s.ci || "",
+      tipo_persona: s.tipo_persona || "juridica",
+      tipo_proveedor: s.tipo_proveedor || "nacional",
+      tipo_provision: (s as any).tipo_provision || "bienes",
+      rubro: (s as any).rubro || "Abarrotes y Almacén Seco",
+      pais: (s as any).pais || (s.tipo_proveedor === "brasilero" ? "Brasil" : "Paraguay"),
+      moneda_default: s.moneda_default || (s.tipo_proveedor === "brasilero" ? "BRL" : "PYG"),
+      plazo_pago_dias: s.plazo_pago_dias ?? 30,
+      limite_credito: Number((s as any).limite_credito || 0),
+      dia_visita: (s as any).dia_visita || "",
+      frecuencia_entrega: (s as any).frecuencia_entrega || "Semanal",
+      telefono: s.telefono || "",
+      email: s.email || "",
+      contacto_nombre: s.contacto_nombre || s.contacto || "",
+      contacto_telefono: s.contacto_telefono || "",
+      contacto_email: (s as any).contacto_email || "",
+      direccion: s.direccion || "",
+      ciudad: s.ciudad || "",
+      condicion_iva: s.condicion_iva || "10",
+      banco: (s as any).banco || "",
+      tipo_cuenta_bancaria: (s as any).tipo_cuenta_bancaria || "cuenta_corriente",
+      cuenta_bancaria: (s as any).cuenta_bancaria || "",
+      titular_cuenta_bancaria: (s as any).titular_cuenta_bancaria || "",
+      identificacion_bancaria: (s as any).identificacion_bancaria || "",
+      retencion_iva: (s as any).retencion_iva ?? true,
+      porcentaje_retencion_iva: (s as any).porcentaje_retencion_iva ?? 30,
+      agente_retencion: (s as any).agente_retencion ?? false,
+      notas: (s as any).notas || "",
+      activo: s.activo ?? true,
+    })
+    setSupplierModalTab("general")
+    setShowSupplierModal(true)
+  }
+
+  const handleSaveSupplier = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!supplierForm.razon_social.trim()) {
+      toast.error("Razón Social obligatoria", "Indique la razón social o nombre comercial.")
+      return
+    }
+    setSavingSupplier(true)
+    try {
+      const payload: Partial<Supplier> = {
+        company_id: "00000000-0000-0000-0000-000000000001",
+        razon_social: supplierForm.razon_social.trim(),
+        nombre_fantasia: supplierForm.nombre_fantasia.trim() || supplierForm.razon_social.trim(),
+        ruc: supplierForm.ruc.trim() || undefined,
+        ci: supplierForm.ci.trim() || undefined,
+        tipo_persona: supplierForm.tipo_persona,
+        tipo_proveedor: supplierForm.tipo_proveedor,
+        tipo_provision: supplierForm.tipo_provision,
+        rubro: supplierForm.rubro,
+        pais: supplierForm.pais,
+        moneda_default: supplierForm.moneda_default,
+        plazo_pago_dias: Number(supplierForm.plazo_pago_dias) || 0,
+        limite_credito: Number(supplierForm.limite_credito) || 0,
+        dia_visita: supplierForm.dia_visita.trim() || undefined,
+        frecuencia_entrega: supplierForm.frecuencia_entrega.trim() || undefined,
+        telefono: supplierForm.telefono.trim() || undefined,
+        email: supplierForm.email.trim() || undefined,
+        contacto_nombre: supplierForm.contacto_nombre.trim() || undefined,
+        contacto_telefono: supplierForm.contacto_telefono.trim() || undefined,
+        contacto_email: supplierForm.contacto_email.trim() || undefined,
+        contacto: supplierForm.contacto_nombre.trim() || undefined,
+        direccion: supplierForm.direccion.trim() || undefined,
+        ciudad: supplierForm.ciudad.trim() || undefined,
+        condicion_iva: supplierForm.condicion_iva || undefined,
+        banco: supplierForm.banco.trim() || undefined,
+        tipo_cuenta_bancaria: supplierForm.tipo_cuenta_bancaria || undefined,
+        cuenta_bancaria: supplierForm.cuenta_bancaria.trim() || undefined,
+        titular_cuenta_bancaria: supplierForm.titular_cuenta_bancaria.trim() || undefined,
+        identificacion_bancaria: supplierForm.identificacion_bancaria.trim() || undefined,
+        retencion_iva: supplierForm.retencion_iva,
+        porcentaje_retencion_iva: Number(supplierForm.porcentaje_retencion_iva) || 0,
+        agente_retencion: supplierForm.agente_retencion,
+        notas: supplierForm.notas.trim() || undefined,
+        activo: supplierForm.activo,
+      }
+
+      if (editingSupplier) {
+        await api.purchases.updateSupplier(editingSupplier.id, payload)
+        toast.success("Proveedor Actualizado", `Los datos de ${payload.razon_social} se guardaron exitosamente.`)
+      } else {
+        await api.purchases.createSupplier(payload)
+        toast.success("Proveedor Registrado", `${payload.razon_social} fue dado de alta exitosamente.`)
+      }
+      setShowSupplierModal(false)
+      fetchAll()
+    } catch (err: any) {
+      toast.error("Error al guardar proveedor", err.message)
+    } finally {
+      setSavingSupplier(false)
+    }
+  }
 
   // Estado para Eliminación de Órdenes de Compra
   const [poToDelete, setPoToDelete] = useState<PurchaseOrder | null>(null)
@@ -1806,9 +1970,15 @@ export default function PurchasesPage() {
   // Filtrado y Paginación de Proveedores
   const filteredSuppliers = useMemo(() => {
     return suppliers.filter(s => {
-      const matchSearch = !searchSupplier ||
-        (s.razon_social && s.razon_social.toLowerCase().includes(searchSupplier.toLowerCase())) ||
-        (s.ruc && s.ruc.toLowerCase().includes(searchSupplier.toLowerCase()))
+      const q = searchSupplier.trim().toLowerCase()
+      const matchSearch = !q ||
+        (s.razon_social && s.razon_social.toLowerCase().includes(q)) ||
+        (s.nombre_fantasia && s.nombre_fantasia.toLowerCase().includes(q)) ||
+        (s.ruc && s.ruc.toLowerCase().includes(q)) ||
+        ((s as any).rubro && (s as any).rubro.toLowerCase().includes(q)) ||
+        (s.contacto_nombre && s.contacto_nombre.toLowerCase().includes(q)) ||
+        (s.telefono && s.telefono.toLowerCase().includes(q)) ||
+        (s.ciudad && s.ciudad.toLowerCase().includes(q))
 
       const isBr = s.tipo_proveedor === "brasilero" || s.tipo_proveedor === "br" || (s as any).moneda_default === "BRL"
       const matchType = supplierFilterType === "todos"
@@ -1817,9 +1987,18 @@ export default function PurchasesPage() {
         ? isBr
         : !isBr
 
-      return matchSearch && matchType
+      const provision = ((s as any).tipo_provision || "bienes").toLowerCase()
+      const matchProvision = supplierFilterProvision === "todos"
+        ? true
+        : supplierFilterProvision === "bienes"
+        ? provision === "bienes"
+        : supplierFilterProvision === "servicios"
+        ? provision === "servicios"
+        : provision === "mixto"
+
+      return matchSearch && matchType && matchProvision
     })
-  }, [suppliers, searchSupplier, supplierFilterType])
+  }, [suppliers, searchSupplier, supplierFilterType, supplierFilterProvision])
 
   const paginatedSuppliers = useMemo(() => {
     const start = (pageSupplier - 1) * pageSizeSupplier
@@ -4635,25 +4814,44 @@ export default function PurchasesPage() {
       ────────────────────────────────────────────────────────────────────────── */}
       {tab === "proveedores" && (
         <div className="space-y-5">
-          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          {/* HEADER Y ESTADÍSTICAS DEL DIRECTORIO */}
+          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div>
-              <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <Building2 className="w-5 h-5 text-indigo-500" />
-                Directorio de Proveedores & Scorecard OTIF ({suppliers.length} Proveedores)
-              </h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Gestión de proveedores nacionales y de importación directa de Brasil (Reales R$).
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <h3 className="text-base font-extrabold text-gray-900 dark:text-white">
+                  Directorio de Proveedores & Clasificación ({suppliers.length})
+                </h3>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-2xl">
+                Administración integral de proveedores de <strong>Bienes (Mercaderías)</strong> y <strong>Prestadores de Servicios</strong>, con condiciones comerciales, cuentas bancarias y retenciones fiscales.
               </p>
             </div>
 
-            <div className="flex items-center gap-2.5 flex-wrap">
-              {/* Filtro Nacional vs Brasil */}
-              <div className="flex items-center bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={handleOpenCreateSupplier}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition active:scale-95"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ Registrar Proveedor</span>
+              </button>
+            </div>
+          </div>
+
+          {/* BARRA DE FILTROS AVANZADOS Y VISTA */}
+          <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* FILTRO: BIENES VS SERVICIOS */}
+              <div className="flex items-center bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
                 <button
                   type="button"
-                  onClick={() => { setSupplierFilterType("todos"); setPageSupplier(1); }}
+                  onClick={() => { setSupplierFilterProvision("todos"); setPageSupplier(1); }}
                   className={`px-3 py-1.5 rounded-lg font-bold transition ${
-                    supplierFilterType === "todos"
+                    supplierFilterProvision === "todos"
                       ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
                       : "text-slate-500 hover:text-slate-900"
                   }`}
@@ -4662,100 +4860,365 @@ export default function PurchasesPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setSupplierFilterType("nacional"); setPageSupplier(1); }}
+                  onClick={() => { setSupplierFilterProvision("bienes"); setPageSupplier(1); }}
                   className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                    supplierFilterProvision === "bienes"
+                      ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  <Package className="w-3.5 h-3.5 text-blue-500" />
+                  <span>Bienes ({suppliers.filter(s => ((s as any).tipo_provision || "bienes") === "bienes").length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSupplierFilterProvision("servicios"); setPageSupplier(1); }}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                    supplierFilterProvision === "servicios"
+                      ? "bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  <Wrench className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Servicios ({suppliers.filter(s => (s as any).tipo_provision === "servicios").length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSupplierFilterProvision("mixto"); setPageSupplier(1); }}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                    supplierFilterProvision === "mixto"
+                      ? "bg-white dark:bg-slate-800 text-purple-600 dark:text-purple-400 shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  <span>🔄 Mixto ({suppliers.filter(s => (s as any).tipo_provision === "mixto").length})</span>
+                </button>
+              </div>
+
+              {/* FILTRO: NACIONAL VS BRASIL */}
+              <div className="flex items-center bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => { setSupplierFilterType("todos"); setPageSupplier(1); }}
+                  className={`px-2.5 py-1.5 rounded-lg font-bold transition ${
+                    supplierFilterType === "todos"
+                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  Origen: Todos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSupplierFilterType("nacional"); setPageSupplier(1); }}
+                  className={`px-2.5 py-1.5 rounded-lg font-bold transition flex items-center gap-1 ${
                     supplierFilterType === "nacional"
                       ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm"
                       : "text-slate-500 hover:text-slate-900"
                   }`}
                 >
-                  <span>🇵🇾 Nacional</span>
-                  <span className="text-[10px] opacity-70">
-                    ({suppliers.filter(s => s.tipo_proveedor !== "brasilero" && s.tipo_proveedor !== "br" && (s as any).moneda_default !== "BRL").length})
-                  </span>
+                  <span>🇵🇾 PY</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => { setSupplierFilterType("brasilero"); setPageSupplier(1); }}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                  className={`px-2.5 py-1.5 rounded-lg font-bold transition flex items-center gap-1 ${
                     supplierFilterType === "brasilero"
                       ? "bg-emerald-600 text-white shadow-sm"
                       : "text-slate-500 hover:text-slate-900"
                   }`}
                 >
-                  <span>🇧🇷 Brasil (BR)</span>
-                  <span className="text-[10px] opacity-90">
-                    ({suppliers.filter(s => s.tipo_proveedor === "brasilero" || s.tipo_proveedor === "br" || (s as any).moneda_default === "BRL").length})
-                  </span>
+                  <span>🇧🇷 BR</span>
                 </button>
               </div>
+            </div>
 
-              <div className="relative w-full sm:w-64">
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1 md:w-64">
                 <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Buscar por nombre o RUC/CNPJ..."
+                  placeholder="Buscar por nombre, RUC, rubro o contacto..."
                   value={searchSupplier}
                   onChange={(e) => { setSearchSupplier(e.target.value); setPageSupplier(1); }}
-                  className="input-field pl-9 w-full text-xs"
+                  className="input-field pl-9 pr-7 w-full text-xs"
                 />
+                {searchSupplier && (
+                  <button
+                    onClick={() => { setSearchSupplier(""); setPageSupplier(1); }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowCreateSupplierModal(true)}
-                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-sm transition"
-              >
-                <Plus className="w-4 h-4" />
-                <span>+ Registrar Proveedor</span>
-              </button>
+              {/* TOGGLE VISTA CUADRÍCULA / TABLA */}
+              <div className="flex items-center bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setSupplierViewMode("grid")}
+                  className={`p-1.5 rounded-lg transition ${
+                    supplierViewMode === "grid"
+                      ? "bg-white dark:bg-slate-800 text-indigo-600 shadow-sm"
+                      : "text-slate-400 hover:text-slate-700"
+                  }`}
+                  title="Vista Cuadrícula de Tarjetas"
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSupplierViewMode("table")}
+                  className={`p-1.5 rounded-lg transition ${
+                    supplierViewMode === "table"
+                      ? "bg-white dark:bg-slate-800 text-indigo-600 shadow-sm"
+                      : "text-slate-400 hover:text-slate-700"
+                  }`}
+                  title="Vista Tabla Completa"
+                >
+                  <Table className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {paginatedSuppliers.map(s => {
-              const isBr = s.tipo_proveedor === "brasilero" || s.tipo_proveedor === "br" || (s as any).moneda_default === "BRL"
-              return (
-                <div key={s.id} className="card p-5 hover:shadow-md transition-shadow space-y-3 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <h4 className="font-bold text-sm text-gray-900 dark:text-white line-clamp-1" title={s.razon_social}>
-                        {s.razon_social}
-                      </h4>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-wide shrink-0 flex items-center gap-1 ${
-                        isBr
-                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
-                          : "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/30"
-                      }`}>
-                        {isBr ? "🇧🇷 BR · Reales (R$)" : "🇵🇾 PY · Nacional (₲)"}
-                      </span>
-                    </div>
-                    <div className="text-xs text-gray-400 space-y-1 font-mono">
-                      <div>{isBr ? "CNPJ / Doc:" : "RUC:"} <strong className="text-gray-700 dark:text-gray-300">{s.ruc || "—"}</strong></div>
-                      <div>Plazo de Pago: <strong className="text-indigo-600">{s.plazo_pago_dias || 30} Días</strong></div>
-                      {s.telefono && <div className="flex items-center gap-1 text-[11px]"><Phone className="w-3 h-3" /> {s.telefono}</div>}
-                    </div>
-                  </div>
+          {/* VISTA CUADRÍCULA O VISTA TABLA */}
+          {supplierViewMode === "grid" ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {paginatedSuppliers.map(s => {
+                const isBr = s.tipo_proveedor === "brasilero" || s.tipo_proveedor === "br" || (s as any).moneda_default === "BRL"
+                const provision = (s as any).tipo_provision || "bienes"
+                const rubro = (s as any).rubro || (s as any).grupo || "General"
 
-                  <div className="pt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between">
+                return (
+                  <div key={s.id} className="card p-5 hover:shadow-md transition-shadow space-y-3 flex flex-col justify-between border-slate-200/80 dark:border-slate-800">
                     <div>
-                      <span className="text-[11px] font-bold text-gray-500">Scorecard: </span>
-                      <span className="font-bold font-mono text-emerald-600 text-xs">
-                        {s.rating ? `${Number(s.rating).toFixed(1)} ★` : "4.8 ★"}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => openSupplier360(s)}
-                      className="px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors flex items-center gap-1"
-                    >
-                      <Eye className="w-3.5 h-3.5" /> Ficha 360°
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+                      {/* Cabecera de la tarjeta con badges */}
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <div className="min-w-0 pr-1">
+                          <h4 className="font-extrabold text-sm text-gray-900 dark:text-white line-clamp-1" title={s.razon_social}>
+                            {s.razon_social}
+                          </h4>
+                          {s.nombre_fantasia && s.nombre_fantasia !== s.razon_social && (
+                            <p className="text-[11px] text-gray-500 italic truncate font-medium">
+                              "{s.nombre_fantasia}"
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {/* Badge Bienes vs Servicios */}
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-wide flex items-center gap-1 ${
+                            provision === "servicios"
+                              ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30"
+                              : provision === "mixto"
+                              ? "bg-purple-500/10 text-purple-700 dark:text-purple-400 border border-purple-500/30"
+                              : "bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/30"
+                          }`}>
+                            {provision === "servicios" ? "🛠️ Servicios" : provision === "mixto" ? "🔄 Mixto" : "📦 Bienes"}
+                          </span>
+                          {/* Badge Origen */}
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                            isBr ? "bg-emerald-500/10 text-emerald-600" : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                          }`}>
+                            {isBr ? "🇧🇷 BR" : "🇵🇾 PY"}
+                          </span>
+                        </div>
+                      </div>
 
+                      {/* Rubro comercial */}
+                      <div className="inline-block mb-2">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                          🏷️ {rubro}
+                        </span>
+                      </div>
+
+                      {/* Datos y condiciones comerciales */}
+                      <div className="text-xs text-gray-400 space-y-1.5 font-mono bg-slate-50 dark:bg-slate-850/50 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center justify-between">
+                          <span>{isBr ? "CNPJ / Doc:" : "RUC / Doc:"}</span>
+                          <strong className="text-gray-800 dark:text-gray-200">{s.ruc || s.ci || "—"}</strong>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>Condición de Pago:</span>
+                          <strong className="text-indigo-600 dark:text-indigo-400">
+                            {s.plazo_pago_dias === 0 ? "Contado" : `${s.plazo_pago_dias || 30} Días`} ({s.moneda_default || (isBr ? "BRL" : "PYG")})
+                          </strong>
+                        </div>
+                        {Number((s as any).limite_credito || 0) > 0 && (
+                          <div className="flex items-center justify-between">
+                            <span>Límite de Crédito:</span>
+                            <strong className="text-emerald-600 dark:text-emerald-400">
+                              {s.moneda_default === "BRL" ? `R$ ${(s as any).limite_credito.toLocaleString()}` : `₲ ${formatPYG((s as any).limite_credito)}`}
+                            </strong>
+                          </div>
+                        )}
+                        {(s.contacto_nombre || s.contacto || s.telefono) && (
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 dark:border-slate-800 text-[11px]">
+                            <span className="truncate max-w-[120px]">👤 {s.contacto_nombre || s.contacto || "Contacto"}</span>
+                            {s.telefono && (
+                              <a
+                                href={`tel:${s.telefono}`}
+                                className="text-emerald-600 dark:text-emerald-400 font-bold hover:underline flex items-center gap-1"
+                              >
+                                <Phone className="w-3 h-3" /> {s.telefono}
+                              </a>
+                            )}
+                          </div>
+                        )}
+                        {(s as any).banco && (
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate pt-0.5">
+                            🏛️ {(s as any).banco} {(s as any).cuenta_bancaria ? `· N° ${(s as any).cuenta_bancaria}` : ""}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Botones de acción del proveedor */}
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between gap-2">
+                      <div>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Scorecard</span>
+                        <span className="font-extrabold font-mono text-emerald-600 text-xs flex items-center gap-0.5">
+                          <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                          {s.rating ? `${Number(s.rating).toFixed(1)}` : "4.8"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditSupplier(s)}
+                          className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/30 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/40 transition flex items-center gap-1"
+                          title="Editar todos los campos de este proveedor"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Editar</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => openSupplier360(s)}
+                          className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/40 transition flex items-center gap-1"
+                          title="Ver Ficha 360°, compras y scorecard"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Ficha 360°</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            /* VISTA TABLA COMPLETA */
+            <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-50 dark:bg-slate-900/80 text-slate-500 font-extrabold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <th className="p-3">Proveedor / Razón Social</th>
+                      <th className="p-3">RUC / Doc</th>
+                      <th className="p-3">Provisión</th>
+                      <th className="p-3">Rubro</th>
+                      <th className="p-3">Origen & Moneda</th>
+                      <th className="p-3">Plazo Pago</th>
+                      <th className="p-3">Límite Crédito</th>
+                      <th className="p-3">Contacto / Tel</th>
+                      <th className="p-3">Banco / Cuenta</th>
+                      <th className="p-3 text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                    {paginatedSuppliers.map(s => {
+                      const isBr = s.tipo_proveedor === "brasilero" || s.tipo_proveedor === "br" || (s as any).moneda_default === "BRL"
+                      const provision = (s as any).tipo_provision || "bienes"
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-850/50 transition">
+                          <td className="p-3">
+                            <div className="font-extrabold text-slate-900 dark:text-white">{s.razon_social}</div>
+                            {s.nombre_fantasia && s.nombre_fantasia !== s.razon_social && (
+                              <div className="text-[10px] text-slate-400 italic">"{s.nombre_fantasia}"</div>
+                            )}
+                          </td>
+                          <td className="p-3 font-mono font-bold text-slate-700 dark:text-slate-300">
+                            {s.ruc || s.ci || "—"}
+                          </td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                              provision === "servicios"
+                                ? "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300"
+                                : provision === "mixto"
+                                ? "bg-purple-100 text-purple-800 dark:bg-purple-950/50 dark:text-purple-300"
+                                : "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300"
+                            }`}>
+                              {provision === "servicios" ? "🛠️ Servicios" : provision === "mixto" ? "🔄 Mixto" : "📦 Bienes"}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                              {(s as any).rubro || (s as any).grupo || "General"}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              isBr ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300" : "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-300"
+                            }`}>
+                              {isBr ? "🇧🇷 BRL (R$)" : "🇵🇾 PYG (₲)"}
+                            </span>
+                          </td>
+                          <td className="p-3 font-mono font-bold text-slate-700 dark:text-slate-300">
+                            {s.plazo_pago_dias === 0 ? "Contado" : `${s.plazo_pago_dias || 30}d`}
+                          </td>
+                          <td className="p-3 font-mono">
+                            {Number((s as any).limite_credito || 0) > 0 ? (
+                              <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                {s.moneda_default === "BRL" ? `R$ ${(s as any).limite_credito.toLocaleString()}` : `₲ ${formatPYG((s as any).limite_credito)}`}
+                              </span>
+                            ) : "—"}
+                          </td>
+                          <td className="p-3 text-[11px]">
+                            <div>{s.contacto_nombre || s.contacto || "—"}</div>
+                            {s.telefono && <div className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">{s.telefono}</div>}
+                          </td>
+                          <td className="p-3 text-[11px] text-slate-500">
+                            {(s as any).banco ? (
+                              <div>
+                                <span className="font-bold text-slate-700 dark:text-slate-300">{(s as any).banco}</span>
+                                {(s as any).cuenta_bancaria && <div className="font-mono text-[10px]">{(s as any).cuenta_bancaria}</div>}
+                              </div>
+                            ) : "—"}
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditSupplier(s)}
+                                className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 transition"
+                                title="Editar Proveedor"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openSupplier360(s)}
+                                className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 transition"
+                                title="Ver Ficha 360°"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* PAGINACIÓN */}
           <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex items-center justify-between text-xs">
             <span className="text-gray-500 font-mono">
               Mostrando {(pageSupplier - 1) * pageSizeSupplier + 1} a {Math.min(pageSupplier * pageSizeSupplier, filteredSuppliers.length)} de <strong>{filteredSuppliers.length}</strong> proveedores
@@ -8668,279 +9131,788 @@ export default function PurchasesPage() {
         </div>
       )}
       {/* ──────────────────────────────────────────────────────────────────────────
-          MODAL: ALTA DE PROVEEDOR (NACIONAL vs BRASIL / BR)
+          MODAL: ALTA Y EDICIÓN INTEGRAL DE PROVEEDOR (BIENES, SERVICIOS, BANCARIO)
       ────────────────────────────────────────────────────────────────────────── */}
-      {showCreateSupplierModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
-                  <Building2 className="w-5 h-5" />
+      {showSupplierModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-5 animate-in fade-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className={`w-11 h-11 rounded-2xl flex items-center justify-center font-bold shadow-sm ${
+                  editingSupplier 
+                    ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20" 
+                    : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20"
+                }`}>
+                  {editingSupplier ? <Edit className="w-5 h-5" /> : <Building2 className="w-5 h-5" />}
                 </div>
                 <div>
-                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
-                    Registrar Nuevo Proveedor
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Definición comercial, moneda de compra y origen fiscal
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                      {editingSupplier ? `Editar Proveedor: ${editingSupplier.nombre_fantasia || editingSupplier.razon_social}` : "Registrar Nuevo Proveedor"}
+                    </h3>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide ${
+                      supplierForm.tipo_provision === "bienes" 
+                        ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                        : supplierForm.tipo_provision === "servicios"
+                        ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                        : "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300"
+                    }`}>
+                      {supplierForm.tipo_provision === "bienes" ? "📦 Bienes" : supplierForm.tipo_provision === "servicios" ? "🛠️ Servicios" : "🔄 Mixto"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {editingSupplier ? "Actualización de clasificación, rubro, condiciones comerciales y datos bancarios" : "Alta maestra de proveedor con clasificación fiscal y condiciones comerciales"}
                   </p>
                 </div>
               </div>
 
               <button
                 type="button"
-                onClick={() => setShowCreateSupplierModal(false)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                onClick={() => setShowSupplierModal(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault()
-                if (!newSupplierForm.razon_social.trim()) {
-                  toast.error("Razón Social obligatoria", "Indique el nombre o razón social.")
-                  return
-                }
-                setSavingSupplier(true)
-                try {
-                  const payload = {
-                    company_id: "00000000-0000-0000-0000-000000000001",
-                    razon_social: newSupplierForm.razon_social.trim(),
-                    nombre_fantasia: newSupplierForm.nombre_fantasia.trim() || newSupplierForm.razon_social.trim(),
-                    ruc: newSupplierForm.ruc.trim(),
-                    tipo_proveedor: newSupplierForm.tipo_proveedor,
-                    moneda_default: newSupplierForm.moneda_default,
-                    telefono: newSupplierForm.telefono.trim(),
-                    email: newSupplierForm.email.trim(),
-                    contacto_nombre: newSupplierForm.contacto_nombre.trim(),
-                    contacto_telefono: newSupplierForm.contacto_telefono.trim(),
-                    plazo_pago_dias: Number(newSupplierForm.plazo_pago_dias) || 30,
-                    direccion: newSupplierForm.direccion.trim(),
-                    ciudad: newSupplierForm.ciudad.trim(),
-                    tipo_persona: newSupplierForm.tipo_persona || "juridica",
-                  }
-                  const created = await api.purchases.createSupplier(payload)
-                  toast.success("Proveedor Registrado", `${created.razon_social} fue dado de alta exitosamente.`)
-                  setShowCreateSupplierModal(false)
-                  setNewSupplierForm({
-                    razon_social: "",
-                    nombre_fantasia: "",
-                    ruc: "",
-                    tipo_proveedor: "nacional",
-                    moneda_default: "PYG",
-                    telefono: "",
-                    email: "",
-                    contacto_nombre: "",
-                    contacto_telefono: "",
-                    plazo_pago_dias: 30,
-                    direccion: "",
-                    ciudad: "",
-                    tipo_persona: "juridica",
-                  })
-                  fetchAll()
-                } catch (err: any) {
-                  toast.error("Error al registrar proveedor", err.message)
-                } finally {
-                  setSavingSupplier(false)
-                }
-              }}
-              className="space-y-4"
-            >
-              {/* TOGGLE VISUAL: NACIONAL (PY) vs BRASIL (BR) */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                  Origen y Tipo de Proveedor *
-                </label>
-                <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-100 dark:bg-slate-850 rounded-2xl border border-slate-200 dark:border-slate-800">
+            {/* Pestañas de Navegación del Modal */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl overflow-x-auto shrink-0 border border-slate-200/60 dark:border-slate-700/60">
+              <button
+                type="button"
+                onClick={() => setSupplierModalTab("general")}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                  supplierModalTab === "general"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Building2 className="w-3.5 h-3.5" />
+                <span>1. Identificación</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSupplierModalTab("clasificacion")}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                  supplierModalTab === "clasificacion"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Briefcase className="w-3.5 h-3.5" />
+                <span>2. Provisión & Rubro</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSupplierModalTab("comercial")}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                  supplierModalTab === "comercial"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <DollarSign className="w-3.5 h-3.5" />
+                <span>3. Comercial</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSupplierModalTab("bancario")}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                  supplierModalTab === "bancario"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>4. Bancario & Fiscal</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSupplierModalTab("contacto")}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                  supplierModalTab === "contacto"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Phone className="w-3.5 h-3.5" />
+                <span>5. Contacto</span>
+              </button>
+            </div>
+
+            {/* Contenido scrolleable del formulario */}
+            <form onSubmit={handleSaveSupplier} className="space-y-4 overflow-y-auto pr-1 flex-1">
+              
+              {/* TAB 1: IDENTIFICACIÓN & ORIGEN */}
+              {supplierModalTab === "general" && (
+                <div className="space-y-4">
+                  {/* Origen del Proveedor */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                      Origen y Territorio Fiscal *
+                    </label>
+                    <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-100 dark:bg-slate-850 rounded-2xl border border-slate-200 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setSupplierForm(prev => ({
+                          ...prev,
+                          tipo_proveedor: "nacional",
+                          pais: "Paraguay",
+                          moneda_default: prev.moneda_default === "BRL" ? "PYG" : prev.moneda_default,
+                        }))}
+                        className={`p-3 rounded-xl flex items-center gap-3 transition text-left border ${
+                          supplierForm.tipo_proveedor === "nacional"
+                            ? "bg-white dark:bg-slate-800 border-indigo-500 shadow-md"
+                            : "border-transparent opacity-60 hover:opacity-100"
+                        }`}
+                      >
+                        <span className="text-2xl">🇵🇾</span>
+                        <div>
+                          <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <span>Nacional (Paraguay)</span>
+                            {supplierForm.tipo_proveedor === "nacional" && (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            RUC DNIT · Moneda PYG (Guaraní)
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSupplierForm(prev => ({
+                          ...prev,
+                          tipo_proveedor: "brasilero",
+                          pais: "Brasil",
+                          moneda_default: prev.moneda_default === "PYG" ? "BRL" : prev.moneda_default,
+                        }))}
+                        className={`p-3 rounded-xl flex items-center gap-3 transition text-left border ${
+                          supplierForm.tipo_proveedor === "brasilero"
+                            ? "bg-emerald-500/10 dark:bg-emerald-950/40 border-emerald-500 shadow-md"
+                            : "border-transparent opacity-60 hover:opacity-100"
+                        }`}
+                      >
+                        <span className="text-2xl">🇧🇷</span>
+                        <div>
+                          <div className="text-xs font-bold text-emerald-900 dark:text-emerald-300 flex items-center gap-1.5">
+                            <span>Brasil (Frontera / Importación)</span>
+                            {supplierForm.tipo_proveedor === "brasilero" && (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            )}
+                          </div>
+                          <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-mono">
+                            CNPJ Receita Federal · Liquidación en Reales (R$)
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Razón Social y Nombre Fantasía */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Razón Social / Razón Legal *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={supplierForm.razon_social}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, razon_social: e.target.value }))}
+                        placeholder={supplierForm.tipo_proveedor === "brasilero" ? "Ej: JBS Aves do Brasil Ltda." : "Ej: Frigorífico Concepción S.A."}
+                        className="input-field w-full text-xs font-bold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Nombre Fantasía / Marca Comercial
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.nombre_fantasia}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, nombre_fantasia: e.target.value }))}
+                        placeholder="Ej: Friboi / Lactolanda / Coca-Cola"
+                        className="input-field w-full text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Documento Fiscal y Tipo de Persona */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Tipo de Persona
+                      </label>
+                      <select
+                        value={supplierForm.tipo_persona}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, tipo_persona: e.target.value as any }))}
+                        className="input-field w-full text-xs font-medium"
+                      >
+                        <option value="juridica">Persona Jurídica (S.A. / EAS / SRL / Ltda.)</option>
+                        <option value="fisica">Persona Física (Unipersonal / Profesional)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        {supplierForm.tipo_proveedor === "brasilero" ? "CNPJ / CPF Brasil *" : "RUC con Dígito Verificador (DV) *"}
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.ruc}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, ruc: e.target.value }))}
+                        placeholder={supplierForm.tipo_proveedor === "brasilero" ? "Ej: 02.916.265/0001-60" : "Ej: 80012345-6"}
+                        className="input-field w-full text-xs font-mono font-bold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        C.I. / Documento Identidad
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.ci}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, ci: e.target.value }))}
+                        placeholder="Cédula (si aplica)"
+                        className="input-field w-full text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Estado Activo / País */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        País de Radicación
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.pais}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, pais: e.target.value }))}
+                        className="input-field w-full text-xs"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-4">
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={supplierForm.activo}
+                          onChange={(e) => setSupplierForm(prev => ({ ...prev, activo: e.target.checked }))}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                      </label>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        {supplierForm.activo ? "Proveedor Habilitado (Activo)" : "Proveedor Inactivo / Bloqueado"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: PROVISIÓN & RUBRO (SUPERMERCADO) */}
+              {supplierModalTab === "clasificacion" && (
+                <div className="space-y-4">
+                  {/* Selector Clave de Provisión: BIENES vs SERVICIOS vs MIXTO */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-extrabold text-slate-800 dark:text-slate-200 block">
+                      Tipo de Provisión Comercial *
+                    </label>
+                    <p className="text-xs text-slate-500">
+                      Define el impacto contable y operativo: control de inventario/recepción física vs órdenes de gasto y servicios.
+                    </p>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setSupplierForm(prev => ({ ...prev, tipo_provision: "bienes" }))}
+                        className={`p-3.5 rounded-2xl border text-left transition flex flex-col justify-between gap-2 ${
+                          supplierForm.tipo_provision === "bienes"
+                            ? "bg-blue-50/80 dark:bg-blue-950/40 border-blue-500 ring-2 ring-blue-500/20 shadow-sm"
+                            : "bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-800 opacity-70 hover:opacity-100"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-2xl">📦</span>
+                          {supplierForm.tipo_provision === "bienes" && <CheckCircle2 className="w-4 h-4 text-blue-600" />}
+                        </div>
+                        <div>
+                          <div className="text-xs font-extrabold text-slate-900 dark:text-white">
+                            Bienes & Mercaderías
+                          </div>
+                          <div className="text-[11px] text-slate-500 leading-snug mt-0.5">
+                            Productos físicos, abarrotes, carnes, bebidas. Manejan stock, inventario y recepciones con remito.
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSupplierForm(prev => ({ ...prev, tipo_provision: "servicios" }))}
+                        className={`p-3.5 rounded-2xl border text-left transition flex flex-col justify-between gap-2 ${
+                          supplierForm.tipo_provision === "servicios"
+                            ? "bg-amber-50/80 dark:bg-amber-950/40 border-amber-500 ring-2 ring-amber-500/20 shadow-sm"
+                            : "bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-800 opacity-70 hover:opacity-100"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-2xl">🛠️</span>
+                          {supplierForm.tipo_provision === "servicios" && <CheckCircle2 className="w-4 h-4 text-amber-600" />}
+                        </div>
+                        <div>
+                          <div className="text-xs font-extrabold text-slate-900 dark:text-white">
+                            Servicios Operativos
+                          </div>
+                          <div className="text-[11px] text-slate-500 leading-snug mt-0.5">
+                            Mantenimiento de frío, limpieza, vigilancia, software, asesorías, fletes, servicios públicos.
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSupplierForm(prev => ({ ...prev, tipo_provision: "mixto" }))}
+                        className={`p-3.5 rounded-2xl border text-left transition flex flex-col justify-between gap-2 ${
+                          supplierForm.tipo_provision === "mixto"
+                            ? "bg-purple-50/80 dark:bg-purple-950/40 border-purple-500 ring-2 ring-purple-500/20 shadow-sm"
+                            : "bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-800 opacity-70 hover:opacity-100"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-2xl">🔄</span>
+                          {supplierForm.tipo_provision === "mixto" && <CheckCircle2 className="w-4 h-4 text-purple-600" />}
+                        </div>
+                        <div>
+                          <div className="text-xs font-extrabold text-slate-900 dark:text-white">
+                            Mixto (Bienes y Servicios)
+                          </div>
+                          <div className="text-[11px] text-slate-500 leading-snug mt-0.5">
+                            Proveedores con entrega de equipos o insumos y contratos asociados de soporte/reparación.
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Rubro Comercial Especializado */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                      Rubro Comercial en Supermercado *
+                    </label>
+                    <select
+                      value={supplierForm.rubro}
+                      onChange={(e) => setSupplierForm(prev => ({ ...prev, rubro: e.target.value }))}
+                      className="input-field w-full text-xs font-bold"
+                    >
+                      {RUBROS_PROVEEDORES.map((rub) => (
+                        <option key={rub} value={rub}>{rub}</option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-slate-400">
+                      Permite agrupar las compras por sectores de retail (Carnicería, Lácteos, Fletes, Informática, etc.)
+                    </p>
+                  </div>
+
+                  {/* Notas internas / Clasificación */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                      Descripción de Mercaderías o Prestación
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={supplierForm.notas}
+                      onChange={(e) => setSupplierForm(prev => ({ ...prev, notas: e.target.value }))}
+                      placeholder="Ej: Distribuidor oficial de lácteos en sachet y queso mozzarella. Proveedor crítico para fin de semana."
+                      className="input-field w-full text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: CONDICIONES COMERCIALES */}
+              {supplierModalTab === "comercial" && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Moneda de Compra *
+                      </label>
+                      <select
+                        value={supplierForm.moneda_default}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, moneda_default: e.target.value }))}
+                        className="input-field w-full text-xs font-bold font-mono"
+                      >
+                        <option value="PYG">₲ PYG (Guaraní Paraguayo)</option>
+                        <option value="BRL">R$ BRL (Real Brasileño)</option>
+                        <option value="USD">US$ USD (Dólar Americano)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Plazo de Pago (Días)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={supplierForm.plazo_pago_dias}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, plazo_pago_dias: Number(e.target.value) || 0 }))}
+                        placeholder="0 = Contado, 30, 45, 60..."
+                        className="input-field w-full text-xs font-mono font-bold"
+                      />
+                      <span className="text-[10px] text-slate-400">
+                        {supplierForm.plazo_pago_dias === 0 ? "Pago al contado contraentrega" : `Crédito a ${supplierForm.plazo_pago_dias} días`}
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Límite de Crédito ({supplierForm.moneda_default})
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={supplierForm.limite_credito}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, limite_credito: Number(e.target.value) || 0 }))}
+                        placeholder="0 = Sin límite fijado"
+                        className="input-field w-full text-xs font-mono font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Día Habitual de Visita / Preventista
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.dia_visita}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, dia_visita: e.target.value }))}
+                        placeholder="Ej: Lunes y Jueves por la mañana"
+                        className="input-field w-full text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Frecuencia de Reposición / Entrega
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.frecuencia_entrega}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, frecuencia_entrega: e.target.value }))}
+                        placeholder="Ej: Semanal / 48hs post-pedido / Diario"
+                        className="input-field w-full text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 4: BANCARIO & RETENCIONES FISCALES */}
+              {supplierModalTab === "bancario" && (
+                <div className="space-y-4">
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/30 rounded-2xl border border-amber-200 dark:border-amber-900/50 flex items-start gap-2.5">
+                    <CreditCard className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-amber-900 dark:text-amber-200">
+                      <strong>Información para Pagos y Liquidaciones:</strong> Estos datos se utilizan para generar transferencias SIPAP, pagos con PIX en Brasil y retenciones automáticas de IVA en comprobantes de retención.
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Entidad Bancaria
+                      </label>
+                      <input
+                        type="text"
+                        list="bancos-proveedores-list"
+                        value={supplierForm.banco}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, banco: e.target.value }))}
+                        placeholder="Seleccione o escriba el banco"
+                        className="input-field w-full text-xs font-bold"
+                      />
+                      <datalist id="bancos-proveedores-list">
+                        {BANCOS_PROVEEDORES.map((b) => (
+                          <option key={b} value={b} />
+                        ))}
+                      </datalist>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Tipo de Cuenta
+                      </label>
+                      <select
+                        value={supplierForm.tipo_cuenta_bancaria}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, tipo_cuenta_bancaria: e.target.value }))}
+                        className="input-field w-full text-xs font-medium"
+                      >
+                        <option value="cuenta_corriente">Cuenta Corriente</option>
+                        <option value="caja_ahorro">Caja de Ahorro</option>
+                        <option value="pix">Llave PIX (Brasil)</option>
+                        <option value="otro">Otro</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        N° de Cuenta Bancaria / Llave PIX
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.cuenta_bancaria}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, cuenta_bancaria: e.target.value }))}
+                        placeholder="Ej: 12-345678-9 o correo/teléfono PIX"
+                        className="input-field w-full text-xs font-mono font-bold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        RUC / Documento del Titular
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.identificacion_bancaria}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, identificacion_bancaria: e.target.value }))}
+                        placeholder="Documento asociado"
+                        className="input-field w-full text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                      Titular Oficial de la Cuenta
+                    </label>
+                    <input
+                      type="text"
+                      value={supplierForm.titular_cuenta_bancaria}
+                      onChange={(e) => setSupplierForm(prev => ({ ...prev, titular_cuenta_bancaria: e.target.value }))}
+                      placeholder="Nombre exacto del titular en el banco"
+                      className="input-field w-full text-xs"
+                    />
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Condición IVA Fiscal
+                      </label>
+                      <select
+                        value={supplierForm.condicion_iva}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, condicion_iva: e.target.value }))}
+                        className="input-field w-full text-xs font-bold"
+                      >
+                        <option value="10">IVA 10% (General)</option>
+                        <option value="5">IVA 5% (Canasta / Agrícola)</option>
+                        <option value="exento">Exento de IVA</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Porcentaje Retención IVA (%)
+                      </label>
+                      <select
+                        value={supplierForm.porcentaje_retencion_iva}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, porcentaje_retencion_iva: Number(e.target.value) || 0 }))}
+                        className="input-field w-full text-xs font-bold font-mono"
+                      >
+                        <option value="0">0% (Sin retención)</option>
+                        <option value="30">30% (Estándar B2B)</option>
+                        <option value="50">50%</option>
+                        <option value="70">70%</option>
+                        <option value="100">100% (Servicios / Especial)</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col justify-center space-y-1.5 pt-2">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={supplierForm.retencion_iva}
+                          onChange={(e) => setSupplierForm(prev => ({ ...prev, retencion_iva: e.target.checked }))}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>Aplica Retención de IVA</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={supplierForm.agente_retencion}
+                          onChange={(e) => setSupplierForm(prev => ({ ...prev, agente_retencion: e.target.checked }))}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>Es Agente de Retención DNIT</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 5: CONTACTO & LOCALIZACIÓN */}
+              {supplierModalTab === "contacto" && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Nombre de Contacto / Vendedor Asignado
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.contacto_nombre}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, contacto_nombre: e.target.value }))}
+                        placeholder="Ej: Lic. Carlos Mendoza (Ventas)"
+                        className="input-field w-full text-xs font-bold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Celular / WhatsApp del Vendedor
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.contacto_telefono}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, contacto_telefono: e.target.value }))}
+                        placeholder="Ej: 0981 987 654"
+                        className="input-field w-full text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Teléfono Central de la Empresa
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.telefono}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, telefono: e.target.value }))}
+                        placeholder="Ej: 061 500 123 / +55 45 3522-0000"
+                        className="input-field w-full text-xs font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Correo Electrónico (Pedidos / Facturas)
+                      </label>
+                      <input
+                        type="email"
+                        value={supplierForm.email}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, email: e.target.value }))}
+                        placeholder="pedidos@proveedor.com"
+                        className="input-field w-full text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Dirección del Depósito / Sede
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.direccion}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, direccion: e.target.value }))}
+                        placeholder="Ej: Av. San Blas Km 4.5, Parque Industrial"
+                        className="input-field w-full text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Ciudad
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.ciudad}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, ciudad: e.target.value }))}
+                        placeholder="Ej: Ciudad del Este / Foz"
+                        className="input-field w-full text-xs font-bold"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Botonera de Acciones del Modal */}
+              <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800 shrink-0">
+                <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <span>Paso {
+                    supplierModalTab === "general" ? "1 de 5" :
+                    supplierModalTab === "clasificacion" ? "2 de 5" :
+                    supplierModalTab === "comercial" ? "3 de 5" :
+                    supplierModalTab === "bancario" ? "4 de 5" : "5 de 5"
+                  }</span>
+                </div>
+
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setNewSupplierForm(prev => ({
-                      ...prev,
-                      tipo_proveedor: "nacional",
-                      moneda_default: "PYG",
-                    }))}
-                    className={`p-3 rounded-xl flex items-center gap-3 transition text-left border ${
-                      newSupplierForm.tipo_proveedor === "nacional"
-                        ? "bg-white dark:bg-slate-800 border-indigo-500/50 shadow-md"
-                        : "border-transparent opacity-60 hover:opacity-100"
-                    }`}
+                    onClick={() => setShowSupplierModal(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
                   >
-                    <span className="text-2xl">🇵🇾</span>
-                    <div>
-                      <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                        <span>Nacional (PY)</span>
-                        {newSupplierForm.tipo_proveedor === "nacional" && (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                        )}
-                      </div>
-                      <div className="text-[10px] text-slate-500 font-mono">
-                        RUC Paraguay · Compra en Guaraníes (₲)
-                      </div>
-                    </div>
+                    Cancelar
                   </button>
+
+                  {supplierModalTab !== "contacto" ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (supplierModalTab === "general") setSupplierModalTab("clasificacion")
+                        else if (supplierModalTab === "clasificacion") setSupplierModalTab("comercial")
+                        else if (supplierModalTab === "comercial") setSupplierModalTab("bancario")
+                        else if (supplierModalTab === "bancario") setSupplierModalTab("contacto")
+                      }}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition flex items-center gap-1"
+                    >
+                      <span>Siguiente</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  ) : null}
 
                   <button
-                    type="button"
-                    onClick={() => setNewSupplierForm(prev => ({
-                      ...prev,
-                      tipo_proveedor: "brasilero",
-                      moneda_default: "BRL",
-                    }))}
-                    className={`p-3 rounded-xl flex items-center gap-3 transition text-left border ${
-                      newSupplierForm.tipo_proveedor === "brasilero"
-                        ? "bg-emerald-500/10 dark:bg-emerald-950/40 border-emerald-500/60 shadow-md"
-                        : "border-transparent opacity-60 hover:opacity-100"
+                    type="submit"
+                    disabled={savingSupplier}
+                    className={`px-5 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shadow-md disabled:opacity-50 transition ${
+                      editingSupplier 
+                        ? "bg-amber-600 hover:bg-amber-500 shadow-amber-600/20" 
+                        : "bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/20"
                     }`}
                   >
-                    <span className="text-2xl">🇧🇷</span>
-                    <div>
-                      <div className="text-xs font-bold text-emerald-900 dark:text-emerald-300 flex items-center gap-1.5">
-                        <span>Brasil (BR)</span>
-                        {newSupplierForm.tipo_proveedor === "brasilero" && (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                        )}
-                      </div>
-                      <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-mono">
-                        CNPJ Brasil · Importación en Reales (R$)
-                      </div>
-                    </div>
+                    {savingSupplier ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Guardando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>{editingSupplier ? "Actualizar Proveedor" : "Guardar Proveedor"}</span>
+                      </>
+                    )}
                   </button>
                 </div>
-              </div>
-
-              {/* Razón Social y Nombre Fantasía */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
-                    Razón Social / Empresa *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newSupplierForm.razon_social}
-                    onChange={(e) => setNewSupplierForm(prev => ({ ...prev, razon_social: e.target.value }))}
-                    placeholder={newSupplierForm.tipo_proveedor === "brasilero" ? "Ej: JBS Aves do Brasil Ltda." : "Ej: Frigorífico Concepción S.A."}
-                    className="input-field w-full text-xs font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
-                    Nombre Fantasía / Comercial
-                  </label>
-                  <input
-                    type="text"
-                    value={newSupplierForm.nombre_fantasia}
-                    onChange={(e) => setNewSupplierForm(prev => ({ ...prev, nombre_fantasia: e.target.value }))}
-                    placeholder="Ej. Seara / Friboi / Lactolanda"
-                    className="input-field w-full text-xs"
-                  />
-                </div>
-              </div>
-
-              {/* RUC / CNPJ y Moneda */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
-                    {newSupplierForm.tipo_proveedor === "brasilero" ? "CNPJ / CPF Brasilero *" : "RUC con Dígito Verificador (DV) *"}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newSupplierForm.ruc}
-                    onChange={(e) => setNewSupplierForm(prev => ({ ...prev, ruc: e.target.value }))}
-                    placeholder={newSupplierForm.tipo_proveedor === "brasilero" ? "Ej: 02.916.265/0001-60" : "Ej: 80012345-6"}
-                    className="input-field w-full text-xs font-mono font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
-                    Moneda de Liquidación
-                  </label>
-                  <select
-                    value={newSupplierForm.moneda_default}
-                    onChange={(e) => setNewSupplierForm(prev => ({ ...prev, moneda_default: e.target.value }))}
-                    className="input-field w-full text-xs font-bold font-mono"
-                  >
-                    <option value="PYG">₲ PYG (Guaraní)</option>
-                    <option value="BRL">R$ BRL (Real Brasileño)</option>
-                    <option value="USD">US$ USD (Dólar)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Plazo de Pago y Contacto */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
-                    Plazo de Pago (Días)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={newSupplierForm.plazo_pago_dias}
-                    onChange={(e) => setNewSupplierForm(prev => ({ ...prev, plazo_pago_dias: Number(e.target.value) || 0 }))}
-                    className="input-field w-full text-xs font-mono font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
-                    Teléfono / WhatsApp
-                  </label>
-                  <input
-                    type="text"
-                    value={newSupplierForm.telefono}
-                    onChange={(e) => setNewSupplierForm(prev => ({ ...prev, telefono: e.target.value }))}
-                    placeholder={newSupplierForm.tipo_proveedor === "brasilero" ? "+55 45 9999-0000" : "0981 123 456"}
-                    className="input-field w-full text-xs font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
-                    Ciudad / Origen
-                  </label>
-                  <input
-                    type="text"
-                    value={newSupplierForm.ciudad}
-                    onChange={(e) => setNewSupplierForm(prev => ({ ...prev, ciudad: e.target.value }))}
-                    placeholder={newSupplierForm.tipo_proveedor === "brasilero" ? "Foz do Iguaçu / Cascavel" : "Ciudad del Este / Asunción"}
-                    className="input-field w-full text-xs"
-                  />
-                </div>
-              </div>
-
-              {/* Acciones */}
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateSupplierModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingSupplier}
-                  className="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-md shadow-indigo-600/20 disabled:opacity-50 transition"
-                >
-                  {savingSupplier ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Registrando...</span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>Guardar Proveedor</span>
-                    </>
-                  )}
-                </button>
               </div>
             </form>
           </div>

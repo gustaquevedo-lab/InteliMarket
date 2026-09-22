@@ -60,7 +60,7 @@ export default function IntegracionesTab({ env }: { env: Env }) {
 
   const mostrarChecklist = data.items.length > 0
   return (
-    <div className="flex flex-col gap-5">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
           Empresa:

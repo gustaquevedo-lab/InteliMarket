@@ -53,97 +53,76 @@ export default function PlataformaPage() {
   const abiertas = ov?.issues.unresolved || 0
 
   return (
-    <div className="p-4 sm:p-6 max-w-[1440px] mx-auto flex flex-col gap-6">
-      {/* ── HERO INSTITUCIONAL — CONSOLA DE PLATAFORMA ── */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/40 border border-slate-800/80 p-6 sm:p-8 shadow-2xl backdrop-blur-xl">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-        <div className="absolute bottom-0 left-0 w-80 h-80 bg-violet-500/10 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20" />
-
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-          <div className="space-y-2">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-600/30 text-white font-black">
-                <Radar className="w-6 h-6" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                    Telemetría &amp; Operaciones Supermercado · Superadmin
-                  </span>
-                  {ov && ov.environment_api !== "production" && (
-                    <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-[10px]">
-                      API {ov.environment_api.toUpperCase()}
-                    </span>
-                  )}
-                </div>
-                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
-                  Consola de Plataforma
+    <div className="space-y-6">
+      {/* ── HEADER DE PLATAFORMA (IDÉNTICO A BUSINESS INTELLIGENCE) ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-indigo-600 to-cyan-600 text-white shadow-lg shadow-indigo-500/20">
+              <Radar className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">
+                  Consola de Plataforma &amp; Telemetría
                 </h1>
-                <p className="text-xs text-slate-400 font-medium mt-0.5">
-                  Monitoreo centralizado de incidencias, auditoría de eventos, salud de cajas y conectividad de servicios en Extra Supermercado.
-                </p>
+                <span className="px-2.5 py-0.5 text-xs font-black rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-700 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                  Superadmin &amp; SRE
+                </span>
+                {ov && ov.environment_api !== "production" && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700 text-xs font-black font-mono">
+                    API {ov.environment_api.toUpperCase()}
+                  </span>
+                )}
               </div>
-            </div>
-
-            {/* Micro pills de estado */}
-            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
-              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
-                🏢 Extra Supermercado (Central)
-              </span>
-              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
-                🌐 Entorno: {env === "production" ? "Producción (8000/8002)" : env === "sandbox" ? "Sandbox (8001)" : "Todo"}
-              </span>
-              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-rose-400">
-                ⚠️ {abiertas} incidencia(s) abiertas
-              </span>
-              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-indigo-300">
-                ⚡ {ov?.events_24h_total || 0} eventos procesados (24h)
-              </span>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Monitoreo centralizado de incidencias, auditoría de eventos, salud de cajas y conectividad en Extra Supermercado
+              </p>
             </div>
           </div>
+        </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <Segmented<Env>
-              value={env}
-              onChange={setEnv}
-              options={[
-                { value: "production", label: "Producción" },
-                { value: "sandbox", label: "Sandbox" },
-                { value: "all", label: "Todo" },
-              ]}
-            />
-            <button
-              onClick={() => void load()}
-              disabled={loading}
-              className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 transition shadow-sm cursor-pointer disabled:opacity-50"
-              title="Sincronizar telemetría"
-            >
-              <Activity className={cx("w-4 h-4 text-indigo-400", loading && "animate-spin")} />
-            </button>
-          </div>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <Segmented<Env>
+            value={env}
+            onChange={setEnv}
+            options={[
+              { value: "production", label: "Producción" },
+              { value: "sandbox", label: "Sandbox" },
+              { value: "all", label: "Todo" },
+            ]}
+          />
+          <button
+            onClick={() => void load()}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-black text-white bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 rounded-xl shadow-md shadow-indigo-500/25 transition cursor-pointer disabled:opacity-50"
+            title="Sincronizar telemetría"
+          >
+            <Activity className={cx("w-3.5 h-3.5", loading && "animate-spin")} />
+            Sincronizar
+          </button>
         </div>
       </div>
 
-      {/* Tabs Glassmorphism */}
-      <div className="flex items-center gap-1.5 p-1.5 bg-slate-100/90 dark:bg-slate-900/90 backdrop-blur-md rounded-2xl border border-slate-200/80 dark:border-slate-800/80 overflow-x-auto shadow-xs">
+      {/* ── TABS BAR (IDÉNTICO A BUSINESS INTELLIGENCE) ── */}
+      <div className="flex gap-1.5 bg-gray-100/50 dark:bg-slate-800/50 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-1.5 w-full overflow-x-auto shadow-inner">
         {TABS.map(({ key, label, Icon }) => {
           const active = tab === key
           return (
             <button
               key={key}
               onClick={() => goTab(key)}
-              className={cx(
-                "flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all duration-150 whitespace-nowrap cursor-pointer",
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 cursor-pointer ${
                 active
-                  ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-200/80 dark:border-slate-700/80"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800/50",
-              )}
+                  ? "bg-white dark:bg-slate-700 shadow-md text-indigo-700 dark:text-indigo-400 ring-1 ring-indigo-500/20"
+                  : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/50 dark:hover:bg-slate-700/50"
+              }`}
             >
-              <Icon className={cx("w-4 h-4", active ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400")} />
+              <Icon className="w-4 h-4" />
               <span>{label}</span>
               {key === "incidencias" && abiertas > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black leading-none shadow-xs">
+                <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black leading-none">
                   {abiertas}
                 </span>
               )}

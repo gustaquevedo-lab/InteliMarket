@@ -35,108 +35,122 @@ export default function ResumenTab({ ov, loading, onOpenIssue, goTab }: { ov: Ov
   const problemas = (salud?.checks || []).filter((c: any) => c.estado !== "ok")
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="space-y-6">
       {/* Semáforo General Ejecutivo */}
       <div className={cx(
-        "rounded-3xl p-6 sm:p-7 flex flex-col md:flex-row items-start md:items-center justify-between gap-5 border shadow-xl relative overflow-hidden backdrop-blur-md transition-all duration-300",
+        "p-5 sm:p-6 rounded-2xl border shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-5 transition-all duration-200",
         todoBien
-          ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-900 dark:text-emerald-100"
+          ? "bg-emerald-50/70 dark:bg-emerald-950/25 border-emerald-200 dark:border-emerald-800/60"
           : i.fatal > 0
-            ? "bg-rose-950/20 border-rose-500/30 text-rose-900 dark:text-rose-100"
-            : "bg-amber-950/20 border-amber-500/30 text-amber-900 dark:text-amber-100"
+            ? "bg-rose-50/70 dark:bg-rose-950/25 border-rose-200 dark:border-rose-800/60"
+            : "bg-amber-50/70 dark:bg-amber-950/25 border-amber-200 dark:border-amber-800/60"
       )}>
-        {/* Glow halo */}
-        <div className={cx(
-          "absolute -right-10 -bottom-10 w-48 h-48 rounded-full blur-3xl pointer-events-none opacity-40",
-          todoBien ? "bg-emerald-500" : i.fatal > 0 ? "bg-rose-500" : "bg-amber-500"
-        )} />
-
-        <div className="flex items-center gap-4.5 z-10">
+        <div className="flex items-center gap-4">
           <div className={cx(
-            "w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-lg border",
+            "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-md",
             todoBien
-              ? "bg-gradient-to-br from-emerald-500 to-teal-600 text-white border-emerald-400/40 shadow-emerald-500/25"
+              ? "bg-gradient-to-tr from-emerald-600 to-teal-600 text-white shadow-emerald-500/25"
               : i.fatal > 0
-                ? "bg-gradient-to-br from-rose-600 to-red-700 text-white border-rose-400/40 shadow-rose-500/25 animate-pulse"
-                : "bg-gradient-to-br from-amber-500 to-orange-600 text-white border-amber-400/40 shadow-amber-500/25"
+                ? "bg-gradient-to-tr from-rose-600 to-red-600 text-white shadow-rose-500/25 animate-pulse"
+                : "bg-gradient-to-tr from-amber-500 to-orange-500 text-white shadow-amber-500/25"
           )}>
-            {todoBien ? <CheckCircle2 className="w-7 h-7" /> : <AlertOctagon className="w-7 h-7" />}
+            {todoBien ? <CheckCircle2 className="w-6 h-6" /> : <AlertOctagon className="w-6 h-6" />}
           </div>
           <div className="min-w-0">
-            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white leading-tight">
-              {todoBien ? "Plataforma Estable · Sin Incidencias" : `${i.unresolved} ${i.unresolved === 1 ? "Incidencia Abierta" : "Incidencias Abiertas"}`}
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-base sm:text-lg font-black text-gray-900 dark:text-white">
+                {todoBien ? "Plataforma Estable · Sin Incidencias" : `${i.unresolved} ${i.unresolved === 1 ? "Incidencia Abierta" : "Incidencias Abiertas"}`}
+              </h2>
+              <span className={cx(
+                "px-2 py-0.5 text-[11px] font-black rounded-full font-mono",
+                todoBien
+                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300"
+                  : i.fatal > 0
+                    ? "bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-300"
+                    : "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
+              )}>
+                {todoBien ? "100% OPERATIVO" : i.fatal > 0 ? "CRÍTICO" : "ATENCIÓN"}
+              </span>
             </div>
-            <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-1">
+            <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
               {todoBien
                 ? `Cero fallos abiertos en cajas o servicios. ${num(ov.events_24h_total)} eventos procesados en las últimas 24 horas.`
                 : `${num(ov.events_24h_total)} eventos en 24h${i.fatal ? ` · ${i.fatal} fatal(es)` : ""}${i.new_24h ? ` · ${i.new_24h} nueva(s) hoy` : ""}. Requieren diagnóstico.`}
-            </div>
+            </p>
           </div>
         </div>
 
         {!todoBien && (
           <button
             onClick={() => goTab("incidencias")}
-            className="z-10 px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-xs font-black transition-all shadow-md cursor-pointer whitespace-nowrap"
+            className="px-4 py-2 rounded-xl bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-gray-900 text-xs font-black transition-all shadow-md cursor-pointer whitespace-nowrap"
           >
             Ver incidencias & diagnóstico →
           </button>
         )}
       </div>
 
-      {/* 4 KPI Stats Canónicos Intelimarket */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* 4 KPI Cards Estilizadas con Estética Canónica de Business Intelligence */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* KPI 1: Incidencias abiertas */}
-        <div className="space-y-1 bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Incidencias Abiertas</span>
-            <Bug className={`w-4 h-4 ${i.unresolved ? "text-rose-400" : "text-emerald-400"}`} />
-          </div>
-          <p className={`text-2xl font-black font-mono tracking-tight ${i.unresolved ? "text-rose-400" : "text-emerald-400"}`}>
-            {num(i.unresolved)}
-          </p>
-          <p className="text-[11px] text-slate-400 font-mono font-bold">
-            {i.unresolved > 0 ? "Requieren diagnóstico" : "0 fallas activas"}
-          </p>
-        </div>
+        <Stat
+          icon={<Bug className="w-4 h-4" />}
+          label="Incidencias Abiertas"
+          value={num(i.unresolved)}
+          tone={i.unresolved ? "rose" : "emerald"}
+          sub={
+            <>
+              <span>{i.unresolved > 0 ? "Requieren diagnóstico" : "0 fallas activas"}</span>
+              <span className={cx("font-bold font-mono", i.unresolved ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400")}>
+                {i.unresolved > 0 ? "Atención" : "Estable"}
+              </span>
+            </>
+          }
+        />
 
         {/* KPI 2: Fatales */}
-        <div className="space-y-1 bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Fatales (Caídas)</span>
-            <Flame className={`w-4 h-4 ${i.fatal ? "text-rose-400" : "text-slate-400"}`} />
-          </div>
-          <p className={`text-2xl font-black font-mono tracking-tight ${i.fatal ? "text-rose-400" : "text-white"}`}>
-            {num(i.fatal)}
-          </p>
-          <p className="text-[11px] text-slate-400 font-mono font-bold">
-            {i.fatal > 0 ? "Corte crítico reportado" : "Cero caídas en terminales"}
-          </p>
-        </div>
+        <Stat
+          icon={<Flame className="w-4 h-4" />}
+          label="Fatales (Caídas)"
+          value={num(i.fatal)}
+          tone={i.fatal ? "rose" : "slate"}
+          sub={
+            <>
+              <span>{i.fatal > 0 ? "Corte crítico reportado" : "Cero caídas en terminales"}</span>
+              <span className={cx("font-bold font-mono", i.fatal ? "text-rose-600 dark:text-rose-400" : "text-gray-400")}>
+                {i.fatal > 0 ? "Crítico" : "Óptimo"}
+              </span>
+            </>
+          }
+        />
 
         {/* KPI 3: Nuevas 24h */}
-        <div className="space-y-1 bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Nuevas en 24 h</span>
-            <Sparkles className={`w-4 h-4 ${i.new_24h ? "text-amber-400" : "text-indigo-400"}`} />
-          </div>
-          <p className={`text-2xl font-black font-mono tracking-tight ${i.new_24h ? "text-amber-400" : "text-indigo-300"}`}>
-            {num(i.new_24h)}
-          </p>
-          <p className="text-[11px] text-slate-400 font-mono font-bold">Detectadas en la jornada</p>
-        </div>
+        <Stat
+          icon={<Sparkles className="w-4 h-4" />}
+          label="Nuevas en 24 h"
+          value={num(i.new_24h)}
+          tone={i.new_24h ? "amber" : "indigo"}
+          sub={
+            <>
+              <span>Detectadas en la jornada</span>
+              <span className="text-amber-600 dark:text-amber-400 font-bold font-mono">24 Horas</span>
+            </>
+          }
+        />
 
         {/* KPI 4: Resueltas 7d */}
-        <div className="space-y-1 bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Resueltas (7 Días)</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          </div>
-          <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
-            {num(i.resolved_7d)}
-          </p>
-          <p className="text-[11px] text-slate-400 font-mono font-bold">Cerradas con éxito</p>
-        </div>
+        <Stat
+          icon={<CheckCircle2 className="w-4 h-4" />}
+          label="Resueltas (7 Días)"
+          value={num(i.resolved_7d)}
+          tone="emerald"
+          sub={
+            <>
+              <span>Cerradas con éxito</span>
+              <span className="text-emerald-600 dark:text-emerald-400 font-bold font-mono">7 Días</span>
+            </>
+          }
+        />
       </div>
 
       {/* Gráficos y Orígenes */}

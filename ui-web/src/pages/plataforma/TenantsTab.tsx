@@ -32,10 +32,10 @@ export default function TenantsTab() {
   if (!data) return <div className="grid md:grid-cols-2 gap-4">{[0, 1].map((i) => <Skel key={i} className="h-48" />)}</div>
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <p className="text-[11px] text-slate-400 max-w-2xl">Cada empresa es un cliente de la plataforma, con su plan, su estado y sus usuarios. Las credenciales de cobro de cada una se cargan en Integraciones.</p>
-        <button onClick={() => setCreating(true)} className="ml-auto px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer"><Plus className="w-3.5 h-3.5" />Nueva empresa</button>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-gray-500 dark:text-gray-400 max-w-2xl">Cada empresa es un cliente de la plataforma, con su plan, su estado y sus usuarios. Las credenciales de cobro de cada una se cargan en Integraciones.</p>
+        <button onClick={() => setCreating(true)} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white text-xs font-black shadow-md shadow-indigo-500/20 transition cursor-pointer"><Plus className="w-3.5 h-3.5" />Nueva empresa</button>
       </div>
 
       {created && (

@@ -26,7 +26,7 @@ export function AuditoriaTab() {
   useEffect(() => { setLoading(true); void load() }, [load])
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="space-y-6">
       <div className="flex items-center gap-3">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por persona o elemento…" className="w-full max-w-sm px-3 py-2 rounded-xl text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 outline-none focus:border-indigo-500" />
         <span className="text-xs text-slate-400 font-bold">{total} registros</span>
@@ -100,7 +100,7 @@ export function AlertasTab() {
 
   if (!s) return <Skel className="h-64 max-w-2xl" />
   return (
-    <div className="grid lg:grid-cols-2 gap-4 max-w-5xl">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <Card title="Cómo te avisamos">
         <div className="space-y-4">
           <Toggle icon={<MessageCircle className="w-4 h-4" />} title="WhatsApp" hint="Mensaje al número de abajo cuando pasa algo importante. Máximo 8 por hora para no saturarte." on={s.whatsapp_enabled} onChange={(v) => save({ whatsapp_enabled: v })} />

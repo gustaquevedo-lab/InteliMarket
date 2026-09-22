@@ -45,24 +45,102 @@ export default function CajasTab() {
   if (!data) return <div className="grid gap-4"><div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{[0, 1, 2, 3].map((i) => <Skel key={i} className="h-20" />)}</div><Skel className="h-72" /></div>
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat icon={<Cpu className="w-5 h-5" />} label="Cajas activas" value={stats.activas} sub={`de ${items.length} registradas`} />
-        <Stat icon={<Wifi className="w-5 h-5" />} label="Conectadas ahora" value={stats.online} tone={stats.online ? "emerald" : "slate"} sub="latido en los últimos 3 min" />
-        <Stat icon={<AlertTriangle className="w-5 h-5" />} label="Con problemas" value={stats.conAvisos} tone={stats.conAvisos ? "rose" : "emerald"} />
-        <Stat icon={<PackageOpen className="w-5 h-5" />} label="App de caja vieja" value={stats.vieja} tone={stats.vieja ? "amber" : "emerald"} sub={data.current_release ? `pantalla actual ${data.current_release}` : undefined} />
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Stat
+          icon={<Cpu className="w-4 h-4" />}
+          label="Cajas Registradas"
+          value={stats.activas}
+          tone="indigo"
+          sub={
+            <>
+              <span>De {items.length} terminales</span>
+              <span className="font-bold font-mono text-indigo-600 dark:text-indigo-400">POS Activos</span>
+            </>
+          }
+        />
+        <Stat
+          icon={<Wifi className="w-4 h-4" />}
+          label="Conectadas Ahora"
+          value={stats.online}
+          tone={stats.online ? "emerald" : "slate"}
+          sub={
+            <>
+              <span>Latido en los últimos 3 min</span>
+              <span className={cx("font-bold font-mono", stats.online ? "text-emerald-600 dark:text-emerald-400" : "text-gray-400")}>
+                {stats.online ? "Online" : "Offline"}
+              </span>
+            </>
+          }
+        />
+        <Stat
+          icon={<AlertTriangle className="w-4 h-4" />}
+          label="Con Alertas / Problemas"
+          value={stats.conAvisos}
+          tone={stats.conAvisos ? "rose" : "emerald"}
+          sub={
+            <>
+              <span>{stats.conAvisos ? "Requieren revisión" : "Sin incidentes"}</span>
+              <span className={cx("font-bold font-mono", stats.conAvisos ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400")}>
+                {stats.conAvisos ? "Alerta" : "OK"}
+              </span>
+            </>
+          }
+        />
+        <Stat
+          icon={<PackageOpen className="w-4 h-4" />}
+          label="Versión Desactualizada"
+          value={stats.vieja}
+          tone={stats.vieja ? "amber" : "emerald"}
+          sub={
+            <>
+              <span className="truncate">{data.current_release ? `Target: ${data.current_release.slice(0, 14)}` : "Release vigente"}</span>
+              <span className={cx("font-bold font-mono", stats.vieja ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400")}>
+                {stats.vieja ? "Pendiente" : "Al día"}
+              </span>
+            </>
+          }
+        />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2.5">
-        <div className="inline-flex p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80 gap-0.5">
-          {([["todas", "Todas"], ["online", "Conectadas"], ["problemas", "Con avisos"]] as const).map(([k, l]) => (
-            <button key={k} onClick={() => setFilter(k)} className={cx("px-3 py-1.5 rounded-lg text-xs font-black cursor-pointer", filter === k ? "bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white" : "text-slate-500")}>{l}</button>
-          ))}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <div className="inline-flex p-1 rounded-xl bg-gray-100 dark:bg-slate-800 border border-gray-200/60 dark:border-slate-700/60 gap-1 shadow-inner">
+            {([["todas", "Todas"], ["online", "Conectadas"], ["problemas", "Con avisos"]] as const).map(([k, l]) => (
+              <button
+                key={k}
+                onClick={() => setFilter(k)}
+                className={cx(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer",
+                  filter === k
+                    ? "bg-white dark:bg-slate-700 shadow-xs text-indigo-600 dark:text-indigo-400"
+                    : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                )}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+          <span className="text-xs text-gray-500 dark:text-gray-400 hidden lg:block">
+            Mapeo IP para POS y terminales de cobro electrónico
+          </span>
         </div>
-        <span className="text-[11px] text-slate-400 hidden md:block">Acá se cargan las IPs de los terminales. Se guardan en los dos lugares que usa el POS, sin que se desfasen.</span>
-        <div className="ml-auto flex items-center gap-2">
-          <button onClick={() => void load()} className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-white cursor-pointer" title="Actualizar"><RefreshCw className="w-3.5 h-3.5" /></button>
-          <button onClick={() => setEditing("nueva")} className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer"><Plus className="w-3.5 h-3.5" />Nueva caja</button>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void load()}
+            className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-800 transition shadow-xs cursor-pointer"
+            title="Actualizar"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setEditing("nueva")}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white text-xs font-black shadow-md shadow-indigo-500/20 transition cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Nueva caja
+          </button>
         </div>
       </div>
 

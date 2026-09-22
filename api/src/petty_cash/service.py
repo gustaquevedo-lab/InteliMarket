@@ -2,12 +2,15 @@ from decimal import Decimal
 from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
+import logging
 import json
 import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import select, text, func as sa_func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from api.src.petty_cash.models import (
     Expense, ExpenseCategory, CostCenter, PettyCashFund, PettyCashFundMovement,
@@ -66,16 +69,19 @@ _CONFIG_KEY = "petty_cash_approval"
 
 
 async def get_approval_config(db: AsyncSession, company_id: str) -> ExpenseApprovalConfig:
-    result = await db.execute(
-        text("SELECT value FROM settings_company WHERE company_id = :cid AND key = :k"),
-        {"cid": company_id, "k": _CONFIG_KEY},
-    )
-    row = result.fetchone()
-    if row and row.value:
-        try:
-            return ExpenseApprovalConfig(**json.loads(row.value))
-        except Exception:
-            pass
+    try:
+        result = await db.execute(
+            text("SELECT value FROM settings_company WHERE company_id = :cid AND key = :k"),
+            {"cid": company_id, "k": _CONFIG_KEY},
+        )
+        row = result.fetchone()
+        if row and row.value:
+            try:
+                return ExpenseApprovalConfig(**json.loads(row.value))
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning("No se pudo leer settings_company (retornando configuración por defecto): %s", e)
     return ExpenseApprovalConfig()
 
 

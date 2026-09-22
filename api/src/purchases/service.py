@@ -36,6 +36,7 @@ from api.src.purchases.schemas import (
 )
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
 from api.src.financial.models import SupplierInvoice
+from api.src.products.models import Product
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -174,6 +175,15 @@ async def update_supplier(db: AsyncSession, supplier_id: str, data: SupplierUpda
     return supplier
 
 
+async def delete_supplier(db: AsyncSession, supplier_id: str) -> bool:
+    supplier = await get_supplier(db, supplier_id)
+    if not supplier:
+        return False
+    supplier.activo = False
+    await db.flush()
+    return True
+
+
 # ── Purchase Orders ───────────────────────────────────────────────────────────
 
 async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrder:
@@ -265,6 +275,28 @@ async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrd
     else:
         for item, _base in items_with_base:
             item.costo_unitario_estimado = item.precio_unitario
+
+    # Registrar automáticamente en SupplierPriceHistory para alimentar la comparativa de precios
+    for item, _base in items_with_base:
+        if item.product_id and item.precio_unitario:
+            ph = SupplierPriceHistory(
+                company_id=data.company_id,
+                supplier_id=data.supplier_id,
+                product_id=item.product_id,
+                precio=item.precio_unitario,
+                moneda=data.moneda or "PYG",
+                fecha=datetime.now(timezone.utc),
+                purchase_order_id=order.id,
+                notas=f"OC #{order.numero}",
+            )
+            db.add(ph)
+
+            if getattr(data, "update_default_supplier", False):
+                prod = await db.get(Product, item.product_id)
+                if prod:
+                    prod.supplier_id = data.supplier_id
+                    prod.ultimo_costo = item.precio_unitario
+                    prod.costo_unitario = item.precio_unitario
 
     await db.flush()
     await db.refresh(order)
@@ -408,6 +440,28 @@ async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate) ->
         landed = shipping + subtotal - descuento_total
         order.costo_landed_total = landed.quantize(Decimal("1"))
         order.total = landed.quantize(Decimal("1"))
+
+        # Registrar historial de precios y actualizar proveedor habitual si solicitado
+        for item_data in data.items:
+            if item_data.product_id and item_data.precio_unitario and order.supplier_id:
+                ph = SupplierPriceHistory(
+                    company_id=order.company_id,
+                    supplier_id=order.supplier_id,
+                    product_id=item_data.product_id,
+                    precio=item_data.precio_unitario,
+                    moneda=order.moneda or "PYG",
+                    fecha=datetime.now(timezone.utc),
+                    purchase_order_id=order.id,
+                    notas=f"OC #{order.numero} (actualizada)",
+                )
+                db.add(ph)
+
+                if getattr(data, "update_default_supplier", False):
+                    prod = await db.get(Product, item_data.product_id)
+                    if prod:
+                        prod.supplier_id = order.supplier_id
+                        prod.ultimo_costo = item_data.precio_unitario
+                        prod.costo_unitario = item_data.precio_unitario
 
     await db.flush()
     await db.refresh(order)
