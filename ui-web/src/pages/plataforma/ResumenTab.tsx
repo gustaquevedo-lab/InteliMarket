@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react"
-import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts"
+import {
+  Bar,
+  BarChart,
+  AreaChart,
+  Area,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+} from "recharts"
 import { Activity, AlertOctagon, Bug, CheckCircle2, Flame, MessageCircle, Sparkles } from "lucide-react"
 import { api } from "../../api"
 import type { Issue, Overview } from "../../api/platform"
@@ -74,28 +84,87 @@ export default function ResumenTab({ ov, loading, onOpenIssue, goTab }: { ov: Ov
         )}
       </div>
 
-      {/* 4 KPI Stats */}
+      {/* 4 KPI Stats Canónicos Intelimarket */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Stat icon={<Bug className="w-5 h-5" />} label="Incidencias abiertas" value={num(i.unresolved)} tone={i.unresolved ? "rose" : "emerald"} sub={i.unresolved > 0 ? "Pendientes de resolución" : "0 fallas activas"} />
-        <Stat icon={<Flame className="w-5 h-5" />} label="Fatales (pantalla caída)" value={num(i.fatal)} tone={i.fatal ? "rose" : "slate"} sub={i.fatal > 0 ? "Corte crítico reportado" : "Cero caídas en cajas"} />
-        <Stat icon={<Sparkles className="w-5 h-5" />} label="Nuevas en 24 h" value={num(i.new_24h)} tone={i.new_24h ? "amber" : "slate"} sub="Detectadas en la jornada" />
-        <Stat icon={<CheckCircle2 className="w-5 h-5" />} label="Resueltas en 7 días" value={num(i.resolved_7d)} tone="emerald" sub="Cerradas con éxito" />
+        {/* KPI 1: Incidencias abiertas */}
+        <div className="space-y-1 bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Incidencias Abiertas</span>
+            <Bug className={`w-4 h-4 ${i.unresolved ? "text-rose-400" : "text-emerald-400"}`} />
+          </div>
+          <p className={`text-2xl font-black font-mono tracking-tight ${i.unresolved ? "text-rose-400" : "text-emerald-400"}`}>
+            {num(i.unresolved)}
+          </p>
+          <p className="text-[11px] text-slate-400 font-mono font-bold">
+            {i.unresolved > 0 ? "Requieren diagnóstico" : "0 fallas activas"}
+          </p>
+        </div>
+
+        {/* KPI 2: Fatales */}
+        <div className="space-y-1 bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Fatales (Caídas)</span>
+            <Flame className={`w-4 h-4 ${i.fatal ? "text-rose-400" : "text-slate-400"}`} />
+          </div>
+          <p className={`text-2xl font-black font-mono tracking-tight ${i.fatal ? "text-rose-400" : "text-white"}`}>
+            {num(i.fatal)}
+          </p>
+          <p className="text-[11px] text-slate-400 font-mono font-bold">
+            {i.fatal > 0 ? "Corte crítico reportado" : "Cero caídas en terminales"}
+          </p>
+        </div>
+
+        {/* KPI 3: Nuevas 24h */}
+        <div className="space-y-1 bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Nuevas en 24 h</span>
+            <Sparkles className={`w-4 h-4 ${i.new_24h ? "text-amber-400" : "text-indigo-400"}`} />
+          </div>
+          <p className={`text-2xl font-black font-mono tracking-tight ${i.new_24h ? "text-amber-400" : "text-indigo-300"}`}>
+            {num(i.new_24h)}
+          </p>
+          <p className="text-[11px] text-slate-400 font-mono font-bold">Detectadas en la jornada</p>
+        </div>
+
+        {/* KPI 4: Resueltas 7d */}
+        <div className="space-y-1 bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Resueltas (7 Días)</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          </div>
+          <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+            {num(i.resolved_7d)}
+          </p>
+          <p className="text-[11px] text-slate-400 font-mono font-bold">Cerradas con éxito</p>
+        </div>
       </div>
 
       {/* Gráficos y Orígenes */}
       <div className="grid lg:grid-cols-3 gap-5">
-        <Card title="Eventos por hora · últimas 24 h" className="lg:col-span-2" right={<span className="text-[11px] font-bold text-slate-400 tabular-nums">{num(ov.events_24h_total)} eventos en total</span>}>
-          <div className="h-48 -mx-1 pt-2">
+        <Card title="Curva de Eventos en Tiempo Real (24 h)" className="lg:col-span-2" right={<span className="text-[11px] font-mono font-bold text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 px-2.5 py-0.5 rounded-lg">{num(ov.events_24h_total)} eventos</span>}>
+          <div className="h-56 -mx-1 pt-2">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={series} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
+              <AreaChart data={series} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gradEventosPlat" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#6366f1" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="#6366f1" stopOpacity={0.0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" opacity={0.15} />
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} tickLine={false} axisLine={false} interval={2} />
-                <Tooltip cursor={{ fill: "rgba(148,163,184,.15)" }} content={({ active, payload }) => active && payload?.length ? (
-                  <div className="px-3 py-2 rounded-xl bg-slate-950 text-white text-xs font-bold shadow-xl border border-slate-800">
-                    {(payload[0].payload as any).label} · {payload[0].value} eventos
-                  </div>
-                ) : null} />
-                <Bar dataKey="c" fill="#f43f5e" radius={[4, 4, 0, 0]} />
-              </BarChart>
+                <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} tickLine={false} axisLine={false} />
+                <Tooltip
+                  cursor={{ stroke: "#6366f1", strokeWidth: 1, strokeDasharray: "3 3" }}
+                  content={({ active, payload }) => active && payload?.length ? (
+                    <div className="px-3.5 py-2.5 rounded-xl bg-slate-950 text-white text-xs font-bold shadow-xl border border-slate-800">
+                      <span className="text-slate-400 text-[10px] uppercase tracking-wider block">Hora: {(payload[0].payload as any).label}</span>
+                      <span className="font-mono text-indigo-400 font-black text-sm">{payload[0].value} eventos</span>
+                    </div>
+                  ) : null}
+                />
+                <Area type="monotone" dataKey="c" stroke="#6366f1" strokeWidth={2.5} fill="url(#gradEventosPlat)" isAnimationActive={false} />
+              </AreaChart>
             </ResponsiveContainer>
           </div>
         </Card>

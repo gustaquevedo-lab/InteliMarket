@@ -53,28 +53,54 @@ export default function PlataformaPage() {
   const abiertas = ov?.issues.unresolved || 0
 
   return (
-    <div className="p-4 sm:p-6 max-w-[1400px] mx-auto flex flex-col gap-6">
-      {/* Hero Banner Ejecutivo */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950/50 border border-slate-800/80 p-6 sm:p-8 shadow-2xl">
-        {/* Glow ambient orbs */}
-        <div className="absolute top-0 right-0 -mt-8 -mr-8 w-80 h-80 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 right-1/4 -mb-10 w-64 h-64 rounded-full bg-violet-500/10 blur-2xl pointer-events-none" />
+    <div className="p-4 sm:p-6 max-w-[1440px] mx-auto flex flex-col gap-6">
+      {/* ── HERO INSTITUCIONAL — CONSOLA DE PLATAFORMA ── */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/40 border border-slate-800/80 p-6 sm:p-8 shadow-2xl backdrop-blur-xl">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
+        <div className="absolute bottom-0 left-0 w-80 h-80 bg-violet-500/10 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20" />
 
         <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
           <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shadow-xs">
-              <Radar className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
-              <span>Telemetría & Operaciones Supermercado · Superadmin</span>
-              {ov && ov.environment_api !== "production" && (
-                <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-[10px]">API {ov.environment_api.toUpperCase()}</span>
-              )}
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-600/30 text-white font-black">
+                <Radar className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                    Telemetría &amp; Operaciones Supermercado · Superadmin
+                  </span>
+                  {ov && ov.environment_api !== "production" && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-[10px]">
+                      API {ov.environment_api.toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Consola de Plataforma
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Monitoreo centralizado de incidencias, auditoría de eventos, salud de cajas y conectividad de servicios en Extra Supermercado.
+                </p>
+              </div>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight leading-tight">
-              Consola de Plataforma
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-300/85 max-w-2xl leading-relaxed">
-              Monitoreo centralizado de incidencias, auditoría de eventos, salud de cajas y conectividad de servicios en Extra Supermercado.
-            </p>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                🌐 Entorno: {env === "production" ? "Producción (8000/8002)" : env === "sandbox" ? "Sandbox (8001)" : "Todo"}
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-rose-400">
+                ⚠️ {abiertas} incidencia(s) abiertas
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-indigo-300">
+                ⚡ {ov?.events_24h_total || 0} eventos procesados (24h)
+              </span>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -90,10 +116,10 @@ export default function PlataformaPage() {
             <button
               onClick={() => void load()}
               disabled={loading}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white border border-white/10 text-xs font-bold transition-all shadow-xs backdrop-blur-md cursor-pointer disabled:opacity-50"
+              className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 transition shadow-sm cursor-pointer disabled:opacity-50"
+              title="Sincronizar telemetría"
             >
-              <Activity className={cx("w-3.5 h-3.5 text-indigo-400", loading && "animate-spin")} />
-              <span>{loading ? "Sincronizando..." : "Actualizar"}</span>
+              <Activity className={cx("w-4 h-4 text-indigo-400", loading && "animate-spin")} />
             </button>
           </div>
         </div>
