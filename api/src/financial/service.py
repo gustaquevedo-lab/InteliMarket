@@ -3138,31 +3138,45 @@ async def _execute_disbursements_internal(
                         break
                     e_monto_brl = Decimal(str(e.monto_brl or 0))
                     if e_monto_brl <= remaining_brl:
-                        e.estado = "pagado_proveedor"
-                        e.fecha_deposito = now_dt
-                        e.observaciones = f"Egreso R$ por Pago Proveedor {order.numero_orden}"
-                        if user_id:
-                            e.registrado_por = uuid.UUID(user_id)
+                        if (e.monto_pyg and e.monto_pyg > 0) or (e.monto_usd and e.monto_usd > 0):
+                            db.add(VaultEntry(
+                                company_id=cid,
+                                branch_id=e.branch_id,
+                                origen=e.origen,
+                                handoff_id=e.handoff_id,
+                                monto_pyg=Decimal("0"),
+                                monto_usd=Decimal("0"),
+                                monto_brl=e_monto_brl,
+                                estado="pagado_proveedor",
+                                fecha_deposito=now_dt,
+                                observaciones=f"Egreso R$ por Pago Proveedor {order.numero_orden}",
+                                registrado_por=uuid.UUID(user_id) if user_id else None,
+                            ))
+                            e.monto_brl = Decimal("0")
+                        else:
+                            e.estado = "pagado_proveedor"
+                            e.fecha_deposito = now_dt
+                            e.observaciones = f"Egreso R$ por Pago Proveedor {order.numero_orden}"
+                            if user_id:
+                                e.registrado_por = uuid.UUID(user_id)
                         remaining_brl -= e_monto_brl
                     else:
-                        remanente_brl = e_monto_brl - remaining_brl
                         db.add(VaultEntry(
                             company_id=cid,
                             branch_id=e.branch_id,
-                            origen="remanente",
+                            origen=e.origen,
                             handoff_id=e.handoff_id,
                             monto_pyg=Decimal("0"),
                             monto_usd=Decimal("0"),
-                            monto_brl=remanente_brl,
-                            estado="en_boveda",
-                            registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
-                            observaciones=f"Remanente R$ en bóveda tras pago a proveedor {order.numero_orden}",
+                            monto_brl=remaining_brl,
+                            estado="pagado_proveedor",
+                            fecha_deposito=now_dt,
+                            observaciones=f"Egreso parcial R$ por Pago Proveedor {order.numero_orden}",
+                            registrado_por=uuid.UUID(user_id) if user_id else None,
                         ))
-                        e.monto_brl = remaining_brl
-                        e.estado = "pagado_proveedor"
-                        e.fecha_deposito = now_dt
-                        e.observaciones = f"Egreso R$ por Pago Proveedor {order.numero_orden}"
+                        e.monto_brl = e_monto_brl - remaining_brl
                         remaining_brl = Decimal("0")
+                        break
 
                 # Registrar movimiento de caja/bóveda en Reales
                 from api.src.caja.models import CashRegister
@@ -3208,31 +3222,45 @@ async def _execute_disbursements_internal(
                         break
                     e_monto = Decimal(str(e.monto_pyg or 0))
                     if e_monto <= remaining:
-                        e.estado = "pagado_proveedor"
-                        e.fecha_deposito = now_dt
-                        e.observaciones = f"Egreso por Pago Proveedor {order.numero_orden}"
-                        if user_id:
-                            e.registrado_por = uuid.UUID(user_id)
+                        if (e.monto_brl and e.monto_brl > 0) or (e.monto_usd and e.monto_usd > 0):
+                            db.add(VaultEntry(
+                                company_id=cid,
+                                branch_id=e.branch_id,
+                                origen=e.origen,
+                                handoff_id=e.handoff_id,
+                                monto_pyg=e_monto,
+                                monto_usd=Decimal("0"),
+                                monto_brl=Decimal("0"),
+                                estado="pagado_proveedor",
+                                fecha_deposito=now_dt,
+                                observaciones=f"Egreso por Pago Proveedor {order.numero_orden}",
+                                registrado_por=uuid.UUID(user_id) if user_id else None,
+                            ))
+                            e.monto_pyg = Decimal("0")
+                        else:
+                            e.estado = "pagado_proveedor"
+                            e.fecha_deposito = now_dt
+                            e.observaciones = f"Egreso por Pago Proveedor {order.numero_orden}"
+                            if user_id:
+                                e.registrado_por = uuid.UUID(user_id)
                         remaining -= e_monto
                     else:
-                        remanente_monto = e_monto - remaining
                         db.add(VaultEntry(
                             company_id=cid,
                             branch_id=e.branch_id,
-                            origen="remanente",
+                            origen=e.origen,
                             handoff_id=e.handoff_id,
-                            monto_pyg=remanente_monto,
+                            monto_pyg=remaining,
                             monto_usd=Decimal("0"),
                             monto_brl=Decimal("0"),
-                            estado="en_boveda",
-                            registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
-                            observaciones=f"Remanente en bóveda tras pago a proveedor {order.numero_orden}",
+                            estado="pagado_proveedor",
+                            fecha_deposito=now_dt,
+                            observaciones=f"Egreso parcial por Pago Proveedor {order.numero_orden}",
+                            registrado_por=uuid.UUID(user_id) if user_id else None,
                         ))
-                        e.monto_pyg = remaining
-                        e.estado = "pagado_proveedor"
-                        e.fecha_deposito = now_dt
-                        e.observaciones = f"Egreso por Pago Proveedor {order.numero_orden}"
+                        e.monto_pyg = e_monto - remaining
                         remaining = Decimal("0")
+                        break
 
                 # Registrar movimiento de caja/bóveda en Guaraníes
                 from api.src.caja.models import CashRegister
@@ -3979,31 +4007,45 @@ async def create_multi_supplier_payment_batch(
                     break
                 e_monto = Decimal(str(e.monto_brl or 0))
                 if e_monto <= remaining_brl:
-                    e.estado = "pagado_proveedor"
-                    e.fecha_deposito = now_dt
-                    e.observaciones = f"Egreso R$ Lote Multi-Proveedor ({len(payload.items)} prov.)"
-                    if user_id:
-                        e.registrado_por = uuid.UUID(user_id)
+                    if (e.monto_pyg and e.monto_pyg > 0) or (e.monto_usd and e.monto_usd > 0):
+                        db.add(VaultEntry(
+                            company_id=cid,
+                            branch_id=e.branch_id,
+                            origen=e.origen,
+                            handoff_id=e.handoff_id,
+                            monto_pyg=Decimal("0"),
+                            monto_usd=Decimal("0"),
+                            monto_brl=e_monto,
+                            estado="pagado_proveedor",
+                            fecha_deposito=now_dt,
+                            observaciones=f"Egreso R$ Lote Multi-Proveedor ({len(payload.items)} prov.)",
+                            registrado_por=uuid.UUID(user_id) if user_id else None,
+                        ))
+                        e.monto_brl = Decimal("0")
+                    else:
+                        e.estado = "pagado_proveedor"
+                        e.fecha_deposito = now_dt
+                        e.observaciones = f"Egreso R$ Lote Multi-Proveedor ({len(payload.items)} prov.)"
+                        if user_id:
+                            e.registrado_por = uuid.UUID(user_id)
                     remaining_brl -= e_monto
                 else:
-                    remanente_monto = e_monto - remaining_brl
                     db.add(VaultEntry(
                         company_id=cid,
                         branch_id=e.branch_id,
-                        origen="remanente",
+                        origen=e.origen,
                         handoff_id=e.handoff_id,
                         monto_pyg=Decimal("0"),
                         monto_usd=Decimal("0"),
-                        monto_brl=remanente_monto,
-                        estado="en_boveda",
-                        registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
-                        observaciones="Remanente R$ en bóveda tras pago Lote Multi-Proveedor",
+                        monto_brl=remaining_brl,
+                        estado="pagado_proveedor",
+                        fecha_deposito=now_dt,
+                        observaciones=f"Egreso parcial R$ Lote Multi-Proveedor ({len(payload.items)} prov.)",
+                        registrado_por=uuid.UUID(user_id) if user_id else None,
                     ))
-                    e.monto_brl = remaining_brl
-                    e.estado = "pagado_proveedor"
-                    e.fecha_deposito = now_dt
-                    e.observaciones = f"Egreso R$ Lote Multi-Proveedor ({len(payload.items)} prov.)"
+                    e.monto_brl = e_monto - remaining_brl
                     remaining_brl = Decimal("0")
+                    break
 
             from api.src.caja.models import CashRegister
             reg_res = await db.execute(
@@ -4046,31 +4088,45 @@ async def create_multi_supplier_payment_batch(
                     break
                 e_monto = Decimal(str(e.monto_pyg or 0))
                 if e_monto <= remaining:
-                    e.estado = "pagado_proveedor"
-                    e.fecha_deposito = now_dt
-                    e.observaciones = f"Egreso por Lote Multi-Proveedor ({len(payload.items)} prov.)"
-                    if user_id:
-                        e.registrado_por = uuid.UUID(user_id)
+                    if (e.monto_brl and e.monto_brl > 0) or (e.monto_usd and e.monto_usd > 0):
+                        db.add(VaultEntry(
+                            company_id=cid,
+                            branch_id=e.branch_id,
+                            origen=e.origen,
+                            handoff_id=e.handoff_id,
+                            monto_pyg=e_monto,
+                            monto_usd=Decimal("0"),
+                            monto_brl=Decimal("0"),
+                            estado="pagado_proveedor",
+                            fecha_deposito=now_dt,
+                            observaciones=f"Egreso por Lote Multi-Proveedor ({len(payload.items)} prov.)",
+                            registrado_por=uuid.UUID(user_id) if user_id else None,
+                        ))
+                        e.monto_pyg = Decimal("0")
+                    else:
+                        e.estado = "pagado_proveedor"
+                        e.fecha_deposito = now_dt
+                        e.observaciones = f"Egreso por Lote Multi-Proveedor ({len(payload.items)} prov.)"
+                        if user_id:
+                            e.registrado_por = uuid.UUID(user_id)
                     remaining -= e_monto
                 else:
-                    remanente_monto = e_monto - remaining
                     db.add(VaultEntry(
                         company_id=cid,
                         branch_id=e.branch_id,
-                        origen="remanente",
+                        origen=e.origen,
                         handoff_id=e.handoff_id,
-                        monto_pyg=remanente_monto,
+                        monto_pyg=remaining,
                         monto_usd=Decimal("0"),
                         monto_brl=Decimal("0"),
-                        estado="en_boveda",
-                        registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
-                        observaciones="Remanente en bóveda tras pago Lote Multi-Proveedor",
+                        estado="pagado_proveedor",
+                        fecha_deposito=now_dt,
+                        observaciones=f"Egreso parcial por Lote Multi-Proveedor ({len(payload.items)} prov.)",
+                        registrado_por=uuid.UUID(user_id) if user_id else None,
                     ))
-                    e.monto_pyg = remaining
-                    e.estado = "pagado_proveedor"
-                    e.fecha_deposito = now_dt
-                    e.observaciones = f"Egreso por Lote Multi-Proveedor ({len(payload.items)} prov.)"
+                    e.monto_pyg = e_monto - remaining
                     remaining = Decimal("0")
+                    break
 
             from api.src.caja.models import CashRegister
             reg_res = await db.execute(

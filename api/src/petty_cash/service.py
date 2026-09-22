@@ -636,29 +636,45 @@ async def disburse_expense(
                         break
                     e_brl = Decimal(str(e.monto_brl or 0))
                     if e_brl <= remaining_brl:
-                        e.estado = "egreso_gasto"
-                        e.fecha_deposito = now_dt
-                        e.observaciones = f"Egreso R$ por Pago Gasto {exp.numero_factura or exp.id} - {exp.proveedor or exp.descripcion}"
+                        if (e.monto_pyg and e.monto_pyg > 0) or (e.monto_usd and e.monto_usd > 0):
+                            db.add(VaultEntry(
+                                company_id=cid,
+                                branch_id=e.branch_id,
+                                origen="egreso_gasto",
+                                handoff_id=e.handoff_id,
+                                monto_pyg=Decimal("0"),
+                                monto_usd=Decimal("0"),
+                                monto_brl=e_brl,
+                                estado="egreso_gasto",
+                                fecha_deposito=now_dt,
+                                observaciones=f"Egreso R$ por Pago Gasto {exp.numero_factura or exp.id} - {exp.proveedor or exp.descripcion}",
+                                registrado_por=uuid.UUID(user_id) if user_id else None,
+                            ))
+                            e.monto_brl = Decimal("0")
+                        else:
+                            e.estado = "egreso_gasto"
+                            e.fecha_deposito = now_dt
+                            e.observaciones = f"Egreso R$ por Pago Gasto {exp.numero_factura or exp.id} - {exp.proveedor or exp.descripcion}"
+                            if user_id:
+                                e.registrado_por = uuid.UUID(user_id)
                         remaining_brl -= e_brl
                     else:
-                        remanente_brl = e_brl - remaining_brl
                         db.add(VaultEntry(
                             company_id=cid,
                             branch_id=e.branch_id,
-                            origen="remanente",
+                            origen="egreso_gasto",
                             handoff_id=e.handoff_id,
                             monto_pyg=Decimal("0"),
                             monto_usd=Decimal("0"),
-                            monto_brl=remanente_brl,
-                            estado="en_boveda",
-                            registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
-                            observaciones=f"Remanente en bóveda tras pago de gasto en R$ {exp.numero_factura or exp.id}",
+                            monto_brl=remaining_brl,
+                            estado="egreso_gasto",
+                            fecha_deposito=now_dt,
+                            observaciones=f"Egreso parcial R$ por Pago Gasto {exp.numero_factura or exp.id}",
+                            registrado_por=uuid.UUID(user_id) if user_id else None,
                         ))
-                        e.monto_brl = remaining_brl
-                        e.estado = "egreso_gasto"
-                        e.fecha_deposito = now_dt
-                        e.observaciones = f"Egreso R$ por Pago Gasto {exp.numero_factura or exp.id}"
+                        e.monto_brl = e_brl - remaining_brl
                         remaining_brl = Decimal("0")
+                        break
 
                 from api.src.caja.models import CashRegister
                 reg_res = await db.execute(
@@ -704,7 +720,8 @@ async def disburse_expense(
                 entries_res = await db.execute(
                     select(VaultEntry).where(
                         VaultEntry.company_id == cid,
-                        VaultEntry.estado == "en_boveda"
+                        VaultEntry.estado == "en_boveda",
+                        VaultEntry.monto_pyg > Decimal("0")
                     ).order_by(VaultEntry.created_at.asc())
                 )
                 entries = entries_res.scalars().all()
@@ -715,29 +732,45 @@ async def disburse_expense(
                         break
                     e_monto = Decimal(str(e.monto_pyg or 0))
                     if e_monto <= remaining:
-                        e.estado = "egreso_gasto"
-                        e.fecha_deposito = now_dt
-                        e.observaciones = f"Egreso por Pago Gasto {exp.numero_factura or exp.id} - {exp.proveedor or exp.descripcion}"
+                        if (e.monto_brl and e.monto_brl > 0) or (e.monto_usd and e.monto_usd > 0):
+                            db.add(VaultEntry(
+                                company_id=cid,
+                                branch_id=e.branch_id,
+                                origen="egreso_gasto",
+                                handoff_id=e.handoff_id,
+                                monto_pyg=e_monto,
+                                monto_usd=Decimal("0"),
+                                monto_brl=Decimal("0"),
+                                estado="egreso_gasto",
+                                fecha_deposito=now_dt,
+                                observaciones=f"Egreso por Pago Gasto {exp.numero_factura or exp.id} - {exp.proveedor or exp.descripcion}",
+                                registrado_por=uuid.UUID(user_id) if user_id else None,
+                            ))
+                            e.monto_pyg = Decimal("0")
+                        else:
+                            e.estado = "egreso_gasto"
+                            e.fecha_deposito = now_dt
+                            e.observaciones = f"Egreso por Pago Gasto {exp.numero_factura or exp.id} - {exp.proveedor or exp.descripcion}"
+                            if user_id:
+                                e.registrado_por = uuid.UUID(user_id)
                         remaining -= e_monto
                     else:
-                        remanente_monto = e_monto - remaining
                         db.add(VaultEntry(
                             company_id=cid,
                             branch_id=e.branch_id,
-                            origen="remanente",
+                            origen="egreso_gasto",
                             handoff_id=e.handoff_id,
-                            monto_pyg=remanente_monto,
+                            monto_pyg=remaining,
                             monto_usd=Decimal("0"),
                             monto_brl=Decimal("0"),
-                            estado="en_boveda",
-                            registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
-                            observaciones=f"Remanente en bóveda tras pago de gasto {exp.numero_factura or exp.id}",
+                            estado="egreso_gasto",
+                            fecha_deposito=now_dt,
+                            observaciones=f"Egreso parcial por Pago Gasto {exp.numero_factura or exp.id}",
+                            registrado_por=uuid.UUID(user_id) if user_id else None,
                         ))
-                        e.monto_pyg = remaining
-                        e.estado = "egreso_gasto"
-                        e.fecha_deposito = now_dt
-                        e.observaciones = f"Egreso por Pago Gasto {exp.numero_factura or exp.id}"
+                        e.monto_pyg = e_monto - remaining
                         remaining = Decimal("0")
+                        break
 
                 # Movimiento de caja/bóveda
                 from api.src.caja.models import CashRegister

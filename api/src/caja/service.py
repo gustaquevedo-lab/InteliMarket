@@ -5548,13 +5548,22 @@ async def incorporate_session_to_vault_and_banks(
 
     vault_entries_creados = []
     # Verificar si ya existe VaultEntry directo para esta sesión
-    existing_ve = await db.execute(
-        select(VaultEntry).where(
-            VaultEntry.company_id == cid,
-            VaultEntry.session_id == sid if hasattr(VaultEntry, "session_id") else VaultEntry.observaciones.ilike(f"%{str(sid)[:8]}%"),
-        )
-    )
-    if not existing_ve.scalars().first():
+    ve_query = select(VaultEntry).where(
+        VaultEntry.company_id == cid,
+        (VaultEntry.handoff_id == handoff_obj.id if handoff_obj else False)
+        | (VaultEntry.observaciones.ilike(f"%{str(sid)[:8]}%")),
+    ).order_by(VaultEntry.created_at.desc()).limit(1)
+    existing_ve_obj = (await db.execute(ve_query)).scalar_one_or_none()
+
+    if existing_ve_obj:
+        if existing_ve_obj.estado == "en_boveda":
+            existing_ve_obj.monto_pyg = m_ef_pyg
+            existing_ve_obj.monto_brl = m_ef_brl
+            existing_ve_obj.monto_usd = m_ef_usd
+            if handoff_obj and not existing_ve_obj.handoff_id:
+                existing_ve_obj.handoff_id = handoff_obj.id
+            vault_entries_creados.append({"tipo": "efectivo_actualizado", "pyg": float(m_ef_pyg), "brl": float(m_ef_brl), "usd": float(m_ef_usd)})
+    else:
         if m_ef_pyg > 0 or m_ef_brl > 0 or m_ef_usd > 0:
             ve_cash = VaultEntry(
                 company_id=cid,
