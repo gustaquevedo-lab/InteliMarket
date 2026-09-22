@@ -7607,7 +7607,7 @@ export default function POSPage() {
             codigo_barras: barcodeToRedeem,
             sale_id: saleIdForRedeem,
             caja_session_id: cashSessionId || undefined,
-            caja_numero: typeof puntoEmision !== "undefined" ? String(puntoEmision) : "CAJA-02",
+            caja_numero: terminalAssignment?.caja_nombre || (typeof puntoEmision !== "undefined" ? String(puntoEmision) : "CAJA-02"),
           }).catch((err: any) => console.warn("[POS] Error quemando vale en backend:", err))
         }
         if (createdSaleId) {
@@ -12887,15 +12887,22 @@ export default function POSPage() {
                                           setValeValidating(true)
                                           const res = await api.vouchers.check(valeCodigo.trim())
                                           if (res.es_valido) {
+                                            const saldoVale = Number(res.saldo_disponible)
+                                            const montoAplicar = totalPyg > 0 ? Math.min(saldoVale, totalPyg) : saldoVale
                                             setValeData({
                                               id: res.id,
                                               numero_vale: res.numero_vale,
                                               convenio_nombre: res.convenio_nombre,
-                                              monto: Number(res.saldo_disponible),
+                                              monto: montoAplicar,
                                             })
-                                            setMixedOtrosPyg(Number(res.saldo_disponible).toLocaleString("es-PY"))
+                                            setMixedOtrosPyg(montoAplicar.toLocaleString("es-PY"))
                                             setOtrosSupervisorApproved(true)
-                                            toast.success("Vale Válido", `${res.convenio_nombre} • Vale N° ${res.numero_vale} por Gs. ${Number(res.saldo_disponible).toLocaleString("es-PY")}`)
+                                            if (totalPyg > 0 && totalPyg > saldoVale) {
+                                              const resto = totalPyg - saldoVale
+                                              toast.success("Vale Válido", `${res.convenio_nombre} • N° ${res.numero_vale} por Gs. ${saldoVale.toLocaleString("es-PY")}. Restan Gs. ${resto.toLocaleString("es-PY")} por cobrar con otro medio.`)
+                                            } else {
+                                              toast.success("Vale Válido", `${res.convenio_nombre} • Vale N° ${res.numero_vale} por Gs. ${montoAplicar.toLocaleString("es-PY")} (cubierto al 100%, sin vuelto).`)
+                                            }
                                           } else {
                                             setValeData(null)
                                             setOtrosSupervisorApproved(false)
@@ -12924,15 +12931,22 @@ export default function POSPage() {
                                       setValeValidating(true)
                                       const res = await api.vouchers.check(valeCodigo.trim())
                                       if (res.es_valido) {
+                                        const saldoVale = Number(res.saldo_disponible)
+                                        const montoAplicar = totalPyg > 0 ? Math.min(saldoVale, totalPyg) : saldoVale
                                         setValeData({
                                           id: res.id,
                                           numero_vale: res.numero_vale,
                                           convenio_nombre: res.convenio_nombre,
-                                          monto: Number(res.saldo_disponible),
+                                          monto: montoAplicar,
                                         })
-                                        setMixedOtrosPyg(Number(res.saldo_disponible).toLocaleString("es-PY"))
+                                        setMixedOtrosPyg(montoAplicar.toLocaleString("es-PY"))
                                         setOtrosSupervisorApproved(true)
-                                        toast.success("Vale Válido", `${res.convenio_nombre} • N° ${res.numero_vale}`)
+                                        if (totalPyg > 0 && totalPyg > saldoVale) {
+                                          const resto = totalPyg - saldoVale
+                                          toast.success("Vale Válido", `${res.convenio_nombre} • N° ${res.numero_vale} por Gs. ${saldoVale.toLocaleString("es-PY")}. Restan Gs. ${resto.toLocaleString("es-PY")} por cobrar con otro medio.`)
+                                        } else {
+                                          toast.success("Vale Válido", `${res.convenio_nombre} • Vale N° ${res.numero_vale} por Gs. ${montoAplicar.toLocaleString("es-PY")} (cubierto al 100%, sin vuelto).`)
+                                        }
                                       } else {
                                         setValeData(null)
                                         setOtrosSupervisorApproved(false)
