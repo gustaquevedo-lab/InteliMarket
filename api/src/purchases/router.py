@@ -36,6 +36,7 @@ from api.src.purchases.schemas import (
     SupplierNcRequestResponse, ResolveSupplierNcRequest,
     SupplierProductItemResponse, ProductInvoiceOptionResponse,
     SupplierReturnCreateInput, SupplierReturnUpdateInput, SupplierReturnRejectInput, SupplierReturnCompleteInput,
+    ProductSupplierComparisonResponse, SupplierPriceComparisonItem,
 )
 from api.src.purchases import service
 from api.src.purchases import imap_service
@@ -109,6 +110,19 @@ async def get_supplier_price_history(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.get_supplier_price_history(db, supplier_id, product_id)
+
+
+@router.get("/purchases/products/{product_id}/supplier-comparison", response_model=ProductSupplierComparisonResponse)
+@router.get("/products/{product_id}/supplier-comparison", response_model=ProductSupplierComparisonResponse)
+async def get_product_supplier_comparison(
+    product_id: str,
+    company_id: str = Query("f0000000-0000-0000-0000-000000000001"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    cid = user.get("company_id") or company_id
+    return await service.get_product_supplier_comparison(db, cid, product_id)
+
 
 
 @router.get("/suppliers/{supplier_id}/performance", response_model=SupplierPerformanceResponse)

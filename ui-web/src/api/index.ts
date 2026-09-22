@@ -1593,6 +1593,41 @@ export interface Supplier360Response {
   }
 }
 
+export interface SupplierPriceComparisonItem {
+  supplier_id: string
+  razon_social: string
+  nombre_fantasia?: string
+  ruc?: string
+  telefono?: string
+  es_habitual: boolean
+  ultimo_precio: number
+  mejor_precio: number
+  moneda: string
+  fecha_ultima_compra?: string
+  origen: string
+  referencia_doc?: string
+  es_mas_barato: boolean
+  ahorro_vs_habitual: number
+  ahorro_pct: number
+}
+
+export interface ProductSupplierComparisonResponse {
+  product_id: string
+  nombre: string
+  sku?: string
+  codigo_barra?: string
+  costo_unitario_actual: number
+  ultimo_costo: number
+  habitual_supplier_id?: string
+  habitual_supplier_nombre?: string
+  mejor_precio?: number
+  mejor_supplier_id?: string
+  mejor_supplier_nombre?: string
+  ahorro_maximo_gs: number
+  ahorro_maximo_pct: number
+  proveedores: SupplierPriceComparisonItem[]
+}
+
 export const api = {
   auth: {
     login: (data: { email: string; password: string }) => client.post<{ access_token: string; refresh_token: string }>("/v1/auth/login", data),
@@ -2297,6 +2332,8 @@ export const api = {
     },
     getSupplierPerformance: (id: string) => client.get<{ supplier_id: string; razon_social: string; total_orders: number; total_spent: number; on_time_rate: number | null; avg_quality_score: number | null; avg_delivery_score: number | null; avg_price_score: number | null; avg_attention_score: number | null; overall_rating: number | null; last_evaluation_date: string | null }>(`/v1/suppliers/${id}/performance`),
     getSupplierPriceHistory: (id: string) => client.get<{ product_id: string; product_nombre: string; sku: string; purchase_order_id: string; fecha_orden: string; precio_unitario: number; cantidad: number }[]>(`/v1/suppliers/${id}/price-history`),
+    getProductSupplierComparison: (productId: string) =>
+      client.get<ProductSupplierComparisonResponse>(`/v1/purchases/products/${productId}/supplier-comparison`),
     requisitions: {
       list: (estado?: string) => client.get<PurchaseRequisition[]>(`/v1/companies/${COMPANY_ID}/purchase-requisitions`, estado ? { estado } : undefined),
       get: (id: string) => client.get<PurchaseRequisition & { items: PurchaseRequisitionItem[] }>(`/v1/purchase-requisitions/${id}`),

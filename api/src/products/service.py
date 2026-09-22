@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from api.src.products.models import Product, ProductCategory
 from api.src.products.schemas import ProductCreate, ProductUpdate, CategoryCreate
 from api.src.inventory.models import Stock, Warehouse, InventoryMovement
-from api.src.purchases.models import PurchaseOrder, PurchaseOrderItem, Supplier
+from api.src.purchases.models import PurchaseOrder, PurchaseOrderItem, Supplier, SupplierPriceHistory
 from api.src.promotions.models import Promotion
 from api.src.sales.models import Sale, SaleItem
 from api.src.customers.models import Customer
@@ -301,10 +301,15 @@ async def list_products(
                 .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderItem.purchase_order_id)
                 .where(PurchaseOrder.supplier_id == supp_uuid)
             )
+            sph_subquery = (
+                select(SupplierPriceHistory.product_id)
+                .where(SupplierPriceHistory.supplier_id == supp_uuid)
+            )
             query = query.where(
                 or_(
                     Product.supplier_id == supp_uuid,
-                    and_(Product.supplier_id.is_(None), Product.id.in_(po_subquery)),
+                    Product.id.in_(po_subquery),
+                    Product.id.in_(sph_subquery),
                 )
             )
         except ValueError:
