@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react"
 import {
   Scale, Beef, TrendingUp, AlertTriangle, Plus, Loader2,
   DollarSign, CheckCircle2, RefreshCw, Info, Package, ChevronRight, ClipboardList,
-  Sparkles, Layers, ArrowRight
+  Sparkles, Layers, ArrowRight, Edit3, Trash2, Search, X, Check, Save, Tag
 } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -11,7 +11,7 @@ import WasteControlPanel from "../../components/operations/WasteControlPanel"
 
 type Tab = "wizard" | "templates" | "ordenes" | "rendimientos" | "mermas"
 
-const ESPECIES = ["Vacuno Novillo", "Vacuno Vaquilla", "Porcino", "Ovino", "Pollos (Unidad)"]
+const ESPECIES = ["Vacuno Novillo", "Vacuno Vaquilla", "Bovino", "Porcino", "Ovino", "Pollos (Unidad)", "Pescadería"]
 
 export default function CarniceriaDespostePage() {
   const toast = useToast()
@@ -36,6 +36,18 @@ export default function CarniceriaDespostePage() {
   const [showTemplateForm, setShowTemplateForm] = useState(false)
   const [savingTemplate, setSavingTemplate] = useState(false)
   const [templateForm, setTemplateForm] = useState({ nombre: "", especie: "Vacuno Novillo", peso_promedio_kg: "", descripcion: "" })
+
+  // Edición integral de template y cortes
+  const [editingTemplate, setEditingTemplate] = useState<any | null>(null)
+  const [editForm, setEditForm] = useState({ nombre: "", especie: "Vacuno Novillo", peso_promedio_kg: "", descripcion: "", activa: true })
+  const [editCuts, setEditCuts] = useState<any[]>([])
+  const [savingEdit, setSavingEdit] = useState(false)
+
+  // Selector de producto interactivo para cortes
+  const [productPickerIndex, setProductPickerIndex] = useState<number | null>(null)
+  const [productSearchQuery, setProductSearchQuery] = useState("")
+  const [productSearchResults, setProductSearchResults] = useState<any[]>([])
+  const [searchingProducts, setSearchingProducts] = useState(false)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -107,6 +119,162 @@ export default function CarniceriaDespostePage() {
       toast.error("Error al crear template", err.message)
     } finally {
       setSavingTemplate(false)
+    }
+  }
+
+  // Abrir editor de template existente
+  const handleOpenEditTemplate = (tmpl: any) => {
+    setEditingTemplate(tmpl)
+    setEditForm({
+      nombre: tmpl.nombre || "",
+      especie: tmpl.especie || "Vacuno Novillo",
+      peso_promedio_kg: tmpl.peso_promedio_kg ? String(tmpl.peso_promedio_kg) : "250",
+      descripcion: tmpl.descripcion || "",
+      activa: tmpl.activa !== undefined ? tmpl.activa : true,
+    })
+    setEditCuts((tmpl.cuts || []).map((c: any, idx: number) => ({
+      ...c,
+      rendimiento_porcentual: Number(c.rendimiento_porcentual) || 0,
+      precio_ponderado: Number(c.precio_ponderado) || 50,
+      orden: c.orden || idx + 1,
+      es_subproducto: Boolean(c.es_subproducto),
+    })))
+    setProductPickerIndex(null)
+    setProductSearchQuery("")
+  }
+
+  // Búsqueda de productos en catálogo
+  const handleSearchProducts = useCallback(async (query: string) => {
+    setProductSearchQuery(query)
+    if (!query || query.trim().length < 2) {
+      setProductSearchResults([])
+      return
+    }
+    setSearchingProducts(true)
+    try {
+      const res = await api.products.list({ search: query.trim(), limit: 15 })
+      setProductSearchResults(res || [])
+    } catch {
+      setProductSearchResults([])
+    } finally {
+      setSearchingProducts(false)
+    }
+  }, [])
+
+  // Asignar producto a un corte
+  const handleSelectProductForCut = (prod: any) => {
+    if (productPickerIndex === null) return
+    const updated = [...editCuts]
+    updated[productPickerIndex] = {
+      ...updated[productPickerIndex],
+      producto_id: prod.id,
+      producto_nombre: prod.nombre,
+      producto_sku: prod.sku,
+      producto_codigo_barra: prod.codigo_barra,
+      plu_balanza: prod.plu_balanza,
+      precio_venta: prod.precio_venta || 0,
+    }
+    setEditCuts(updated)
+    setProductPickerIndex(null)
+    setProductSearchQuery("")
+    setProductSearchResults([])
+  }
+
+  // Agregar nuevo corte a la lista
+  const handleAddCut = () => {
+    const nextCuts = [
+      ...editCuts,
+      {
+        producto_id: "",
+        producto_nombre: "",
+        producto_sku: "",
+        producto_codigo_barra: "",
+        plu_balanza: undefined,
+        precio_venta: 0,
+        rendimiento_porcentual: 0,
+        precio_ponderado: 50,
+        orden: editCuts.length + 1,
+        es_subproducto: false,
+      }
+    ]
+    setEditCuts(nextCuts)
+    setProductPickerIndex(nextCuts.length - 1)
+    setProductSearchQuery("")
+    setProductSearchResults([])
+  }
+
+  // Eliminar corte
+  const handleDeleteCut = (index: number) => {
+    setEditCuts(editCuts.filter((_, i) => i !== index))
+    if (productPickerIndex === index) {
+      setProductPickerIndex(null)
+    }
+  }
+
+  // Modificar campo de un corte
+  const handleCutChange = (index: number, field: string, val: any) => {
+    const updated = [...editCuts]
+    updated[index] = { ...updated[index], [field]: val }
+    setEditCuts(updated)
+  }
+
+  // Total rendimiento en edición
+  const totalEditRendimiento = useMemo(() => {
+    return editCuts.reduce((acc, c) => acc + (parseFloat(c.rendimiento_porcentual) || 0), 0)
+  }, [editCuts])
+
+  // Guardar cambios del template
+  const handleSaveEditTemplate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingTemplate) return
+    if (!editForm.nombre.trim()) {
+      toast.error("El nombre es requerido", "")
+      return
+    }
+    const invalidCut = editCuts.find(c => !c.producto_id)
+    if (invalidCut) {
+      toast.error("Hay cortes sin producto asignado", "Seleccioná un producto del catálogo para cada fila.")
+      return
+    }
+
+    setSavingEdit(true)
+    try {
+      const payload = {
+        nombre: editForm.nombre,
+        especie: editForm.especie,
+        peso_promedio_kg: parseFloat(editForm.peso_promedio_kg || "0"),
+        descripcion: editForm.descripcion,
+        activa: editForm.activa,
+        cuts: editCuts.map((c, i) => ({
+          producto_id: c.producto_id,
+          rendimiento_porcentual: parseFloat(c.rendimiento_porcentual || 0),
+          precio_ponderado: parseFloat(c.precio_ponderado || 50),
+          orden: i + 1,
+          es_subproducto: Boolean(c.es_subproducto),
+        }))
+      }
+      await api.supermer.butchery.templates.update(editingTemplate.id, payload)
+      toast.success("✅ Plantilla Actualizada", `Se guardaron los cambios y ${editCuts.length} cortes de "${editForm.nombre}".`)
+      setEditingTemplate(null)
+      loadData()
+    } catch (err: any) {
+      toast.error("Error al actualizar plantilla", err.message)
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
+  // Eliminar template
+  const handleDeleteTemplate = async (templateId: string, nombre: string) => {
+    if (!window.confirm(`¿Estás seguro de eliminar la plantilla "${nombre}"? Esta acción no se puede deshacer.`)) {
+      return
+    }
+    try {
+      await api.supermer.butchery.templates.delete(templateId)
+      toast.success("Plantilla eliminada", `La plantilla "${nombre}" fue eliminada correctamente.`)
+      loadData()
+    } catch (err: any) {
+      toast.error("Error al eliminar plantilla", err.message)
     }
   }
 
@@ -441,42 +609,108 @@ export default function CarniceriaDespostePage() {
 
       {/* ══════════════════════ TAB 2: TEMPLATES ══════════════════════ */}
       {tab === "templates" && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
-          {templates.length === 0 ? (
-            <div className="text-center py-16 text-slate-400 text-xs">
-              <Package className="w-10 h-10 mx-auto mb-3 opacity-40" />
-              <p className="font-bold text-sm text-slate-700 dark:text-slate-300">Sin templates configurados</p>
-              <p className="mt-1 max-w-xs mx-auto">Creá un template por especie (vacuno, porcino) con los porcentajes de rendimiento de cada corte (lomo, costilla, asado, etc.).</p>
-              <button onClick={() => setShowTemplateForm(true)} className="px-4 py-2 mt-4 rounded-2xl bg-red-600 text-white font-bold text-xs inline-flex items-center gap-1.5">
-                <Plus className="w-3.5 h-3.5" />Crear Primer Template
-              </button>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                <Layers className="w-5 h-5 text-red-500" /> Plantillas de Despiece y Rendimiento
+              </h2>
+              <p className="text-xs text-slate-400">
+                Fórmulas de rendimiento por corte con productos asociados, PLUs de balanza y ponderaciones de costeo.
+              </p>
             </div>
-          ) : (
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {templates.map((t: any) => (
-                <div key={t.id} className="p-5 hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
-                  <div className="flex items-center justify-between text-xs">
-                    <div>
-                      <p className="font-extrabold text-slate-900 dark:text-white text-sm">{t.nombre}</p>
-                      <p className="text-slate-400">{t.especie} · Peso promedio: {t.peso_promedio_kg || "—"} kg · {t.cuts?.length || 0} cortes</p>
+            <button
+              onClick={() => setShowTemplateForm(true)}
+              className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-red-600 to-rose-500 hover:from-red-500 hover:to-rose-400 shadow-md shadow-red-500/20 flex items-center gap-2 transition"
+            >
+              <Plus className="w-4 h-4" />
+              Nueva Plantilla
+            </button>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+            {templates.length === 0 ? (
+              <div className="text-center py-16 text-slate-400 text-xs">
+                <Package className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                <p className="font-bold text-sm text-slate-700 dark:text-slate-300">Sin templates configurados</p>
+                <p className="mt-1 max-w-xs mx-auto">Creá un template por especie (vacuno, porcino) con los porcentajes de rendimiento de cada corte.</p>
+                <button onClick={() => setShowTemplateForm(true)} className="px-4 py-2 mt-4 rounded-2xl bg-red-600 text-white font-bold text-xs inline-flex items-center gap-1.5">
+                  <Plus className="w-3.5 h-3.5" />Crear Primer Template
+                </button>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {templates.map((t: any) => {
+                  const sumRend = (t.cuts || []).reduce((acc: number, c: any) => acc + (parseFloat(c.rendimiento_porcentual) || 0), 0)
+                  return (
+                    <div key={t.id} className="p-5 hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs">
+                        <div>
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <span className="font-extrabold text-slate-900 dark:text-white text-base">{t.nombre}</span>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${t.activa ? "text-emerald-600 bg-emerald-500/10 border border-emerald-500/20" : "text-slate-400 bg-slate-100"}`}>
+                              {t.activa ? "Activo" : "Inactivo"}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                              {t.especie}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border ${Math.abs(sumRend - 100) < 0.05 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"}`}>
+                              Rend. Total: {sumRend.toFixed(1)}%
+                            </span>
+                          </div>
+                          <p className="text-slate-400 mt-1">
+                            Peso base: <span className="font-semibold text-slate-700 dark:text-slate-300 font-mono">{t.peso_promedio_kg || "—"} kg</span> · {t.cuts?.length || 0} cortes configurados
+                            {t.descripcion && ` · ${t.descripcion}`}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 self-start sm:self-center">
+                          <button
+                            onClick={() => handleOpenEditTemplate(t)}
+                            className="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 transition"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            Editar Cortes & PLUs
+                          </button>
+                          <button
+                            onClick={() => handleDeleteTemplate(t.id, t.nombre)}
+                            className="p-2 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition"
+                            title="Eliminar plantilla"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {t.cuts?.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {t.cuts.map((c: any, i: number) => (
+                            <span
+                              key={i}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 dark:bg-slate-800/80 hover:bg-red-500/10 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700/80 rounded-xl text-[11px] font-medium transition"
+                            >
+                              <span className="font-bold text-slate-900 dark:text-white">{c.producto_nombre || "Corte"}</span>
+                              <span className="font-mono font-bold text-red-600 dark:text-red-400">{c.rendimiento_porcentual}%</span>
+                              {c.plu_balanza && (
+                                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-600 dark:text-purple-300 border border-purple-500/30 font-bold">
+                                  PLU #{c.plu_balanza}
+                                </span>
+                              )}
+                              {c.producto_sku && !c.plu_balanza && (
+                                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold">
+                                  SKU: {c.producto_sku}
+                                </span>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${t.activa ? "text-emerald-600 bg-emerald-500/10 border border-emerald-500/20" : "text-slate-400 bg-slate-100"}`}>
-                      {t.activa ? "Activo" : "Inactivo"}
-                    </span>
-                  </div>
-                  {t.cuts?.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {t.cuts.map((c: any, i: number) => (
-                        <span key={i} className="px-2.5 py-1 bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 rounded-xl text-[10px] font-bold">
-                          {c.producto_nombre || "Corte"} {c.rendimiento_porcentual}%
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+                  )
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -618,6 +852,295 @@ export default function CarniceriaDespostePage() {
                 <button type="button" onClick={() => setShowTemplateForm(false)} className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">Cancelar</button>
                 <button type="submit" disabled={savingTemplate} className="px-5 py-2.5 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs shadow-md shadow-red-500/20 flex items-center gap-1.5 transition">
                   {savingTemplate ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}Crear Template
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════ MODAL: EDICIÓN COMPLETA DE PLANTILLA & CORTES ══════════════════════ */}
+      {editingTemplate && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-4xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[92vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-5 sm:p-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-950/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-red-600/10 text-red-600 dark:text-red-400 border border-red-500/20 flex items-center justify-center">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="font-extrabold text-lg text-slate-900 dark:text-white">
+                    Editar Plantilla de Cortes & PLUs
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Modificá los productos asignados, buscá en el catálogo para cambiar códigos o PLUs y ajustá porcentajes.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingTemplate(null)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleSaveEditTemplate} className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
+              {/* Metadatos principales */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                <div>
+                  <label className="block text-slate-500 dark:text-slate-400 font-bold mb-1">Nombre de la Plantilla *</label>
+                  <input
+                    required
+                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-900 dark:text-white font-bold outline-none focus:ring-2 focus:ring-red-500"
+                    value={editForm.nombre}
+                    onChange={e => setEditForm(f => ({ ...f, nombre: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-500 dark:text-slate-400 font-bold mb-1">Especie</label>
+                  <select
+                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-900 dark:text-white font-bold outline-none focus:ring-2 focus:ring-red-500"
+                    value={editForm.especie}
+                    onChange={e => setEditForm(f => ({ ...f, especie: e.target.value }))}
+                  >
+                    {ESPECIES.map(esp => <option key={esp}>{esp}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-500 dark:text-slate-400 font-bold mb-1">Peso Promedio Base (kg)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-red-500"
+                    value={editForm.peso_promedio_kg}
+                    onChange={e => setEditForm(f => ({ ...f, peso_promedio_kg: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {/* Barra de balance de rendimiento */}
+              <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${
+                Math.abs(totalEditRendimiento - 100) < 0.05
+                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-300"
+                  : totalEditRendimiento < 100
+                  ? "bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300"
+                  : "bg-red-500/10 border-red-500/30 text-red-800 dark:text-red-300"
+              }`}>
+                <div className="flex items-center gap-2.5">
+                  <div className="font-extrabold text-sm">
+                    {Math.abs(totalEditRendimiento - 100) < 0.05 ? "✅ Balance Perfecto 100%" : totalEditRendimiento < 100 ? "⚠️ Rendimiento Incompleto" : "❌ Rendimiento Excedido"}
+                  </div>
+                  <span className="text-xs opacity-90">
+                    {Math.abs(totalEditRendimiento - 100) < 0.05
+                      ? "La suma de los cortes cubre exactamente el 100% de la pieza."
+                      : totalEditRendimiento < 100
+                      ? `Faltan ${(100 - totalEditRendimiento).toFixed(2)}% para balancear el desposte.`
+                      : `La suma excede el 100% en ${(totalEditRendimiento - 100).toFixed(2)}%.`}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider">Total Suma:</span>
+                  <span className="font-mono font-black text-lg px-2.5 py-0.5 rounded-lg bg-white/60 dark:bg-black/30 border border-current">
+                    {totalEditRendimiento.toFixed(2)}%
+                  </span>
+                </div>
+              </div>
+
+              {/* Lista de cortes */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                    <Beef className="w-4 h-4 text-red-500" />
+                    Cortes & Salidas de la Pieza ({editCuts.length})
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={handleAddCut}
+                    className="px-3 py-1.5 rounded-xl bg-red-600/10 hover:bg-red-600/20 text-red-600 dark:text-red-400 font-bold text-xs border border-red-500/20 flex items-center gap-1.5 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Agregar Corte
+                  </button>
+                </div>
+
+                <div className="space-y-2.5">
+                  {editCuts.map((cut, idx) => (
+                    <div
+                      key={idx}
+                      className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 space-y-2 transition"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                        {/* Selector / Visualizador de Producto */}
+                        <div className="flex-1 min-w-0">
+                          {productPickerIndex === idx ? (
+                            <div className="space-y-2 relative">
+                              <div className="flex items-center gap-2">
+                                <div className="relative flex-1">
+                                  <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                                  <input
+                                    autoFocus
+                                    type="text"
+                                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-red-500 bg-white dark:bg-slate-950 text-slate-900 dark:text-white font-bold outline-none text-xs"
+                                    placeholder="Buscar producto por nombre, SKU o PLU de balanza..."
+                                    value={productSearchQuery}
+                                    onChange={e => handleSearchProducts(e.target.value)}
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setProductPickerIndex(null)}
+                                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+
+                              {searchingProducts && (
+                                <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando en catálogo...
+                                </p>
+                              )}
+
+                              {productSearchResults.length > 0 && (
+                                <div className="max-h-48 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 shadow-xl">
+                                  {productSearchResults.map((prod: any) => (
+                                    <button
+                                      key={prod.id}
+                                      type="button"
+                                      onClick={() => handleSelectProductForCut(prod)}
+                                      className="w-full text-left p-2.5 hover:bg-red-50 dark:hover:bg-slate-800 transition flex items-center justify-between gap-2"
+                                    >
+                                      <div>
+                                        <p className="font-extrabold text-slate-900 dark:text-white text-xs">{prod.nombre}</p>
+                                        <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                                          {prod.sku && <span>SKU: {prod.sku}</span>}
+                                          {prod.codigo_barra && <span>Barra: {prod.codigo_barra}</span>}
+                                          {prod.plu_balanza && (
+                                            <span className="font-bold text-purple-600 dark:text-purple-400">PLU #{prod.plu_balanza}</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {prod.precio_venta > 0 && (
+                                        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-xs">
+                                          {formatPYG(prod.precio_venta)}
+                                        </span>
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-extrabold text-slate-900 dark:text-white text-xs">
+                                    {cut.producto_nombre || "Corte sin asignar"}
+                                  </span>
+                                  {cut.plu_balanza && (
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-300 font-bold border border-purple-500/30">
+                                      PLU #{cut.plu_balanza}
+                                    </span>
+                                  )}
+                                  {cut.producto_sku && (
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold">
+                                      SKU: {cut.producto_sku}
+                                    </span>
+                                  )}
+                                  {cut.precio_venta > 0 && (
+                                    <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400">
+                                      {formatPYG(cut.precio_venta)}/kg
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setProductPickerIndex(idx)
+                                  setProductSearchQuery("")
+                                  setProductSearchResults([])
+                                }}
+                                className="px-2.5 py-1 text-[11px] font-bold text-red-600 dark:text-red-400 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition shrink-0"
+                              >
+                                Cambiar Producto
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Parámetros de rendimiento y costo */}
+                        <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-slate-400 font-bold">Rend:</span>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                step="0.01"
+                                className="w-20 p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white text-xs text-right pr-5 outline-none focus:ring-2 focus:ring-red-500"
+                                value={cut.rendimiento_porcentual}
+                                onChange={e => handleCutChange(idx, "rendimiento_porcentual", e.target.value)}
+                              />
+                              <span className="absolute right-1.5 top-1.5 text-slate-400 text-xs font-mono">%</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-slate-400 font-bold">Index:</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              className="w-16 p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white text-xs text-right outline-none focus:ring-2 focus:ring-red-500"
+                              value={cut.precio_ponderado}
+                              onChange={e => handleCutChange(idx, "precio_ponderado", e.target.value)}
+                              title="Ponderación de costeo por valor de venta (Index)"
+                            />
+                          </div>
+
+                          <label className="flex items-center gap-1 cursor-pointer text-[11px] text-slate-500 dark:text-slate-400 select-none">
+                            <input
+                              type="checkbox"
+                              className="rounded border-slate-300 text-red-600 focus:ring-red-500"
+                              checked={cut.es_subproducto}
+                              onChange={e => handleCutChange(idx, "es_subproducto", e.target.checked)}
+                            />
+                            Subprod
+                          </label>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCut(idx)}
+                            className="p-1.5 text-slate-400 hover:text-red-500 transition"
+                            title="Eliminar corte"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingTemplate(null)}
+                  className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEdit}
+                  className="px-6 py-2.5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-extrabold text-xs shadow-lg shadow-red-500/25 flex items-center gap-2 transition"
+                >
+                  {savingEdit ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Guardar Cambios de Plantilla
                 </button>
               </div>
             </form>

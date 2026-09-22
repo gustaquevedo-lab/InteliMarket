@@ -22,7 +22,7 @@ from api.src.supermer.schemas import (
     PurchaseForecastResponse, PurchaseSuggestionCreate, PurchaseSuggestionUpdate,
     PurchaseSuggestionResponse,
     DashboardStats, WasteByArea, ProductionByArea,
-    ButcheryTemplateCreate, ButcheryTemplateResponse,
+    ButcheryTemplateCreate, ButcheryTemplateUpdate, ButcheryTemplateResponse,
     DesposteInput, DesposteResponse, ButcheryYieldReport,
     BakeryPlanCreate, BakeryPlanResponse,
     ScaleRecipeInput, ScaleRecipeResult,
@@ -543,6 +543,33 @@ async def create_butchery_template(
     _=Depends(require_permission("salon:manage")),
 ):
     return await service.create_butchery_template(db, user["company_id"], data)
+
+
+@router.put("/butchery/templates/{template_id}", response_model=ButcheryTemplateResponse)
+async def update_butchery_template(
+    template_id: str,
+    data: ButcheryTemplateUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
+):
+    try:
+        return await service.update_butchery_template(db, user["company_id"], template_id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.delete("/butchery/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_butchery_template(
+    template_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
+):
+    deleted = await service.delete_butchery_template(db, user["company_id"], template_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Plantilla no encontrada")
+    return None
 
 
 @router.post("/butchery/desposte", response_model=DesposteResponse)

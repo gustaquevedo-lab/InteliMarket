@@ -346,6 +346,10 @@ class ButcheryTemplateCutResponse(BaseModel):
     orden: int
     es_subproducto: bool
     producto_nombre: Optional[str] = None
+    producto_sku: Optional[str] = None
+    producto_codigo_barra: Optional[str] = None
+    plu_balanza: Optional[int] = None
+    precio_venta: Optional[Decimal] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -356,6 +360,15 @@ class ButcheryTemplateCreate(BaseModel):
     peso_promedio_kg: Decimal
     descripcion: Optional[str] = None
     cuts: list[ButcheryTemplateCutCreate]
+
+
+class ButcheryTemplateUpdate(BaseModel):
+    nombre: Optional[str] = None
+    especie: Optional[str] = None
+    peso_promedio_kg: Optional[Decimal] = None
+    descripcion: Optional[str] = None
+    activa: Optional[bool] = None
+    cuts: Optional[list[ButcheryTemplateCutCreate]] = None
 
 
 class ButcheryTemplateResponse(BaseModel):

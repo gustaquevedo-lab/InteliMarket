@@ -378,7 +378,53 @@ export interface FinanceAgentRun { id: string; company_id: string; started_at: s
 export interface FinanceRecommendation { id: string; company_id: string; run_id: string; tipo: string; titulo: string; descripcion: string; entidad_relacionada?: string; monto_relacionado?: string; requested_by: string; approved_by?: string; status: string; comments?: string; created_at: string; updated_at: string }
 export interface SalesAgentRun { id: string; company_id: string; started_at: string; finished_at?: string; model?: string; status: string; diagnostico?: string; error_message?: string }
 export interface SalesRecommendation { id: string; company_id: string; run_id: string; tipo: string; titulo: string; descripcion: string; entidad_relacionada?: string; monto_relacionado?: string; requested_by: string; approved_by?: string; status: string; comments?: string; created_at: string; updated_at: string }
-export interface Supplier { id: string; company_id?: string; ruc?: string; razon_social?: string; nombre?: string; nombre_fantasia?: string; pais?: string; direccion?: string; telefono?: string; email?: string; contacto?: string; contacto_nombre?: string; contacto_telefono?: string; plazo_pago_dias?: number; plazo_entrega_promedio?: number; rating?: number; tipo?: string; tipo_proveedor?: string; grupo?: string; activo?: boolean; created_at?: string; updated_at?: string }
+export interface Supplier {
+  id: string
+  company_id?: string
+  ruc?: string
+  ci?: string
+  razon_social?: string
+  nombre?: string
+  nombre_fantasia?: string
+  tipo_persona?: string
+  tipo_provision?: "bienes" | "servicios" | "mixto" | string
+  rubro?: string
+  pais?: string
+  limite_credito?: number
+  dia_visita?: string
+  frecuencia_entrega?: string
+  condicion_iva?: string
+  direccion?: string
+  ciudad?: string
+  telefono?: string
+  email?: string
+  contacto?: string
+  contacto_nombre?: string
+  contacto_telefono?: string
+  contacto_email?: string
+  plazo_pago_dias?: number
+  plazo_entrega_promedio?: number
+  rating?: number
+  tipo?: string
+  tipo_proveedor?: string
+  grupo?: string
+  categoria_ids?: string[]
+  moneda_default?: string
+  banco?: string
+  cuenta_bancaria?: string
+  titular_cuenta_bancaria?: string
+  tipo_cuenta_bancaria?: string
+  identificacion_bancaria?: string
+  tipo_contribuyente?: string
+  retencion_irp?: boolean
+  retencion_iva?: boolean
+  porcentaje_retencion_iva?: number
+  agente_retencion?: boolean
+  notas?: string
+  activo?: boolean
+  created_at?: string
+  updated_at?: string
+}
 export interface Quote { id: string; company_id?: string; customer_id?: string; customer?: Customer; numero?: string; fecha?: string; fecha_vencimiento?: string; valido_hasta?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; observaciones?: string; condiciones_pago?: string; descuento_total?: number; iva_10?: number; iva_5?: number; sale_id?: string; items?: QuoteItem[]; created_at?: string; updated_at?: string }
 export interface QuoteItem { id?: string; cotizacion_id?: string; producto_id?: string; producto?: Product; product?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; descuento?: number; total?: number; descripcion?: string; created_at?: string }
 export interface Discount { id: string; company_id?: string; nombre?: string; descripcion?: string; tipo?: string; valor?: number; aplica_a?: string; monto_minimo?: number; monto_maximo?: number; cantidad_minima?: number; fecha_inicio?: string; fecha_fin?: string; producto_ids?: string[]; categoria_ids?: string[]; cliente_ids?: string[]; activo?: boolean; created_at?: string; updated_at?: string }
@@ -403,7 +449,7 @@ export interface SupermerDashboard { ordenes_activas?: number; ordenes_hoy?: num
 export interface SupermerWasteByArea { area?: string; total_cantidad?: number; total_costo?: number; cantidad_ordenes?: number }
 export interface SupermerProductionByArea { area?: string; total_producido?: number; ordenes_completadas?: number; rendimiento_promedio?: number; merma_cantidad?: number; merma_costo?: number }
 export interface ButcheryTemplate { id: string; nombre?: string; especie?: string; peso_promedio_kg?: number; descripcion?: string; activa?: boolean; cuts?: ButcheryTemplateCut[]; created_at?: string }
-export interface ButcheryTemplateCut { id?: string; producto_id?: string; producto_nombre?: string; rendimiento_porcentual?: number; precio_ponderado?: number; orden?: number; es_subproducto?: boolean }
+export interface ButcheryTemplateCut { id?: string; producto_id?: string; producto_nombre?: string; producto_sku?: string; producto_codigo_barra?: string; plu_balanza?: number; precio_venta?: number; rendimiento_porcentual?: number; precio_ponderado?: number; orden?: number; es_subproducto?: boolean }
 export interface DesposteInput { template_id: string; peso_entrada_kg: number; costo_total_gs: number; fecha_vencimiento?: string; responsable_id?: string; notas?: string }
 export interface DesposteCorteResult { producto_id?: string; producto_nombre?: string; rendimiento_esperado?: number; peso_obtenido_kg?: number; costo_unitario_gs?: number; precio_ponderado?: number; es_subproducto?: boolean }
 export interface DesposteResponse { orden_id: string; template_nombre?: string; peso_entrada_kg?: number; costo_total_gs?: number; peso_total_obtenido?: number; merma_kg?: number; merma_porcentaje?: number; cortes?: DesposteCorteResult[]; batches?: SupermerBatch[] }
@@ -3292,6 +3338,8 @@ export const api = {
         list: (params?: { activa?: boolean }) => client.get<ButcheryTemplate[]>("/v1/supermer/butchery/templates", params as any),
         get: (id: string) => client.get<ButcheryTemplate>(`/v1/supermer/butchery/templates/${id}`),
         create: (data: any) => client.post<ButcheryTemplate>("/v1/supermer/butchery/templates", data),
+        update: (id: string, data: any) => client.put<ButcheryTemplate>(`/v1/supermer/butchery/templates/${id}`, data),
+        delete: (id: string) => client.delete<void>(`/v1/supermer/butchery/templates/${id}`),
       },
       desposte: (data: DesposteInput) => client.post<DesposteResponse>("/v1/supermer/butchery/desposte", data),
       orders: (params?: { limit?: number; offset?: number }) => client.get<SupermerOrder[]>("/v1/supermer/butchery/orders", params as any),

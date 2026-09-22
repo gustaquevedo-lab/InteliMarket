@@ -23,6 +23,7 @@ from api.src.supermer.schemas import (
     ProductionBatchCreate, WasteLogCreate, PerishableConfigCreate,
     MarkdownLogCreate, PurchaseSuggestionCreate, PurchaseSuggestionUpdate,
     ReceiveBatchCreate, FreshnessAuditCreate, ForecastEnhanceInput,
+    ButcheryTemplateUpdate,
 )
 from api.src.products.models import Product
 
@@ -35,6 +36,20 @@ async def _get_product_name(db: AsyncSession, product_id: UUID) -> Optional[str]
     r = await db.execute(select(Product.nombre).where(Product.id == product_id))
     row = r.scalar_one_or_none()
     return str(row) if row else None
+
+
+async def _get_product_info(db: AsyncSession, product_id: UUID) -> dict:
+    r = await db.execute(select(Product).where(Product.id == product_id))
+    p = r.scalar_one_or_none()
+    if not p:
+        return {}
+    return {
+        "producto_nombre": p.nombre,
+        "producto_sku": p.sku,
+        "producto_codigo_barra": p.codigo_barra,
+        "plu_balanza": p.plu_balanza,
+        "precio_venta": p.precio_venta,
+    }
 
 
 async def _get_user_name(db: AsyncSession, user_id: UUID) -> Optional[str]:
@@ -1136,15 +1151,16 @@ async def list_butchery_templates(db: AsyncSession, company_id: str, activa: Opt
         cuts_q = select(ButcheryTemplateCut).where(ButcheryTemplateCut.template_id == t.id).order_by(ButcheryTemplateCut.orden)
         cuts_r = await db.execute(cuts_q)
         cuts = cuts_r.scalars().all()
+        cuts_data = []
+        for cut in cuts:
+            pinfo = await _get_product_info(db, cut.producto_id)
+            cuts_data.append({
+                **{c.name: getattr(cut, c.name) for c in cut.__table__.columns},
+                **pinfo,
+            })
         result.append({
             **{c.name: getattr(t, c.name) for c in t.__table__.columns},
-            "cuts": [
-                {
-                    **{c.name: getattr(cut, c.name) for c in cut.__table__.columns},
-                    "producto_nombre": await _get_product_name(db, cut.producto_id),
-                }
-                for cut in cuts
-            ],
+            "cuts": cuts_data,
         })
     return result
 
@@ -1157,15 +1173,16 @@ async def get_butchery_template(db: AsyncSession, template_id: str) -> Optional[
     cuts_q = select(ButcheryTemplateCut).where(ButcheryTemplateCut.template_id == t.id).order_by(ButcheryTemplateCut.orden)
     cuts_r = await db.execute(cuts_q)
     cuts = cuts_r.scalars().all()
+    cuts_data = []
+    for cut in cuts:
+        pinfo = await _get_product_info(db, cut.producto_id)
+        cuts_data.append({
+            **{c.name: getattr(cut, c.name) for c in cut.__table__.columns},
+            **pinfo,
+        })
     return {
         **{c.name: getattr(t, c.name) for c in t.__table__.columns},
-        "cuts": [
-            {
-                **{c.name: getattr(cut, c.name) for c in cut.__table__.columns},
-                "producto_nombre": await _get_product_name(db, cut.producto_id),
-            }
-            for cut in cuts
-        ],
+        "cuts": cuts_data,
     }
 
 
@@ -1196,6 +1213,55 @@ async def create_butchery_template(db: AsyncSession, company_id: str, data) -> d
         db.add(tc)
     await db.commit()
     return await get_butchery_template(db, str(t.id))
+
+
+async def update_butchery_template(db: AsyncSession, company_id: str, template_id: str, data: ButcheryTemplateUpdate) -> dict:
+    r = await db.execute(select(ButcheryTemplate).where(ButcheryTemplate.id == template_id, ButcheryTemplate.company_id == company_id))
+    t = r.scalar_one_or_none()
+    if not t:
+        raise ValueError("Plantilla de desposte no encontrada")
+
+    if data.nombre is not None:
+        t.nombre = data.nombre
+    if data.especie is not None:
+        t.especie = data.especie
+    if data.peso_promedio_kg is not None:
+        t.peso_promedio_kg = data.peso_promedio_kg
+    if data.descripcion is not None:
+        t.descripcion = data.descripcion
+    if data.activa is not None:
+        t.activa = data.activa
+
+    if data.cuts is not None:
+        await db.execute(delete(ButcheryTemplateCut).where(ButcheryTemplateCut.template_id == t.id))
+        total_ponderado = sum(float(c.precio_ponderado) for c in data.cuts)
+        for i, cut in enumerate(data.cuts):
+            ponderado = float(cut.precio_ponderado)
+            if total_ponderado > 0 and i == len(data.cuts) - 1 and total_ponderado != 100:
+                ponderado = 100 - sum(float(c.precio_ponderado) for c in data.cuts[:i])
+            tc = ButcheryTemplateCut(
+                template_id=t.id,
+                producto_id=cut.producto_id,
+                rendimiento_porcentual=cut.rendimiento_porcentual,
+                precio_ponderado=Decimal(str(ponderado)),
+                orden=cut.orden if cut.orden else i,
+                es_subproducto=cut.es_subproducto,
+            )
+            db.add(tc)
+
+    await db.commit()
+    return await get_butchery_template(db, str(t.id))
+
+
+async def delete_butchery_template(db: AsyncSession, company_id: str, template_id: str) -> bool:
+    r = await db.execute(select(ButcheryTemplate).where(ButcheryTemplate.id == template_id, ButcheryTemplate.company_id == company_id))
+    t = r.scalar_one_or_none()
+    if not t:
+        return False
+    await db.execute(delete(ButcheryTemplateCut).where(ButcheryTemplateCut.template_id == t.id))
+    await db.delete(t)
+    await db.commit()
+    return True
 
 
 async def execute_desposte(db: AsyncSession, company_id: str, data) -> dict:
