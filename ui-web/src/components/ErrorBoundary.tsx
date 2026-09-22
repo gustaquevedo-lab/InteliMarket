@@ -206,7 +206,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
       return (
         <div className="min-h-[70vh] flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-300">
-          <div className="max-w-2xl w-full bg-white dark:bg-slate-850 rounded-3xl p-6 sm:p-8 border border-slate-200 dark:border-slate-700/80 shadow-2xl space-y-6">
+          <div className="max-w-2xl w-full bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200 dark:border-slate-700/80 shadow-2xl space-y-6">
             {/* Cabecera Amigable */}
             <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 text-center sm:text-left">
               <div className="p-3.5 rounded-2xl bg-gradient-to-tr from-rose-500 to-amber-500 text-white shadow-lg shadow-rose-500/20 shrink-0">
@@ -217,7 +217,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   <h1 className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white tracking-tight">
                     Tranquilo, tu información está a salvo
                   </h1>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-750 text-gray-600 dark:text-gray-300 border border-slate-200 dark:border-slate-700">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 border border-slate-200 dark:border-slate-700">
                     Sistema Protegido
                   </span>
                 </div>
@@ -267,7 +267,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
               <button
                 onClick={this.handleCopyReport}
-                className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-800 dark:bg-slate-700 hover:bg-slate-750 text-white font-bold text-xs shadow-md transition-all"
+                className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 text-white font-bold text-xs shadow-md transition-all"
               >
                 {this.state.copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
                 {this.state.copied ? "¡Informe Copiado al Portapapeles!" : "Copiar Informe Técnico Completo"}
@@ -275,7 +275,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
               <button
                 onClick={this.handleReload}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-750 text-gray-700 dark:text-gray-200 font-bold text-xs transition"
+                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800 text-gray-700 dark:text-gray-200 font-bold text-xs transition"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 Recargar Sistema
@@ -286,7 +286,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   this.handleReset()
                   window.location.href = "/"
                 }}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-750 text-gray-700 dark:text-gray-200 font-bold text-xs transition"
+                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800 text-gray-700 dark:text-gray-200 font-bold text-xs transition"
               >
                 <Home className="w-3.5 h-3.5" />
                 Volver al Dashboard
