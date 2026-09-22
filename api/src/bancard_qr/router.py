@@ -14,6 +14,7 @@ from api.src.auth.middleware import require_auth
 from api.src.bancard_qr import service
 from api.src.bancard_qr.schemas import GenerateQrRequest, GenerateQrResponse, QrStatusResponse, RevertResponse
 from api.src.payment_integrations.models import PaymentIntegrationConfig
+from api.src.payment_integrations.crypto import decrypt_value
 
 router = APIRouter(prefix="/api/v1/bancard-qr", tags=["bancard-qr"])
 
@@ -84,9 +85,14 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
         select(PaymentIntegrationConfig).where(PaymentIntegrationConfig.provider == "bancard_qr")
     )
     configs = result.scalars().all()
+    # callback_password se guarda cifrado (ver payment_integrations/crypto.py) --
+    # esta consulta es un SELECT crudo, no pasa por payment_integrations.service
+    # .get_config(), asi que hay que descifrarla a mano antes de comparar. Sin
+    # esto, TODAS las notificaciones reales de Bancard quedan rechazadas con 401
+    # (comparan contra el texto "enc:..." en vez de la contraseña real).
     matched = any(
         secrets.compare_digest(sent_user, (c.config or {}).get("callback_user", ""))
-        and secrets.compare_digest(sent_pass, (c.config or {}).get("callback_password", ""))
+        and secrets.compare_digest(sent_pass, decrypt_value((c.config or {}).get("callback_password", "")))
         for c in configs
     )
     if not matched:
