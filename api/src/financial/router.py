@@ -16,6 +16,7 @@ from api.src.auth.middleware import require_auth
 from api.src.financial.schemas import (
     SupplierInvoiceCreate, SupplierInvoiceResponse, SupplierInvoiceWithPayments,
     SupplierInvoicePaymentCreate, SupplierInvoicePaymentResponse,
+    PaidInvoicesListResponse, SupplierInvoiceBatchRevertRequest,
     BankAccountCreate, BankAccountUpdate, BankAccountResponse,
     BankTransactionCreate, BankTransferCreate, BankTransactionImport, BankTransactionResponse,
     ReconcileRequest,
@@ -77,6 +78,32 @@ async def list_invoices(
     return await service.list_invoices(db, company_id, estado, supplier_id, vencidas, desde, hasta, limit, offset)
 
 
+@router.get("/invoices/paid", response_model=PaidInvoicesListResponse)
+async def list_paid_invoices(
+    company_id: str | None = Query(None),
+    supplier_id: str | None = Query(None),
+    search: str | None = Query(None),
+    desde: date | None = Query(None),
+    hasta: date | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Lista facturas en estado 'pagada' con paginación, filtros avanzados y resumen monetario."""
+    cid = _resolve_company_id(company_id, user)
+    return await service.list_paid_invoices(
+        db=db,
+        company_id=cid,
+        supplier_id=supplier_id,
+        search=search,
+        desde=desde,
+        hasta=hasta,
+        limit=limit,
+        offset=offset,
+    )
+
+
 @router.get("/invoices/{invoice_id}", response_model=SupplierInvoiceWithPayments)
 async def get_invoice(invoice_id: str, db: AsyncSession = Depends(get_db)):
     invoice = await service.get_invoice_with_payments(db, invoice_id)
@@ -129,6 +156,23 @@ async def revert_invoice_payment(
         motivo=motivo,
     )
 
+
+@router.post("/invoices/batch-revert-payments")
+async def batch_revert_supplier_invoices(
+    body: SupplierInvoiceBatchRevertRequest,
+    company_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Revierte múltiples facturas de proveedor en bloque para devolverlas a 'pendiente'."""
+    cid = _resolve_company_id(company_id, user)
+    return await service.batch_revert_supplier_invoices(
+        db=db,
+        company_id=cid,
+        invoice_ids=body.invoice_ids,
+        user_id=user.get("id"),
+        motivo=body.motivo,
+    )
 
 
 @router.get("/aging", response_model=dict)

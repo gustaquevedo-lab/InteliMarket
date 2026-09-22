@@ -9,14 +9,15 @@ import {
   XCircle, AlertTriangle, Clock, Calendar, RefreshCw, Loader2,
   Building2, User, FileText, ArrowUpRight, DollarSign, Layers,
   Check, X, FileSpreadsheet, ShieldAlert, Sparkles, Info, ArrowRight,
-  TrendingDown, CheckSquare, Square, Wallet, Printer, FileCheck, Globe, Apple
+  TrendingDown, CheckSquare, Square, Wallet, Printer, FileCheck, Globe, Apple,
+  RotateCcw, ChevronLeft, ChevronRight
 } from "lucide-react"
 import { api, SupplierPaymentOrder } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatCurrency } from "../../utils/format"
 
-type ApTab = "facturas" | "ordenes_pago" | "aging" | "lotes"
+type ApTab = "facturas" | "facturas_pagadas" | "ordenes_pago" | "aging" | "lotes"
 
 export default function PaymentsPage() {
   const toast = useToast()
@@ -70,15 +71,105 @@ export default function PaymentsPage() {
   const [showValesModal, setShowValesModal] = useState(false)
   const [valesModalSupplierId, setValesModalSupplierId] = useState<string | null>(null)
 
+  // Pestaña Facturas Pagadas (Historial & Reversión)
+  const [paidInvoices, setPaidInvoices] = useState<any[]>([])
+  const [paidInvoicesTotal, setPaidInvoicesTotal] = useState(0)
+  const [paidInvoicesTotalPyg, setPaidInvoicesTotalPyg] = useState(0)
+  const [paidInvoicesTotalBrl, setPaidInvoicesTotalBrl] = useState(0)
+  const [loadingPaidInvoices, setLoadingPaidInvoices] = useState(false)
+  const [searchPaid, setSearchPaid] = useState("")
+  const [filterPaidSupplier, setFilterPaidSupplier] = useState("all")
+  const [pagePaid, setPagePaid] = useState(1)
+  const pageSizePaid = 20
+
+  // Reversión individual
+  const [revertingInvoice, setRevertingInvoice] = useState<any | null>(null)
+  const [revertingInvoiceLoading, setRevertingInvoiceLoading] = useState(false)
+  const [revertInvoiceMotivo, setRevertInvoiceMotivo] = useState("")
+
+  // Reversión masiva
+  const [selectedPaidInvoiceIds, setSelectedPaidInvoiceIds] = useState<string[]>([])
+  const [showBatchRevertInvoiceModal, setShowBatchRevertInvoiceModal] = useState(false)
+  const [batchRevertingInvoices, setBatchRevertingInvoices] = useState(false)
+  const [batchRevertInvoiceMotivo, setBatchRevertInvoiceMotivo] = useState("")
+
+  const loadPaidInvoices = useCallback(async () => {
+    setLoadingPaidInvoices(true)
+    try {
+      const res = await api.financial.invoices.listPaid({
+        supplier_id: filterPaidSupplier !== "all" ? filterPaidSupplier : undefined,
+        search: searchPaid.trim() || undefined,
+        limit: pageSizePaid,
+        offset: (pagePaid - 1) * pageSizePaid,
+      })
+      setPaidInvoices(res.items || [])
+      setPaidInvoicesTotal(res.total || 0)
+      setPaidInvoicesTotalPyg(res.total_monto_pyg || 0)
+      setPaidInvoicesTotalBrl(res.total_monto_brl || 0)
+    } catch (err: any) {
+      toast.error("Error al cargar facturas pagadas", err.message || String(err))
+    } finally {
+      setLoadingPaidInvoices(false)
+    }
+  }, [filterPaidSupplier, searchPaid, pagePaid])
+
+  const handleConfirmRevertInvoice = async () => {
+    if (!revertingInvoice) return
+    setRevertingInvoiceLoading(true)
+    try {
+      await api.financial.invoices.revertPayment(
+        revertingInvoice.id,
+        revertInvoiceMotivo || "Reversión desde módulo de proveedores / facturas pagadas"
+      )
+      toast.success(
+        "Factura Revertida",
+        `La factura N° ${revertingInvoice.numero_factura} volvió a estado 'pendiente' y su saldo fue restaurado.`
+      )
+      setRevertingInvoice(null)
+      setRevertInvoiceMotivo("")
+      loadPaidInvoices()
+      loadData()
+    } catch (err: any) {
+      toast.error("Error al revertir factura", err.message || String(err))
+    } finally {
+      setRevertingInvoiceLoading(false)
+    }
+  }
+
+  const handleConfirmBatchRevertInvoices = async () => {
+    if (selectedPaidInvoiceIds.length === 0) return
+    setBatchRevertingInvoices(true)
+    try {
+      const res = await api.financial.invoices.batchRevertPayments({
+        invoice_ids: selectedPaidInvoiceIds,
+        motivo: batchRevertInvoiceMotivo || "Reversión masiva de pagos a proveedores del legacy",
+      })
+      toast.success(
+        "Lote Revertido",
+        `Se revirtieron exitosamente ${res.reverted_count} facturas a estado 'pendiente'.`
+      )
+      setShowBatchRevertInvoiceModal(false)
+      setSelectedPaidInvoiceIds([])
+      setBatchRevertInvoiceMotivo("")
+      loadPaidInvoices()
+      loadData()
+    } catch (err: any) {
+      toast.error("Error al revertir lote de facturas", err.message || String(err))
+    } finally {
+      setBatchRevertingInvoices(false)
+    }
+  }
+
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [invRes, runsRes, supRes, bnkRes, ordersRes] = await Promise.allSettled([
+      const [invRes, runsRes, supRes, bnkRes, ordersRes, paidCountRes] = await Promise.allSettled([
         api.financial.payableInvoices(),
         api.financial.paymentRuns.list(),
         api.purchases.listSuppliers(),
         api.financial.banks.list(),
         api.financial.paymentOrders.list(),
+        api.financial.invoices.listPaid({ limit: 1 }),
       ])
 
       if (invRes.status === "fulfilled" && Array.isArray(invRes.value)) setInvoices(invRes.value)
@@ -93,6 +184,9 @@ export default function PaymentsPage() {
       if (supRes.status === "fulfilled" && Array.isArray(supRes.value)) setSuppliers(supRes.value)
       if (bnkRes.status === "fulfilled" && Array.isArray(bnkRes.value)) setBankAccounts(bnkRes.value)
       if (ordersRes.status === "fulfilled" && ordersRes.value?.items) setPaymentOrders(ordersRes.value.items)
+      if (paidCountRes.status === "fulfilled" && paidCountRes.value?.total !== undefined) {
+        setPaidInvoicesTotal(paidCountRes.value.total)
+      }
     } catch (e: any) {
       toast.error("Error al sincronizar cuentas por pagar", e.message)
     } finally {
@@ -101,6 +195,12 @@ export default function PaymentsPage() {
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
+
+  useEffect(() => {
+    if (tab === "facturas_pagadas") {
+      loadPaidInvoices()
+    }
+  }, [tab, loadPaidInvoices])
 
   const supplierMap = useMemo(() => {
     const map: Record<string, string> = {}
@@ -564,6 +664,7 @@ export default function PaymentsPage() {
       <div className="bg-slate-100 dark:bg-slate-850/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-wrap gap-1.5 shadow-sm">
         {[
           { id: "facturas", label: "Facturas Comerciales por Pagar", icon: FileText, count: invoices.length },
+          { id: "facturas_pagadas", label: "Facturas Pagadas", icon: CheckCircle2, count: paidInvoicesTotal },
           { id: "ordenes_pago", label: "Órdenes de Pago & Recibos AP", icon: Wallet, count: paymentOrders.length },
           { id: "aging", label: "Matriz Aging por Proveedor", icon: Calendar, count: supplierAging.length },
           { id: "lotes", label: "Lotes Masivos SIPAP", icon: Layers, count: paymentRuns.length },
@@ -748,6 +849,289 @@ export default function PaymentsPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB 1.B: FACTURAS PAGADAS & REVERSIÓN ───────────────────────── */}
+      {tab === "facturas_pagadas" && (
+        <div className="space-y-4">
+          {/* Tarjetas resumen de facturas pagadas */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Facturas Liquidadas</p>
+                <p className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
+                  {paidInvoicesTotal.toLocaleString("es-PY")}
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Comprobantes con saldo cero</p>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Pagado (PYG)</p>
+                <p className="text-xl font-black font-mono text-slate-900 dark:text-white mt-1">
+                  {formatPYG(paidInvoicesTotalPyg)}
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Historial acumulado</p>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                <DollarSign className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Pagado (Reales BRL)</p>
+                <p className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
+                  R$ {Number(paidInvoicesTotalBrl).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Importaciones de Brasil</p>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                <Globe className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* BARRA DE FILTROS */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3 flex-1 min-w-[280px] flex-wrap">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar factura por N°, timbrado o proveedor..."
+                  value={searchPaid}
+                  onChange={(e) => {
+                    setSearchPaid(e.target.value)
+                    setPagePaid(1)
+                  }}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition"
+                />
+              </div>
+
+              <select
+                value={filterPaidSupplier}
+                onChange={(e) => {
+                  setFilterPaidSupplier(e.target.value)
+                  setPagePaid(1)
+                }}
+                className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-medium max-w-xs truncate"
+              >
+                <option value="all">Todos los Proveedores</option>
+                {suppliers.map((s: any) => (
+                  <option key={s.id} value={s.id}>
+                    {s.razon_social || s.nombre}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={loadPaidInvoices}
+                className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-xl transition"
+                title="Actualizar listado"
+              >
+                <RefreshCw className={`w-4 h-4 ${loadingPaidInvoices ? "animate-spin text-indigo-500" : ""}`} />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {selectedPaidInvoiceIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowBatchRevertInvoiceModal(true)}
+                  className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
+                  title="Revertir facturas seleccionadas a estado pendiente"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Revertir Lote ({selectedPaidInvoiceIds.length})</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* TABLA DE FACTURAS PAGADAS */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+            {loadingPaidInvoices ? (
+              <div className="flex flex-col items-center justify-center py-20 text-slate-400 text-xs">
+                <Loader2 className="w-8 h-8 animate-spin text-rose-500 mb-2" />
+                <p>Cargando facturas pagadas del servidor...</p>
+              </div>
+            ) : paidInvoices.length === 0 ? (
+              <div className="text-center py-20 text-slate-400 text-xs">
+                <CheckCircle2 className="w-12 h-12 mx-auto mb-3 opacity-30 text-emerald-500" />
+                <p className="font-bold text-sm text-slate-600 dark:text-slate-300">No se encontraron facturas pagadas</p>
+                <p className="mt-1">Probá cambiando los términos de búsqueda o el proveedor seleccionado.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-850/80 text-slate-500 uppercase text-[10px] font-extrabold border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="p-3.5 w-10 text-center">
+                        <input
+                          type="checkbox"
+                          className="rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+                          checked={
+                            paidInvoices.length > 0 &&
+                            paidInvoices.every((inv) => selectedPaidInvoiceIds.includes(inv.id))
+                          }
+                          onChange={(e) => {
+                            const pageIds = paidInvoices.map((inv) => inv.id)
+                            if (e.target.checked) {
+                              setSelectedPaidInvoiceIds(Array.from(new Set([...selectedPaidInvoiceIds, ...pageIds])))
+                            } else {
+                              setSelectedPaidInvoiceIds(selectedPaidInvoiceIds.filter((id) => !pageIds.includes(id)))
+                            }
+                          }}
+                        />
+                      </th>
+                      <th className="p-3.5">N° Factura Fiscal</th>
+                      <th className="p-3.5">Proveedor</th>
+                      <th className="p-3.5">Fecha Emisión</th>
+                      <th className="p-3.5">Fecha Pago / Origen</th>
+                      <th className="p-3.5 text-right">Monto Total</th>
+                      <th className="p-3.5 text-center">Estado</th>
+                      <th className="p-3.5 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                    {paidInvoices.map((inv) => {
+                      const isSelected = selectedPaidInvoiceIds.includes(inv.id)
+
+                      return (
+                        <tr
+                          key={inv.id}
+                          className={`hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition ${
+                            isSelected ? "bg-rose-50/30 dark:bg-rose-950/10" : ""
+                          }`}
+                        >
+                          <td className="p-3.5 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedPaidInvoiceIds((prev) => [...prev, inv.id])
+                                } else {
+                                  setSelectedPaidInvoiceIds((prev) => prev.filter((id) => id !== inv.id))
+                                }
+                              }}
+                              className="rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+                            />
+                          </td>
+                          <td className="p-3.5">
+                            <div className="font-mono font-black text-slate-900 dark:text-white text-xs">
+                              {inv.numero_factura}
+                            </div>
+                            {inv.timbrado && (
+                              <p className="text-[10px] text-slate-400 font-mono">Timb: {inv.timbrado}</p>
+                            )}
+                          </td>
+                          <td className="p-3.5">
+                            <p className="font-bold text-slate-800 dark:text-slate-200">
+                              {inv.supplier_nombre || "Proveedor"}
+                            </p>
+                            <p className="text-[10px] text-slate-400 font-mono">
+                              {inv.supplier_ruc ? `RUC: ${inv.supplier_ruc}` : ""}
+                            </p>
+                          </td>
+                          <td className="p-3.5 text-slate-500 font-mono">
+                            {formatDate(inv.fecha_emision)}
+                          </td>
+                          <td className="p-3.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-mono text-slate-600 dark:text-slate-400 text-[11px]">
+                                {formatDate(inv.ultimo_pago_fecha || inv.fecha_emision)}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 uppercase">
+                                {inv.ultimo_pago_metodo || "PAGADO"}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="p-3.5 text-right font-mono font-black text-slate-900 dark:text-white">
+                            <div>{formatPYG(inv.total || 0)}</div>
+                            {Number(inv.total_brl || 0) > 0 && (
+                              <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                                R$ {Number(inv.total_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3.5 text-center">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Pagada
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelected360SupplierId(inv.supplier_id)
+                                  setSelected360SupplierNombre(inv.supplier_nombre)
+                                }}
+                                className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
+                                title="Ver Ficha 360° del Proveedor"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRevertingInvoice(inv)
+                                  setRevertInvoiceMotivo("Revertir pago para procesar mediante flujo InteliMarket")
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700/60 rounded-lg transition-all shadow-xs"
+                                title="Revertir condición de pagada para poder volver a pagar o tramitar en InteliMarket"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                                <span>Revertir Pago</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Paginación */}
+            {paidInvoicesTotal > pageSizePaid && (
+              <div className="p-4 bg-slate-50 dark:bg-slate-850/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+                <span className="text-slate-500 font-mono">
+                  Mostrando {(pagePaid - 1) * pageSizePaid + 1} a {Math.min(pagePaid * pageSizePaid, paidInvoicesTotal)} de <strong>{paidInvoicesTotal.toLocaleString("es-PY")}</strong> facturas
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={pagePaid <= 1}
+                    onClick={() => setPagePaid((p) => Math.max(1, p - 1))}
+                    className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="font-bold text-slate-700 dark:text-slate-300 font-mono">
+                    Página {pagePaid} de {Math.max(1, Math.ceil(paidInvoicesTotal / pageSizePaid))}
+                  </span>
+                  <button
+                    disabled={pagePaid >= Math.ceil(paidInvoicesTotal / pageSizePaid)}
+                    onClick={() => setPagePaid((p) => p + 1)}
+                    className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1119,6 +1503,167 @@ export default function PaymentsPage() {
             setTab("ordenes_pago")
           }}
         />
+      )}
+
+      {/* MODAL REVERSIÓN INDIVIDUAL DE FACTURA PAGADA */}
+      {revertingInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-rose-600">
+                <RotateCcw className="w-5 h-5 animate-spin-reverse" />
+                <h3 className="font-extrabold text-sm uppercase">Revertir Condición de Pagado</h3>
+              </div>
+              <button
+                onClick={() => setRevertingInvoice(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl p-3 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+              <p className="font-bold flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                ¿Deseas devolver esta factura a estado Pendiente?
+              </p>
+              <p className="text-[11px] text-amber-800/80 dark:text-amber-300/80">
+                La factura volverá a tener saldo pendiente por el 100% de su monto y sus pagos asociados serán anulados para poder procesarla con las Órdenes de Pago o rendiciones de InteliMarket.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Factura N°:</span>
+                <span className="font-mono font-bold text-slate-800 dark:text-slate-100">{revertingInvoice.numero_factura}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Proveedor:</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-100 truncate max-w-[200px]">{revertingInvoice.supplier_nombre || "Proveedor"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Importe Total:</span>
+                <span className="font-mono font-black text-rose-600 dark:text-rose-400">
+                  {revertingInvoice.moneda === "BRL" && revertingInvoice.total_brl
+                    ? `R$ ${revertingInvoice.total_brl.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} (${formatPYG(revertingInvoice.total)})`
+                    : formatPYG(revertingInvoice.total)}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Motivo de la reversión (opcional):
+              </label>
+              <input
+                type="text"
+                value={revertInvoiceMotivo}
+                onChange={(e) => setRevertInvoiceMotivo(e.target.value)}
+                placeholder="Ej. Importado legacy para incluir en OP o rendición..."
+                className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:outline-hidden focus:ring-2 focus:ring-rose-500/20"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setRevertingInvoice(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 rounded-xl transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={revertingInvoiceLoading}
+                onClick={handleConfirmRevertInvoice}
+                className="px-4 py-2 text-xs font-extrabold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+              >
+                {revertingInvoiceLoading ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Revirtiendo...
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Confirmar Reversión
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL REVERSIÓN MASIVA DE FACTURAS PAGADAS */}
+      {showBatchRevertInvoiceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-rose-600">
+                <RotateCcw className="w-5 h-5 animate-spin-reverse" />
+                <h3 className="font-extrabold text-sm uppercase">Reversión Masiva de Pagos</h3>
+              </div>
+              <button
+                onClick={() => setShowBatchRevertInvoiceModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl p-3 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+              <p className="font-bold flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                Revertir {selectedPaidInvoiceIds.length} facturas seleccionadas
+              </p>
+              <p className="text-[11px] text-amber-800/80 dark:text-amber-300/80">
+                Todas las facturas seleccionadas volverán a estado 'pendiente' con su saldo 100% restaurado y sus pagos asociados quedarán anulados.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Motivo general para el lote:
+              </label>
+              <input
+                type="text"
+                value={batchRevertInvoiceMotivo}
+                onChange={(e) => setBatchRevertInvoiceMotivo(e.target.value)}
+                placeholder="Ej. Reversión masiva de importaciones legacy para OP agrupada..."
+                className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:outline-hidden focus:ring-2 focus:ring-rose-500/20"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowBatchRevertInvoiceModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 rounded-xl transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={batchRevertingInvoices}
+                onClick={handleConfirmBatchRevertInvoices}
+                className="px-4 py-2 text-xs font-extrabold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+              >
+                {batchRevertingInvoices ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Procesando {selectedPaidInvoiceIds.length} facturas...
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Revertir {selectedPaidInvoiceIds.length} Facturas
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -439,10 +439,23 @@ async def sync_accounts_payable(db: AsyncSession, company_id: str, since: date |
 
         existing_id = await _get_mapped_target(db, company_id, "fin_conta_pagar", r["ID_CONTA_PAGAR"])
         if existing_id:
-            await db.execute(
-                text("UPDATE supplier_invoices SET saldo_pendiente = :saldo, estado = :estado, updated_at = now() WHERE id = :id"),
-                {"saldo": saldo, "estado": estado, "id": str(existing_id)},
+            # Blindaje: no pisar facturas que ya tienen pagos u órdenes de pago procesadas en InteliMarket
+            has_payments = await db.execute(
+                text("""
+                    SELECT 1 FROM supplier_invoice_payments WHERE invoice_id = :id AND estado != 'anulado'
+                    UNION
+                    SELECT 1 FROM supplier_payment_order_allocations spoa
+                    JOIN supplier_payment_orders spo ON spo.id = spoa.payment_order_id
+                    WHERE spoa.invoice_id = :id AND spo.estado = 'pagado'
+                    LIMIT 1
+                """),
+                {"id": str(existing_id)},
             )
+            if not has_payments.first():
+                await db.execute(
+                    text("UPDATE supplier_invoices SET saldo_pendiente = :saldo, estado = :estado, updated_at = now() WHERE id = :id"),
+                    {"saldo": saldo, "estado": estado, "id": str(existing_id)},
+                )
         else:
             invoice = SupplierInvoice(
                 company_id=company_id,

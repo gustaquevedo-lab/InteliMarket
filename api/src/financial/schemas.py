@@ -88,6 +88,45 @@ class SupplierInvoiceWithPayments(SupplierInvoiceResponse):
     payments: list["SupplierInvoicePaymentResponse"] = []
 
 
+class SupplierInvoiceBatchRevertRequest(BaseModel):
+    invoice_ids: list[str]
+    motivo: Optional[str] = None
+
+
+class PaidInvoiceItem(BaseModel):
+    id: UUID
+    numero_factura: str
+    timbrado: Optional[str] = None
+    cdc: Optional[str] = None
+    fecha_emision: date
+    fecha_vencimiento: date
+    total: Decimal
+    total_brl: Optional[Decimal] = None
+    saldo_pendiente: Decimal
+    saldo_pendiente_brl: Optional[Decimal] = None
+    moneda: str
+    estado: str
+    condicion: Optional[str] = None
+    supplier_id: UUID
+    supplier_nombre: Optional[str] = None
+    supplier_ruc: Optional[str] = None
+    notas: Optional[str] = None
+    concepto: Optional[str] = None
+    ultimo_pago_fecha: Optional[date] = None
+    ultimo_pago_metodo: Optional[str] = None
+    pagos_count: int = 0
+    created_at: Optional[datetime] = None
+
+
+class PaidInvoicesListResponse(BaseModel):
+    items: list[PaidInvoiceItem]
+    total: int
+    total_monto_pyg: Decimal
+    total_monto_brl: Decimal
+    limit: int
+    offset: int
+
+
 class SupplierInvoicePaymentCreate(BaseModel):
     payment_method: str = Field(min_length=1, max_length=30)
     monto: Decimal = Field(ge=0)

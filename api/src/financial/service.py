@@ -190,6 +190,22 @@ async def revert_supplier_invoice_payment(
     if not inv:
         raise HTTPException(status_code=404, detail="Factura de proveedor no encontrada")
 
+    # Revertir/anular pagos registrados en SupplierInvoicePayment
+    pmts_res = await db.execute(
+        select(SupplierInvoicePayment).where(SupplierInvoicePayment.invoice_id == iid)
+    )
+    for pmt in pmts_res.scalars().all():
+        pmt.estado = "anulado"
+        nota_pmt = f" [Pago revertido/anulado: {motivo or 'Reversión'}]"
+        pmt.referencia = ((pmt.referencia or "") + nota_pmt).strip()
+
+    # Desvincular asignaciones de órdenes de pago si existieran
+    allocs_res = await db.execute(
+        select(SupplierPaymentOrderAllocation).where(SupplierPaymentOrderAllocation.invoice_id == iid)
+    )
+    for alloc in allocs_res.scalars().all():
+        await db.delete(alloc)
+
     inv.estado = "pendiente"
     inv.saldo_pendiente = inv.total or Decimal("0")
     if inv.total_brl:
@@ -201,6 +217,178 @@ async def revert_supplier_invoice_payment(
     await db.commit()
     await db.refresh(inv)
     return inv
+
+
+async def batch_revert_supplier_invoices(
+    db: AsyncSession,
+    company_id: str,
+    invoice_ids: list[str],
+    user_id: str | None = None,
+    motivo: str | None = None,
+) -> dict:
+    reverted = []
+    errors = []
+    for iid in invoice_ids:
+        try:
+            inv = await revert_supplier_invoice_payment(
+                db=db,
+                company_id=company_id,
+                invoice_id=iid,
+                user_id=user_id,
+                motivo=motivo,
+            )
+            reverted.append(str(inv.id))
+        except Exception as err:
+            errors.append({"id": iid, "error": str(err)})
+
+    return {
+        "success": True,
+        "reverted_count": len(reverted),
+        "reverted_ids": reverted,
+        "errors": errors,
+    }
+
+
+async def list_paid_invoices(
+    db: AsyncSession,
+    company_id: str,
+    supplier_id: str | None = None,
+    search: str | None = None,
+    desde: date | None = None,
+    hasta: date | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    cid = uuid.UUID(company_id)
+    base_conditions = [
+        SupplierInvoice.company_id == cid,
+        or_(
+            SupplierInvoice.estado.in_(["pagada", "pagado"]),
+            and_(
+                SupplierInvoice.saldo_pendiente <= Decimal("0"),
+                SupplierInvoice.estado != "cancelada",
+            ),
+        ),
+    ]
+
+    if supplier_id:
+        base_conditions.append(SupplierInvoice.supplier_id == uuid.UUID(supplier_id))
+    if desde:
+        base_conditions.append(SupplierInvoice.fecha_emision >= desde)
+    if hasta:
+        base_conditions.append(SupplierInvoice.fecha_emision <= hasta)
+    if search:
+        st = f"%{search.strip()}%"
+        sup_subq = select(Supplier.id).where(
+            Supplier.company_id == cid,
+            or_(
+                Supplier.razon_social.ilike(st),
+                Supplier.ruc.ilike(st),
+            )
+        )
+        base_conditions.append(
+            or_(
+                SupplierInvoice.numero_factura.ilike(st),
+                SupplierInvoice.timbrado.ilike(st),
+                SupplierInvoice.cdc.ilike(st),
+                SupplierInvoice.concepto.ilike(st),
+                SupplierInvoice.supplier_id.in_(sup_subq),
+            )
+        )
+
+    # Conteo y totales monetarios
+    stats_query = select(
+        func.count(SupplierInvoice.id).label("total_count"),
+        func.coalesce(func.sum(SupplierInvoice.total), Decimal("0")).label("total_pyg"),
+        func.coalesce(func.sum(SupplierInvoice.total_brl), Decimal("0")).label("total_brl"),
+    ).where(*base_conditions)
+    stats_res = await db.execute(stats_query)
+    total_count, total_pyg, total_brl = stats_res.one()
+
+    # Obtener facturas paginadas
+    inv_query = (
+        select(SupplierInvoice)
+        .where(*base_conditions)
+        .order_by(SupplierInvoice.fecha_emision.desc(), SupplierInvoice.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    inv_res = await db.execute(inv_query)
+    invoices = list(inv_res.scalars().all())
+
+    # Cargar datos de proveedores
+    supplier_ids = {inv.supplier_id for inv in invoices if inv.supplier_id}
+    suppliers_map = {}
+    if supplier_ids:
+        s_res = await db.execute(
+            select(Supplier.id, Supplier.razon_social, Supplier.ruc).where(Supplier.id.in_(supplier_ids))
+        )
+        for s_id, s_name, s_ruc in s_res.all():
+            suppliers_map[s_id] = {"nombre": s_name, "ruc": s_ruc}
+
+    # Cargar últimos pagos de estas facturas
+    invoice_ids = [inv.id for inv in invoices]
+    payments_map = {}
+    if invoice_ids:
+        p_res = await db.execute(
+            select(
+                SupplierInvoicePayment.invoice_id,
+                SupplierInvoicePayment.fecha_pago,
+                SupplierInvoicePayment.payment_method,
+                SupplierInvoicePayment.estado,
+            )
+            .where(
+                SupplierInvoicePayment.invoice_id.in_(invoice_ids),
+                SupplierInvoicePayment.estado != "anulado",
+            )
+            .order_by(SupplierInvoicePayment.fecha_pago.desc())
+        )
+        for p_iid, p_fecha, p_metodo, p_est in p_res.all():
+            if p_iid not in payments_map:
+                payments_map[p_iid] = {
+                    "fecha_pago": p_fecha,
+                    "payment_method": p_metodo,
+                    "count": 0,
+                }
+            payments_map[p_iid]["count"] += 1
+
+    items = []
+    for inv in invoices:
+        s_info = suppliers_map.get(inv.supplier_id, {})
+        p_info = payments_map.get(inv.id, {})
+        items.append({
+            "id": inv.id,
+            "numero_factura": inv.numero_factura,
+            "timbrado": inv.timbrado,
+            "cdc": inv.cdc,
+            "fecha_emision": inv.fecha_emision,
+            "fecha_vencimiento": inv.fecha_vencimiento,
+            "total": inv.total or Decimal("0"),
+            "total_brl": inv.total_brl,
+            "saldo_pendiente": inv.saldo_pendiente or Decimal("0"),
+            "saldo_pendiente_brl": inv.saldo_pendiente_brl,
+            "moneda": inv.moneda or "PYG",
+            "estado": inv.estado or "pagada",
+            "condicion": inv.condicion or "credito",
+            "supplier_id": inv.supplier_id,
+            "supplier_nombre": s_info.get("nombre") or "Proveedor Desconocido",
+            "supplier_ruc": s_info.get("ruc") or "",
+            "notas": inv.notas,
+            "concepto": inv.concepto,
+            "ultimo_pago_fecha": p_info.get("fecha_pago") or inv.fecha_emision,
+            "ultimo_pago_metodo": p_info.get("payment_method") or "LEGACY",
+            "pagos_count": p_info.get("count", 1),
+            "created_at": inv.created_at,
+        })
+
+    return {
+        "items": items,
+        "total": total_count or 0,
+        "total_monto_pyg": total_pyg or Decimal("0"),
+        "total_monto_brl": total_brl or Decimal("0"),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 
@@ -3495,16 +3683,27 @@ async def _execute_disbursements_internal(
         if inv:
             total_amort = alloc.monto_aplicado + alloc.monto_retencion
             inv.saldo_pendiente = max(Decimal("0"), inv.saldo_pendiente - total_amort)
-            if inv.saldo_pendiente_brl is not None and inv.total and inv.total > 0:
-                proporcion = min(Decimal("1"), total_amort / inv.total)
-                amort_brl = (inv.total_brl or Decimal("0")) * proporcion
-                inv.saldo_pendiente_brl = max(Decimal("0"), (inv.saldo_pendiente_brl or Decimal("0")) - amort_brl)
-            if inv.saldo_pendiente <= Decimal("0"):
+
+            # Tolerancia de diferencia de cambio / redondeo: si el saldo restante es un micro-remanente (<= 5.000 Gs)
+            # se absorbe como Diferencia de Cambio para cerrar la factura como 'pagada' y registrar el ajuste contable.
+            if Decimal("0") < inv.saldo_pendiente <= Decimal("5000"):
+                diff_centavos = inv.saldo_pendiente
+                inv.saldo_pendiente = Decimal("0")
+                if inv.saldo_pendiente_brl is not None:
+                    inv.saldo_pendiente_brl = Decimal("0")
+                inv.estado = "pagada"
+                order.diferencia_cambio = (order.diferencia_cambio or Decimal("0")) + diff_centavos
+            elif inv.saldo_pendiente <= Decimal("0"):
                 inv.estado = "pagada"
                 if inv.saldo_pendiente_brl is not None:
                     inv.saldo_pendiente_brl = Decimal("0")
             else:
                 inv.estado = "parcial"
+
+            if inv.saldo_pendiente_brl is not None and inv.total and inv.total > 0 and inv.estado != "pagada":
+                proporcion = min(Decimal("1"), total_amort / inv.total)
+                amort_brl = (inv.total_brl or Decimal("0")) * proporcion
+                inv.saldo_pendiente_brl = max(Decimal("0"), (inv.saldo_pendiente_brl or Decimal("0")) - amort_brl)
 
             # Registrar compatibilidad con SupplierInvoicePayment
             db.add(SupplierInvoicePayment(
@@ -4210,6 +4409,14 @@ async def create_multi_supplier_payment_batch(
             total_amort = m_aplicado + m_ret
             saldo_rest = max(Decimal("0"), saldo_ant - total_amort)
 
+            # Tolerancia de diferencia de cambio / centavos: si el saldo restante es un micro-remanente (<= 5.000 Gs)
+            # se absorbe como Diferencia de Cambio para cerrar la factura como 'pagada'.
+            diff_centavos = Decimal("0")
+            if (item.moneda == "BRL" or payload.moneda_desembolso == "BRL") and Decimal("0") < saldo_rest <= Decimal("5000"):
+                diff_centavos = saldo_rest
+                saldo_rest = Decimal("0")
+                op.diferencia_cambio = (op.diferencia_cambio or Decimal("0")) + diff_centavos
+
             db.add(SupplierPaymentOrderAllocation(
                 payment_order_id=op.id,
                 invoice_id=inv.id,
@@ -4220,11 +4427,12 @@ async def create_multi_supplier_payment_batch(
             ))
 
             inv.saldo_pendiente = saldo_rest
-            if inv.saldo_pendiente_brl is not None and inv.total and inv.total > 0:
+            if inv.saldo_pendiente_brl is not None and inv.total and inv.total > 0 and saldo_rest > Decimal("0"):
                 proporcion = min(Decimal("1"), total_amort / inv.total)
                 amort_brl = (inv.total_brl or Decimal("0")) * proporcion
                 inv.saldo_pendiente_brl = max(Decimal("0"), (inv.saldo_pendiente_brl or Decimal("0")) - amort_brl)
             if inv.saldo_pendiente <= Decimal("0"):
+                inv.saldo_pendiente = Decimal("0")
                 inv.estado = "pagada"
                 if inv.saldo_pendiente_brl is not None:
                     inv.saldo_pendiente_brl = Decimal("0")

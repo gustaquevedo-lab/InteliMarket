@@ -3460,6 +3460,20 @@ export const api = {
         const query = new URLSearchParams({ company_id: COMPANY_ID, ...(motivo ? { motivo } : {}) }).toString()
         return client.post<SupplierInvoice>(`/v1/financial/invoices/${id}/revert-payment?${query}`)
       },
+      batchRevertPayments: (data: { invoice_ids: string[]; motivo?: string }) =>
+        client.post<{ success: boolean; reverted_count: number; reverted_ids: string[]; errors: any[] }>(
+          `/v1/financial/invoices/batch-revert-payments?company_id=${COMPANY_ID}`,
+          data
+        ),
+      listPaid: (params?: { supplier_id?: string; search?: string; desde?: string; hasta?: string; limit?: number; offset?: number }) =>
+        client.get<{
+          items: Array<SupplierInvoice & { supplier_nombre?: string; supplier_ruc?: string; ultimo_pago_fecha?: string; ultimo_pago_metodo?: string; pagos_count?: number }>
+          total: number
+          total_monto_pyg: number
+          total_monto_brl: number
+          limit: number
+          offset: number
+        }>("/v1/financial/invoices/paid", { company_id: COMPANY_ID, ...params } as any),
       byReceipt: (receiptId: string) => client.get<{ found: boolean; id?: string; numero_factura?: string; total?: number; estado?: string }>(`/v1/financial/invoices/by-receipt/${receiptId}`),
       downloadStatementPdf: (supplierId: string) => downloadAuthenticated(`/v1/financial/suppliers/${supplierId}/statement.pdf`, { company_id: COMPANY_ID }, `estado_cuenta_proveedor_${supplierId.slice(0, 8)}.pdf`),
     },

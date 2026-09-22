@@ -3909,7 +3909,25 @@ export default function PurchasesPage() {
 
               <select
                 value={filterInvoiceStatus}
-                onChange={(e) => { setFilterInvoiceStatus(e.target.value); setPageInvoices(1); }}
+                onChange={async (e) => {
+                  const val = e.target.value
+                  setFilterInvoiceStatus(val)
+                  setPageInvoices(1)
+                  if (val === "pagada") {
+                    try {
+                      const res = await api.financial.invoices.list({ estado: "pagada", limit: 500 })
+                      if (res && res.length > 0) {
+                        setAllSupplierInvoices(prev => {
+                          const existingIds = new Set(prev.map(i => i.id))
+                          const toAdd = res.filter((r: any) => !existingIds.has(r.id))
+                          return [...prev, ...toAdd]
+                        })
+                      }
+                    } catch (err) {
+                      console.error("Error loading paid invoices in PurchasesPage", err)
+                    }
+                  }
+                }}
                 className="input-field text-xs font-semibold"
               >
                 <option value="todos">Todos los Estados</option>
