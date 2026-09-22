@@ -1,4 +1,5 @@
 import Supplier360Modal from "./Supplier360Modal"
+import { ProductPriceComparisonModal } from "./ProductPriceComparisonModal"
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import {
@@ -230,6 +231,8 @@ export default function PurchasesPage() {
   const [productSearchResultsPO, setProductSearchResultsPO] = useState<Product[]>([])
   const [searchingProductsPO, setSearchingProductsPO] = useState(false)
   const [savingManualPO, setSavingManualPO] = useState(false)
+  const [comparisonProductId, setComparisonProductId] = useState<string | null>(null)
+  const [comparisonProductNombre, setComparisonProductNombre] = useState<string>("")
 
   // Estados para Inbox IMAP cPanel y Facturas SIFEN
   const [showInboxConfigModal, setShowInboxConfigModal] = useState(false)
@@ -1411,7 +1414,7 @@ export default function PurchasesPage() {
     }
   }
 
-  const handleSearchProductsPO = async (q: string) => {
+  const handleSearchProductsPO = async (q: string, filterBySupplier = manualPOFilterBySupplier) => {
     setSearchProductPO(q)
     if (!q.trim() || q.trim().length < 2) {
       setProductSearchResultsPO([])
@@ -1421,8 +1424,8 @@ export default function PurchasesPage() {
     try {
       const res = await api.products.list({
         search: q.trim(),
-        limit: 12,
-        supplier_id: manualPOSupplierId || undefined,
+        limit: 15,
+        supplier_id: filterBySupplier && manualPOSupplierId ? manualPOSupplierId : undefined,
       } as any)
       setProductSearchResultsPO(Array.isArray(res) ? res : (res as any)?.items || [])
     } catch {
@@ -1432,13 +1435,14 @@ export default function PurchasesPage() {
     }
   }
 
-  const handleAddProductToManualPO = (p: Product) => {
+  const handleAddProductToManualPO = (p: Product, customPrice?: number) => {
     const exists = manualPOItems.find(it => it.product_id === p.id)
     if (exists) {
-      toast.info("Producto ya agregado", "Modifique la cantidad en la tabla.")
+      toast.info("Producto ya agregado", "Modifique la cantidad o el precio en la tabla.")
       return
     }
-    const cost = Number(p.costo_unitario || (p as any).precio_costo || 0)
+    const cost = customPrice !== undefined ? customPrice : Number(p.costo_unitario || (p as any).precio_costo || p.ultimo_costo || 0)
+    const supName = (p as any).supplier_nombre || (p as any).supplier?.razon_social || (suppliers.find(s => s.id === p.supplier_id)?.razon_social) || ""
     setManualPOItems(prev => [
       ...prev,
       {
@@ -1450,6 +1454,9 @@ export default function PurchasesPage() {
         precio_unitario: cost,
         iva_tasa: 10,
         subtotal: 10 * cost,
+        habitual_supplier_id: p.supplier_id,
+        habitual_supplier_nombre: p.supplier_id ? supName : "Sin asignar",
+        habitual_costo: Number(p.ultimo_costo || p.costo_unitario || cost),
       }
     ])
     setSearchProductPO("")
@@ -1463,9 +1470,15 @@ export default function PurchasesPage() {
   const handleManualPOItemChange = (idx: number, field: string, value: any) => {
     setManualPOItems(prev => {
       const copy = [...prev]
-      const item = { ...copy[idx], [field]: value }
-      item.subtotal = Number(item.cantidad || 0) * Number(item.precio_unitario || 0)
-      copy[idx] = item
+      copy[idx] = {
+        ...copy[idx],
+        [field]: value,
+      }
+      if (field === "cantidad" || field === "precio_unitario") {
+        const c = Number(field === "cantidad" ? value : copy[idx].cantidad || 1)
+        const p = Number(field === "precio_unitario" ? value : copy[idx].precio_unitario || 0)
+        copy[idx].subtotal = c * p
+      }
       return copy
     })
   }
@@ -1490,6 +1503,7 @@ export default function PurchasesPage() {
           prioridad: manualPOPrioridad,
           condiciones_pago: manualPOCondiciones,
           observaciones: manualPOObservaciones || undefined,
+          update_default_supplier: manualPOUpdateDefaultSupplier,
           items: manualPOItems.map(it => ({
             product_id: it.product_id,
             descripcion: it.nombre,
@@ -1498,7 +1512,17 @@ export default function PurchasesPage() {
             iva_tasa: Number(it.iva_tasa || 10),
             total: Number(it.subtotal),
           })) as any,
-        })
+        } as any)
+
+        if (manualPOUpdateDefaultSupplier && manualPOSupplierId) {
+          for (const it of manualPOItems) {
+            api.products.update(it.product_id, {
+              supplier_id: manualPOSupplierId as any,
+              ultimo_costo: Number(it.precio_unitario),
+            } as any).catch(() => {})
+          }
+        }
+
         toast.success("¡Orden de Compra Actualizada!", `Se guardaron los cambios de la OC N° ${editingPO?.numero || updated.numero}.`)
         setShowManualPOModal(false)
         setEditingPOId(null)
@@ -1515,6 +1539,7 @@ export default function PurchasesPage() {
           observaciones: manualPOObservaciones || undefined,
           user_id: user?.id as any,
           created_by_name: user?.nombre || "Comprador",
+          update_default_supplier: manualPOUpdateDefaultSupplier,
           items: manualPOItems.map(it => ({
             product_id: it.product_id,
             descripcion: it.nombre,
@@ -1523,7 +1548,17 @@ export default function PurchasesPage() {
             iva_tasa: Number(it.iva_tasa || 10),
             total: Number(it.subtotal),
           })) as any,
-        })
+        } as any)
+
+        if (manualPOUpdateDefaultSupplier && manualPOSupplierId) {
+          for (const it of manualPOItems) {
+            api.products.update(it.product_id, {
+              supplier_id: manualPOSupplierId as any,
+              ultimo_costo: Number(it.precio_unitario),
+            } as any).catch(() => {})
+          }
+        }
+
         toast.success("¡Orden de Compra Emitida!", `Se creó la OC N° ${created.numero} con ${manualPOItems.length} ítems.`)
         setShowManualPOModal(false)
         fetchAll()
@@ -7062,15 +7097,57 @@ export default function PurchasesPage() {
               </div>
 
               {/* Buscador reactivo de productos */}
-              <div className="p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2">
-                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block">
-                  Buscar y Agregar Productos a la Orden
-                </label>
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block">
+                      Buscar y Agregar Productos a la Orden
+                    </label>
+                    <span className="text-[11px] text-gray-500">
+                      Podés comprar cualquier producto del supermercado al proveedor que venda más barato.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 bg-white dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualPOFilterBySupplier(false)
+                        if (searchProductPO) handleSearchProductsPO(searchProductPO, false)
+                      }}
+                      className={`px-2.5 py-1 rounded-md font-bold transition-all flex items-center gap-1.5 ${
+                        !manualPOFilterBySupplier
+                          ? "bg-indigo-600 text-white shadow-sm"
+                          : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                      }`}
+                    >
+                      <Globe className="w-3 h-3" /> Catálogo Completo (Cualquier Proveedor)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualPOFilterBySupplier(true)
+                        if (searchProductPO) handleSearchProductsPO(searchProductPO, true)
+                      }}
+                      className={`px-2.5 py-1 rounded-md font-bold transition-all flex items-center gap-1.5 ${
+                        manualPOFilterBySupplier
+                          ? "bg-indigo-600 text-white shadow-sm"
+                          : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                      }`}
+                    >
+                      <Building2 className="w-3 h-3" /> Solo de este Proveedor
+                    </button>
+                  </div>
+                </div>
+
                 <div className="relative">
                   <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
-                    placeholder="Escriba nombre, código de barras o SKU del producto..."
+                    placeholder={
+                      manualPOFilterBySupplier
+                        ? "Buscar productos habitualmente comprados a este proveedor..."
+                        : "Buscar en TODO el catálogo del supermercado (nombre, código de barras o SKU)..."
+                    }
                     value={searchProductPO}
                     onChange={(e) => handleSearchProductsPO(e.target.value)}
                     className="input-field w-full pl-9 text-xs bg-white dark:bg-slate-900"
@@ -7080,27 +7157,61 @@ export default function PurchasesPage() {
                   )}
 
                   {productSearchResultsPO.length > 0 && (
-                    <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-20 max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
-                      {productSearchResultsPO.map(p => (
-                        <div
-                          key={p.id}
-                          onClick={() => handleAddProductToManualPO(p)}
-                          className="p-2.5 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 cursor-pointer flex items-center justify-between text-xs transition-colors"
-                        >
-                          <div>
-                            <span className="font-bold text-gray-900 dark:text-white">{p.nombre}</span>
-                            <span className="text-[10px] text-gray-400 ml-2 font-mono">{p.codigo_barra || p.sku}</span>
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-20 max-h-64 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                      {productSearchResultsPO.map(p => {
+                        const supHabitual = (p as any).supplier_nombre || (p as any).supplier?.razon_social || (suppliers.find(s => s.id === p.supplier_id)?.razon_social)
+                        const costHabitual = Number(p.ultimo_costo || p.costo_unitario || (p as any).precio_costo || 0)
+
+                        return (
+                          <div
+                            key={p.id}
+                            className="p-2.5 hover:bg-indigo-50/70 dark:hover:bg-indigo-950/40 cursor-pointer flex items-center justify-between text-xs transition-colors"
+                          >
+                            <div className="space-y-0.5 flex-1 pr-3" onClick={() => handleAddProductToManualPO(p)}>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-gray-900 dark:text-white">{p.nombre}</span>
+                                {supHabitual ? (
+                                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold border border-slate-200 dark:border-slate-700">
+                                    Habitual: {supHabitual}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 font-semibold border border-amber-200 dark:border-amber-800">
+                                    Sin proveedor habitual
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-gray-400 font-mono">
+                                SKU: {p.sku || "—"} | Barra: {p.codigo_barra || "—"}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="font-mono text-gray-600 dark:text-gray-300 text-xs">
+                                Costo Ref: <strong>{formatPYG(costHabitual)}</strong>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setComparisonProductId(p.id)
+                                  setComparisonProductNombre(p.nombre)
+                                }}
+                                className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-bold text-[11px] flex items-center gap-1 border border-slate-200 dark:border-slate-700 transition-colors"
+                                title="Ver comparativa de precios entre todos los proveedores"
+                              >
+                                <DollarSign className="w-3 h-3 text-emerald-600" /> Comparar Precios
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleAddProductToManualPO(p)}
+                                className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] flex items-center gap-1 shadow-sm transition-colors"
+                              >
+                                <Plus className="w-3.5 h-3.5" /> Agregar
+                              </button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-3">
-                            <span className="font-mono text-gray-600 dark:text-gray-300">
-                              Costo: {formatPYG(Number(p.costo_unitario || (p as any).precio_costo || 0))}
-                            </span>
-                            <span className="text-indigo-600 font-bold text-xs flex items-center gap-1">
-                              <Plus className="w-3.5 h-3.5" /> Agregar
-                            </span>
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </div>
@@ -7108,27 +7219,32 @@ export default function PurchasesPage() {
 
               {/* Tabla de ítems de la orden manual */}
               <div className="overflow-x-auto w-full border border-slate-200 dark:border-slate-700 rounded-xl">
-                <table className="w-full text-left text-xs min-w-[650px]">
+                <table className="w-full text-left text-xs min-w-[700px]">
                   <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
                     <tr>
-                      <th className="p-2.5">Producto</th>
-                      <th className="p-2.5 text-right w-28">Cantidad</th>
-                      <th className="p-2.5 text-right w-36">Precio Unitario (Gs.)</th>
-                      <th className="p-2.5 text-right w-20">IVA %</th>
-                      <th className="p-2.5 text-right w-36">Subtotal</th>
-                      <th className="p-2.5 text-center w-12"></th>
+                      <th className="p-2.5">Producto & Ref. Habitual</th>
+                      <th className="p-2.5 text-right w-24">Cantidad</th>
+                      <th className="p-2.5 text-right w-36">Precio Compra (Gs.)</th>
+                      <th className="p-2.5 text-right w-16">IVA %</th>
+                      <th className="p-2.5 text-right w-32">Subtotal</th>
+                      <th className="p-2.5 text-center w-24">Comparar</th>
+                      <th className="p-2.5 text-center w-10"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
                     {manualPOItems.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="p-6 text-center text-gray-400">
-                          Utilice el buscador para añadir productos a la orden.
+                        <td colSpan={7} className="p-6 text-center text-gray-400">
+                          Utilice el buscador para añadir productos a la orden. Podés comprar de cualquier proveedor existente.
                         </td>
                       </tr>
                     ) : (
                       manualPOItems.map((it, idx) => {
                         const isEven = idx % 2 === 0
+                        const habitualCost = Number(it.habitual_costo || 0)
+                        const currentCost = Number(it.precio_unitario || 0)
+                        const ahorro = habitualCost > 0 && currentCost < habitualCost ? habitualCost - currentCost : 0
+
                         return (
                           <tr
                             key={idx}
@@ -7143,6 +7259,16 @@ export default function PurchasesPage() {
                               <div className="text-[10px] text-gray-400 font-mono">
                                 SKU: {it.sku || "—"} | Barra: {it.codigo_barra || "—"}
                               </div>
+                              {it.habitual_supplier_nombre && (
+                                <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                  <span>Habitual: <strong>{it.habitual_supplier_nombre}</strong> ({formatPYG(habitualCost)})</span>
+                                  {ahorro > 0 && (
+                                    <span className="text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-100 dark:bg-emerald-950/60 px-1.5 py-0.2 rounded text-[9px] border border-emerald-200 dark:border-emerald-800">
+                                      ¡Ahorro {formatPYG(ahorro)}/un!
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </td>
                             <td className="p-2.5 text-right">
                               <input
@@ -7150,7 +7276,7 @@ export default function PurchasesPage() {
                                 min={1}
                                 value={it.cantidad}
                                 onChange={(e) => handleManualPOItemChange(idx, "cantidad", Math.max(1, Number(e.target.value)))}
-                                className="input-field w-24 p-1 text-right font-mono font-bold text-xs"
+                                className="input-field w-20 p-1 text-right font-mono font-bold text-xs"
                                 required
                               />
                             </td>
@@ -7173,6 +7299,19 @@ export default function PurchasesPage() {
                             <td className="p-2.5 text-center">
                               <button
                                 type="button"
+                                onClick={() => {
+                                  setComparisonProductId(it.product_id)
+                                  setComparisonProductNombre(it.nombre)
+                                }}
+                                className="px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-bold text-[10px] flex items-center gap-1 mx-auto border border-emerald-200 dark:border-emerald-800/60 transition-colors"
+                                title="Ver precios de todos los proveedores para este producto"
+                              >
+                                <DollarSign className="w-3 h-3 text-emerald-600" /> Precios
+                              </button>
+                            </td>
+                            <td className="p-2.5 text-center">
+                              <button
+                                type="button"
                                 onClick={() => handleRemoveItemFromManualPO(idx)}
                                 className="p-1 text-red-500 hover:text-red-700 rounded hover:bg-red-50 dark:hover:bg-red-950/30"
                               >
@@ -7186,6 +7325,24 @@ export default function PurchasesPage() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Checkbox para actualizar proveedor habitual */}
+              <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={manualPOUpdateDefaultSupplier}
+                  onChange={(e) => setManualPOUpdateDefaultSupplier(e.target.checked)}
+                  className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                <div>
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                    Actualizar este proveedor como nuevo Proveedor Habitual de los productos agregados
+                  </span>
+                  <span className="text-[11px] text-slate-500 block">
+                    Si se marca, el sistema recordará a este proveedor como el preferido para futuras reposiciones automáticas y actualizará su último costo de compra en el catálogo.
+                  </span>
+                </div>
+              </label>
 
               {/* Barra de Totales */}
               <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 flex justify-between items-center text-xs">
@@ -9926,6 +10083,45 @@ export default function PurchasesPage() {
         <DevolucionProveedorPrintModal
           devolucion={printingReturnDoc}
           onClose={() => setPrintingReturnDoc(null)}
+        />
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: COMPARATIVA DE PRECIOS ENTRE PROVEEDORES (QUIÉN VENDE MÁS BARATO)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {comparisonProductId && (
+        <ProductPriceComparisonModal
+          productId={comparisonProductId}
+          productNombre={comparisonProductNombre}
+          onClose={() => {
+            setComparisonProductId(null)
+            setComparisonProductNombre("")
+          }}
+          onSelectSupplierPrice={(supId, supName, price) => {
+            setManualPOItems(prev => {
+              const exists = prev.some(it => it.product_id === comparisonProductId)
+              if (exists) {
+                return prev.map(it => {
+                  if (it.product_id === comparisonProductId) {
+                    return {
+                      ...it,
+                      precio_unitario: price,
+                      subtotal: (it.cantidad || 1) * price,
+                    }
+                  }
+                  return it
+                })
+              }
+              return prev
+            })
+            if (!manualPOSupplierId) {
+              setManualPOSupplierId(supId)
+            }
+            toast.info("Precio Aplicado", `Se configuró el precio de ${formatPYG(price)} de "${supName}".`)
+          }}
+          onProductUpdated={() => {
+            fetchAll()
+          }}
         />
       )}
     </div>
