@@ -114,7 +114,11 @@ async def get_valid_token(db: AsyncSession, company_id: str) -> tuple[str, Payme
 
     async with _token_lock:
         # Otra request pudo renovar el token mientras esperabamos el lock.
-        await db.refresh(row)
+        # OJO: db.refresh(row) directo pisaría row.config con la version CIFRADA
+        # tal cual esta en la base (set_committed_value solo vive en memoria, no
+        # sobrevive un refresh) -- hay que pasar de nuevo por get_config() para
+        # que se vuelva a descifrar, si no el login manda "enc:..." como password.
+        row = await _load_config(db, company_id)
         cfg = row.config or {}
         if _is_token_valid(cfg.get("cached_token_expires_at")) and cfg.get("cached_token"):
             return cfg["cached_token"], row
