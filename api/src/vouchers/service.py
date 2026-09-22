@@ -387,3 +387,43 @@ async def create_voucher_batch(
         "monto_total": float(total_vales * monto_por_vale),
     }
 
+
+async def list_convenios(
+    db: AsyncSession,
+    company_id: UUID,
+) -> list[dict]:
+    """Lista todos los convenios institucionales registrados para la empresa."""
+    stmt = (
+        select(
+            InstitutionalVoucher.convenio_nombre,
+            InstitutionalVoucher.cliente_ruc,
+            InstitutionalVoucher.cliente_razon_social,
+            func.count(InstitutionalVoucher.id).label("total_vales"),
+            func.sum(InstitutionalVoucher.monto_inicial).label("monto_total"),
+            func.max(InstitutionalVoucher.fecha_vencimiento).label("max_vencimiento"),
+            func.max(InstitutionalVoucher.factura_emision_numero).label("factura_numero"),
+        )
+        .where(InstitutionalVoucher.company_id == company_id)
+        .group_by(
+            InstitutionalVoucher.convenio_nombre,
+            InstitutionalVoucher.cliente_ruc,
+            InstitutionalVoucher.cliente_razon_social,
+        )
+        .order_by(InstitutionalVoucher.convenio_nombre.asc())
+    )
+    res = await db.execute(stmt)
+    rows = res.all()
+    return [
+        {
+            "convenio_nombre": r.convenio_nombre,
+            "cliente_ruc": r.cliente_ruc,
+            "cliente_razon_social": r.cliente_razon_social,
+            "total_vales": r.total_vales,
+            "monto_total": float(r.monto_total or 0),
+            "max_vencimiento": str(r.max_vencimiento) if r.max_vencimiento else None,
+            "factura_numero": r.factura_numero,
+        }
+        for r in rows
+    ]
+
+

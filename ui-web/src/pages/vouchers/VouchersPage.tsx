@@ -20,7 +20,7 @@ import {
   Plus,
   Check,
   X,
-  ExternalLink,
+  ChevronDown,
   Info
 } from "lucide-react"
 import { api } from "../../api"
@@ -54,9 +54,21 @@ interface ConvenioSummary {
   vales: VoucherItem[]
 }
 
+interface ConvenioListItem {
+  convenio_nombre: string
+  cliente_ruc?: string | null
+  cliente_razon_social?: string | null
+  total_vales: number
+  monto_total: number
+  max_vencimiento?: string | null
+  factura_numero?: string | null
+}
+
 export default function VouchersPage() {
   const toast = useToast()
   const [loading, setLoading] = useState(true)
+  const [convenios, setConvenios] = useState<ConvenioListItem[]>([])
+  const [selectedConvenio, setSelectedConvenio] = useState("Universidad del Pacífico")
   const [summary, setSummary] = useState<ConvenioSummary | null>(null)
   const [search, setSearch] = useState("")
   const [filterState, setFilterState] = useState<"ALL" | "ACTIVO" | "CANJEADO">("ALL")
@@ -76,24 +88,40 @@ export default function VouchersPage() {
   // Modal Nuevo Lote
   const [showBatchModal, setShowBatchModal] = useState(false)
   const [batchForm, setBatchForm] = useState({
-    convenio_nombre: "Universidad del Pacífico",
-    cliente_ruc: "80024467-2",
-    cliente_razon_social: "UNIVERSIDAD DEL PACÍFICO",
-    total_vales: 25,
+    convenio_nombre: "",
+    cliente_ruc: "",
+    cliente_razon_social: "",
+    total_vales: 50,
     monto_por_vale: 100000,
     fecha_vencimiento: "2026-12-31",
     factura_numero: "",
-    prefijo_codigo: "UP-",
+    prefijo_codigo: "",
   })
   const [savingBatch, setSavingBatch] = useState(false)
 
-  const fetchSummary = async () => {
+  const loadConveniosList = async () => {
+    try {
+      const list = await api.vouchers.listConvenios()
+      if (Array.isArray(list) && list.length > 0) {
+        setConvenios(list)
+        if (!list.some(c => c.convenio_nombre === selectedConvenio)) {
+          setSelectedConvenio(list[0].convenio_nombre)
+        }
+      }
+    } catch (e) {
+      console.warn("Error cargando lista de convenios:", e)
+    }
+  }
+
+  const fetchSummary = async (convenioTarget = selectedConvenio) => {
     try {
       setLoading(true)
-      const data = await api.vouchers.summary("Universidad del Pacífico")
+      const data = await api.vouchers.summary(convenioTarget)
       setSummary(data)
       if (data?.factura_emision_numero) {
         setInvoiceNumberInput(data.factura_emision_numero)
+      } else {
+        setInvoiceNumberInput("")
       }
     } catch (err: any) {
       toast.error("Error al cargar vales", err?.message || "No se pudo obtener el resumen de convenios")
@@ -103,8 +131,12 @@ export default function VouchersPage() {
   }
 
   useEffect(() => {
-    fetchSummary()
+    loadConveniosList()
   }, [])
+
+  useEffect(() => {
+    fetchSummary(selectedConvenio)
+  }, [selectedConvenio])
 
   const handleSeedUP = async () => {
     try {
@@ -118,7 +150,8 @@ export default function VouchersPage() {
         "Lote UP Inicializado",
         `Se sembraron ${res.creados} vales nuevos (${res.existentes} ya existían).`
       )
-      fetchSummary()
+      loadConveniosList()
+      fetchSummary("Universidad del Pacífico")
     } catch (err: any) {
       toast.error("Error al sembrar vales", err?.message || "Error del servidor")
     } finally {
@@ -145,22 +178,24 @@ export default function VouchersPage() {
   const handleLinkInvoice = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!invoiceNumberInput.trim()) {
-      toast.warning("Falta Nº de Factura", "Ingrese el número de factura timbrada emitida a la UP.")
+      toast.warning("Falta Nº de Factura", "Ingrese el número de factura timbrada emitida.")
       return
     }
 
     try {
       setSavingInvoice(true)
+      const targetConvenio = summary?.convenio_nombre || selectedConvenio
       const res = await api.vouchers.linkInvoice({
-        convenio_nombre: summary?.convenio_nombre || "Universidad del Pacífico",
+        convenio_nombre: targetConvenio,
         factura_numero: invoiceNumberInput.trim(),
       })
       toast.success(
         "Factura Vinculada",
-        `Factura N° ${res.factura_numero} vinculada exitosamente a ${res.vales_actualizados} vales.`
+        `Factura N° ${res.factura_numero} vinculada a ${res.vales_actualizados} vales de '${targetConvenio}'.`
       )
       setShowInvoiceModal(false)
-      fetchSummary()
+      loadConveniosList()
+      fetchSummary(targetConvenio)
     } catch (err: any) {
       toast.error("Error al vincular factura", err?.message || "Error del servidor")
     } finally {
@@ -183,7 +218,9 @@ export default function VouchersPage() {
         `Se crearon ${res.creados} vales para '${res.convenio}' por un total de Gs. ${res.monto_total.toLocaleString("es-PY")}.`
       )
       setShowBatchModal(false)
-      fetchSummary()
+      setSelectedConvenio(res.convenio)
+      await loadConveniosList()
+      fetchSummary(res.convenio)
     } catch (err: any) {
       toast.error("Error al crear lote", err?.message || "Error del servidor")
     } finally {
@@ -192,14 +229,20 @@ export default function VouchersPage() {
   }
 
   const handleCopyBillingData = () => {
-    const text = `DATOS PARA EMISIÓN DE FACTURA A UNIVERSIDAD DEL PACÍFICO:
-Razón Social: UNIVERSIDAD DEL PACÍFICO
-RUC: 80024467-2
+    const rz = summary?.cliente_razon_social || "UNIVERSIDAD DEL PACÍFICO"
+    const ruc = summary?.cliente_ruc || "80024467-2"
+    const qty = summary?.total_emitidos || 75
+    const montoTot = summary?.monto_total_emitido || 7500000
+    const montoUnit = qty > 0 ? Math.round(montoTot / qty) : 100000
+
+    const text = `DATOS PARA EMISIÓN DE FACTURA A: ${rz}
+Razón Social: ${rz}
+RUC: ${ruc}
 Condición: CONTADO
 Concepto: VALES DE COMPRA PREPAGO - CONVENIO INSTITUCIONAL
-Cantidad: 75
-Precio Unitario: Gs. 100.000
-Total: Gs. 7.500.000
+Cantidad: ${qty}
+Precio Unitario: Gs. ${montoUnit.toLocaleString("es-PY")}
+Total: Gs. ${montoTot.toLocaleString("es-PY")}
 Tasa IVA: EXENTA (0% IVA)
 Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extra Supermercado. El IVA de las mercaderías se liquida en cajas de cobranza al momento del canje.`
     navigator.clipboard.writeText(text)
@@ -228,13 +271,27 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
             <Ticket className="w-8 h-8" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                Vales Corporativos & Convenios
+                Vales y Convenios
               </h1>
-              <span className="bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-300 text-xs font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                Convenio UP
-              </span>
+              {/* Selector de Convenio Dinámico */}
+              {convenios.length > 0 && (
+                <div className="relative inline-block">
+                  <select
+                    value={selectedConvenio}
+                    onChange={(e) => setSelectedConvenio(e.target.value)}
+                    className="appearance-none bg-orange-50 dark:bg-orange-950/60 border border-orange-200 dark:border-orange-800 text-orange-800 dark:text-orange-300 font-black text-xs px-3 py-1 pr-7 rounded-xl outline-none cursor-pointer"
+                  >
+                    {convenios.map((c) => (
+                      <option key={c.convenio_nombre} value={c.convenio_nombre} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
+                        {c.convenio_nombre} ({c.total_vales} vales)
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 text-orange-600 dark:text-orange-400 pointer-events-none" />
+                </div>
+              )}
             </div>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
               Control unitario, trazabilidad de canje en cajas y arqueo de vales institucionales
@@ -252,15 +309,27 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
           </button>
 
           <button
-            onClick={() => setShowBatchModal(true)}
+            onClick={() => {
+              setBatchForm({
+                convenio_nombre: "",
+                cliente_ruc: "",
+                cliente_razon_social: "",
+                total_vales: 50,
+                monto_por_vale: 100000,
+                fecha_vencimiento: "2026-12-31",
+                factura_numero: "",
+                prefijo_codigo: "",
+              })
+              setShowBatchModal(true)
+            }}
             className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-2 cursor-pointer transition-all"
           >
             <Plus className="w-4 h-4" />
-            Nuevo Lote
+            Nuevo Convenio / Lote
           </button>
 
           <button
-            onClick={fetchSummary}
+            onClick={() => fetchSummary(selectedConvenio)}
             disabled={loading}
             className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-2 cursor-pointer transition-all"
           >
@@ -281,7 +350,7 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
         </div>
       </div>
 
-      {/* Banner Resumen Legal de Facturación a la UP */}
+      {/* Banner Resumen Legal de Facturación del Convenio Activo */}
       <div className="bg-slate-900 text-white p-5 rounded-2xl border border-slate-800 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shrink-0">
@@ -289,13 +358,17 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-black text-sm text-white">UNIVERSIDAD DEL PACÍFICO</span>
-              <span className="font-mono text-xs text-blue-300 bg-blue-950/80 px-2 py-0.5 rounded border border-blue-800/60">
-                RUC: 80024467-2
+              <span className="font-black text-sm text-white">
+                {summary?.cliente_razon_social || summary?.convenio_nombre || selectedConvenio}
               </span>
+              {summary?.cliente_ruc && (
+                <span className="font-mono text-xs text-blue-300 bg-blue-950/80 px-2 py-0.5 rounded border border-blue-800/60">
+                  RUC: {summary.cliente_ruc}
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Facturación en <span className="text-amber-400 font-bold">EXENTA (0% IVA)</span> por Gs. 7.500.000 (75 vales × Gs. 100.000). El IVA de mercaderías se liquida en cajas de cobro al canjear.
+              Facturación en <span className="text-amber-400 font-bold">EXENTA (0% IVA)</span> por {formatPYG(summary?.monto_total_emitido || 0)} ({summary?.total_emitidos || 0} vales emitidos). El IVA de mercaderías se liquida en cajas de cobro al canjear.
             </p>
           </div>
         </div>
@@ -329,7 +402,7 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
             <span className="text-3xl font-black text-slate-900 dark:text-white">
               {summary?.total_emitidos || 0}
             </span>
-            <span className="text-xs text-slate-500">vales (Gs. 100k)</span>
+            <span className="text-xs text-slate-500">vales</span>
           </div>
           <p className="text-xs font-bold text-slate-500 mt-1">
             Monto Total: {formatPYG(summary?.monto_total_emitido || 0)}
@@ -370,16 +443,16 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
 
         <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="flex items-center justify-between text-blue-600 text-xs font-bold uppercase tracking-wider">
-            <span>Vigencia Convenio</span>
+            <span>Factura Asociada</span>
             <Calendar className="w-4 h-4 text-blue-500" />
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-xl font-black text-blue-600 dark:text-blue-400">
-              31/12/2026
+            <span className="text-base font-black text-blue-600 dark:text-blue-400 truncate">
+              {summary?.factura_emision_numero || "Pendiente"}
             </span>
           </div>
           <p className="text-xs font-bold text-slate-500 mt-1">
-            {summary?.factura_emision_numero ? `Factura: ${summary.factura_emision_numero}` : "Univ. del Pacífico • PJC"}
+            {summary?.cliente_razon_social || summary?.convenio_nombre}
           </p>
         </div>
       </div>
@@ -581,7 +654,7 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
                 </div>
                 <div>
                   <h3 className="font-black text-slate-900 dark:text-white text-base">
-                    Facturación Legal a la Universidad del Pacífico
+                    Facturación Legal · {summary?.cliente_razon_social || summary?.convenio_nombre || selectedConvenio}
                   </h3>
                   <p className="text-xs text-slate-500">
                     Datos fiscales oficiales y vinculación de comprobante timbrado
@@ -596,20 +669,24 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
               </button>
             </div>
 
-            {/* Ficha Resumen Fiscal */}
+            {/* Ficha Resumen Fiscal Dinámica */}
             <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs space-y-2">
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Razón Social Cliente:</span>
-                  <span className="font-bold text-slate-900 dark:text-white">UNIVERSIDAD DEL PACÍFICO</span>
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    {summary?.cliente_razon_social || summary?.convenio_nombre || selectedConvenio}
+                  </span>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">RUC Cliente:</span>
-                  <span className="font-bold font-mono text-blue-600 dark:text-blue-400">80024467-2</span>
+                  <span className="font-bold font-mono text-blue-600 dark:text-blue-400">
+                    {summary?.cliente_ruc || "80024467-2"}
+                  </span>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Concepto a Facturar:</span>
-                  <span className="font-bold text-slate-900 dark:text-white">VALES DE COMPRA PREPAGO - CONVENIO UP</span>
+                  <span className="font-bold text-slate-900 dark:text-white">VALES DE COMPRA PREPAGO - CONVENIO INSTITUCIONAL</span>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Tasa de IVA Aplicable:</span>
@@ -617,18 +694,22 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Cantidad / Unitario:</span>
-                  <span className="font-bold text-slate-900 dark:text-white">75 vales × Gs. 100.000</span>
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    {summary?.total_emitidos || 0} vales emitidos
+                  </span>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Total a Facturar:</span>
-                  <span className="font-black text-slate-900 dark:text-white">Gs. 7.500.000</span>
+                  <span className="font-black text-slate-900 dark:text-white">
+                    {formatPYG(summary?.monto_total_emitido || 0)}
+                  </span>
                 </div>
               </div>
 
               <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-start gap-2 text-[11px] text-slate-500">
                 <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
                 <p>
-                  <strong>¿Por qué EXENTA?</strong> Porque se trata de un anticipo de fondos / medio de pago prepago. El IVA de las mercaderías se liquida y factura en las cajas cuando los beneficiarios canjean los productos. La UP deduce el 100% en IRE con esta factura.
+                  <strong>¿Por qué EXENTA?</strong> Porque se trata de un anticipo de fondos / medio de pago prepago. El IVA de las mercaderías se liquida y factura en las cajas registradoras cuando los beneficiarios canjean los productos. El cliente corporativo deduce el 100% en IRE con esta factura.
                 </p>
               </div>
             </div>
@@ -637,7 +718,7 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
             <form onSubmit={handleLinkInvoice} className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                  Número de Factura Emitida a la UP (*):
+                  Número de Factura Emitida (*):
                 </label>
                 <input
                   type="text"
@@ -647,7 +728,7 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 />
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Este número quedará asociado a los 75 vales en la base de datos para trazabilidad y auditoría fiscal.
+                  Este número quedará asociado a todos los vales de este convenio en la base de datos para trazabilidad y auditoría fiscal.
                 </p>
               </div>
 
@@ -698,7 +779,7 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
                     Registrar Nuevo Lote de Vales
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Emisión de vales de compra corporativos con código de barras
+                    Emisión de vales corporativos para cualquier cliente o institución
                   </p>
                 </div>
               </div>
@@ -713,14 +794,14 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
             <form onSubmit={handleCreateBatch} className="space-y-3.5 text-xs">
               <div>
                 <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                  Nombre del Convenio / Institución (*):
+                  Nombre del Convenio / Institución / Empresa (*):
                 </label>
                 <input
                   type="text"
                   required
                   value={batchForm.convenio_nombre}
                   onChange={(e) => setBatchForm({ ...batchForm, convenio_nombre: e.target.value })}
-                  placeholder="Ej: Universidad del Pacífico, Hospital Regional..."
+                  placeholder="Ej: Banco Continental, Cooperativa PJC, Sanatorio..."
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-bold focus:ring-2 focus:ring-orange-500 outline-none"
                 />
               </div>
@@ -734,7 +815,7 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
                     type="text"
                     value={batchForm.cliente_ruc}
                     onChange={(e) => setBatchForm({ ...batchForm, cliente_ruc: e.target.value })}
-                    placeholder="80024467-2"
+                    placeholder="80012345-6"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono outline-none"
                   />
                 </div>
@@ -746,7 +827,7 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
                     type="text"
                     value={batchForm.cliente_razon_social}
                     onChange={(e) => setBatchForm({ ...batchForm, cliente_razon_social: e.target.value })}
-                    placeholder="UNIVERSIDAD DEL PACÍFICO"
+                    placeholder="Razón Social Completa S.A."
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 outline-none"
                   />
                 </div>
@@ -760,7 +841,7 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
                   <input
                     type="number"
                     min={1}
-                    max={500}
+                    max={1000}
                     required
                     value={batchForm.total_vales}
                     onChange={(e) => setBatchForm({ ...batchForm, total_vales: parseInt(e.target.value) || 0 })}
@@ -803,7 +884,7 @@ Observación: Anticipo de fondos prepago según Convenio Interinstitucional Extr
                     type="text"
                     value={batchForm.prefijo_codigo}
                     onChange={(e) => setBatchForm({ ...batchForm, prefijo_codigo: e.target.value })}
-                    placeholder="Ej: UP- (genera UP-076...)"
+                    placeholder="Ej: BC- (genera BC-001...)"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono outline-none"
                   />
                 </div>

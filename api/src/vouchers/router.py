@@ -83,6 +83,16 @@ async def seed_convenio_up_endpoint(
     )
 
 
+@router.get("/convenios")
+async def list_convenios_endpoint(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    """Lista todos los convenios institucionales registrados en la empresa."""
+    company_id = uuid.UUID(str(user.get("company_id", "00000000-0000-0000-0000-000000000010")))
+    return await service.list_convenios(db, company_id)
+
+
 @router.get("/summary", response_model=ConvenioSummaryResponse)
 async def get_summary_endpoint(
     convenio: str = Query(default="Universidad del Pacífico"),
@@ -92,6 +102,7 @@ async def get_summary_endpoint(
     """Resumen consolidado y detalle de todos los vales emitidos para el convenio."""
     company_id = uuid.UUID(str(user.get("company_id", "00000000-0000-0000-0000-000000000010")))
     return await service.get_convenio_summary(db, company_id, convenio)
+
 
 
 @router.post("/link-invoice")

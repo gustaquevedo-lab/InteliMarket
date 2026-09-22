@@ -119,7 +119,7 @@ const navGroups: NavGroup[] = [
     title: "Finanzas & Tesorería",
     items: [
       { icon: Banknote, label: "Arqueo de Caja", path: "/caja" },
-      { icon: Ticket, label: "Vales y Convenios (UP)", path: "/vales", keywords: ["vales", "convenio", "up", "universidad del pacifico"] },
+      { icon: Ticket, label: "Vales y Convenios", path: "/vales", keywords: ["vales", "convenio", "convenios", "up", "empresas", "gift card", "bonos"] },
       { icon: Landmark, label: "Bóveda Central", path: "/boveda" },
       { icon: Landmark, label: "Cuentas Bancarias", path: "/bancos" },
       { icon: CreditCard, label: "Gestión de Cheques", path: "/cheques" },

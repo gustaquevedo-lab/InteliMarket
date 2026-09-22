@@ -4726,6 +4726,7 @@ export const api = {
     }) => client.post<any>("/vouchers/redeem", data),
     seedUP: (data?: { total_vales?: number; monto_por_vale?: number; fecha_vencimiento?: string }) =>
       client.post<any>("/vouchers/seed-up", data || { total_vales: 75, monto_por_vale: 100000, fecha_vencimiento: "2026-12-31" }),
+    listConvenios: () => client.get<any[]>("/vouchers/convenios"),
     summary: (convenio = "Universidad del Pacífico") =>
       client.get<any>(`/vouchers/summary?convenio=${encodeURIComponent(convenio)}`),
     linkInvoice: (data: { convenio_nombre: string; factura_numero: string }) =>
