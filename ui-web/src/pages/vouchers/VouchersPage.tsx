@@ -31,6 +31,7 @@ import {
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDateTime, formatDate, getTodayAsuncion } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 
 interface VoucherItem {
   id: string
@@ -901,7 +902,14 @@ export default function VouchersPage() {
                 </div>
                 <div>
                   <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Monto por Vale (₲) (*)</label>
-                  <input type="number" step={1000} required value={batchForm.monto_por_vale} onChange={e => setBatchForm({ ...batchForm, monto_por_vale: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono font-bold outline-none transition" />
+                  <CurrencyInput
+                    currency="PYG"
+                    required
+                    value={batchForm.monto_por_vale}
+                    onChangeValue={(numVal) => setBatchForm({ ...batchForm, monto_por_vale: numVal })}
+                    placeholder="100.000"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono font-bold outline-none transition"
+                  />
                 </div>
               </div>
 

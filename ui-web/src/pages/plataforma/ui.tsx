@@ -53,10 +53,10 @@ export function Chip({ className, children, title }: { className?: string; child
 
 export function Card({ title, right, children, className, pad = true }: { title?: ReactNode; right?: ReactNode; children: ReactNode; className?: string; pad?: boolean }) {
   return (
-    <section className={cx("p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow space-y-4", className)}>
+    <section className={cx("p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition space-y-4", className)}>
       {(title || right) && (
-        <header className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-700/60">
-          <h3 className="text-base font-black text-gray-900 dark:text-white">{title}</h3>
+        <header className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+          <h3 className="text-base font-black text-slate-900 dark:text-white">{title}</h3>
           {right}
         </header>
       )}
@@ -79,30 +79,31 @@ export function Stat({
   tone?: "slate" | "rose" | "amber" | "emerald" | "sky" | "indigo" | "blue" | "purple"
 }) {
   const tones = {
-    slate: { iconBg: "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300", valColor: "text-slate-900 dark:text-white" },
-    rose: { iconBg: "bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400", valColor: "text-rose-600 dark:text-rose-400" },
-    amber: { iconBg: "bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400", valColor: "text-amber-600 dark:text-amber-400" },
-    emerald: { iconBg: "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400", valColor: "text-emerald-600 dark:text-emerald-400" },
-    sky: { iconBg: "bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400", valColor: "text-sky-600 dark:text-sky-400" },
-    indigo: { iconBg: "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400", valColor: "text-indigo-600 dark:text-indigo-400" },
-    blue: { iconBg: "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400", valColor: "text-blue-600 dark:text-blue-400" },
-    purple: { iconBg: "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400", valColor: "text-purple-600 dark:text-purple-400" },
+    slate: { bar: "bg-gradient-to-r from-slate-400 to-slate-600", iconBg: "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300", valColor: "text-slate-900 dark:text-white" },
+    rose: { bar: "bg-gradient-to-r from-rose-500 to-red-600", iconBg: "bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400", valColor: "text-rose-600 dark:text-rose-400" },
+    amber: { bar: "bg-gradient-to-r from-amber-500 to-orange-500", iconBg: "bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400", valColor: "text-amber-600 dark:text-amber-400" },
+    emerald: { bar: "bg-gradient-to-r from-emerald-500 to-teal-500", iconBg: "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400", valColor: "text-emerald-600 dark:text-emerald-400" },
+    sky: { bar: "bg-gradient-to-r from-sky-400 to-blue-500", iconBg: "bg-sky-50 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400", valColor: "text-sky-600 dark:text-sky-400" },
+    indigo: { bar: "bg-gradient-to-r from-indigo-500 to-cyan-500", iconBg: "bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400", valColor: "text-indigo-600 dark:text-indigo-400" },
+    blue: { bar: "bg-gradient-to-r from-blue-500 to-indigo-500", iconBg: "bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400", valColor: "text-blue-600 dark:text-blue-400" },
+    purple: { bar: "bg-gradient-to-r from-purple-500 to-pink-500", iconBg: "bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400", valColor: "text-purple-600 dark:text-purple-400" },
   }
   const t = tones[tone] || tones.indigo
 
   return (
-    <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{label}</span>
+    <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+      <div className={cx("h-1 w-full absolute top-0 left-0", t.bar)} />
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">{label}</span>
         <div className={cx("p-2 rounded-xl", t.iconBg)}>
           {icon}
         </div>
       </div>
-      <p className={cx("text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate", t.valColor)}>
+      <p className={cx("text-2xl font-black font-mono", t.valColor)}>
         {value}
       </p>
       {sub && (
-        <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
+        <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
           {typeof sub === "string" ? <span>{sub}</span> : sub}
         </div>
       )}

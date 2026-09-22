@@ -59,3 +59,11 @@
    - **Playwright Local:** No depender del subagente interno del navegador si falla la descarga de binarios de Azure CDN. Utilizar el entorno de Playwright configurado en `tests-pos/` (`node tests-pos/...` o `npx playwright test`), el cual ya cuenta con Chromium instalado localmente y permite validar la interfaz del POS (`http://100.83.91.76:5173/pos`) generando capturas y aserciones.
    - **Control de Cajas Físicas vía WinRM:** Para interactuar, diagnosticar o reiniciar las PCs de las Cajas 2, 3, 4 y 5 (Windows), utilizar el puerto 5985 desde la VM con el helper `/tmp/run_winrm.py` o tareas programadas interactivas.
    - **Evidencia Obligatoria:** Todo cambio en la lógica del POS o del offline-first requiere evidencia real ejecutada (logs, capturas o queries SQL con servidor simulado/apagado) antes de ser considerado completado.
+
+10. **FORMATO CANÓNICO DE MONTOS E INPUTS DE MONEDA (OBLIGATORIO Y DEFINITIVO):**
+   - **PROHIBICIÓN ESTRICTA:** Queda terminantemente PROHIBIDO utilizar `<input type="number">` o `<input type="text">` plano sin máscara para importes de dinero (precios, costos, líneas de crédito, cuotas, saldos, desembolsos, anticipos, totales o valores de vales). En HTML nativo, `type="number"` rompe o ignora los separadores de miles de la región.
+   - **COMPONENTE CANÓNICO OBLIGATORIO:** Todo formulario de frontend que reciba o edite un monto monetario DEBE utilizar exclusivamente el componente `<CurrencyInput />` (`src/components/CurrencyInput.tsx`).
+   - **Formato Paraguay (PYG):** Guaraníes siempre enteros, sin decimales, con separador de miles por punto (`.`), ej: `1.500.000`.
+   - **Formato Divisas (USD / BRL):** Con separador de miles por punto (`.`) y centavos por coma (`,`), ej: `1.250,50`.
+   - **Visualización en Pantallas / Tablas:** Se debe emplear siempre `formatPYG()`, `formatCurrency()`, `formatBRL()` o `formatUSD()` de `src/utils/format.ts`. Nunca imprimir números crudos sin formato en montos de dinero.
+

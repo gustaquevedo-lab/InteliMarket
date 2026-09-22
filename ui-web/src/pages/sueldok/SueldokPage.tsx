@@ -49,6 +49,7 @@ import {
   CartesianGrid,
 } from "recharts"
 import { formatPYG, formatDate, formatDateTime, getTodayAsuncion } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 
 // ── Configuración de Integración con SueldOK ──────────────────────────
 const SUELDOK_BASE_URL = "https://sueldok.intellihouse.lat"
@@ -160,13 +161,13 @@ export default function SueldokPage() {
 
   // Estados de formularios de modales
   const [anticipoEmpId, setAnticipoEmpId] = useState("")
-  const [anticipoMonto, setAnticipoMonto] = useState("")
+  const [anticipoMonto, setAnticipoMonto] = useState<number | string>("")
   const [anticipoMotivo, setAnticipoMotivo] = useState("Anticipo quincenal de haberes")
   const [anticipoFecha, setAnticipoFecha] = useState(() => getTodayAsuncion())
 
   const [descuentoEmpId, setDescuentoEmpId] = useState("")
   const [descuentoTipo, setDescuentoTipo] = useState("Faltante de Arqueo de Caja")
-  const [descuentoMonto, setDescuentoMonto] = useState("")
+  const [descuentoMonto, setDescuentoMonto] = useState<number | string>("")
   const [descuentoCuotas, setDescuentoCuotas] = useState("1")
   const [descuentoPeriodo, setDescuentoPeriodo] = useState("2026-09")
   const [descuentoObs, setDescuentoObs] = useState("")
@@ -410,7 +411,7 @@ export default function SueldokPage() {
   const handleRegistrarAnticipo = () => {
     if (!anticipoEmpId || !anticipoMonto) return
     const emp = employees.find((e: any) => e.id === anticipoEmpId)
-    const montoNum = parseInt(anticipoMonto.replace(/\./g, "").replace(/,/g, "")) || 0
+    const montoNum = typeof anticipoMonto === "number" ? anticipoMonto : parseInt(String(anticipoMonto).replace(/\./g, "").replace(/,/g, "")) || 0
     if (montoNum <= 0) return
 
     const nuevo = {
@@ -435,7 +436,7 @@ export default function SueldokPage() {
   const handleRegistrarDescuento = () => {
     if (!descuentoEmpId || !descuentoMonto) return
     const emp = employees.find((e: any) => e.id === descuentoEmpId)
-    const montoNum = parseInt(descuentoMonto.replace(/\./g, "").replace(/,/g, "")) || 0
+    const montoNum = typeof descuentoMonto === "number" ? descuentoMonto : parseInt(String(descuentoMonto).replace(/\./g, "").replace(/,/g, "")) || 0
     if (montoNum <= 0) return
 
     const nuevo = {
@@ -1359,11 +1360,11 @@ export default function SueldokPage() {
 
               <div>
                 <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Monto del Anticipo (₲) *</label>
-                <input
-                  type="text"
-                  placeholder="Ej: 500.000"
+                <CurrencyInput
+                  currency="PYG"
+                  placeholder="500.000"
                   value={anticipoMonto}
-                  onChange={(e) => setAnticipoMonto(e.target.value)}
+                  onChangeValue={(val) => setAnticipoMonto(val)}
                   className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-sm font-black text-slate-900 dark:text-white outline-none"
                 />
               </div>
@@ -1465,11 +1466,11 @@ export default function SueldokPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Monto Total (₲) *</label>
-                  <input
-                    type="text"
-                    placeholder="Ej: 80.000"
+                  <CurrencyInput
+                    currency="PYG"
+                    placeholder="80.000"
                     value={descuentoMonto}
-                    onChange={(e) => setDescuentoMonto(e.target.value)}
+                    onChangeValue={(val) => setDescuentoMonto(val)}
                     className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-sm font-black text-slate-900 dark:text-white outline-none"
                   />
                 </div>

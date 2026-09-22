@@ -37,14 +37,11 @@ export default function ResumenTab({ ov, loading, onOpenIssue, goTab }: { ov: Ov
   return (
     <div className="space-y-6">
       {/* Semáforo General Ejecutivo */}
-      <div className={cx(
-        "p-5 sm:p-6 rounded-2xl border shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-5 transition-all duration-200",
-        todoBien
-          ? "bg-emerald-50/70 dark:bg-emerald-950/25 border-emerald-200 dark:border-emerald-800/60"
-          : i.fatal > 0
-            ? "bg-rose-50/70 dark:bg-rose-950/25 border-rose-200 dark:border-rose-800/60"
-            : "bg-amber-50/70 dark:bg-amber-950/25 border-amber-200 dark:border-amber-800/60"
-      )}>
+      <div className="relative overflow-hidden rounded-2xl p-5 border shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-5 transition-all duration-200 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+        <div className={cx(
+          "h-1 w-full absolute top-0 left-0",
+          todoBien ? "bg-gradient-to-r from-emerald-500 to-teal-500" : i.fatal > 0 ? "bg-gradient-to-r from-rose-600 to-red-600" : "bg-gradient-to-r from-amber-500 to-orange-500"
+        )} />
         <div className="flex items-center gap-4">
           <div className={cx(
             "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-md",
@@ -58,21 +55,21 @@ export default function ResumenTab({ ov, loading, onOpenIssue, goTab }: { ov: Ov
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base sm:text-lg font-black text-gray-900 dark:text-white">
+              <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
                 {todoBien ? "Plataforma Estable · Sin Incidencias" : `${i.unresolved} ${i.unresolved === 1 ? "Incidencia Abierta" : "Incidencias Abiertas"}`}
               </h2>
               <span className={cx(
                 "px-2 py-0.5 text-[11px] font-black rounded-full font-mono",
                 todoBien
-                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300"
+                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700"
                   : i.fatal > 0
-                    ? "bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-300"
-                    : "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
+                    ? "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300 dark:border-rose-700"
+                    : "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700"
               )}>
                 {todoBien ? "100% OPERATIVO" : i.fatal > 0 ? "CRÍTICO" : "ATENCIÓN"}
               </span>
             </div>
-            <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               {todoBien
                 ? `Cero fallos abiertos en cajas o servicios. ${num(ov.events_24h_total)} eventos procesados en las últimas 24 horas.`
                 : `${num(ov.events_24h_total)} eventos en 24h${i.fatal ? ` · ${i.fatal} fatal(es)` : ""}${i.new_24h ? ` · ${i.new_24h} nueva(s) hoy` : ""}. Requieren diagnóstico.`}
@@ -83,9 +80,9 @@ export default function ResumenTab({ ov, loading, onOpenIssue, goTab }: { ov: Ov
         {!todoBien && (
           <button
             onClick={() => goTab("incidencias")}
-            className="px-4 py-2 rounded-xl bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-gray-900 text-xs font-black transition-all shadow-md cursor-pointer whitespace-nowrap"
+            className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-xs font-black transition-all shadow-md cursor-pointer whitespace-nowrap"
           >
-            Ver incidencias & diagnóstico →
+            Ver incidencias &amp; diagnóstico →
           </button>
         )}
       </div>
