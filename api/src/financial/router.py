@@ -112,6 +112,25 @@ async def pay_invoice(invoice_id: str, body: SupplierInvoicePaymentCreate, user_
     return {"pending_approval": False, "id": str(payment.id), "invoice_id": str(payment.invoice_id), "monto": float(payment.monto), "estado": payment.estado}
 
 
+@router.post("/invoices/{invoice_id}/revert-payment", response_model=SupplierInvoiceResponse)
+async def revert_invoice_payment(
+    invoice_id: str,
+    motivo: str | None = Query(None),
+    company_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _resolve_company_id(company_id, user)
+    return await service.revert_supplier_invoice_payment(
+        db=db,
+        company_id=cid,
+        invoice_id=invoice_id,
+        user_id=user.get("id"),
+        motivo=motivo,
+    )
+
+
+
 @router.get("/aging", response_model=dict)
 async def get_aging(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
     return await service.get_ap_aging(db, company_id)

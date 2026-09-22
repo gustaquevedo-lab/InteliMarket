@@ -975,6 +975,105 @@ async def get_expense(db: AsyncSession, expense_id: str) -> Expense | None:
     return exp
 
 
+async def revert_expense_payment(
+    db: AsyncSession,
+    expense_id: str,
+    user_id: str,
+    tenant_id: str,
+    fund_id: str | None = None,
+    nuevo_estado: str = "aprobado",
+    motivo: str | None = None,
+) -> Expense:
+    """Revierte la condición de 'pagado' de un comprobante de gasto (especialmente útil
+    para gastos importados del legacy o liquidados previamente) para permitir incluirlo
+    en una Rendición de Cuentas de Fondo Fijo o volver a pagarlo con el flujo InteliMarket."""
+    exp = await get_expense(db, expense_id)
+    if not exp or str(exp.company_id) != tenant_id:
+        raise HTTPException(status_code=404, detail="Gasto no encontrado")
+
+    if exp.rendicion_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Este comprobante ya está incluido en un expediente de rendición de cuentas. Debe desvincularlo de la rendición primero."
+        )
+
+    # Revertir/limpiar desembolsos registrados si existen
+    disb_res = await db.execute(
+        select(ExpenseDisbursement).where(ExpenseDisbursement.expense_id == exp.id)
+    )
+    disbursements = list(disb_res.scalars().all())
+    for d in disbursements:
+        if d.petty_cash_fund_id:
+            fund = await db.get(PettyCashFund, d.petty_cash_fund_id)
+            if fund:
+                fund.saldo_actual += d.monto
+                db.add(PettyCashFundMovement(
+                    fund_id=fund.id,
+                    tipo="ajuste",
+                    monto=d.monto,
+                    saldo_anterior=fund.saldo_actual - d.monto,
+                    saldo_nuevo=fund.saldo_actual,
+                    referencia_type="reversion_pago_gasto",
+                    referencia_id=exp.id,
+                    observaciones=f"Reversión de pago de gasto: {exp.descripcion}",
+                    created_by=uuid.UUID(user_id) if user_id else None,
+                ))
+        await db.delete(d)
+
+    # Revertir estado y campos de liquidación
+    exp.estado = nuevo_estado if nuevo_estado in {"aprobado", "pendiente"} else "aprobado"
+    exp.fecha_pago = None
+    exp.pagado_por = None
+    exp.pagado_at = None
+    exp.forma_pago_resumen = None
+
+    if fund_id:
+        exp.fund_id = uuid.UUID(fund_id)
+
+    motivo_txt = f" [Reversión de Pago: {motivo}]" if motivo else " [Reversión de Pago / Habilitado para Rendición]"
+    exp.notas = ((exp.notas or "") + motivo_txt).strip()
+
+    await db.commit()
+    await db.refresh(exp)
+    exp.disbursements = []
+    return exp
+
+
+async def revert_expenses_batch(
+    db: AsyncSession,
+    company_id: str,
+    expense_ids: list[str],
+    user_id: str,
+    fund_id: str | None = None,
+    nuevo_estado: str = "aprobado",
+    motivo: str | None = None,
+) -> dict:
+    reverted = []
+    errors = []
+    for eid in expense_ids:
+        try:
+            exp = await revert_expense_payment(
+                db=db,
+                expense_id=eid,
+                user_id=user_id,
+                tenant_id=company_id,
+                fund_id=fund_id,
+                nuevo_estado=nuevo_estado,
+                motivo=motivo,
+            )
+            reverted.append(str(exp.id))
+        except Exception as err:
+            errors.append({"id": eid, "error": str(err)})
+
+    return {
+        "success": True,
+        "reverted_count": len(reverted),
+        "reverted_ids": reverted,
+        "errors": errors,
+    }
+
+
+
 async def list_expenses(
     db: AsyncSession, company_id: str, branch_id: str | None = None,
     fund_id: str | None = None, rendicion_id: str | None = None,

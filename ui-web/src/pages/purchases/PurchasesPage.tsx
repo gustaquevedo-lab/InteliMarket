@@ -10,7 +10,7 @@ import {
   Sparkles, Sun, CloudRain, Snowflake, Flame, ShieldAlert, Scale, CheckCircle,
   HelpCircle, AlertCircle, Box, Layers, Building2, Phone, Mail, MapPin, SlidersHorizontal,
   ChevronRight, ArrowUpDown, ChevronLeft, CheckSquare, Square, PieChart, Undo2, Receipt, History, Star,
-  Lock, Unlock, FileCheck, Barcode
+  Lock, Unlock, FileCheck, Barcode, RotateCcw
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import {
@@ -159,6 +159,7 @@ export default function PurchasesPage() {
   const [filterInvoiceStatus, setFilterInvoiceStatus] = useState("todos")
   const [pageInvoices, setPageInvoices] = useState(1)
   const pageSizeInvoices = 15
+  const [revertingInvoiceId, setRevertingInvoiceId] = useState<string | null>(null)
 
   // Ficha 360° del Proveedor (Scorecard OTIF & Historial de Precios)
   const [showSupplier360Modal, setShowSupplier360Modal] = useState(false)
@@ -1446,6 +1447,24 @@ export default function PurchasesPage() {
       setShowMatchModal(false)
     } finally {
       setPerformingMatch(false)
+    }
+  }
+
+  const handleRevertInvoicePayment = async (inv: any) => {
+    const provName = inv.supplier_nombre || inv.proveedor_nombre || "Proveedor"
+    const nro = inv.numero_factura || inv.id
+    if (!window.confirm(`¿Desea revertir la condición de pagada de la factura N° ${nro} (${provName})?\n\nLa factura volverá a estado 'pendiente' y su saldo pendiente volverá al total original para poder tramitarse o pagarse formalmente.`)) {
+      return
+    }
+    setRevertingInvoiceId(inv.id)
+    try {
+      await api.financial.invoices.revertPayment(inv.id, "Reversión desde panel de compras para inclusión en flujo InteliMarket")
+      toast.success("Factura Revertida", "La factura ha vuelto a estado 'pendiente' con saldo pendiente restablecido.")
+      fetchAll()
+    } catch (err: any) {
+      toast.error("Error al revertir factura", err.message || String(err))
+    } finally {
+      setRevertingInvoiceId(null)
     }
   }
 
@@ -4022,15 +4041,29 @@ export default function PurchasesPage() {
                           </span>
                         </td>
                         <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleOpen3WayMatch(inv.id)}
-                            className="btn-secondary text-xs px-2.5 py-1 inline-flex items-center gap-1 hover:text-indigo-600"
-                            title="Auditar Orden vs Muelle vs Factura"
-                          >
-                            <Scale className="w-3.5 h-3.5 text-indigo-500" />
-                            3-Way Match
-                          </button>
+                          <div className="flex flex-col items-center gap-1.5 justify-center">
+                            <button
+                              type="button"
+                              onClick={() => handleOpen3WayMatch(inv.id)}
+                              className="btn-secondary text-xs px-2.5 py-1 inline-flex items-center gap-1 hover:text-indigo-600"
+                              title="Auditar Orden vs Muelle vs Factura"
+                            >
+                              <Scale className="w-3.5 h-3.5 text-indigo-500" />
+                              3-Way Match
+                            </button>
+                            {inv.estado === "pagada" && (
+                              <button
+                                type="button"
+                                onClick={() => handleRevertInvoicePayment(inv)}
+                                disabled={revertingInvoiceId === inv.id}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700/60 rounded-md transition-all shadow-xs"
+                                title="Revertir condición de pagada para procesar por InteliMarket"
+                              >
+                                <RotateCcw className={`w-3 h-3 text-amber-600 ${revertingInvoiceId === inv.id ? "animate-spin" : ""}`} />
+                                <span>Revertir</span>
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}

@@ -6,7 +6,7 @@ import {
   Paperclip, ClipboardCheck, Scale, Filter, Eye, RefreshCw, ShieldAlert, ArrowRight,
   SlidersHorizontal, Check, AlertCircle, FileText, Download, Calendar, Tag,
   FileSpreadsheet, Printer, PieChart, BookOpen, FileCheck, ScrollText, CheckCheck,
-  Pencil, Package
+  Pencil, Package, RotateCcw, X
 } from "lucide-react"
 import {
   api, API_ORIGIN, type Expense, type ExpenseCategory, type CostCenter,
@@ -154,6 +154,18 @@ export default function ExpensesPage() {
   const [paymentModalExpense, setPaymentModalExpense] = useState<Expense | null>(null)
   const [downloadingReceiptId, setDownloadingReceiptId] = useState<string | null>(null)
   const [downloadingConsolidatedPdf, setDownloadingConsolidatedPdf] = useState(false)
+
+  // Reversión de condición de pagado (Gastos Legacy / Comprobantes)
+  const [revertModalExpense, setRevertModalExpense] = useState<Expense | null>(null)
+  const [revertFundId, setRevertFundId] = useState<string>("")
+  const [revertNuevoEstado, setRevertNuevoEstado] = useState<string>("aprobado")
+  const [revertMotivo, setRevertMotivo] = useState<string>("")
+  const [revertingPayment, setRevertingPayment] = useState<boolean>(false)
+  const [selectedPaidExpenseIds, setSelectedPaidExpenseIds] = useState<string[]>([])
+  const [showBatchRevertModal, setShowBatchRevertModal] = useState<boolean>(false)
+  const [batchRevertFundId, setBatchRevertFundId] = useState<string>("")
+  const [batchRevertMotivo, setBatchRevertMotivo] = useState<string>("")
+  const [batchReverting, setBatchReverting] = useState<boolean>(false)
 
   // Autocomplete proveedores en modal de gasto
   const [suppliersList, setSuppliersList] = useState<any[]>([])
@@ -633,6 +645,53 @@ export default function ExpensesPage() {
       toast.error("Error al anular", e.message)
     }
   }
+
+  const handleConfirmRevertExpense = async () => {
+    if (!revertModalExpense) return
+    setRevertingPayment(true)
+    try {
+      await api.expenses.revertPayment(revertModalExpense.id, {
+        fund_id: revertFundId || undefined,
+        nuevo_estado: revertNuevoEstado,
+        motivo: revertMotivo,
+      })
+      toast.success(
+        "Condición de Pago Revertida",
+        `El comprobante quedó en estado '${revertNuevoEstado}' y disponible para rendir o pagar.`
+      )
+      setRevertModalExpense(null)
+      fetchAll()
+    } catch (err: any) {
+      toast.error("Error al revertir pago", err.message || String(err))
+    } finally {
+      setRevertingPayment(false)
+    }
+  }
+
+  const handleConfirmBatchRevert = async () => {
+    if (selectedPaidExpenseIds.length === 0) return
+    setBatchReverting(true)
+    try {
+      const res = await api.expenses.batchRevertPayments({
+        expense_ids: selectedPaidExpenseIds,
+        fund_id: batchRevertFundId || undefined,
+        nuevo_estado: "aprobado",
+        motivo: batchRevertMotivo || "Reversión masiva para rendición",
+      })
+      toast.success(
+        "Lote de Gastos Revertido",
+        `Se revirtieron exitosamente ${res.reverted_count} gastos a estado 'aprobado'.`
+      )
+      setShowBatchRevertModal(false)
+      setSelectedPaidExpenseIds([])
+      fetchAll()
+    } catch (err: any) {
+      toast.error("Error al procesar lote", err.message || String(err))
+    } finally {
+      setBatchReverting(false)
+    }
+  }
+
 
   const handleDownloadReceiptPdf = async (expenseId: string) => {
     setDownloadingReceiptId(expenseId)
@@ -1749,6 +1808,22 @@ export default function ExpensesPage() {
                       ))}
                     </select>
 
+                    {selectedPaidExpenseIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBatchRevertFundId(funds[0]?.id || "")
+                          setBatchRevertMotivo("Reversión masiva para rendición de cuentas")
+                          setShowBatchRevertModal(true)
+                        }}
+                        className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition shadow-sm whitespace-nowrap"
+                        title="Revertir gastos seleccionados para habilitarlos en rendición"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Revertir Lote ({selectedPaidExpenseIds.length})</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={handleDownloadConsolidatedPdf}
@@ -1773,6 +1848,29 @@ export default function ExpensesPage() {
                   <table className="w-full text-left">
                     <thead>
                       <tr className="bg-slate-50 dark:bg-slate-800/90 text-[11px] font-bold text-gray-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">
+                        <th className="p-3.5 w-8 text-center">
+                          <input
+                            type="checkbox"
+                            className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            checked={
+                              filteredExpenses.filter(e => e.estado === "pagado" && !e.rendicion_id).length > 0 &&
+                              filteredExpenses
+                                .filter(e => e.estado === "pagado" && !e.rendicion_id)
+                                .every(e => selectedPaidExpenseIds.includes(e.id))
+                            }
+                            onChange={(ev) => {
+                              const eligibleIds = filteredExpenses
+                                .filter(e => e.estado === "pagado" && !e.rendicion_id)
+                                .map(e => e.id)
+                              if (ev.target.checked) {
+                                setSelectedPaidExpenseIds(Array.from(new Set([...selectedPaidExpenseIds, ...eligibleIds])))
+                              } else {
+                                setSelectedPaidExpenseIds(selectedPaidExpenseIds.filter(id => !eligibleIds.includes(id)))
+                              }
+                            }}
+                            title="Seleccionar todos los gastos pagados sin rendición"
+                          />
+                        </th>
                         <th className="p-3.5">Fecha</th>
                         <th className="p-3.5">Descripción & Comprobante</th>
                         <th className="p-3.5">Proveedor</th>
@@ -1793,9 +1891,29 @@ export default function ExpensesPage() {
                         const rendId = e.rendicion_id || rend?.id
                         const rendFecha = e.rendicion_fecha || rend?.fecha_presentacion || rend?.created_at
                         const rendCustodio = rend?.custodio_nombre
+                        const isEligibleForRevert = e.estado === "pagado" && !e.rendicion_id
 
                         return (
                           <tr key={e.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                            <td className="p-3.5 text-center">
+                              {isEligibleForRevert ? (
+                                <input
+                                  type="checkbox"
+                                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                  checked={selectedPaidExpenseIds.includes(e.id)}
+                                  onChange={(ev) => {
+                                    if (ev.target.checked) {
+                                      setSelectedPaidExpenseIds(prev => [...prev, e.id])
+                                    } else {
+                                      setSelectedPaidExpenseIds(prev => prev.filter(id => id !== e.id))
+                                    }
+                                  }}
+                                  title="Seleccionar para revertir lote"
+                                />
+                              ) : (
+                                <span className="text-slate-300 dark:text-slate-600 text-xs">•</span>
+                              )}
+                            </td>
                             <td className="p-3.5 font-mono text-gray-500 whitespace-nowrap">
                               {e.fecha_gasto ? new Date(e.fecha_gasto).toLocaleDateString("es-PY") : "—"}
                             </td>
@@ -1979,6 +2097,23 @@ export default function ExpensesPage() {
                                   >
                                     <Wallet className="w-3.5 h-3.5" />
                                     Pagar
+                                  </button>
+                                )}
+
+                                {/* 2.b Si está pagado: Botón Revertir Pago (para meterlo a Rendición o pagar por InteliMarket) */}
+                                {e.estado === "pagado" && !e.rendicion_id && (
+                                  <button
+                                    onClick={() => {
+                                      setRevertModalExpense(e)
+                                      setRevertFundId(e.fund_id || (funds[0]?.id || ""))
+                                      setRevertNuevoEstado("aprobado")
+                                      setRevertMotivo("Revertir para incluir en Rendición de Cuentas")
+                                    }}
+                                    title="Revertir condición de pagado para habilitar en rendición o pago formal"
+                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700/60 rounded-lg transition-all"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                                    Revertir
                                   </button>
                                 )}
 
@@ -4053,6 +4188,229 @@ export default function ExpensesPage() {
             fetchAll()
           }}
         />
+      )}
+
+      {/* MODAL: REVERSIÓN DE PAGO DE GASTO / COMPROBANTE */}
+      {revertModalExpense && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-700 space-y-5">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                  <RotateCcw className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                    Revertir Condición de Pagado
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Habilitar gasto para rendición de cuentas o liquidación en InteliMarket
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRevertModalExpense(null)}
+                disabled={revertingPayment}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Resumen del gasto */}
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-700/60 space-y-2 text-xs">
+              <div className="flex justify-between items-start">
+                <span className="text-gray-500">Descripción:</span>
+                <span className="font-bold text-gray-900 dark:text-white text-right max-w-xs">{revertModalExpense.descripcion}</span>
+              </div>
+              {revertModalExpense.proveedor && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Proveedor:</span>
+                  <span className="font-medium text-gray-800 dark:text-gray-200">{revertModalExpense.proveedor}</span>
+                </div>
+              )}
+              {revertModalExpense.numero_factura && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Factura / Comprobante:</span>
+                  <span className="font-mono font-semibold text-gray-800 dark:text-gray-200">N° {revertModalExpense.numero_factura}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
+                <span className="text-gray-500 font-semibold">Monto Total:</span>
+                <span className="font-mono font-extrabold text-base text-gray-900 dark:text-white">
+                  {formatPYG(revertModalExpense.monto)}
+                </span>
+              </div>
+            </div>
+
+            {/* Configuración de la Reversión */}
+            <div className="space-y-3.5 text-xs">
+              <div>
+                <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                  Asignar a Caja Chica / Fondo Fijo <span className="text-indigo-600 font-normal">(Requerido para Rendición)</span>
+                </label>
+                <select
+                  className="input-field w-full text-xs"
+                  value={revertFundId}
+                  onChange={e => setRevertFundId(e.target.value)}
+                >
+                  <option value="">-- Sin Fondo Fijo Asignado --</option>
+                  {funds.map(f => (
+                    <option key={f.id} value={f.id}>
+                      {f.nombre} ({f.custodio_nombre || "Custodio"} - Saldo: {formatPYG(f.saldo_actual || 0)})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Los gastos importados del legacy suelen tener fondo nulo. Asígnalo aquí para que aparezca en la rendición de esa caja.
+                </p>
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                  Nuevo Estado
+                </label>
+                <select
+                  className="input-field w-full text-xs"
+                  value={revertNuevoEstado}
+                  onChange={e => setRevertNuevoEstado(e.target.value)}
+                >
+                  <option value="aprobado">Aprobado (Listo para rendir o pagar)</option>
+                  <option value="pendiente">Pendiente (Requiere aprobación previa)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                  Motivo / Observación
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej: Revertido para incluir en rendición de caja chica..."
+                  className="input-field w-full text-xs"
+                  value={revertMotivo}
+                  onChange={e => setRevertMotivo(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl text-[11px] text-amber-800 dark:text-amber-300">
+              ⚠️ Esta acción eliminará los desembolsos de pago previos y dejará el comprobante habilitado para ser incluido en la rendición o liquidación correspondiente.
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => setRevertModalExpense(null)}
+                disabled={revertingPayment}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRevertExpense}
+                disabled={revertingPayment}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-amber-600/20 disabled:opacity-50"
+              >
+                {revertingPayment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                <span>{revertingPayment ? "Revirtiendo..." : "Confirmar Reversión"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: REVERSIÓN EN LOTE DE GASTOS */}
+      {showBatchRevertModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-700 space-y-5">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                  <RotateCcw className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                    Revertir Lote de Gastos ({selectedPaidExpenseIds.length})
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Habilitar selección masiva para inclusión en Rendición de Cuentas
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBatchRevertModal(false)}
+                disabled={batchReverting}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3.5 text-xs">
+              <div>
+                <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                  Asignar todos a Fondo / Caja Chica <span className="text-indigo-600 font-normal">(Requerido para Rendición)</span>
+                </label>
+                <select
+                  className="input-field w-full text-xs"
+                  value={batchRevertFundId}
+                  onChange={e => setBatchRevertFundId(e.target.value)}
+                >
+                  <option value="">-- Mantener Fondo Actual / Sin Asignar --</option>
+                  {funds.map(f => (
+                    <option key={f.id} value={f.id}>
+                      {f.nombre} ({f.custodio_nombre || "Custodio"})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Al seleccionar un fondo, todos los comprobantes del lote se asignarán a esa caja chica para poder ser presentados juntos en su rendición.
+                </p>
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                  Motivo de Reversión
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej: Inclusión masiva de gastos legacy en rendición de cuentas..."
+                  className="input-field w-full text-xs"
+                  value={batchRevertMotivo}
+                  onChange={e => setBatchRevertMotivo(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl text-[11px] text-amber-800 dark:text-amber-300">
+              ⚠️ Se cambiará el estado de los {selectedPaidExpenseIds.length} comprobantes a <strong>'aprobado'</strong> y quedarán disponibles para ser incorporados a una nueva rendición.
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => setShowBatchRevertModal(false)}
+                disabled={batchReverting}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBatchRevert}
+                disabled={batchReverting}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-amber-600/20 disabled:opacity-50"
+              >
+                {batchReverting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                <span>{batchReverting ? "Procesando Lote..." : `Revertir ${selectedPaidExpenseIds.length} Gastos`}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

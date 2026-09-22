@@ -210,6 +210,19 @@ class ExpenseVoidBody(BaseModel):
     motivo: str
 
 
+class ExpenseRevertPaymentRequest(BaseModel):
+    fund_id: Optional[str] = None
+    nuevo_estado: Optional[str] = "aprobado"  # aprobado | pendiente
+    motivo: Optional[str] = None
+
+
+class ExpenseBatchRevertPaymentRequest(BaseModel):
+    expense_ids: list[str]
+    fund_id: Optional[str] = None
+    nuevo_estado: Optional[str] = "aprobado"  # aprobado | pendiente
+    motivo: Optional[str] = None
+
+
 class ComprobanteUploadResponse(BaseModel):
     url: str
     filename: str

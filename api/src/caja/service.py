@@ -2435,6 +2435,21 @@ async def deposit_vault_entries(db: AsyncSession, company_id: str, entry_ids: li
     for e in entries:
         if e.estado != "en_boveda":
             continue
+        if (e.monto_brl and e.monto_brl > 0) or (e.monto_usd and e.monto_usd > 0):
+            db.add(VaultEntry(
+                company_id=uuid.UUID(company_id),
+                branch_id=e.branch_id,
+                origen=e.origen,
+                handoff_id=e.handoff_id,
+                monto_pyg=Decimal("0"),
+                monto_usd=e.monto_usd or Decimal("0"),
+                monto_brl=e.monto_brl or Decimal("0"),
+                estado="en_boveda",
+                registrado_por=e.registrado_por,
+                observaciones=f"Remanente divisa en bóveda tras depósito de lote en PYG (Ref: {e.id})",
+            ))
+            e.monto_brl = Decimal("0")
+            e.monto_usd = Decimal("0")
         e.estado = "depositado"
         e.fecha_deposito = datetime.now(timezone.utc)
         e.bank_transaction_id = uuid.UUID(bank_transaction_id) if bank_transaction_id else None
@@ -2958,6 +2973,21 @@ async def deposit_vault_to_bank(
     # 5. Marcar VaultEntry como depositado
     now_dt = datetime.now(timezone.utc)
     for e in entries:
+        if (e.monto_brl and e.monto_brl > 0) or (e.monto_usd and e.monto_usd > 0):
+            db.add(VaultEntry(
+                company_id=cid,
+                branch_id=e.branch_id,
+                origen=e.origen,
+                handoff_id=e.handoff_id,
+                monto_pyg=Decimal("0"),
+                monto_usd=e.monto_usd or Decimal("0"),
+                monto_brl=e.monto_brl or Decimal("0"),
+                estado="en_boveda",
+                registrado_por=e.registrado_por,
+                observaciones=f"Remanente divisa en bóveda tras depósito bancario en PYG Boleta #{numero_boleta}",
+            ))
+            e.monto_brl = Decimal("0")
+            e.monto_usd = Decimal("0")
         e.estado = "depositado"
         e.fecha_deposito = now_dt
         e.bank_transaction_id = bank_tx.id
@@ -3066,10 +3096,10 @@ async def deposit_vault_amount_to_bank(
             observaciones=f"Depósito en {acc.banco} ({acc.numero_cuenta or 'Sin cuenta'}) — Boleta #{numero_boleta}" + (f" ({transportadora})" if transportadora else "") + (f" — {observaciones}" if observaciones else ""),
         ))
 
-    # 6. Consumir entradas de bóveda FIFO
+    # 6. Consumir entradas de bóveda FIFO (únicamente entradas con saldo en Guaraníes)
     entries_res = await db.execute(
         select(VaultEntry)
-        .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda")
+        .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda", VaultEntry.monto_pyg > 0)
         .order_by(VaultEntry.created_at.asc())
     )
     vault_entries = list(entries_res.scalars().all())
@@ -3085,37 +3115,49 @@ async def deposit_vault_amount_to_bank(
         e_monto = Decimal(str(e.monto_pyg or 0))
 
         if e_monto <= remaining:
-            # Consumo total de esta entrada
-            e.estado = "depositado"
-            e.fecha_deposito = now_dt
-            e.bank_transaction_id = bank_tx.id
-            if user_id:
-                e.registrado_por = uuid.UUID(user_id)
+            # Si el sobre contenía Reales o Dólares, no se marcan como depositados en el banco
+            if (e.monto_brl and e.monto_brl > 0) or (e.monto_usd and e.monto_usd > 0):
+                db.add(VaultEntry(
+                    company_id=cid,
+                    branch_id=e.branch_id,
+                    origen=e.origen,
+                    handoff_id=e.handoff_id,
+                    monto_pyg=e_monto,
+                    monto_usd=Decimal("0"),
+                    monto_brl=Decimal("0"),
+                    estado="depositado",
+                    bank_transaction_id=bank_tx.id,
+                    fecha_deposito=now_dt,
+                    registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
+                    observaciones=f"Depósito bancario PYG Boleta #{numero_boleta}",
+                ))
+                e.monto_pyg = Decimal("0")
+                # e continúa en estado 'en_boveda' salvaguardando sus montos en BRL y USD
+            else:
+                e.estado = "depositado"
+                e.fecha_deposito = now_dt
+                e.bank_transaction_id = bank_tx.id
+                if user_id:
+                    e.registrado_por = uuid.UUID(user_id)
             remaining -= e_monto
         else:
             # Fraccionamiento: e_monto > remaining
-            remanente_monto = e_monto - remaining
-            remanente_entry = VaultEntry(
+            db.add(VaultEntry(
                 company_id=cid,
                 branch_id=e.branch_id,
-                origen="remanente",
+                origen=e.origen,
                 handoff_id=e.handoff_id,
-                monto_pyg=remanente_monto,
+                monto_pyg=remaining,
                 monto_usd=Decimal("0"),
                 monto_brl=Decimal("0"),
-                estado="en_boveda",
+                estado="depositado",
+                bank_transaction_id=bank_tx.id,
+                fecha_deposito=now_dt,
                 registrado_por=uuid.UUID(user_id) if user_id else e.registrado_por,
-                observaciones=f"Remanente en bóveda tras depósito parcial Boleta #{numero_boleta}",
-            )
-            db.add(remanente_entry)
-
-            # La entrada actual queda depositada por la porción transferida
-            e.monto_pyg = remaining
-            e.estado = "depositado"
-            e.fecha_deposito = now_dt
-            e.bank_transaction_id = bank_tx.id
-            if user_id:
-                e.registrado_por = uuid.UUID(user_id)
+                observaciones=f"Depósito parcial bancario PYG Boleta #{numero_boleta}",
+            ))
+            e.monto_pyg = e_monto - remaining
+            # e continúa en 'en_boveda' con su remanente en PYG y el 100% de sus Reales y Dólares intactos
             remaining = Decimal("0")
             break
 
@@ -4679,6 +4721,40 @@ async def confirm_session_cash_reception(
     if observaciones:
         nota_rec += f" Obs: {observaciones.strip()}"
     session_obj.observaciones = (session_obj.observaciones or "") + nota_rec
+
+    # ── Asegurar ingreso formal e inmediato en Bóveda Central (VaultEntry) ──
+    ve_res = await db.execute(
+        select(VaultEntry).where(
+            VaultEntry.company_id == cid,
+            (VaultEntry.handoff_id == handoff.id) | (VaultEntry.observaciones.ilike(f"%{str(sid)[:8]}%"))
+        ).order_by(VaultEntry.created_at.desc()).limit(1)
+    )
+    existing_ve = ve_res.scalar_one_or_none()
+
+    if existing_ve:
+        if existing_ve.estado == "en_boveda":
+            existing_ve.monto_pyg = monto_recibido_pyg
+            existing_ve.monto_brl = monto_recibido_brl
+            existing_ve.monto_usd = monto_recibido_usd
+            if user_id:
+                try:
+                    existing_ve.registrado_por = uuid.UUID(user_id)
+                except Exception:
+                    pass
+    else:
+        if monto_recibido_pyg > 0 or monto_recibido_brl > 0 or monto_recibido_usd > 0:
+            db.add(VaultEntry(
+                company_id=cid,
+                branch_id=register.branch_id if register else None,
+                origen="entrega_cajero",
+                handoff_id=handoff.id,
+                monto_pyg=monto_recibido_pyg,
+                monto_usd=monto_recibido_usd,
+                monto_brl=monto_recibido_brl,
+                estado="en_boveda",
+                registrado_por=uuid.UUID(user_id) if user_id else None,
+                observaciones=f"Recepción y conteo físico en Tesorería [{str(sid)[:8]}] de {session_obj.cajero_nombre} ({register.nombre}). Obs: {observaciones or 'Conforme'}".strip(),
+            ))
 
     await db.commit()
     await db.refresh(handoff)

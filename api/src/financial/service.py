@@ -171,6 +171,39 @@ async def approve_invoice(db: AsyncSession, invoice_id: str, user_id: str | None
     return invoice
 
 
+async def revert_supplier_invoice_payment(
+    db: AsyncSession,
+    company_id: str,
+    invoice_id: str,
+    user_id: str | None = None,
+    motivo: str | None = None,
+) -> SupplierInvoice:
+    """Revierte una factura de proveedor de estado 'pagada' a 'pendiente',
+    restaurando su saldo_pendiente al total original para permitir procesarla
+    con órdenes de pago de InteliMarket o vincularla a gastos/rendiciones."""
+    cid = uuid.UUID(company_id)
+    iid = uuid.UUID(invoice_id)
+    res = await db.execute(
+        select(SupplierInvoice).where(SupplierInvoice.id == iid, SupplierInvoice.company_id == cid)
+    )
+    inv = res.scalar_one_or_none()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Factura de proveedor no encontrada")
+
+    inv.estado = "pendiente"
+    inv.saldo_pendiente = inv.total or Decimal("0")
+    if inv.total_brl:
+        inv.saldo_pendiente_brl = inv.total_brl
+
+    nota_rev = f" [Reversión condición pagada: {motivo}]" if motivo else " [Reversión condición pagada para gestionar en InteliMarket]"
+    inv.notas = ((inv.notas or "") + nota_rev).strip()
+
+    await db.commit()
+    await db.refresh(inv)
+    return inv
+
+
+
 async def register_payment(db: AsyncSession, invoice_id: str, data: SupplierInvoicePaymentCreate) -> tuple[SupplierInvoicePayment, SupplierInvoice] | None:
     invoice = await get_invoice(db, invoice_id)
     if not invoice:

@@ -16,6 +16,7 @@ from api.src.petty_cash.schemas import (
     PettyCashFundCreate, PettyCashFundUpdate, PettyCashFundResponse, PettyCashFundMovementResponse,
     ExpenseApprovalConfig, ExpenseRejectBody, FundReplenishRequest,
     ExpenseVoidBody, ComprobanteUploadResponse,
+    ExpenseRevertPaymentRequest, ExpenseBatchRevertPaymentRequest,
     FundCountCreate, FundCountConfirm, PettyCashFundCountResponse,
     PettyCashRendicionCreate, PettyCashRendicionAuditRequest, PettyCashRendicionReplenishRequest,
     PettyCashRendicionResponse, PettyCashRendicionDetailResponse,
@@ -503,6 +504,46 @@ async def void_expense(
     if "error" in result:
         raise HTTPException(status_code=403 if "No autorizado" in result["error"] else 400, detail=result["error"])
     return result["expense"]
+
+
+@router.post("/{expense_id}/revert-payment", response_model=ExpenseResponse)
+async def revert_expense_payment(
+    expense_id: str,
+    body: ExpenseRevertPaymentRequest = ExpenseRevertPaymentRequest(),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Revierte la condición de 'pagado' de un gasto (legacy o liquidado)
+    para permitir incluirlo en una rendición o gestionarlo con el flujo InteliMarket."""
+    return await service.revert_expense_payment(
+        db=db,
+        expense_id=expense_id,
+        user_id=user["id"],
+        tenant_id=user["company_id"],
+        fund_id=body.fund_id,
+        nuevo_estado=body.nuevo_estado or "aprobado",
+        motivo=body.motivo,
+    )
+
+
+@router.post("/batch-revert-payments")
+async def revert_expenses_batch(
+    body: ExpenseBatchRevertPaymentRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Revierte la condición de 'pagado' de múltiples gastos en bloque
+    para asignarlos a un fondo fijo o prepararlos para rendición."""
+    return await service.revert_expenses_batch(
+        db=db,
+        company_id=user["company_id"],
+        expense_ids=body.expense_ids,
+        user_id=user["id"],
+        fund_id=body.fund_id,
+        nuevo_estado=body.nuevo_estado or "aprobado",
+        motivo=body.motivo,
+    )
+
 
 
 @router.post("/upload-comprobante", response_model=ComprobanteUploadResponse)

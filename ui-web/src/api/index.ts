@@ -3401,6 +3401,8 @@ export const api = {
     approve: (id: string) => client.post<Expense>(`/v1/expenses/${id}/approve`),
     reject: (id: string, motivo: string) => client.post<Expense>(`/v1/expenses/${id}/reject`, { motivo }),
     void: (id: string, motivo: string) => client.post<Expense>(`/v1/expenses/${id}/void`, { motivo }),
+    revertPayment: (id: string, data?: { fund_id?: string; nuevo_estado?: string; motivo?: string }) => client.post<Expense>(`/v1/expenses/${id}/revert-payment`, data || {}),
+    batchRevertPayments: (data: { expense_ids: string[]; fund_id?: string; nuevo_estado?: string; motivo?: string }) => client.post<{ success: boolean; reverted_count: number; reverted_ids: string[]; errors: any[] }>("/v1/expenses/batch-revert-payments", data),
     disburse: (id: string, data: { fecha_pago?: string; disbursements: any[]; notas?: string }) => client.post<Expense>(`/v1/expenses/${id}/disburse`, data),
     getDisbursements: (id: string) => client.get<any[]>(`/v1/expenses/${id}/disbursements`),
     downloadPdf: (id: string) => downloadAuthenticated(`/v1/expenses/${id}/pdf`, {}, `recibo_gasto_${id.slice(0, 8)}.pdf`),
@@ -3454,6 +3456,10 @@ export const api = {
       create: (data: any) => client.post<SupplierInvoice>("/v1/financial/invoices", { company_id: COMPANY_ID, ...data }),
       approve: (id: string) => client.post<{ detail: string }>(`/v1/financial/invoices/${id}/approve`),
       pay: (id: string, data: any) => client.post<{ pending_approval: boolean; request_id?: string; id?: string; monto: number; estado?: string }>(`/v1/financial/invoices/${id}/pay`, data),
+      revertPayment: (id: string, motivo?: string) => {
+        const query = new URLSearchParams({ company_id: COMPANY_ID, ...(motivo ? { motivo } : {}) }).toString()
+        return client.post<SupplierInvoice>(`/v1/financial/invoices/${id}/revert-payment?${query}`)
+      },
       byReceipt: (receiptId: string) => client.get<{ found: boolean; id?: string; numero_factura?: string; total?: number; estado?: string }>(`/v1/financial/invoices/by-receipt/${receiptId}`),
       downloadStatementPdf: (supplierId: string) => downloadAuthenticated(`/v1/financial/suppliers/${supplierId}/statement.pdf`, { company_id: COMPANY_ID }, `estado_cuenta_proveedor_${supplierId.slice(0, 8)}.pdf`),
     },
