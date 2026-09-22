@@ -44,6 +44,9 @@ from fastapi import HTTPException
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+TZ_ASUNCION = ZoneInfo("America/Asuncion")
+
+
 def _now():
     return datetime.now(timezone.utc)
 
