@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react"
 import {
   Users, Clock, CheckCircle, XCircle, AlertTriangle, TrendingUp,
   DollarSign, ExternalLink, Search, RefreshCw, Activity, Briefcase,
-  UserCheck, UserX, Coffee, Fingerprint, ShieldCheck
+  UserCheck, UserX, Coffee, Fingerprint, ShieldCheck, Camera, X
 } from "lucide-react"
 
 // ── Configuración de Integración con SueldOK ──────────────────────────
@@ -71,6 +71,13 @@ export default function SueldokPage() {
     metrics?: any
     employees?: any[]
     todayAttendance?: any[]
+  } | null>(null)
+  const [selectedPunchPhoto, setSelectedPunchPhoto] = useState<{
+    photoUrl: string
+    nombre: string
+    hora: string
+    status: string
+    cargo?: string
   } | null>(null)
 
   // Carga reactiva de datos desde SueldOK
@@ -455,6 +462,35 @@ export default function SueldokPage() {
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                      {(att.checkInPhotoUrl || att.checkOutPhotoUrl) ? (
+                        <div 
+                          onClick={() => setSelectedPunchPhoto({
+                            photoUrl: att.checkInPhotoUrl || att.checkOutPhotoUrl,
+                            nombre: att.nombre,
+                            hora: att.checkInPhotoUrl ? `Entrada: ${att.horaEntrada}` : `Salida: ${att.horaSalida || "—"}`,
+                            status: cfg.label,
+                            cargo: `${att.cargo} · ${att.depto}`
+                          })}
+                          style={{ position: "relative", cursor: "pointer", flexShrink: 0 }}
+                          title="Ver foto capturada en el marcador Dahua"
+                        >
+                          <img 
+                            src={att.checkInPhotoUrl || att.checkOutPhotoUrl} 
+                            alt={att.nombre}
+                            style={{ 
+                              width: 44, height: 44, borderRadius: 12, objectFit: "cover",
+                              border: "2px solid #818cf8", boxShadow: "0 2px 8px rgba(0,0,0,0.4)"
+                            }} 
+                          />
+                          <div style={{
+                            position: "absolute", bottom: -4, right: -4, background: "#4f46e5",
+                            borderRadius: "50%", padding: 3, display: "flex", alignItems: "center", justifyContent: "center"
+                          }}>
+                            <Camera style={{ width: 10, height: 10, color: "white" }} />
+                          </div>
+                        </div>
+                      ) : null}
+
                       <div style={{ background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)", color: "#818cf8", borderRadius: 10, padding: "6px 12px", fontFamily: "monospace", fontSize: 14, fontWeight: 900 }}>
                         {att.horaEntrada || "—"}
                       </div>
@@ -567,6 +603,61 @@ export default function SueldokPage() {
             })}
           </div>
         </>
+      )}
+
+      {/* Modal Zoom Foto Dahua */}
+      {selectedPunchPhoto && (
+        <div 
+          onClick={() => setSelectedPunchPhoto(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 9999,
+            background: "rgba(0, 0, 0, 0.85)", backdropFilter: "blur(8px)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20
+          }}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: c.surface, border: `1px solid ${c.border}`, borderRadius: 24,
+              maxWidth: 420, width: "100%", overflow: "hidden", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)"
+            }}
+          >
+            <div style={{ position: "relative", width: "100%", aspectRatio: "4/5", background: "#000" }}>
+              <img 
+                src={selectedPunchPhoto.photoUrl} 
+                alt={selectedPunchPhoto.nombre}
+                style={{ width: "100%", height: "100%", objectFit: "contain" }}
+              />
+              <button
+                onClick={() => setSelectedPunchPhoto(null)}
+                style={{
+                  position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.6)",
+                  border: "none", color: "white", borderRadius: "50%", width: 32, height: 32,
+                  display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer"
+                }}
+              >
+                <X style={{ width: 18, height: 18 }} />
+              </button>
+              <div style={{
+                position: "absolute", bottom: 12, left: 12, background: "rgba(0,0,0,0.7)",
+                borderRadius: 8, padding: "4px 8px", display: "flex", alignItems: "center", gap: 6
+              }}>
+                <Camera style={{ width: 12, height: 12, color: "#818cf8" }} />
+                <span style={{ color: "white", fontSize: 11, fontWeight: 700 }}>Foto Reloj Dahua Facial</span>
+              </div>
+            </div>
+            <div style={{ padding: "16px 20px" }}>
+              <p style={{ color: "white", fontWeight: 800, fontSize: 16, margin: 0 }}>{selectedPunchPhoto.nombre}</p>
+              <p style={{ color: c.muted, fontSize: 13, margin: "4px 0 0" }}>{selectedPunchPhoto.cargo}</p>
+              <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontFamily: "monospace", color: "#818cf8", fontWeight: 800, fontSize: 14 }}>
+                  Hora: {selectedPunchPhoto.hora}
+                </span>
+                <span style={{ fontSize: 12, color: c.muted }}>Captura Biométrica Verificada</span>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

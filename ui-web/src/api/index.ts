@@ -4714,6 +4714,21 @@ export const api = {
     getLiquidaciones: (companyId?: string) => client.get<DonationLiquidation[]>("/v1/donaciones/liquidaciones", { company_id: companyId || COMPANY_ID }),
     liquidar: (data: any) => client.post<DonationLiquidation>("/v1/donaciones/liquidar", data),
   },
+  vouchers: {
+    check: (barcodeOrNumber: string) => client.get<any>(`/vouchers/check/${encodeURIComponent(barcodeOrNumber)}`),
+    redeem: (data: {
+      codigo_barras: string
+      sale_id?: string
+      caja_session_id?: string
+      caja_numero?: string
+      usuario_id?: string
+      beneficiario_nombre?: string
+    }) => client.post<any>("/vouchers/redeem", data),
+    seedUP: (data?: { total_vales?: number; monto_por_vale?: number; fecha_vencimiento?: string }) =>
+      client.post<any>("/vouchers/seed-up", data || { total_vales: 75, monto_por_vale: 100000, fecha_vencimiento: "2026-12-31" }),
+    summary: (convenio = "Universidad del Pacífico") =>
+      client.get<any>(`/vouchers/summary?convenio=${encodeURIComponent(convenio)}`),
+  },
 }
 
 export interface DonationCampaign {

@@ -1058,8 +1058,8 @@ export default function POSPage() {
   const [plugpayManualComprobante, setPlugpayManualComprobante] = useState("")
   const [plugpayManualAutorizacion, setPlugpayManualAutorizacion] = useState("")
 
-  // Otros (Transferencia Bancaria y Cheques)
-  const [otrosSubMethod, setOtrosSubMethod] = useState<"transferencia" | "cheque">("transferencia")
+  // Otros (Transferencia Bancaria, Cheques y Vales de Compra)
+  const [otrosSubMethod, setOtrosSubMethod] = useState<"transferencia" | "cheque" | "vale">("transferencia")
   const [transfComprobante, setTransfComprobante] = useState("")
   const [transfBancoOrigen, setTransfBancoOrigen] = useState("")
   const [transfTitular, setTransfTitular] = useState("")
@@ -1067,6 +1067,10 @@ export default function POSPage() {
   const [chequeNumero, setChequeNumero] = useState("")
   const [chequeFechaVenc, setChequeFechaVenc] = useState("")
   const [chequeTitular, setChequeTitular] = useState("")
+  const [valeCodigo, setValeCodigo] = useState("")
+  const [valeValidating, setValeValidating] = useState(false)
+  const [valeData, setValeData] = useState<{ id: string; numero_vale: string; convenio_nombre: string; monto: number } | null>(null)
+  const valeInputRef = useRef<HTMLInputElement>(null)
   const [mixedPlugPayPyg, setMixedPlugPayPyg] = useState("")
   const [mixedOtrosPyg, setMixedOtrosPyg] = useState("")
   const mixedPlugPayPygInputRef = useRef<HTMLInputElement>(null)
@@ -6805,6 +6809,9 @@ export default function POSPage() {
     setChequeNumero("")
     setChequeFechaVenc("")
     setChequeTitular("")
+    setValeCodigo("")
+    setValeValidating(false)
+    setValeData(null)
     setOtrosSupervisorApproved(false)
     setShowPlugpayManualFallback(false)
     setPlugpayManualComprobante("")
@@ -7140,7 +7147,7 @@ export default function POSPage() {
         if (activeMethods.has("otros")) {
           otrosMonto = isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (otrosMonto > 0) {
-            let fp = otrosSubMethod === "transferencia" ? "TRANF. BANCARIA" : "CHEQUES"
+            let fp = otrosSubMethod === "transferencia" ? "TRANF. BANCARIA" : (otrosSubMethod === "vale" ? "VALE_CONVENIO" : "CHEQUES")
             out.push({ forma_pago: fp, monto: otrosMonto, moneda: "PYG" })
           }
         }
@@ -7589,6 +7596,26 @@ export default function POSPage() {
           saleCreatePromise.then((s: any) => doClaim(s?.id))
         } else {
           doClaim()
+        }
+      }
+
+      // Si el cobro se realizó con Vale Institucional, se quema de forma atómica en el backend
+      if (activeMethods.has("otros") && otrosSubMethod === "vale" && valeData) {
+        const barcodeToRedeem = valeCodigo.trim()
+        const doRedeemVoucher = (saleIdForRedeem?: string) => {
+          api.vouchers.redeem({
+            codigo_barras: barcodeToRedeem,
+            sale_id: saleIdForRedeem,
+            caja_session_id: cashSessionId || undefined,
+            caja_numero: typeof puntoEmision !== "undefined" ? String(puntoEmision) : "CAJA-02",
+          }).catch((err: any) => console.warn("[POS] Error quemando vale en backend:", err))
+        }
+        if (createdSaleId) {
+          doRedeemVoucher(createdSaleId)
+        } else if (saleCreatePromise) {
+          saleCreatePromise.then((s: any) => doRedeemVoucher(s?.id))
+        } else {
+          doRedeemVoucher()
         }
       }
 
@@ -12596,7 +12623,7 @@ export default function POSPage() {
                             </div>
                           </div>
 
-                          {/* Segmented control Transferencia / Cheque */}
+                          {/* Segmented control Transferencia / Cheque / Vale */}
                           <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-xl gap-0.5">
                             <button
                               type="button"
@@ -12618,13 +12645,49 @@ export default function POSPage() {
                                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                               }`}
                             >
-                              📄 Cheque / Vale
+                              📄 Cheque
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOtrosSubMethod("vale")
+                                setTimeout(() => valeInputRef.current?.focus(), 80)
+                              }}
+                              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                otrosSubMethod === "vale"
+                                  ? "bg-orange-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              🎟️ Vale de Compra
                             </button>
                           </div>
                         </div>
 
-                        {/* Banner de Autorización de Supervisor Obligatoria */}
-                        {otrosSupervisorApproved ? (
+                        {/* Banner de Autorización / Verificación */}
+                        {otrosSubMethod === "vale" ? (
+                          valeData ? (
+                            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-700 dark:text-emerald-300 flex items-center justify-between">
+                              <div className="flex items-center gap-2 font-black">
+                                <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                                <span>✓ {valeData.convenio_nombre} • Vale N° {valeData.numero_vale} (Gs. {valeData.monto.toLocaleString("es-PY")})</span>
+                              </div>
+                              <span className="text-[10px] bg-emerald-600 text-white font-black px-2 py-0.5 rounded-full uppercase">
+                                Verificado
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="p-3 rounded-xl bg-orange-500/10 border border-orange-500/40 text-xs text-orange-800 dark:text-orange-200 flex items-center gap-2">
+                              <Ticket className="w-5 h-5 text-orange-600 shrink-0" />
+                              <div>
+                                <span className="font-black block">Convenio Institucional (Vales Prepagados)</span>
+                                <span className="text-[10px] opacity-80">
+                                  Escanee el código de barras del vale con la pistola lectora para validar y descontar.
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        ) : otrosSupervisorApproved ? (
                           <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-700 dark:text-emerald-300 flex items-center justify-between">
                             <div className="flex items-center gap-2 font-black">
                               <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
@@ -12801,6 +12864,105 @@ export default function POSPage() {
                             </div>
                           </div>
                         )}
+
+                        {/* PESTAÑA VALE DE COMPRA */}
+                        {otrosSubMethod === "vale" && (
+                          <div className="space-y-2.5">
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                Escanee o Ingrese Código del Vale (*):
+                              </label>
+                              <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                  <input
+                                    ref={valeInputRef}
+                                    type="text"
+                                    value={valeCodigo}
+                                    onChange={(e) => setValeCodigo(e.target.value)}
+                                    onKeyDown={async (e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault()
+                                        if (!valeCodigo.trim()) return
+                                        try {
+                                          setValeValidating(true)
+                                          const res = await api.vouchers.check(valeCodigo.trim())
+                                          if (res.es_valido) {
+                                            setValeData({
+                                              id: res.id,
+                                              numero_vale: res.numero_vale,
+                                              convenio_nombre: res.convenio_nombre,
+                                              monto: Number(res.saldo_disponible),
+                                            })
+                                            setMixedOtrosPyg(Number(res.saldo_disponible).toLocaleString("es-PY"))
+                                            setOtrosSupervisorApproved(true)
+                                            toast.success("Vale Válido", `${res.convenio_nombre} • Vale N° ${res.numero_vale} por Gs. ${Number(res.saldo_disponible).toLocaleString("es-PY")}`)
+                                          } else {
+                                            setValeData(null)
+                                            setOtrosSupervisorApproved(false)
+                                            toast.error("Vale Inválido", res.mensaje)
+                                          }
+                                        } catch (err: any) {
+                                          toast.error("Error al validar", err?.message || "Error al conectar con la API")
+                                        } finally {
+                                          setValeValidating(false)
+                                        }
+                                      }
+                                    }}
+                                    placeholder="Apunte la pistola al código de barras o digite N°..."
+                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs font-bold outline-none focus:border-orange-500 text-orange-600 dark:text-orange-400"
+                                  />
+                                  {valeValidating && (
+                                    <Loader2 className="w-4 h-4 animate-spin absolute right-3 top-1/2 -translate-y-1/2 text-orange-500" />
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={valeValidating || !valeCodigo.trim()}
+                                  onClick={async () => {
+                                    if (!valeCodigo.trim()) return
+                                    try {
+                                      setValeValidating(true)
+                                      const res = await api.vouchers.check(valeCodigo.trim())
+                                      if (res.es_valido) {
+                                        setValeData({
+                                          id: res.id,
+                                          numero_vale: res.numero_vale,
+                                          convenio_nombre: res.convenio_nombre,
+                                          monto: Number(res.saldo_disponible),
+                                        })
+                                        setMixedOtrosPyg(Number(res.saldo_disponible).toLocaleString("es-PY"))
+                                        setOtrosSupervisorApproved(true)
+                                        toast.success("Vale Válido", `${res.convenio_nombre} • N° ${res.numero_vale}`)
+                                      } else {
+                                        setValeData(null)
+                                        setOtrosSupervisorApproved(false)
+                                        toast.error("Vale Inválido", res.mensaje)
+                                      }
+                                    } catch (err: any) {
+                                      toast.error("Error al validar", err?.message || "Error al conectar con la API")
+                                    } finally {
+                                      setValeValidating(false)
+                                    }
+                                  }}
+                                  className="px-3 bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs rounded-xl cursor-pointer"
+                                >
+                                  Validar
+                                </button>
+                              </div>
+                            </div>
+                            {valeData && (
+                              <div className="p-2.5 rounded-xl bg-orange-50/70 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800/50 text-xs flex items-center justify-between text-orange-900 dark:text-orange-200">
+                                <div>
+                                  <span className="font-black block">{valeData.convenio_nombre} • Vale N° {valeData.numero_vale}</span>
+                                  <span className="text-[10px] opacity-75">Saldo aplicado al cobro: Gs. {valeData.monto.toLocaleString("es-PY")}</span>
+                                </div>
+                                <span className="text-xs font-black bg-orange-600 text-white px-2 py-0.5 rounded-lg">
+                                  Gs. {valeData.monto.toLocaleString("es-PY")}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -12846,13 +13008,18 @@ export default function POSPage() {
                           toast.warning("Falta Nº de Comprobante", "Ingrese el número de comprobante o transacción de la transferencia.")
                           return
                         }
-                      } else {
+                      } else if (otrosSubMethod === "cheque") {
                         if (!chequeBanco.trim() || !chequeNumero.trim()) {
                           toast.warning("Faltan Datos del Cheque", "Ingrese el banco emisor y número de cheque.")
                           return
                         }
+                      } else if (otrosSubMethod === "vale") {
+                        if (!valeCodigo.trim() || !valeData) {
+                          toast.warning("Vale no validado", "Escanee y valide el código de barras del vale antes de continuar.")
+                          return
+                        }
                       }
-                      if (!otrosSupervisorApproved) {
+                      if (otrosSubMethod !== "vale" && !otrosSupervisorApproved) {
                         requestSupervisorAuthorization({
                           type: "otros_payment",
                           otrosSubtipo: otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque",

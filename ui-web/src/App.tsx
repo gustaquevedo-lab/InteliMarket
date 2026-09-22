@@ -92,6 +92,7 @@ const PriceCheckerKioskPage = lazy(() => import("./pages/kiosk/PriceCheckerKiosk
 const SelfCheckoutPage = lazy(() => import("./pages/pos/SelfCheckoutPage"))
 const TransferenciasPage = lazy(() => import("./pages/inventory/TransferenciasPage"))
 const BovedaPage = lazy(() => import("./pages/caja/BovedaPage"))
+const VouchersPage = lazy(() => import("./pages/vouchers/VouchersPage"))
 const EdgeAgentPage = lazy(() => import("./pages/pos/EdgeAgentPage"))
 const SellersPage = lazy(() => import("./pages/sellers/SellersPage"))
 const MapaPage = lazy(() => import("./pages/mapa-tiempo-real/MapaPage"))
@@ -285,6 +286,8 @@ function AppRoutes() {
           ["dashboard", <DashboardRouter />],
           ["self-checkout", <SelfCheckoutPage />],
           ["boveda", <BovedaPage />],
+          ["vales", <VouchersPage />],
+          ["convenios", <VouchersPage />],
           ["edge-agent", <EdgeAgentPage />],
           ["sales", <SalesPage />],
           ["products", <ProductsPage />],

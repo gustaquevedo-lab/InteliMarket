@@ -53,7 +53,8 @@ PAYMENT_CHANNEL_DEFINITIONS = [
     ("PLUGPAY_CREDITO", "Plug Pay Crédito Parcelado", "credito_parcelado", "calendar"),
     ("EXTRA_CLUB", "Extra Club", "credito", "award"),
     ("TRANSFERENCIA", "Transferencia Bancaria", "transferencia", "landmark"),
-    ("CHEQUES", "Cheques / Vales", "cheque", "file-check"),
+    ("CHEQUES", "Cheques", "cheque", "file-check"),
+    ("VALE_CONVENIO", "Vales de Compra / Convenio", "vale", "file-check"),
     ("NOTA_CREDITO", "Nota de Crédito (NC)", "nota_credito", "file-text"),
     ("OTROS", "Otros Medios", "otros", "file-text"),
 ]
@@ -96,6 +97,7 @@ CHANNEL_TO_INSTRUMENT_TYPE = {
 
     "CHEQUES": ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-check", 5),
     "VALES": ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-check", 5),
+    "VALE_CONVENIO": ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-check", 5),
     "NOTA_CREDITO": ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-text", 5),
     "NC": ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-text", 5),
     "OTROS": ("DOCUMENTOS_VALOR", "Documentos Físicos de Pago y Cheques", "file-check", 5),
@@ -152,7 +154,10 @@ def classify_payment_channel(
     if "EXTRA_CLUB" in fp or "CLUB" in fp or "CREDITO_CLIENTE" in fp:
         return PAYMENT_CHANNEL_MAP["EXTRA_CLUB"]
 
-    if "CHEQUE" in fp or "VALE" in fp:
+    if "VALE" in fp or "VOUCHER" in fp:
+        return PAYMENT_CHANNEL_MAP["VALE_CONVENIO"]
+
+    if "CHEQUE" in fp:
         return PAYMENT_CHANNEL_MAP["CHEQUES"]
 
     if "TRANSFERENCIA" in fp or "TRANSF" in fp or "SIPAP" in fp:
