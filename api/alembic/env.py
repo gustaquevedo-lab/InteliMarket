@@ -42,6 +42,7 @@ import api.src.intelicont.models
 import api.src.inteliaudit.models
 import api.src.sueldok.models
 import api.src.pagopar.models
+import api.src.plugpay.models
 import api.src.backups.models
 import api.src.receipts.models
 import api.src.branches.models

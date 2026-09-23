@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
@@ -13,6 +14,7 @@ from api.src.plugpay.schemas import (
     PlugpayTransactionListResponse, PlugpaySummaryResponse,
 )
 
+logger = logging.getLogger("intelimarket.plugpay")
 router = APIRouter(prefix="/api/v1/plugpay", tags=["plugpay"])
 
 
@@ -40,21 +42,36 @@ async def pix_create(data: PixCreateRequest, db: AsyncSession = Depends(get_db),
     try:
         cpf = data.customer_cpf or data.customer_cpf_cnpj or ""
         result = await service.create_pix(db, user["company_id"], data.monto, data.moneda, cpf)
-        txn = await transactions_service.log_transaction(
-            db, user["company_id"], sale_id=data.sale_id, customer_id=data.customer_id,
-            tipo_operacion="pix", id_transacao=str(result.get("IdTransacao") or result.get("idTransacao") or ""),
-            referencia_interna=result.get("referenciaInterna"), qr_code_id=result.get("qrCodeId"),
-            qr_code_string_image=result.get("qrCodeStringImage"), moneda_origen=data.moneda, monto_origen=data.monto,
-            exitosa=True, raw_response=result,
-        )
-        return PlugpayTransactionResponse(ok=True, data=result, transaction_log_id=txn.id)
+        
+        val_brl = result.get("valueBRL") or result.get("value_brl")
+        try:
+            val_brl = float(val_brl) if val_brl is not None else None
+        except (ValueError, TypeError):
+            val_brl = None
+
+        txn = None
+        try:
+            txn = await transactions_service.log_transaction(
+                db, user["company_id"], sale_id=data.sale_id, customer_id=data.customer_id,
+                tipo_operacion="pix", id_transacao=str(result.get("IdTransacao") or result.get("idTransacao") or ""),
+                referencia_interna=result.get("referenciaInterna"), qr_code_id=result.get("qrCodeId"),
+                qr_code_string_image=result.get("qrCodeStringImage"), moneda_origen=data.moneda, monto_origen=data.monto,
+                value_brl=val_brl, exitosa=True, raw_response=result,
+            )
+        except Exception as log_err:
+            logger.error("Failed to log plugpay pix transaction to DB: %s", log_err)
+
+        return PlugpayTransactionResponse(ok=True, data=result, transaction_log_id=txn.id if txn else None)
     except (PlugpayNotConfigured, PlugpayApiError) as e:
         if isinstance(e, PlugpayApiError):
-            await transactions_service.log_transaction(
-                db, user["company_id"], sale_id=data.sale_id, customer_id=data.customer_id,
-                tipo_operacion="pix", moneda_origen=data.moneda, monto_origen=data.monto,
-                exitosa=False, error_message=e.message, raw_response=e.body,
-            )
+            try:
+                await transactions_service.log_transaction(
+                    db, user["company_id"], sale_id=data.sale_id, customer_id=data.customer_id,
+                    tipo_operacion="pix", moneda_origen=data.moneda, monto_origen=data.monto,
+                    exitosa=False, error_message=str(e.message) if e.message else None, raw_response=e.body,
+                )
+            except Exception as log_err:
+                logger.error("Failed to log failed plugpay pix transaction: %s", log_err)
         return _error_response(e)
 
 
@@ -133,22 +150,30 @@ async def credito_start(data: StartParceladoRequest, db: AsyncSession = Depends(
         result = await service.start_credito_parcelado(
             db, user["company_id"], data.monto, data.moneda, data.cuotas, data.customer_cpf, data.customer_phone,
         )
-        txn = await transactions_service.log_transaction(
-            db, user["company_id"], sale_id=data.sale_id, customer_id=data.customer_id,
-            tipo_operacion="credito_parcelado", id_transacao=str(result.get("IdTransacao") or ""),
-            referencia_interna=result.get("referenciaInterna"), value_brl=result.get("valueBRL"),
-            url_payment_form=result.get("UrlPaymentForm"), numero_cuotas=data.cuotas,
-            moneda_origen=data.moneda, monto_origen=data.monto, exitosa=True, raw_response=result,
-        )
-        return PlugpayTransactionResponse(ok=True, data=result, transaction_log_id=txn.id)
+        txn = None
+        try:
+            txn = await transactions_service.log_transaction(
+                db, user["company_id"], sale_id=data.sale_id, customer_id=data.customer_id,
+                tipo_operacion="credito_parcelado", id_transacao=str(result.get("IdTransacao") or ""),
+                referencia_interna=result.get("referenciaInterna"), value_brl=result.get("valueBRL"),
+                url_payment_form=result.get("UrlPaymentForm"), numero_cuotas=data.cuotas,
+                moneda_origen=data.moneda, monto_origen=data.monto, exitosa=True, raw_response=result,
+            )
+        except Exception as log_err:
+            logger.error("Failed to log plugpay parcelado transaction to DB: %s", log_err)
+
+        return PlugpayTransactionResponse(ok=True, data=result, transaction_log_id=txn.id if txn else None)
     except (PlugpayNotConfigured, PlugpayApiError) as e:
         if isinstance(e, PlugpayApiError):
-            await transactions_service.log_transaction(
-                db, user["company_id"], sale_id=data.sale_id, customer_id=data.customer_id,
-                tipo_operacion="credito_parcelado", numero_cuotas=data.cuotas,
-                moneda_origen=data.moneda, monto_origen=data.monto,
-                exitosa=False, error_message=e.message, raw_response=e.body,
-            )
+            try:
+                await transactions_service.log_transaction(
+                    db, user["company_id"], sale_id=data.sale_id, customer_id=data.customer_id,
+                    tipo_operacion="credito_parcelado", numero_cuotas=data.cuotas,
+                    moneda_origen=data.moneda, monto_origen=data.monto,
+                    exitosa=False, error_message=str(e.message) if e.message else None, raw_response=e.body,
+                )
+            except Exception as log_err:
+                logger.error("Failed to log failed plugpay parcelado transaction: %s", log_err)
         return _error_response(e)
 
 
