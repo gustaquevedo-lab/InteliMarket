@@ -25,6 +25,7 @@ const PurchasesPage = lazy(() => import("./pages/purchases/PurchasesPage"))
 const ReportsPage = lazy(() => import("./pages/reports/ReportsPage"))
 const ExecutiveReportPage = lazy(() => import("./pages/gerencial/ExecutiveReportPage"))
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"))
+const AppsMovilesPage = lazy(() => import("./pages/apps/AppsMovilesPage"))
 const POSPage = lazy(() => import("./pages/pos/POSPage"))
 const SupervisorPage = lazy(() => import("./pages/pos/SupervisorPage"))
 const CajaPage = lazy(() => import("./pages/caja/CajaPage"))
@@ -299,6 +300,8 @@ function AppRoutes() {
           ["reports", <ReportsPage />],
           ["gerencial", <ExecutiveReportPage />],
           ["settings", <SettingsPage />],
+          ["apps-moviles", <AppsMovilesPage />],
+          ["apps", <Navigate to="/apps-moviles" replace />],
           ["sifen", <SifenPage />],
           ["facturacion-electronica", <InteliFactPage />],
           ["caja", <CajaPage />],

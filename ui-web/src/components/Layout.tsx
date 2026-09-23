@@ -8,7 +8,7 @@ import {
   LogOut, Menu, X, Moon, Sun, Monitor, Search, Store, ChevronDown, Building, Scan, QrCode, BookOpen, PiggyBank,
   PieChart, DollarSign, TrendingUp, Bot, Clock, Award, Globe, Repeat, Wrench,
   Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid, Carrot, ChefHat, Radio, Plus, Sparkles, Tag,
-  Ticket, ArrowLeftRight, ClipboardCheck, RefreshCw, Radar
+  Ticket, ArrowLeftRight, ClipboardCheck, RefreshCw, Radar, Smartphone
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
@@ -170,6 +170,7 @@ const navGroups: NavGroup[] = [
       // fraude inventado) fue reemplazada por RiskAgentPage -- dashboard y chat
       // reales sobre audit_logs, clasificados por nivel/categoria de riesgo.
       { icon: Fingerprint, label: "Auditoría & Riesgos", path: "/audit" },
+      { icon: Smartphone, label: "Apps Móviles & APKs", path: "/apps-moviles", keywords: ["apps", "movil", "apk", "descarga", "deposito", "supervisor", "salon", "conteo", "android"] },
       { icon: Settings, label: "Configuración", path: "/settings" },
       { icon: Building, label: "Sucursales", path: "/branches" },
       { icon: Users, label: "Gestión de Usuarios", path: "/usuarios" },
