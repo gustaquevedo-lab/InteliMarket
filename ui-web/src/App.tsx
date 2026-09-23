@@ -316,7 +316,7 @@ function AppRoutes() {
           ["marketing-agent", <MarketingAgentPage />],
           ["notifications", <NotificationsPage />],
           ["intelicont", <InteliContPage />],
-          ["integrations", <SuperadminRoute><IntegrationsPage /></SuperadminRoute>],
+          ["integrations", <Navigate to="/reports?tab=medios_pago" replace />],
           ["sueldok", <SueldokPage />],
           ["promociones", <PromotionsPage />],
           ["cupones", <CapturaCuponesPage />],

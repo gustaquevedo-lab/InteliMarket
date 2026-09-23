@@ -159,8 +159,7 @@ const navGroups: NavGroup[] = [
       // { icon: Radio, label: "Etiquetas Electrónicas (ESL)", path: "/esl" },
       // DESACTIVADO 2026-09-04: cero llamadas a backend, plataformas/pedidos 100%
       // hardcodeados incluido el badge "3 Canales Conectados". Ver auditoria de sidebar.
-      // { icon: Globe, label: "Delivery Apps", path: "/delivery-integrations" },
-      { icon: CreditCard, label: "Integración Medios de Pago", path: "/integrations", superadminOnly: true },
+      { icon: CreditCard, label: "Medios de Pago & Gaveta", path: "/reports?tab=medios_pago", keywords: ["tarjetas", "bancard", "dinelco", "qr", "pix", "efectivo", "pos"] },
     ]
   },
   {
