@@ -38,9 +38,13 @@ scratch/
 node_modules/
 ui-web/node_modules/
 mobile-apps/*/node_modules
+tests-pos/node_modules/
+tests-pos/playwright-report/
+tests-pos/test-results/
 
-# Apps nativas (mobile-apps/*): cada proyecto Android genera esto localmente,
+# Apps nativas (mobile-apps/* y ui-web/android deprecado): cada proyecto Android genera esto localmente,
 # no es portable entre maquinas (rutas de SDK, cache de Gradle).
+ui-web/android/
 mobile-apps/*/android/local.properties
 mobile-apps/*/android/.gradle/
 mobile-apps/*/android/**/build/
