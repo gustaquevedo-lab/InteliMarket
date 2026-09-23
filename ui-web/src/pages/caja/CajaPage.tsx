@@ -683,10 +683,15 @@ export default function CajaPage() {
         observaciones_efectivo: efectivoObsTesoreria.trim() || undefined,
       })
 
-      setPunteoData((prev: any) => prev ? {
-        ...prev,
-        session_data: { ...prev.session_data, estado: "verificada" }
-      } : prev)
+      try {
+        const refreshedPunteo = await api.caja.sessionPunteo(punteoData.session_data.id)
+        setPunteoData(refreshedPunteo)
+      } catch {
+        setPunteoData((prev: any) => prev ? {
+          ...prev,
+          session_data: { ...prev.session_data, estado: "verificada" }
+        } : prev)
+      }
 
       toast.success("Caja Verificada con Éxito", "El estado de la caja pasó a VERIFICADA. Valores recibidos y asumidos en Bóveda.")
       fetchData()
@@ -5062,6 +5067,9 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   const hasFaltanteVouchers = countVouchersFaltantes > 0 || difVouchersGs < -5000
                   const estadoComprobantes = (!hasFaltanteVouchers && countVouchersDiscrepantes === 0 && difVouchersGs === 0) ? "CONFORME" : "OBSERVADO"
 
+                  // D) Diferencia Total Consolidada del Turno (Efectivo + Comprobantes)
+                  const difTotalConsolidadaGs = difEfectivoGs + difVouchersGs
+
                   return (
                     <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 text-white border border-slate-700/80 shadow-xl space-y-4">
                       {/* Cabecera del Control de Custodia */}
@@ -5454,6 +5462,12 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                     {estadoComprobantes === "CONFORME" ? "✓ CONFORME" : `OBSERVADO (${countVouchersFaltantes} faltante${countVouchersFaltantes !== 1 ? "s" : ""})`}
                                   </span>
                                 </div>
+                                <div className="flex items-center justify-between text-white font-bold pt-1 border-t border-slate-800">
+                                  <span className="text-[11px] uppercase tracking-wide text-emerald-400">Diferencia Total Consolidada Turno:</span>
+                                  <span className={`font-mono text-xs font-black ${Math.abs(difTotalConsolidadaGs) < 5000 ? "text-emerald-400" : difTotalConsolidadaGs < 0 ? "text-rose-400" : "text-blue-400"}`}>
+                                    {difTotalConsolidadaGs >= 0 ? `+${formatPYG(difTotalConsolidadaGs)}` : formatPYG(difTotalConsolidadaGs)}
+                                  </span>
+                                </div>
                               </div>
                             </div>
 
@@ -5467,7 +5481,8 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                     <span className="text-[11px] font-normal leading-tight block text-rose-300">
                                       Efectivo en gaveta faltante: <strong>{formatPYG(difEfectivoGs)}</strong>.
                                       {hasShortageSobre ? ` Vino menos en sobre de lo declarado (${formatPYG(difSobreTotalGs)}). ` : ""}
-                                      {hasFaltanteVouchers ? ` Además faltan ${countVouchersFaltantes} comprobante(s) (${formatPYG(difVouchersGs)}).` : ""}
+                                      {hasFaltanteVouchers ? ` Además faltan ${countVouchersFaltantes} comprobante(s) (${formatPYG(difVouchersGs)}). ` : ""}
+                                      Diferencia Total Turno: <strong>{formatPYG(difTotalConsolidadaGs)}</strong>.
                                     </span>
                                   </div>
                                 </div>
@@ -5479,7 +5494,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                               ) : hasSobranteEfectivo ? (
                                 <div className="p-2 rounded-lg bg-blue-900/60 border border-blue-500 text-blue-200 text-xs font-bold flex items-center gap-2">
                                   <Info className="w-4 h-4 text-blue-400 shrink-0" />
-                                  <span>🔵 SOBRANTE EN EFECTIVO: +{formatPYG(difEfectivoGs)}. {hasFaltanteVouchers ? `(Con ${countVouchersFaltantes} comprobante(s) faltante(s)).` : ""}</span>
+                                  <span>🔵 SOBRANTE EN EFECTIVO: +{formatPYG(difEfectivoGs)}. {hasFaltanteVouchers ? `(Con ${countVouchersFaltantes} comprobante(s) faltante(s)). ` : ""}Diferencia Turno: {formatPYG(difTotalConsolidadaGs)}.</span>
                                 </div>
                               ) : hasFaltanteVouchers ? (
                                 <div className="p-2 rounded-lg bg-amber-900/60 border border-amber-500 text-amber-200 text-xs font-bold flex items-start gap-2">
@@ -5487,7 +5502,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                   <div>
                                     <span className="block font-black">🟡 EFECTIVO CUADRADO · COMPROBANTES CON FALTANTE</span>
                                     <span className="text-[11px] font-normal leading-tight block text-amber-300">
-                                      La rendición de efectivo está conforme, pero faltan {countVouchersFaltantes} comprobante(s) físico(s) ({formatPYG(difVouchersGs)}).
+                                      La rendición de efectivo está conforme, pero faltan {countVouchersFaltantes} comprobante(s) físico(s) ({formatPYG(difVouchersGs)}). Impacto Neto Turno: <strong>{formatPYG(difTotalConsolidadaGs)}</strong>.
                                     </span>
                                   </div>
                                 </div>
@@ -5502,19 +5517,26 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
 
                           <div className="pt-1.5 border-t border-slate-800 flex items-center justify-between text-[11px]">
                             <span className="text-slate-400">Dictamen Oficial:</span>
-                            <div className="flex items-center gap-2">
-                              <span className={`px-2 py-0.5 rounded font-black tracking-wider ${
+                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                              <span className={`px-2 py-0.5 rounded font-black tracking-wider text-[10px] ${
                                 estadoRendicionEfectivo === "CUADRADO" ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" :
                                 estadoRendicionEfectivo === "SOBRANTE" ? "bg-blue-500/20 text-blue-300 border border-blue-500/40" :
                                 "bg-rose-500/20 text-rose-300 border border-rose-500/40"
                               }`}>
-                                Efectivo: {estadoRendicionEfectivo} ({difEfectivoGs >= 0 ? `+${formatPYG(difEfectivoGs)}` : formatPYG(difEfectivoGs)})
+                                Efec: {estadoRendicionEfectivo} ({difEfectivoGs >= 0 ? `+${formatPYG(difEfectivoGs)}` : formatPYG(difEfectivoGs)})
                               </span>
-                              <span className={`px-2 py-0.5 rounded font-black tracking-wider ${
+                              <span className={`px-2 py-0.5 rounded font-black tracking-wider text-[10px] ${
                                 estadoComprobantes === "CONFORME" ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" :
                                 "bg-amber-500/20 text-amber-300 border border-amber-500/40"
                               }`}>
-                                Vouchers: {estadoComprobantes} {countVouchersFaltantes > 0 ? `(${countVouchersFaltantes} Falt.)` : ""}
+                                Vouchers: {estadoComprobantes} {difVouchersGs !== 0 ? `(${difVouchersGs > 0 ? "+" : ""}${formatPYG(difVouchersGs)})` : ""}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded font-black tracking-wider text-[10px] ${
+                                Math.abs(difTotalConsolidadaGs) < 5000 ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" :
+                                difTotalConsolidadaGs < 0 ? "bg-rose-500/20 text-rose-300 border border-rose-500/40" :
+                                "bg-blue-500/20 text-blue-300 border border-blue-500/40"
+                              }`}>
+                                Turno: {difTotalConsolidadaGs >= 0 ? `+${formatPYG(difTotalConsolidadaGs)}` : formatPYG(difTotalConsolidadaGs)}
                               </span>
                             </div>
                           </div>
@@ -5632,69 +5654,150 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 {/* 1. Resumen de Comprobantes Agrupado por Tipo de Instrumento */}
                 {punteoData.grupos_por_instrumento && punteoData.grupos_por_instrumento.length > 0 ? (
                   <div className="space-y-3">
-                    {punteoData.grupos_por_instrumento.map((grp: any) => (
-                      <div key={grp.instrumento_key} className="space-y-1.5">
-                        <div className="flex items-center justify-between px-1">
-                          <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 uppercase tracking-wide">
-                            <span className="w-2 h-2 rounded-full bg-purple-500"></span>
-                            {grp.label}
-                          </span>
-                          <span className="text-[10px] text-slate-500 font-mono">
-                            {grp.total_vouchers} voucher{grp.total_vouchers !== 1 ? "s" : ""} · <b>{formatPYG(grp.total_gs)}</b>
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                          {grp.canales.map((val: any) => {
-                            const key = val.canal_key
-                            const cant = val.cantidad || 0
-                            const monto = Number(val.monto_gs || 0)
-                            const vouchersDelCanal = (punteoData.vouchers || []).filter((v: any) => v.canal_key === key)
-                            const conformes = vouchersDelCanal.filter((v: any) => (punteoStatuses[v.id] || "conforme") === "conforme").length
-                            const faltantes = vouchersDelCanal.filter((v: any) => punteoStatuses[v.id] === "faltante").length
+                    {punteoData.grupos_por_instrumento.map((grp: any) => {
+                      const canalesKeys = (grp.canales || []).map((c: any) => c.canal_key)
+                      const vouchersDelGrupo = (punteoData.vouchers || []).filter((v: any) => canalesKeys.includes(v.canal_key))
+                      let totEsperadoGrp = 0
+                      let totFisicoGrp = 0
+                      vouchersDelGrupo.forEach((v: any) => {
+                        const mSis = Number(v.monto_gs || 0)
+                        totEsperadoGrp += mSis
+                        const st = punteoStatuses[v.id] || "conforme"
+                        if (st === "conforme") {
+                          totFisicoGrp += mSis
+                        } else if (st === "discrepante") {
+                          const mf = punteoDiscrepanciasMonto[v.id] !== undefined ? Number(punteoDiscrepanciasMonto[v.id]) : mSis
+                          totFisicoGrp += mf
+                        }
+                      })
+                      const difGrp = totFisicoGrp - totEsperadoGrp
 
-                            return (
-                              <div
-                                key={key}
-                                onClick={() => setPunteoFilterCanal(punteoFilterCanal === key ? "todos" : key)}
-                                className={`p-2.5 rounded-xl border text-xs space-y-1.5 cursor-pointer transition-all ${
-                                  punteoFilterCanal === key
-                                    ? "bg-purple-50 dark:bg-purple-950/50 border-purple-500 ring-2 ring-purple-500/40"
-                                    : "bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/70 hover:border-purple-300 dark:hover:border-slate-600"
-                                }`}
-                              >
-                                <div className="flex items-center justify-between gap-1.5 min-w-0">
-                                  <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 truncate block" title={val.label || key}>
-                                    {val.label || key}
-                                  </span>
-                                  {faltantes > 0 && (
-                                    <span className="px-1.5 py-0.5 bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 text-[9px] font-bold rounded border border-rose-200 dark:border-rose-800 shrink-0 whitespace-nowrap">
-                                      {faltantes} f.
+                      return (
+                        <div key={grp.instrumento_key} className="space-y-1.5">
+                          <div className="flex items-center justify-between px-1">
+                            <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 uppercase tracking-wide">
+                              <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                              {grp.label}
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              {grp.total_vouchers} voucher{grp.total_vouchers !== 1 ? "s" : ""} · Físico: <b>{formatPYG(totFisicoGrp)}</b>
+                              {difGrp !== 0 ? (
+                                <span className={`ml-1 font-bold ${difGrp < 0 ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"}`}>
+                                  ({difGrp > 0 ? `+${formatPYG(difGrp)}` : formatPYG(difGrp)})
+                                </span>
+                              ) : (
+                                <span className="ml-1 text-emerald-600 dark:text-emerald-400 font-bold">✓</span>
+                              )}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                            {grp.canales.map((val: any) => {
+                              const key = val.canal_key
+                              const vouchersDelCanal = (punteoData.vouchers || []).filter((v: any) => v.canal_key === key)
+                              const cant = vouchersDelCanal.length || val.cantidad || 0
+                              let montoEsperado = 0
+                              let montoFisico = 0
+                              let conformes = 0
+                              let faltantes = 0
+                              let discrepantes = 0
+
+                              vouchersDelCanal.forEach((v: any) => {
+                                const mSis = Number(v.monto_gs || 0)
+                                montoEsperado += mSis
+                                const st = punteoStatuses[v.id] || "conforme"
+                                if (st === "conforme") {
+                                  montoFisico += mSis
+                                  conformes++
+                                } else if (st === "faltante") {
+                                  faltantes++
+                                } else if (st === "discrepante") {
+                                  const mf = punteoDiscrepanciasMonto[v.id] !== undefined ? Number(punteoDiscrepanciasMonto[v.id]) : mSis
+                                  montoFisico += mf
+                                  discrepantes++
+                                }
+                              })
+                              const difCanal = montoFisico - montoEsperado
+
+                              return (
+                                <div
+                                  key={key}
+                                  onClick={() => setPunteoFilterCanal(punteoFilterCanal === key ? "todos" : key)}
+                                  className={`p-2.5 rounded-xl border text-xs space-y-1.5 cursor-pointer transition-all ${
+                                    punteoFilterCanal === key
+                                      ? "bg-purple-50 dark:bg-purple-950/50 border-purple-500 ring-2 ring-purple-500/40"
+                                      : "bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/70 hover:border-purple-300 dark:hover:border-slate-600"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between gap-1.5 min-w-0">
+                                    <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 truncate block" title={val.label || key}>
+                                      {val.label || key}
                                     </span>
+                                    {faltantes > 0 && (
+                                      <span className="px-1.5 py-0.5 bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 text-[9px] font-bold rounded border border-rose-200 dark:border-rose-800 shrink-0 whitespace-nowrap">
+                                        {faltantes} f.
+                                      </span>
+                                    )}
+                                    {discrepantes > 0 && (
+                                      <span className="px-1.5 py-0.5 bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 text-[9px] font-bold rounded border border-amber-200 dark:border-amber-800 shrink-0 whitespace-nowrap">
+                                        {discrepantes} d.
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="font-mono font-black text-slate-900 dark:text-white text-xs">
+                                    {formatPYG(montoFisico)}
+                                  </div>
+                                  {difCanal !== 0 ? (
+                                    <div className="flex items-center justify-between text-[10px] font-mono">
+                                      <span className="text-slate-400">Esp: {formatPYG(montoEsperado)}</span>
+                                      <span className={`font-bold ${difCanal < 0 ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"}`}>
+                                        {difCanal > 0 ? `+${formatPYG(difCanal)}` : formatPYG(difCanal)}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <div className="text-[10px] text-slate-400 font-mono">
+                                      Esp: {formatPYG(montoEsperado)}
+                                    </div>
                                   )}
+                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between whitespace-nowrap pt-0.5 border-t border-slate-200/50 dark:border-slate-700/50">
+                                    <span>{cant} v.</span>
+                                    <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">{conformes} ✓</span>
+                                  </div>
                                 </div>
-                                <div className="font-mono font-black text-slate-900 dark:text-white text-xs">
-                                  {formatPYG(monto)}
-                                </div>
-                                <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between whitespace-nowrap">
-                                  <span>{cant} v.</span>
-                                  <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">{conformes} ✓</span>
-                                </div>
-                              </div>
-                            )
-                          })}
+                              )
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
                     {Object.entries(punteoData.summary_by_method || {}).map(([key, val]: [string, any]) => {
-                      const cant = val.cantidad || 0
-                      const monto = Number(val.monto_gs || 0)
-                      if (cant === 0 && monto === 0) return null
                       const vouchersDelCanal = (punteoData.vouchers || []).filter((v: any) => v.canal_key === key || val.label?.includes(v.medio_pago))
-                      const conformes = vouchersDelCanal.filter((v: any) => (punteoStatuses[v.id] || "conforme") === "conforme").length
-                      const faltantes = vouchersDelCanal.filter((v: any) => punteoStatuses[v.id] === "faltante").length
+                      const cant = vouchersDelCanal.length || val.cantidad || 0
+                      let montoEsperado = 0
+                      let montoFisico = 0
+                      let conformes = 0
+                      let faltantes = 0
+                      let discrepantes = 0
+
+                      vouchersDelCanal.forEach((v: any) => {
+                        const mSis = Number(v.monto_gs || 0)
+                        montoEsperado += mSis
+                        const st = punteoStatuses[v.id] || "conforme"
+                        if (st === "conforme") {
+                          montoFisico += mSis
+                          conformes++
+                        } else if (st === "faltante") {
+                          faltantes++
+                        } else if (st === "discrepante") {
+                          const mf = punteoDiscrepanciasMonto[v.id] !== undefined ? Number(punteoDiscrepanciasMonto[v.id]) : mSis
+                          montoFisico += mf
+                          discrepantes++
+                        }
+                      })
+                      const difCanal = montoFisico - montoEsperado
+                      if (cant === 0 && montoEsperado === 0) return null
 
                       return (
                         <div
@@ -5715,11 +5818,28 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                 {faltantes} faltante{faltantes !== 1 ? "s" : ""}
                               </span>
                             )}
+                            {discrepantes > 0 && (
+                              <span className="px-1.5 py-0.5 bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 text-[9px] font-bold rounded border border-amber-200 dark:border-amber-800 shrink-0 whitespace-nowrap">
+                                {discrepantes} discrep.
+                              </span>
+                            )}
                           </div>
                           <div className="font-mono font-black text-slate-900 dark:text-white text-xs">
-                            {formatPYG(monto)}
+                            {formatPYG(montoFisico)}
                           </div>
-                          <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between whitespace-nowrap">
+                          {difCanal !== 0 ? (
+                            <div className="flex items-center justify-between text-[10px] font-mono">
+                              <span className="text-slate-400">Esp: {formatPYG(montoEsperado)}</span>
+                              <span className={`font-bold ${difCanal < 0 ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"}`}>
+                                {difCanal > 0 ? `+${formatPYG(difCanal)}` : formatPYG(difCanal)}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="text-[10px] text-slate-400 font-mono">
+                              Esp: {formatPYG(montoEsperado)}
+                            </div>
+                          )}
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between whitespace-nowrap pt-0.5 border-t border-slate-200/50 dark:border-slate-700/50">
                             <span>{cant} voucher{cant !== 1 ? "s" : ""}</span>
                             <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">{conformes} ✓</span>
                           </div>

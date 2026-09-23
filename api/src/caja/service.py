@@ -1705,6 +1705,9 @@ async def list_sessions_with_totals(
             "efectivo_brl_acumulado": efectivo_brl_acumulado,
             "ultimo_cash_drop_at": s.ultimo_cash_drop_at.isoformat() if s.ultimo_cash_drop_at else None,
             "handoff": handoff_data,
+            "recon": recon_obj,
+            "diferencia_vouchers_gs": recon_obj.get("diferencia_vouchers_gs") if recon_obj else None,
+            "diferencia_global_turno_gs": recon_obj.get("diferencia_global_turno_gs") if recon_obj else None,
             "observaciones": s.observaciones,
         })
     return out
@@ -3740,21 +3743,10 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             Sale.tipo_comprobante,
             Sale.observaciones.label("sale_obs"),
             Customer.razon_social.label("cliente_nombre"),
-            PosTerminalTransaction.id.label("pos_txn_id"),
-            PosTerminalTransaction.tipo_operacion.label("pos_tipo_operacion"),
-            PosTerminalTransaction.codigo_autorizacion,
-            PosTerminalTransaction.nsu,
-            PosTerminalTransaction.nombre_tarjeta,
-            PosTerminalTransaction.pan,
-            PosTerminalTransaction.nombre_cliente,
-            PosTerminalTransaction.raw_response,
-            PlugpayTransaction.tipo_operacion.label("plug_tipo_operacion"),
         )
         .select_from(SalePayment)
         .join(Sale, Sale.id == SalePayment.sale_id)
         .outerjoin(Customer, Customer.id == Sale.customer_id)
-        .outerjoin(PosTerminalTransaction, and_(PosTerminalTransaction.sale_id == Sale.id, PosTerminalTransaction.exitosa == True))
-        .outerjoin(PlugpayTransaction, and_(PlugpayTransaction.sale_id == Sale.id, PlugpayTransaction.exitosa == True))
         .where(
             Sale.session_id == sid,
             Sale.estado.in_(["confirmado", "completada", "completado", "pagado", "devuelto"]),
@@ -3762,6 +3754,33 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         .order_by(SalePayment.fecha.asc())
     )
     rows = vouchers_res.all()
+
+    # Pre-cargar transacciones POS y PlugPay vinculadas a las ventas para enlace 1:1 sin producto cartesiano
+    sale_ids = list({r.sale_id for r in rows if r.sale_id})
+    pos_txns_by_sale: dict[uuid.UUID, list[PosTerminalTransaction]] = {}
+    if sale_ids:
+        res_linked_pos = await db.execute(
+            select(PosTerminalTransaction).where(
+                PosTerminalTransaction.sale_id.in_(sale_ids),
+                PosTerminalTransaction.exitosa == True,
+            ).order_by(PosTerminalTransaction.created_at.asc())
+        )
+        for p in res_linked_pos.scalars().all():
+            pos_txns_by_sale.setdefault(p.sale_id, []).append(p)
+
+    plug_txns_by_sale: dict[uuid.UUID, list[PlugpayTransaction]] = {}
+    if sale_ids:
+        try:
+            res_linked_plug = await db.execute(
+                select(PlugpayTransaction).where(
+                    PlugpayTransaction.sale_id.in_(sale_ids),
+                    PlugpayTransaction.exitosa == True,
+                ).order_by(PlugpayTransaction.created_at.asc())
+            )
+            for pl in res_linked_plug.scalars().all():
+                plug_txns_by_sale.setdefault(pl.sale_id, []).append(pl)
+        except Exception:
+            plug_txns_by_sale = {}
 
     # Agrupar pagos por venta para calcular con exactitud la porción del ticket en Guaraníes
     sale_payments_map: dict[uuid.UUID, list] = {}
@@ -3850,9 +3869,36 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         mon = (row.moneda or "PYG").upper()
         m_dec = Decimal(str(row.monto or 0))
 
-        pos_op = getattr(row, "pos_tipo_operacion", None)
-        pos_nom = getattr(row, "nombre_tarjeta", None)
-        plug_op = getattr(row, "plug_tipo_operacion", None)
+        # 1. Buscar transacciones asociadas por sale_id y monto (1:1 sin producto cartesiano)
+        linked_pos = None
+        if row.sale_id in pos_txns_by_sale:
+            cand_pos = [p for p in pos_txns_by_sale[row.sale_id] if p.id not in used_pos_ids]
+            for p in cand_pos:
+                p_monto = Decimal(str(p.monto or 0))
+                if abs(p_monto - m_dec) < Decimal("1.00"):
+                    linked_pos = p
+                    used_pos_ids.add(p.id)
+                    break
+            if not linked_pos and cand_pos and ("TARJETA" in fp_raw or "BANCARD" in fp_raw or "DINELCO" in fp_raw or "POS" in fp_raw or "DEBITO" in fp_raw or "CREDITO" in fp_raw):
+                linked_pos = cand_pos[0]
+                used_pos_ids.add(linked_pos.id)
+
+        linked_plug = None
+        if row.sale_id in plug_txns_by_sale:
+            cand_pl = [pl for pl in plug_txns_by_sale[row.sale_id] if pl.id not in used_plug_ids]
+            for pl in cand_pl:
+                pl_monto = Decimal(str(pl.monto_origen or 0))
+                if abs(pl_monto - m_dec) < Decimal("1.00"):
+                    linked_plug = pl
+                    used_plug_ids.add(pl.id)
+                    break
+            if not linked_plug and cand_pl and ("PIX" in fp_raw or "PLUG" in fp_raw or "QR" in fp_raw):
+                linked_plug = cand_pl[0]
+                used_plug_ids.add(linked_plug.id)
+
+        pos_op = linked_pos.tipo_operacion if linked_pos else None
+        pos_nom = linked_pos.nombre_tarjeta if linked_pos else None
+        plug_op = linked_plug.tipo_operacion if linked_plug else None
         canal_key, medio_label, _, _ = classify_payment_channel(fp_raw, row.moneda, pos_op, pos_nom, plug_op)
 
         if mon == "PYG":
@@ -3874,18 +3920,18 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             nsu = None
             tarjeta_marca = "Crédito Extra Club"
             tarjeta_pan = None
-            titular = row.cliente_nombre or row.nombre_cliente or "Socio Extra Club"
+            titular = row.cliente_nombre or "Socio Extra Club"
         else:
             nro_boleta = None
-            codigo_autorizacion = row.codigo_autorizacion
-            nsu = row.nsu
-            tarjeta_marca = row.nombre_tarjeta
-            tarjeta_pan = row.pan
-            titular = row.nombre_cliente
+            codigo_autorizacion = linked_pos.codigo_autorizacion if linked_pos else None
+            nsu = linked_pos.nsu if linked_pos else None
+            tarjeta_marca = linked_pos.nombre_tarjeta if linked_pos else None
+            tarjeta_pan = linked_pos.pan if linked_pos else None
+            titular = linked_pos.nombre_cliente if linked_pos else (row.cliente_nombre or None)
 
-            # A. Si vino un PosTerminalTransaction directamente enlazado por sale_id:
-            if row.raw_response and isinstance(row.raw_response, dict):
-                raw = row.raw_response
+            # A. Si vino un PosTerminalTransaction directamente enlazado:
+            if linked_pos and linked_pos.raw_response and isinstance(linked_pos.raw_response, dict):
+                raw = linked_pos.raw_response
                 nro_boleta = raw.get("nroBoleta") or raw.get("nro_boleta") or raw.get("boleta") or raw.get("ticket_numero")
                 if not tarjeta_pan:
                     tarjeta_pan = raw.get("ultimos4") or raw.get("pan")
@@ -3893,6 +3939,16 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
                     codigo_autorizacion = raw.get("codigoAutorizacion") or raw.get("cod_autorizacion")
                 if not nsu:
                     nsu = raw.get("nsu") or raw.get("nro_secuencia")
+
+            # Si vino linked_plug directamente enlazado:
+            if linked_plug:
+                canal_key = "PLUGPAY_PIX"
+                medio_label = "Plug Pay PIX"
+                nro_boleta = str(linked_plug.id_transacao or "")
+                codigo_autorizacion = linked_plug.referencia_interna or str(linked_plug.qr_code_id or "—")
+                tarjeta_marca = "Plug Pay (PIX Brasil)"
+                val_brl = linked_plug.raw_response.get("valueBRL") if isinstance(linked_plug.raw_response, dict) else None
+                titular = f"PIX R$ {val_brl}" if val_brl else "PIX Brasil"
 
         # B. Si no hay autorización y es tarjeta (Bancard o Dinelco), buscar en unlinked_pos_txns:
         if canal_key != "EXTRA_CLUB" and (not codigo_autorizacion or codigo_autorizacion == "—") and ("TARJETA" in canal_key or "DINELCO" in canal_key or "BANCARD" in canal_key):
@@ -4355,6 +4411,10 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             v["monto_fisico_gs"] = matching["monto_fisico_gs"]
             v["diferencia_gs"] = matching["diferencia_gs"]
             v["dictamen"] = matching["dictamen"]
+
+    for grp in grupos_por_instrumento:
+        grp["total_fisico_gs"] = sum(c.get("monto_fisico_gs", c.get("monto_gs", 0)) for c in grp.get("canales", []))
+        grp["diferencia_gs"] = grp["total_fisico_gs"] - grp.get("total_gs", 0)
 
     canales_activos = [c for c in vouchers_by_channel.values() if c["cantidad_esperada"] > 0]
 
@@ -4890,6 +4950,21 @@ async def save_session_punteo_audit(
 
     session_obj.observaciones = (session_obj.observaciones or "") + nota_audit
     session_obj.estado = "verificada"
+
+    # Actualizar CashCount si existe para reflejar el monto físico de vouchers y la diferencia total
+    count_res = await db.execute(
+        select(CashCount).where(CashCount.session_id == sid).order_by(CashCount.created_at.desc()).limit(1)
+    )
+    count_obj = count_res.scalar_one_or_none()
+    if count_obj:
+        count_obj.monto_tarjeta = tot_fisico_calc
+        count_obj.monto_total = (
+            (count_obj.monto_efectivo or Decimal("0"))
+            + tot_fisico_calc
+            + (count_obj.monto_transferencia or Decimal("0"))
+            + (count_obj.monto_cheque or Decimal("0"))
+            + (count_obj.monto_otro or Decimal("0"))
+        )
 
     await db.commit()
     await db.refresh(session_obj)
