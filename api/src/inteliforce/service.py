@@ -313,7 +313,7 @@ async def get_customer_360(db: AsyncSession, company_id: str, customer_id: str) 
         "dias_plazo": credit.dias_plazo if credit else None,
         "cuentas_por_cobrar_pendiente": float(ar.pendiente),
         "documentos_vencidos": int(ar.vencidos),
-        "cheques_en_cartera": float(checks_total),
+        "cheques_en_cartera": float(checks_cartera),
         "ultimas_compras": ultimas,
         "top_productos": top_productos,
         "sugerencias": sugerencias,

@@ -40,6 +40,22 @@ class RouteStopResponse(BaseModel):
     route_nombre: str
 
 
+class TopProduct(BaseModel):
+    product_id: uuid.UUID
+    nombre: str
+    cantidad_total: float
+    ultima_compra: Optional[date] = None
+
+
+class SuggestedProduct(BaseModel):
+    product_id: uuid.UUID
+    nombre: str
+    sku: str
+    precio_venta: float
+    motivo: str  # "no_compra_hace_X_dias" | "nunca_comprado_top_linea"
+    linea_nombre: Optional[str] = None
+
+
 class Customer360Response(BaseModel):
     customer_id: uuid.UUID
     razon_social: str
@@ -94,22 +110,6 @@ class TargetLineBreakdown(BaseModel):
     unidades: float
     pct_unidades: float
     cumplido: bool
-
-
-class SuggestedProduct(BaseModel):
-    product_id: uuid.UUID
-    nombre: str
-    sku: str
-    precio_venta: float
-    motivo: str  # "no_compra_hace_X_dias" | "nunca_comprado_top_linea"
-    linea_nombre: Optional[str] = None
-
-
-class TopProduct(BaseModel):
-    product_id: uuid.UUID
-    nombre: str
-    cantidad_total: float
-    ultima_compra: Optional[date] = None
 
 
 class SyncRecord(BaseModel):
