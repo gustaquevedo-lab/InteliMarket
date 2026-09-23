@@ -37,6 +37,14 @@ scratch/
 # Node modules
 node_modules/
 ui-web/node_modules/
+mobile-apps/*/node_modules
+
+# Apps nativas (mobile-apps/*): cada proyecto Android genera esto localmente,
+# no es portable entre maquinas (rutas de SDK, cache de Gradle).
+mobile-apps/*/android/local.properties
+mobile-apps/*/android/.gradle/
+mobile-apps/*/android/**/build/
+mobile-apps/*/android/captures/
 
 # Build output
 ui-web-dist/
