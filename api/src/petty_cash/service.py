@@ -2350,7 +2350,7 @@ async def replenish_rendicion(
                     db.add(VaultEntry(
                         company_id=cid,
                         branch_id=e.branch_id,
-                        origen="egreso_reposicion_fondo",
+                        origen="egreso_fondo",
                         handoff_id=e.handoff_id,
                         monto_pyg=e_monto,
                         monto_usd=Decimal("0"),
@@ -2372,7 +2372,7 @@ async def replenish_rendicion(
                 db.add(VaultEntry(
                     company_id=cid,
                     branch_id=e.branch_id,
-                    origen="egreso_reposicion_fondo",
+                    origen="egreso_fondo",
                     handoff_id=e.handoff_id,
                     monto_pyg=remaining,
                     monto_usd=Decimal("0"),
