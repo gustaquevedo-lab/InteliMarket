@@ -1798,6 +1798,11 @@ export const api = {
     items: {
       update: (itemId: string, data: any) => client.put<any>(`/v1/supermer/inventory/items/${itemId}`, data),
     },
+    uploadEvidenciaConteo: (file: File) => {
+      const fd = new FormData()
+      fd.append("file", file)
+      return requestMultipart<{ url: string; filename: string }>("/v1/supermer/inventory/upload-evidencia", fd)
+    },
     adjustments: {
       approve: (adjId: string) => client.post<any>(`/v1/supermer/inventory/adjustments/${adjId}/approve`),
       reject: (adjId: string) => client.post<any>(`/v1/supermer/inventory/adjustments/${adjId}/reject`),

@@ -207,6 +207,11 @@ class CountSessionResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+class EvidenciaUploadResponse(BaseModel):
+    url: str
+    filename: str
+
+
 class CountItemCreate(BaseModel):
     producto_id: UUID
     codigo_barra: Optional[str] = None

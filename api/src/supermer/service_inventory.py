@@ -1,6 +1,8 @@
 """Fase 2 — Physical Inventory service: sessions, items, adjustments, ABC counting"""
 
 from datetime import date, datetime, timezone
+from pathlib import Path
+import uuid
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -181,6 +183,26 @@ async def reject_adjustment(adjustment_id: UUID, db: AsyncSession):
 # ---------------------------------------------------------------------------
 # DASHBOARD
 # ---------------------------------------------------------------------------
+
+# ── Evidencia fotografica de conteo (lote/vencimiento) ──────────────────────
+_EVIDENCIA_DIR = Path(__file__).resolve().parents[3] / "uploads" / "inventario-conteo"
+_EVIDENCIA_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+_EVIDENCIA_MAX = 10 * 1024 * 1024  # 10MB
+
+
+def save_evidencia_conteo(content: bytes, filename: str) -> str:
+    ext = Path(filename).suffix.lower()
+    if ext not in _EVIDENCIA_EXT:
+        raise ValueError(f"Tipo de archivo no permitido: '{ext}'. Se aceptan: {', '.join(sorted(_EVIDENCIA_EXT))}")
+    if len(content) > _EVIDENCIA_MAX:
+        raise ValueError("El archivo supera el tamaño máximo permitido (10MB)")
+    if len(content) == 0:
+        raise ValueError("El archivo está vacío")
+    _EVIDENCIA_DIR.mkdir(parents=True, exist_ok=True)
+    unique_name = f"{uuid.uuid4().hex[:12]}_{Path(filename).name}"
+    (_EVIDENCIA_DIR / unique_name).write_bytes(content)
+    return f"/static/uploads/inventario-conteo/{unique_name}"
+
 
 async def get_inventory_dashboard(company_id: UUID, db: AsyncSession):
     abiertas = (await db.execute(

@@ -1,6 +1,6 @@
 """Supermarket router — production, perishables, waste, forecasting API"""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
@@ -77,7 +77,8 @@ from .schemas_fase2 import (
     DsdRejectionCreate, DsdRejectionResponse,
     DsdDashboard,
     CountSessionCreate, CountSessionUpdate, CountSessionResponse,
-    CountItemCreate, CountItemUpdate, CountItemResponse,
+    CountItemCreate,
+    EvidenciaUploadResponse, CountItemUpdate, CountItemResponse,
     AdjustmentCreate, AdjustmentResponse,
     CountSessionDashboard,
     ReplenishmentRuleCreate, ReplenishmentRuleUpdate, ReplenishmentRuleResponse,
@@ -1706,6 +1707,20 @@ async def inventory_reject_adjustment(
     user=Depends(require_auth),
 ):
     return await service_inventory.reject_adjustment(adjustment_id, db)
+
+
+@router.post("/inventory/upload-evidencia", response_model=EvidenciaUploadResponse)
+async def inventory_upload_evidencia(
+    file: UploadFile = File(...),
+    user=Depends(require_auth),
+):
+    """Foto de respaldo de un item de conteo (etiqueta con lote/vencimiento, faltante, etc)."""
+    content = await file.read()
+    try:
+        url = service_inventory.save_evidencia_conteo(content, file.filename or "evidencia")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return EvidenciaUploadResponse(url=url, filename=file.filename or "evidencia")
 
 
 @router.get("/inventory/dashboard", response_model=CountSessionDashboard)

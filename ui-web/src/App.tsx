@@ -84,6 +84,7 @@ const PanaderiaRotiseriaPage = lazy(() => import("./pages/operations/PanaderiaRo
 const HaccpPage = lazy(() => import("./pages/operations/HaccpPage"))
 const EquipmentPage = lazy(() => import("./pages/operations/EquipmentPage"))
 const SalonOperacionesPwaPage = lazy(() => import("./pages/operations/SalonOperacionesPwaPage"))
+const ConteoVencimientosPage = lazy(() => import("./pages/inventory-count/ConteoVencimientosPage"))
 const DepositoRecepcionPage = lazy(() => import("./pages/operations/DepositoRecepcionPage"))
 const CarniceriaTvDigitalPage = lazy(() => import("./pages/kiosk/CarniceriaTvDigitalPage"))
 const DsdPage = lazy(() => import("./pages/operations/DsdPage"))
@@ -266,6 +267,7 @@ function AppRoutes() {
       <Route path="/tv/carniceria" element={<Suspense fallback={<PageLoader />}><CarniceriaTvDigitalPage /></Suspense>} />
 
       <Route path="/operaciones-salon" element={<Suspense fallback={<PageLoader />}><SalonOperacionesPwaPage /></Suspense>} />
+      <Route path="/conteo-vencimientos" element={<Suspense fallback={<PageLoader />}><ConteoVencimientosPage /></Suspense>} />
       <Route path="/deposito" element={<Suspense fallback={<PageLoader />}><DepositoRecepcionPage /></Suspense>} />
       <Route path="/dock" element={<Navigate to="/deposito" replace />} />
       <Route path="/pos" element={<ProtectedRoute><Suspense fallback={<PageLoader />}><POSPage /></Suspense></ProtectedRoute>} />
@@ -359,6 +361,7 @@ function AppRoutes() {
         <Route path="servicios" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="servicios"><ServiciosPage /></FeatureRoute></Suspense>} />
         <Route path="supermer" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><SupermerPage /></FeatureRoute></Suspense>} />
         <Route path="operaciones-salon" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><SalonOperacionesPwaPage /></PermissionRoute></Suspense>} />
+        <Route path="conteo-vencimientos" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><ConteoVencimientosPage /></PermissionRoute></Suspense>} />
         <Route path="deposito" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="purchases:receive"><DepositoRecepcionPage /></PermissionRoute></Suspense>} />
         <Route path="desposte" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><CarniceriaDespostePage /></PermissionRoute></Suspense>} />
         <Route path="frescos" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><VerduleriaFrescosPage /></PermissionRoute></Suspense>} />
