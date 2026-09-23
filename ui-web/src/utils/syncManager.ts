@@ -1,6 +1,6 @@
 /** Offline sync manager — catalog caching, retry queue, crash recovery */
 
-import { offlineDB, type CachedProduct, type CachedCustomer, type PendingSale, type CachedReceipt } from "./offlineDB"
+import { offlineDB, type CachedProduct, type CachedCustomer, type PendingSale, type CachedReceipt, type CachedTerminal, type CachedCreditAccount } from "./offlineDB"
 import { api, COMPANY_ID } from "../api"
 import { syncSupervisorPins } from "./localAuth"
 
@@ -108,10 +108,12 @@ export async function syncFullCatalog(forceFull = false): Promise<{ products: nu
       ])
     }
 
-    // No bloquea el resultado del sync de catalogo -- si falla (sin
-    // conexion en este preciso instante) se mantiene el cache de PINs
-    // anterior, que es exactamente el comportamiento que se busca.
+    // No bloquean el resultado del sync de catalogo -- si fallan (sin
+    // conexion en este preciso instante) se mantiene el cache anterior de
+    // cada uno, que es exactamente el comportamiento que se busca.
     syncSupervisorPins().catch(() => {})
+    syncTerminals().catch(() => {})
+    syncCreditAccounts().catch(() => {})
 
     await offlineDB.syncState.set({
       last_full_sync: new Date().toISOString(),
@@ -122,6 +124,40 @@ export async function syncFullCatalog(forceFull = false): Promise<{ products: nu
     console.warn("[syncManager] Error en syncFullCatalog:", e)
     return { products: 0, customers: 0, success: false }
   }
+}
+
+// Lista de cajas (hostname/IP/punto de emision) para que la malla LAN entre
+// cajas (peer-mesh, ver OfflineContext.tsx) sepa a quien preguntarle
+// mientras el servidor central esta caido.
+async function syncTerminals(): Promise<void> {
+  const terminals = await api.posTerminals.list()
+  const cached: CachedTerminal[] = (terminals || []).map((t: any) => ({
+    id: t.id,
+    hostname: t.hostname,
+    ip_address: t.ip_address ?? null,
+    punto_emision: t.punto_emision,
+    caja_nombre: t.caja_nombre,
+    activo: t.activo !== false,
+  }))
+  await offlineDB.terminals.setAll(cached)
+}
+
+// Ultimo saldo conocido de cada cuenta de credito Extra Club -- para poder
+// cobrar Extra Club offline (sin tope, venta marcada para revision) usando
+// este dato en vez de bloquear el cobro cuando el servidor no responde.
+async function syncCreditAccounts(): Promise<void> {
+  const accounts = await api.creditAccounts.list({ activo: true })
+  const cached: CachedCreditAccount[] = (accounts || []).map((a: any) => ({
+    id: a.id,
+    customer_id: a.customer_id,
+    limite_credito: Number(a.limite_credito || 0),
+    saldo_disponible: Number(a.saldo_disponible || 0),
+    saldo_utilizado: Number(a.saldo_utilizado || 0),
+    activo: a.activo !== false,
+    en_mora: !!a.en_mora,
+    cached_at: new Date().toISOString(),
+  }))
+  await offlineDB.creditAccounts.setAll(cached)
 }
 
 export async function getCachedCatalog(): Promise<{
@@ -200,6 +236,12 @@ export async function syncPendingSales(onProgress?: (synced: number, total: numb
     try {
       await api.sales.create(sale.data as Parameters<typeof api.sales.create>[0])
       await offlineDB.pendingSales.update({ ...sale, status: "synced" as const })
+      // Si esta venta tenia un consumo Extra Club anotado en la malla LAN
+      // (ver OfflineContext.recordExtraClubOfflineConsumption, misma
+      // convencion de id: "xc-" + id de la venta local), avisar que ya se
+      // confirmo -- para que deje de descontarse del saldo offline de las
+      // demas cajas. No rompe el sync si falla (ej. ya no es Electron).
+      ;(window as any).electronAPI?.peerMesh?.confirmSynced?.(`xc-${sale.id}`)?.catch?.(() => {})
       synced++
     } catch (err) {
       failed++

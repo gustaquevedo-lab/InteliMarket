@@ -1,5 +1,5 @@
 const DB_NAME = "intelimarket_offline"
-const DB_VERSION = 7
+const DB_VERSION = 8
 const STORE_CART = "cart"
 const STORE_PENDING_SALES = "pending_sales"
 const STORE_PENDING_CUPONES = "pending_cupones"
@@ -14,6 +14,8 @@ const STORE_INVOICES = "invoices"
 const STORE_STAFF = "staff_authorizers"
 const STORE_RATES = "currency_rates"
 const STORE_SUPERVISOR_PINS = "supervisor_pins"
+const STORE_TERMINALS = "terminals"
+const STORE_CREDIT_ACCOUNTS = "credit_accounts"
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -82,6 +84,20 @@ function openDB(): Promise<IDBDatabase> {
       // solo tiene datos de exhibicion, nunca credenciales) a proposito.
       // Ver api/src/auth/router.py::pos_supervisor_pins.
       if (!db.objectStoreNames.contains(STORE_SUPERVISOR_PINS)) db.createObjectStore(STORE_SUPERVISOR_PINS, { keyPath: "id" })
+      // Lista de cajas (hostname/IP/punto de emision) para que la malla LAN
+      // (peer-mesh, Extra Club offline) sepa a quien preguntarle aunque el
+      // servidor central este caido -- se sincroniza junto al catalogo.
+      if (!db.objectStoreNames.contains(STORE_TERMINALS)) db.createObjectStore(STORE_TERMINALS, { keyPath: "id" })
+      // Cuentas de credito Extra Club: el ultimo saldo conocido por cliente,
+      // para poder cobrar Extra Club offline (ver OfflineContext.tsx). OJO:
+      // esto es DISTINTO de CachedCustomer.credito_limite/credito_usado
+      // (un campo generico del propio Customer, sin relacion con la cuenta
+      // real de credito -- confirmado leyendo api/src/credit_accounts, es
+      // otra tabla con su propia logica de mora).
+      if (!db.objectStoreNames.contains(STORE_CREDIT_ACCOUNTS)) {
+        const store = db.createObjectStore(STORE_CREDIT_ACCOUNTS, { keyPath: "id" })
+        store.createIndex("customer_id", "customer_id", { unique: true })
+      }
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
@@ -361,6 +377,26 @@ export interface SupervisorPin {
   synced_at?: string
 }
 
+export interface CachedTerminal {
+  id: string
+  hostname: string
+  ip_address: string | null
+  punto_emision: string
+  caja_nombre: string
+  activo: boolean
+}
+
+export interface CachedCreditAccount {
+  id: string
+  customer_id: string
+  limite_credito: number
+  saldo_disponible: number
+  saldo_utilizado: number
+  activo: boolean
+  en_mora?: boolean
+  cached_at: string
+}
+
 export interface PendingCupon {
   id: string
   data: {
@@ -525,6 +561,17 @@ export const offlineDB = {
     setAll: (rates: any[]) => clearStore(STORE_RATES).then(() => putMany(STORE_RATES, rates)),
     clear: () => clearStore(STORE_RATES),
   },
+  terminals: {
+    getAll: () => getStore<CachedTerminal>(STORE_TERMINALS),
+    setAll: (terminals: CachedTerminal[]) => clearStore(STORE_TERMINALS).then(() => putMany(STORE_TERMINALS, terminals)),
+    clear: () => clearStore(STORE_TERMINALS),
+  },
+  creditAccounts: {
+    getAll: () => getStore<CachedCreditAccount>(STORE_CREDIT_ACCOUNTS),
+    getByCustomer: async (customerId: string) => (await getByIndex<CachedCreditAccount>(STORE_CREDIT_ACCOUNTS, "customer_id", customerId))[0] || null,
+    setAll: (accounts: CachedCreditAccount[]) => clearStore(STORE_CREDIT_ACCOUNTS).then(() => putMany(STORE_CREDIT_ACCOUNTS, accounts)),
+    clear: () => clearStore(STORE_CREDIT_ACCOUNTS),
+  },
   syncState: {
     get: async (): Promise<SyncState | null> => {
       const all = await getStore<SyncState>(STORE_SYNC_STATE)
@@ -540,7 +587,7 @@ export const offlineDB = {
     clear: () => clearStore(STORE_RECEIPTS),
   },
   clearAll: async () => {
-    const stores = [STORE_CART, STORE_PENDING_SALES, STORE_PENDING_CUPONES, STORE_PRODUCTS, STORE_CUSTOMERS, STORE_SYNC_STATE, STORE_RECEIPTS, STORE_TIMBRADOS, STORE_PAYMENT_METHODS, STORE_COMPANY_CONFIG, STORE_INVOICES, STORE_STAFF, STORE_RATES, STORE_SUPERVISOR_PINS]
+    const stores = [STORE_CART, STORE_PENDING_SALES, STORE_PENDING_CUPONES, STORE_PRODUCTS, STORE_CUSTOMERS, STORE_SYNC_STATE, STORE_RECEIPTS, STORE_TIMBRADOS, STORE_PAYMENT_METHODS, STORE_COMPANY_CONFIG, STORE_INVOICES, STORE_STAFF, STORE_RATES, STORE_SUPERVISOR_PINS, STORE_TERMINALS, STORE_CREDIT_ACCOUNTS]
     for (const s of stores) await clearStore(s)
   },
   timbrados: {

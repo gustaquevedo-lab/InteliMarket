@@ -19,6 +19,11 @@ interface OfflineContextType {
   generateReceipt: (saleNumber: string, items: Array<{ nombre: string; cantidad: number; precio: number; total: number }>, total: number, iva10: number, iva5: number, paymentMethod: string, customerName: string | null, branchName: string) => { html: string; print: () => void }
   saveReceipt: (saleId: string, saleNumber: string, html: string) => Promise<void>
   getReceipt: (saleId: string) => Promise<CachedReceipt | null>
+  // Extra Club offline: saldo cacheado del cliente, ajustado por lo que
+  // cualquier caja de la malla LAN (incluida esta) le vendio a credito y
+  // todavia no se confirmo sincronizado con el servidor. Ver peer-mesh.cjs.
+  getExtraClubOfflineBalance: (customerId: string) => Promise<{ limite_credito: number; saldo_disponible: number; saldo_utilizado: number; activo: boolean } | null>
+  recordExtraClubOfflineConsumption: (customerId: string, monto: number, clientSaleId: string) => Promise<void>
 }
 
 const OfflineContext = createContext<OfflineContextType | null>(null)
@@ -45,6 +50,58 @@ function generarUUIDLocal(): string {
     const v = c === "x" ? r : (r & 0x3) | 0x8
     return v.toString(16)
   })
+}
+
+// Malla LAN entre cajas: solo existe dentro del POS de Electron (ver
+// electron/preload.cjs -- window.electronAPI.peerMesh). En cualquier otro
+// contexto (navegador suelto, portal de proveedores, etc.) esto no existe
+// y las funciones de mas abajo quedan como no-ops seguros.
+function getPeerMeshAPI(): {
+  port: number
+  getMyState: () => Promise<any>
+  mergeState: (s: unknown) => Promise<unknown>
+  recordExtraClubDelta: (d: unknown) => Promise<unknown>
+  confirmSynced: (id: string) => Promise<unknown>
+  getExtraClubAdjustment: (customerId: string) => Promise<number>
+} | null {
+  const api = (window as any).electronAPI
+  return api?.peerMesh || null
+}
+
+const GOSSIP_INTERVAL_MS = 10000
+const GOSSIP_TIMEOUT_MS = 1500
+
+async function gossipTick(): Promise<void> {
+  const mesh = getPeerMeshAPI()
+  if (!mesh) return
+  const terminals = await offlineDB.terminals.getAll().catch(() => [])
+  const peers = terminals.filter((t) => t.activo && t.ip_address)
+  if (peers.length === 0) return
+
+  await Promise.all(peers.map(async (peer) => {
+    try {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), GOSSIP_TIMEOUT_MS)
+      const res = await fetch(`http://${peer.ip_address}:${mesh.port}/peer/state`, { signal: ctrl.signal, cache: "no-store" })
+      clearTimeout(timer)
+      if (res.ok) await mesh.mergeState(await res.json())
+    } catch { /* esa caja no responde en este intento -- se reintenta solo en el proximo tick, cada 10s */ }
+  }))
+
+  try {
+    const mine = await mesh.getMyState()
+    await Promise.all(peers.map((peer) => {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), GOSSIP_TIMEOUT_MS)
+      return fetch(`http://${peer.ip_address}:${mesh.port}/peer/state`, {
+        method: "POST",
+        signal: ctrl.signal,
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mine),
+      }).catch(() => {}).finally(() => clearTimeout(timer))
+    }))
+  } catch { /* sin estado propio para compartir en este tick, no es grave */ }
 }
 
 async function checkServerReachable(): Promise<boolean> {
@@ -159,6 +216,18 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(t)
   }, [isOnline])
 
+  // Chismorreo entre cajas: SOLO mientras el servidor central no responde.
+  // Con el servidor arriba, este es el que manda -- no tiene sentido gastar
+  // ciclos en la red local (y evita divergencias innecesarias).
+  useEffect(() => {
+    if (isOnline) return
+    let cancelled = false
+    const tick = () => { if (!cancelled) gossipTick().catch(() => {}) }
+    tick()
+    const interval = setInterval(tick, GOSSIP_INTERVAL_MS)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [isOnline])
+
   const saveCartOffline = async (items: OfflineCartItem[]) => {
     setOfflineCart(items)
     await offlineDB.cart.set(items)
@@ -190,6 +259,35 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     setPendingSales(sales)
     return salesResult.status === "fulfilled" ? salesResult.value.synced : 0
   }
+
+  // Saldo Extra Club offline: el ultimo saldo sincronizado del cliente,
+  // menos lo que cualquier caja de la malla (incluida esta) le vendio a
+  // credito y todavia no confirmo el servidor. Sin tope -- si el saldo da
+  // negativo, se permite igual (decision del negocio) pero la venta debe
+  // quedar marcada para revision (eso lo hace quien llama a esta funcion).
+  const getExtraClubOfflineBalance = useCallback(async (customerId: string) => {
+    const cached = await offlineDB.creditAccounts.getByCustomer(customerId)
+    if (!cached) return null
+    const mesh = getPeerMeshAPI()
+    const adjustment = mesh ? await mesh.getExtraClubAdjustment(customerId).catch(() => 0) : 0
+    return {
+      limite_credito: cached.limite_credito,
+      saldo_disponible: cached.saldo_disponible - adjustment,
+      saldo_utilizado: cached.saldo_utilizado + adjustment,
+      activo: cached.activo,
+    }
+  }, [])
+
+  const recordExtraClubOfflineConsumption = useCallback(async (customerId: string, monto: number, clientSaleId: string) => {
+    const mesh = getPeerMeshAPI()
+    if (!mesh) return
+    await mesh.recordExtraClubDelta({
+      id: `xc-${clientSaleId}`,
+      customerId,
+      monto,
+      saleClientId: clientSaleId,
+    }).catch(() => {})
+  }, [])
 
   const generateReceipt = (
     saleNumber: string,
@@ -225,6 +323,8 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
       generateReceipt,
       saveReceipt: saveOfflineReceipt,
       getReceipt: getOfflineReceipt,
+      getExtraClubOfflineBalance,
+      recordExtraClubOfflineConsumption,
     }}>
       {children}
     </OfflineContext.Provider>

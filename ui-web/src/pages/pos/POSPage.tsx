@@ -455,7 +455,7 @@ export default function POSPage() {
   const { user, logout } = useAuth()
   const toast = useToast()
   const { dark, toggle: toggleTheme } = useTheme()
-  const { isOnline: serverOnline, pendingSalesCount } = useOffline()
+  const { isOnline: serverOnline, pendingSalesCount, getExtraClubOfflineBalance, recordExtraClubOfflineConsumption } = useOffline()
 
   // ── TOKENS DE TEMA REUTILIZABLES PARA TODOS LOS MODALES ────────────────────
   // Antes cada modal tenía el fondo oscuro fijo (bg-slate-900/950) sin
@@ -2737,6 +2737,17 @@ export default function POSPage() {
   // apenas hay un cliente real seleccionado en ese tab (no el generico
   // DEFAULT_CUSTOMER). Sin cuenta de credito, extraClubCredit queda null
   // -- eso es lo que bloquea el cobro salvo override de admin.
+  //
+  // Offline: si la llamada en vivo falla, en vez de bloquear se usa el
+  // ultimo saldo sincronizado (cacheado en esta caja) ajustado por lo que
+  // CUALQUIER caja de la malla LAN le vendio a este cliente a credito y
+  // todavia no se confirmo con el servidor (ver OfflineContext). Es
+  // deliberado que esto NO tenga tope: si el saldo ajustado ya viene
+  // negativo, `activo` sigue en true y la venta se deja pasar igual -- la
+  // decision de negocio es no perder la venta. Si al sincronizar el
+  // servidor la rechaza por limite real superado, ya queda "marcada para
+  // revision" por el mecanismo existente (status "error" + audit_logs
+  // accion=venta_offline_rechazada), sin reintentar en bucle.
   useEffect(() => {
     if (!activeMethods.has("extra_club") || !customer || customer.id === DEFAULT_CUSTOMER.id) {
       setExtraClubCredit(null)
@@ -2746,9 +2757,13 @@ export default function POSPage() {
     setExtraClubCredit("loading")
     api.creditAccounts.getByCustomer(customer.id)
       .then((acc) => { if (!cancelled) setExtraClubCredit(acc ? { limite_credito: Number(acc.limite_credito || 0), saldo_disponible: Number(acc.saldo_disponible || 0), saldo_utilizado: Number(acc.saldo_utilizado || 0), activo: acc.activo !== false } : null) })
-      .catch(() => { if (!cancelled) setExtraClubCredit(null) })
+      .catch(async () => {
+        if (cancelled) return
+        const offlineBalance = await getExtraClubOfflineBalance(customer.id).catch(() => null)
+        if (!cancelled) setExtraClubCredit(offlineBalance)
+      })
     return () => { cancelled = true }
-  }, [customer, activeMethods])
+  }, [customer, activeMethods, getExtraClubOfflineBalance])
 
   // Busqueda para el boton dedicado de consulta de saldo (Electron toolbar)
   // -- no toca el carrito ni el cliente de la venta, es solo lectura.
@@ -7640,6 +7655,16 @@ export default function POSPage() {
               last_retry: new Date().toISOString(),
               next_retry: new Date().toISOString(),
             })
+            // Avisa a la malla LAN cuanto se le vendio a este cliente a
+            // credito, para que las demas cajas descuenten lo mismo de su
+            // saldo offline aunque el servidor siga caido (ver
+            // OfflineContext.getExtraClubOfflineBalance).
+            {
+              const extraClubMontoOffline = salePaymentsForCreate.find((p) => p.forma_pago === "EXTRA_CLUB")?.monto || 0
+              if (extraClubMontoOffline > 0) {
+                recordExtraClubOfflineConsumption(customer.id, extraClubMontoOffline, offlineId).catch(() => {})
+              }
+            }
             toast.warning("Venta guardada en modo offline", "El ticket se imprimió y la venta se sincronizará automáticamente cuando vuelva la conexión.")
           } catch (dbErr) {
             console.error("Error guardando en pendingSales:", dbErr)
@@ -7661,6 +7686,12 @@ export default function POSPage() {
                 last_retry: new Date().toISOString(),
                 next_retry: new Date().toISOString(),
               })
+              {
+                const extraClubMontoOffline = salePaymentsForCreate.find((p) => p.forma_pago === "EXTRA_CLUB")?.monto || 0
+                if (extraClubMontoOffline > 0) {
+                  recordExtraClubOfflineConsumption(customer.id, extraClubMontoOffline, offlineId).catch(() => {})
+                }
+              }
               toast.warning("Venta guardada en modo offline", "El ticket se imprimió y la venta se sincronizará automáticamente cuando vuelva la conexión.")
             } catch (dbErr) {
               console.error("Error guardando en pendingSales:", dbErr)
