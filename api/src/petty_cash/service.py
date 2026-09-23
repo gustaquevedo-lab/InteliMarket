@@ -5,6 +5,8 @@ from pathlib import Path
 import logging
 import json
 import uuid
+import os
+import time
 
 from fastapi import HTTPException
 from sqlalchemy import select, text, func as sa_func, and_, or_
@@ -2618,53 +2620,129 @@ async def get_rendicion_pdf_data(db: AsyncSession, company_id: str, rendicion_id
     return detail
 
 
-async def get_staff_candidates(db: AsyncSession, company_id: str, search: str | None = None) -> list[dict]:
-    """Retorna candidatos a colaboradores activos para selección ágil en anticipos de sueldo."""
-    from api.src.auth.models import User
+# ── Integración exclusiva de Nómina y Anticipos con SueldOK ───────────────
+SUELDOK_BASE_URL = os.environ.get("SUELDOK_URL", "https://sueldok.intellihouse.lat")
+SUELDOK_API_KEY = os.environ.get("SUELDOK_API_KEY", "ifk_santateresa_live_api_key_2026")
+_SUELDOK_CACHE: dict = {"data": None, "timestamp": 0}
 
-    query = select(User.id, User.nombre, User.email, User.telefono, User.rol).where(User.activo == True)
-    if search:
-        s = f"%{search.strip().lower()}%"
-        query = query.where(User.nombre.ilike(s) | User.email.ilike(s))
-    query = query.order_by(User.nombre).limit(50)
-    res = await db.execute(query)
-    rows = res.all()
+
+async def fetch_sueldok_overview_data() -> dict:
+    """Consulta la API de SueldOK con caché ligero en memoria para no saturar la red."""
+    global _SUELDOK_CACHE
+    now = time.time()
+    if _SUELDOK_CACHE.get("data") and (now - _SUELDOK_CACHE.get("timestamp", 0)) < 15:
+        return _SUELDOK_CACHE["data"]
+
+    url = f"{SUELDOK_BASE_URL.rstrip('/')}/http/api/intelimarket/overview?apiKey={SUELDOK_API_KEY}"
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.get(url, headers={"User-Agent": "InteliMarket/1.0", "Accept": "application/json"})
+            if res.status_code == 200:
+                data = res.json()
+                _SUELDOK_CACHE = {"data": data, "timestamp": now}
+                return data
+            else:
+                logger.warning(f"SueldOK overview returned status {res.status_code}")
+    except Exception as e:
+        logger.warning(f"Error connecting to SueldOK overview: {e}")
+        if _SUELDOK_CACHE.get("data"):
+            return _SUELDOK_CACHE["data"]
+    return _SUELDOK_CACHE.get("data") or {}
+
+
+async def get_staff_candidates(db: AsyncSession, company_id: str, search: str | None = None) -> list[dict]:
+    """Retorna EXCLUSIVAMENTE los colaboradores activos cargados en SueldOK."""
+    data = await fetch_sueldok_overview_data()
+    raw_employees = data.get("employees", [])
 
     staff = []
-    seen = set()
-    for r in rows:
+    for emp in raw_employees:
+        estado = (emp.get("estado") or "").strip().lower()
+        if estado and estado not in ("activo", "active"):
+            continue
+
+        nombre = (emp.get("nombre") or "").strip()
+        ci = str(emp.get("ci") or "").strip()
+        cargo = (emp.get("cargo") or "").strip()
+        depto = (emp.get("depto") or "").strip()
+        salario = emp.get("salario") or 0
+
+        if search:
+            q = search.strip().lower()
+            if q not in nombre.lower() and q not in ci.lower() and q not in cargo.lower():
+                continue
+
         staff.append({
-            "id": str(r.id),
-            "nombre": r.nombre,
-            "email": r.email,
-            "rol": r.rol,
-            "ci": r.telefono if (r.telefono and r.telefono.isdigit()) else None,
+            "id": str(emp.get("id") or ""),
+            "nombre": nombre,
+            "ci": ci,
+            "cargo": cargo,
+            "depto": depto,
+            "salario": salario,
+            "estado": estado or "activo",
+            "biometricId": emp.get("biometricId"),
         })
-        seen.add(r.nombre.strip().upper())
 
-    staff_extra = [
-        {"id": "c1", "nombre": "NILDA AQUINO", "rol": "Cajera Principal", "ci": "4521098"},
-        {"id": "c2", "nombre": "LILIANA CRISTALDO", "rol": "Cajera Turno Tarde", "ci": "4892104"},
-        {"id": "c3", "nombre": "EVELIN HERRERO", "rol": "Cajera / Cobros", "ci": "5123987"},
-        {"id": "c4", "nombre": "JESSICA FERRARI", "rol": "Cajera Refuerzo", "ci": "4398120"},
-        {"id": "c5", "nombre": "MARISTELA IBARRA", "rol": "Cajera Mañana", "ci": "3987654"},
-        {"id": "c6", "nombre": "ROCIO INSAURRALDE", "rol": "Cajera Cierre", "ci": "4765432"},
-        {"id": "c7", "nombre": "LEIDI VERA", "rol": "Cajera Salón", "ci": "5234567"},
-        {"id": "c8", "nombre": "DIANA GONZALEZ", "rol": "Cajera / Atención", "ci": "4987654"},
-        {"id": "c9", "nombre": "TOMASA", "rol": "Cajera", "ci": "3876543"},
-        {"id": "c10", "nombre": "JUAN GABRIEL RUIZ", "rol": "Cajero / Repositor", "ci": "4654321"},
-        {"id": "c11", "nombre": "CAMILA FERNANDEZ", "rol": "Cajera", "ci": "5123456"},
-        {"id": "c12", "nombre": "LIDIA RAMONA FERNANDEZ", "rol": "Cajera", "ci": "3456789"},
-        {"id": "c13", "nombre": "ROSA CORONEL", "rol": "Cajera", "ci": "4234567"},
-        {"id": "c14", "nombre": "LIZ CENTURION", "rol": "Cajera", "ci": "4567890"},
-        {"id": "c15", "nombre": "SILVIA OVELAR", "rol": "Cajera", "ci": "4876543"},
-    ]
-    for s in staff_extra:
-        if s["nombre"].strip().upper() not in seen:
-            if not search or (search.lower() in s["nombre"].lower() or (s.get("ci") and search in s["ci"])):
-                staff.append(s)
-                seen.add(s["nombre"].strip().upper())
-
+    staff.sort(key=lambda x: x["nombre"])
     return staff
+
+
+async def get_sueldok_approved_advances(db: AsyncSession, company_id: str, search: str | None = None) -> list[dict]:
+    """Retorna los anticipos cargados en SueldOK y APROBADOS allí, cotejando si ya fueron desembolsados en caja chica."""
+    data = await fetch_sueldok_overview_data()
+    raw_advances = data.get("advances", [])
+
+    # Obtener los sueldok_sync_id ya desembolsados/usados en gastos de caja chica
+    used_res = await db.execute(
+        text("SELECT id, sueldok_sync_id, monto, fecha_gasto, estado FROM expenses WHERE sueldok_sync_id IS NOT NULL AND estado != 'anulado'")
+    )
+    used_advances_map = {row.sueldok_sync_id: row for row in used_res.fetchall()}
+
+    advances = []
+    for adv in raw_advances:
+        estado = (adv.get("estado") or "").strip().lower()
+        # Solo los cargados en SueldOK y APROBADOS allí
+        if estado not in ("approved", "aprobado"):
+            continue
+
+        adv_id = str(adv.get("id") or "")
+        nombre = (adv.get("nombre") or "").strip()
+        ci = str(adv.get("ci") or "").strip()
+        monto = adv.get("monto") or 0
+        motivo = (adv.get("motivo") or "").strip()
+        cargo = (adv.get("cargo") or "").strip()
+        depto = (adv.get("depto") or "").strip()
+        fecha = str(adv.get("fecha") or "")
+
+        if search:
+            q = search.strip().lower()
+            if (q not in nombre.lower() and q not in ci.lower() and 
+                q not in motivo.lower() and q not in cargo.lower()):
+                continue
+
+        ya_usado = adv_id in used_advances_map
+        expense_info = used_advances_map.get(adv_id)
+
+        advances.append({
+            "id": adv_id,
+            "employeeId": str(adv.get("employeeId") or ""),
+            "nombre": nombre,
+            "ci": ci,
+            "cargo": cargo,
+            "depto": depto,
+            "monto": monto,
+            "motivo": motivo,
+            "fecha": fecha,
+            "estado": estado,
+            "ya_desembolsado": ya_usado,
+            "expense_id": str(expense_info.id) if expense_info else None,
+            "expense_estado": expense_info.estado if expense_info else None,
+        })
+
+    # Mostrar primero los pendientes de desembolso
+    advances.sort(key=lambda x: (x["ya_desembolsado"], x["nombre"]))
+    return advances
+
 
 

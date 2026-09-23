@@ -637,6 +637,15 @@ async def list_staff_candidates(
     return await service.get_staff_candidates(db, user["company_id"], search)
 
 
+@router.get("/sueldok-advances")
+async def list_sueldok_advances(
+    search: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_sueldok_approved_advances(db, user["company_id"], search)
+
+
 @router.get("/{expense_id}", response_model=ExpenseResponse)
 async def get_expense(
     expense_id: str,

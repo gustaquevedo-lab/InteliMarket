@@ -3541,7 +3541,8 @@ export const api = {
       list: () => client.get<CostCenter[]>("/v1/expenses/cost-centers"),
       create: (data: any) => client.post<CostCenter>("/v1/expenses/cost-centers", data),
     },
-    staffCandidates: (search?: string) => client.get<{ id: string; nombre: string; email?: string; rol?: string; ci?: string }[]>("/v1/expenses/staff-candidates", { search }),
+    staffCandidates: (search?: string) => client.get<{ id: string; nombre: string; email?: string; rol?: string; ci?: string; cargo?: string; depto?: string; salario?: number }[]>("/v1/expenses/staff-candidates", { search }),
+    sueldokAdvances: (search?: string) => client.get<{ id: string; employeeId: string; nombre: string; ci: string; cargo: string; depto: string; monto: number; motivo: string; fecha: string; estado: string; ya_desembolsado: boolean; expense_id?: string; expense_estado?: string }[]>("/v1/expenses/sueldok-advances", { search }),
     list: (params?: { branch_id?: string; fund_id?: string; rendicion_id?: string; sin_rendicion?: boolean; category_id?: string; estado?: string; desde?: string; hasta?: string; search?: string; monto?: number; monto_min?: number; monto_max?: number; limit?: number; offset?: number }) => client.get<Expense[]>("/v1/expenses", params as any),
     rendiciones: {
       list: (params?: { fund_id?: string; estado?: string }) => client.get<PettyCashRendicion[]>("/v1/petty-cash-funds/rendiciones", params as any),

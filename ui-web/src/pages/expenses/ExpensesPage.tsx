@@ -87,6 +87,7 @@ export default function ExpensesPage() {
     employee_ci: "",
     periodo_nomina: getTodayAsuncion().slice(0, 7),
     cuotas_anticipo: "1",
+    sueldok_sync_id: "",
   })
   const [catForm, setCatForm] = useState({ nombre: "", descripcion: "", presupuesto_mensual: "" })
   const [sectorForm, setSectorForm] = useState({ nombre: "", tipo: "sector", peso_prorateo: "1" })
@@ -191,6 +192,13 @@ export default function ExpensesPage() {
   const [loadingStaff, setLoadingStaff] = useState(false)
   const staffSearchRef = useRef<HTMLDivElement>(null)
 
+  // Anticipos formalmente cargados y aprobados en SueldOK
+  const [sueldokAdvances, setSueldokAdvances] = useState<any[]>([])
+  const [advanceSearchQuery, setAdvanceSearchQuery] = useState("")
+  const [advanceDropdownOpen, setAdvanceDropdownOpen] = useState(false)
+  const [loadingAdvances, setLoadingAdvances] = useState(false)
+  const advanceSearchRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (invoiceSearchRef.current && !invoiceSearchRef.current.contains(e.target as Node)) {
@@ -199,10 +207,37 @@ export default function ExpensesPage() {
       if (staffSearchRef.current && !staffSearchRef.current.contains(e.target as Node)) {
         setStaffDropdownOpen(false)
       }
+      if (advanceSearchRef.current && !advanceSearchRef.current.contains(e.target as Node)) {
+        setAdvanceDropdownOpen(false)
+      }
     }
     document.addEventListener("mousedown", handleClickOutside)
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
+
+  // Anticipo de SueldOK actualmente vinculado en el formulario
+  const selectedSueldokAdvance = useMemo(() => {
+    if (!form.sueldok_sync_id) return null
+    return sueldokAdvances.find((a: any) => a.id === form.sueldok_sync_id) || null
+  }, [form.sueldok_sync_id, sueldokAdvances])
+
+  // Filtrado ágil de anticipos aprobados en SueldOK
+  const filteredSueldokAdvances = useMemo(() => {
+    const q = (advanceSearchQuery || "").trim().toLowerCase()
+    if (!q) return sueldokAdvances
+    const qClean = q.replace(/[^a-z0-9]/g, "")
+    return sueldokAdvances.filter((a: any) => {
+      const nombre = (a.nombre || "").toLowerCase()
+      const ci = (a.ci || "").toLowerCase()
+      const ciClean = ci.replace(/[^0-9]/g, "")
+      const motivo = (a.motivo || "").toLowerCase()
+      const cargo = (a.cargo || "").toLowerCase()
+      if (nombre.includes(q)) return true
+      if (ci.includes(q) || (qClean && ciClean.includes(qClean))) return true
+      if (motivo.includes(q) || cargo.includes(q)) return true
+      return false
+    })
+  }, [sueldokAdvances, advanceSearchQuery])
 
   // Filtrado ágil de colaboradores para anticipo de sueldo
   const filteredStaffCandidates = useMemo(() => {
@@ -323,7 +358,7 @@ export default function ExpensesPage() {
   const fetchAll = async () => {
     setLoading(true)
     try {
-      const [c, cc, f, ac, pc, bAccs, cRegs, rends, invs, sups, staff] = await Promise.all([
+      const [c, cc, f, ac, pc, bAccs, cRegs, rends, invs, sups, staff, sAdv] = await Promise.all([
         api.expenses.categories.list().catch(() => []),
         api.expenses.costCenters.list().catch(() => []),
         api.expenses.funds.list().catch(() => []),
@@ -335,6 +370,7 @@ export default function ExpensesPage() {
         api.financial.invoices.list({ limit: 1000 }).catch(() => []),
         api.purchases.listSuppliers().catch(() => []),
         api.expenses.staffCandidates().catch(() => []),
+        api.expenses.sueldokAdvances().catch(() => []),
       ])
       setCategories(c)
       setCostCenters(cc)
@@ -349,6 +385,9 @@ export default function ExpensesPage() {
       }
       if (Array.isArray(staff)) {
         setStaffList(staff)
+      }
+      if (Array.isArray(sAdv)) {
+        setSueldokAdvances(sAdv)
       }
       if (ac) {
         setApprovalThreshold(ac.umbral_aprobacion)
@@ -520,12 +559,15 @@ export default function ExpensesPage() {
       employee_ci: "",
       periodo_nomina: getTodayAsuncion().slice(0, 7),
       cuotas_anticipo: "1",
+      sueldok_sync_id: "",
     })
     setComprobanteFile(null)
     setInvoiceSearchQuery("")
     setInvoiceDropdownOpen(false)
     setStaffSearchQuery("")
     setStaffDropdownOpen(false)
+    setAdvanceSearchQuery("")
+    setAdvanceDropdownOpen(false)
     setShowForm(true)
   }
 
@@ -564,12 +606,15 @@ export default function ExpensesPage() {
       employee_ci: (e as any).employee_ci || "",
       periodo_nomina: (e as any).periodo_nomina || getTodayAsuncion().slice(0, 7),
       cuotas_anticipo: (e as any).cuotas_anticipo ? String((e as any).cuotas_anticipo) : "1",
+      sueldok_sync_id: (e as any).sueldok_sync_id || "",
     })
     setComprobanteFile(null)
     setInvoiceSearchQuery("")
     setInvoiceDropdownOpen(false)
     setStaffSearchQuery("")
     setStaffDropdownOpen(false)
+    setAdvanceSearchQuery("")
+    setAdvanceDropdownOpen(false)
     setShowForm(true)
   }
 
@@ -633,6 +678,7 @@ export default function ExpensesPage() {
           employee_ci: form.es_anticipo_sueldo ? (form.employee_ci || undefined) : undefined,
           periodo_nomina: form.es_anticipo_sueldo ? (form.periodo_nomina || undefined) : undefined,
           cuotas_anticipo: form.es_anticipo_sueldo && form.cuotas_anticipo ? Number(form.cuotas_anticipo) : undefined,
+          sueldok_sync_id: form.es_anticipo_sueldo ? (form.sueldok_sync_id || undefined) : undefined,
           ...(comprobante_url ? { comprobante_url } : {})
         })
         toast.success("Comprobante Actualizado", "Los cambios en el gasto fueron guardados exitosamente.")
@@ -662,6 +708,7 @@ export default function ExpensesPage() {
           employee_ci: form.es_anticipo_sueldo ? (form.employee_ci || undefined) : undefined,
           periodo_nomina: form.es_anticipo_sueldo ? (form.periodo_nomina || undefined) : undefined,
           cuotas_anticipo: form.es_anticipo_sueldo && form.cuotas_anticipo ? Number(form.cuotas_anticipo) : undefined,
+          sueldok_sync_id: form.es_anticipo_sueldo ? (form.sueldok_sync_id || undefined) : undefined,
           comprobante_url
         })
         toast.success("Comprobante Registrado", "El gasto quedó en estado Pendiente de Aprobación. Aprobalo para luego asignar la forma de pago.")
@@ -702,8 +749,15 @@ export default function ExpensesPage() {
         employee_ci: "",
         periodo_nomina: getTodayAsuncion().slice(0, 7),
         cuotas_anticipo: "1",
+        sueldok_sync_id: "",
       })
       setComprobanteFile(null)
+      setInvoiceSearchQuery("")
+      setInvoiceDropdownOpen(false)
+      setStaffSearchQuery("")
+      setStaffDropdownOpen(false)
+      setAdvanceSearchQuery("")
+      setAdvanceDropdownOpen(false)
       fetchAll()
     } catch (e: any) {
       toast.error(editingExpenseId ? "Error al actualizar gasto" : "Error al registrar gasto", e.message)
@@ -3545,24 +3599,236 @@ export default function ExpensesPage() {
 
                 {form.es_anticipo_sueldo && (
                   <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-700 space-y-3 animate-in fade-in">
+                    {/* Encabezado con estado de SueldOK */}
                     <div className="flex items-center justify-between">
                       <label className="font-bold text-blue-900 dark:text-blue-200 block text-[11px] flex items-center gap-1.5">
                         <UserCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                        Colaborador Beneficiario del Anticipo *
+                        Anticipo de Sueldo Aprobado en SueldOK *
                       </label>
                       <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
-                        {staffList.length} colaboradores activos en Nómina
+                        {sueldokAdvances.filter((a: any) => !a.ya_desembolsado).length} anticipos aprobados listos para desembolso
                       </span>
                     </div>
 
-                    {/* Buscador ágil de Colaborador */}
-                    <div className="relative" ref={staffSearchRef}>
-                      <div className="relative">
+                    {/* Caso 1: Anticipo ya seleccionado de SueldOK */}
+                    {form.sueldok_sync_id && !advanceDropdownOpen ? (
+                      <div className="p-3 bg-blue-50/90 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-xl space-y-2 shadow-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-200 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200">
+                                <Check className="w-3 h-3 text-blue-700 dark:text-blue-300" /> Anticipo Aprobado en SueldOK
+                              </span>
+                              {selectedSueldokAdvance?.fecha && (
+                                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                                  Fecha: {selectedSueldokAdvance.fecha}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate flex items-center gap-1.5 mt-0.5">
+                              <UserCircle2 className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                              <span className="truncate">{selectedSueldokAdvance?.nombre || form.employee_nombre || "Colaborador"}</span>
+                              {selectedSueldokAdvance?.cargo && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 font-normal">
+                                  {selectedSueldokAdvance.cargo}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="text-xs text-gray-600 dark:text-gray-300 flex flex-wrap items-center gap-x-3 gap-y-1">
+                              {(selectedSueldokAdvance?.ci || form.employee_ci) && (
+                                <span>
+                                  C.I.: <strong className="font-mono text-blue-700 dark:text-blue-300">{selectedSueldokAdvance?.ci || form.employee_ci}</strong>
+                                </span>
+                              )}
+                              {selectedSueldokAdvance?.motivo && (
+                                <span className="text-[11px] text-gray-500 italic">
+                                  Motivo: "{selectedSueldokAdvance.motivo}"
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <div className="text-[10px] uppercase font-bold text-gray-400">Monto Aprobado</div>
+                            <div className="text-base font-black font-mono text-blue-700 dark:text-blue-300">
+                              ₲ {formatPYG(selectedSueldokAdvance?.monto || form.monto)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-blue-200/80 dark:border-blue-800/60 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAdvanceSearchQuery("")
+                              setAdvanceDropdownOpen(true)
+                            }}
+                            className="text-blue-700 dark:text-blue-300 hover:text-blue-900 dark:hover:text-blue-100 font-semibold flex items-center gap-1 hover:underline"
+                          >
+                            <Search className="w-3.5 h-3.5" /> Cambiar Anticipo / Buscar otro
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setForm((prev: any) => ({
+                                ...prev,
+                                sueldok_sync_id: "",
+                                employee_id: "",
+                                employee_nombre: "",
+                                employee_ci: "",
+                                proveedor: "",
+                                ruc: "",
+                              }))
+                              setAdvanceSearchQuery("")
+                            }}
+                            className="text-rose-500 hover:text-rose-700 font-semibold flex items-center gap-1 hover:underline"
+                          >
+                            <X className="w-3.5 h-3.5" /> Quitar selección
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Caso 2: Buscador ágil de Anticipos Aprobados en SueldOK */
+                      <div className="relative" ref={advanceSearchRef}>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="Buscar anticipo aprobado en SueldOK por nombre, C.I., motivo..."
+                            className="input-field w-full text-xs pl-8 pr-8 border-blue-300 dark:border-blue-700 focus:ring-blue-500 font-semibold"
+                            value={advanceSearchQuery}
+                            onFocus={() => {
+                              if (sueldokAdvances.length === 0) {
+                                setLoadingAdvances(true)
+                                api.expenses.sueldokAdvances()
+                                  .then(list => setSueldokAdvances(list))
+                                  .catch(() => {})
+                                  .finally(() => setLoadingAdvances(false))
+                              }
+                              setAdvanceDropdownOpen(true)
+                            }}
+                            onChange={e => {
+                              setAdvanceSearchQuery(e.target.value)
+                              setAdvanceDropdownOpen(true)
+                            }}
+                          />
+                          <Search className="w-4 h-4 text-blue-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          {advanceSearchQuery ? (
+                            <button
+                              type="button"
+                              onClick={() => setAdvanceSearchQuery("")}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <ChevronDown className="w-4 h-4 text-blue-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          )}
+                        </div>
+
+                        {advanceDropdownOpen && (
+                          <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 rounded-xl shadow-2xl max-h-64 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 animate-in fade-in-50 zoom-in-95">
+                            <div className="px-3 py-1.5 bg-blue-50/80 dark:bg-blue-950/50 text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase tracking-wider flex justify-between items-center sticky top-0 z-10 backdrop-blur-sm border-b border-blue-100 dark:border-blue-900/50">
+                              <span>Anticipos Aprobados en SueldOK ({filteredSueldokAdvances.length})</span>
+                              {loadingAdvances && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
+                            </div>
+
+                            {filteredSueldokAdvances.length === 0 && !loadingAdvances && (
+                              <div className="p-4 text-center text-xs text-gray-500 dark:text-gray-400">
+                                {advanceSearchQuery ? (
+                                  <>No se encontraron anticipos aprobados con "<strong>{advanceSearchQuery}</strong>"</>
+                                ) : (
+                                  <>No hay anticipos pendientes con estado Aprobado en SueldOK.</>
+                                )}
+                              </div>
+                            )}
+
+                            {filteredSueldokAdvances.map((adv: any) => {
+                              const isSelected = form.sueldok_sync_id === adv.id
+                              return (
+                                <div
+                                  key={adv.id}
+                                  className={`p-2.5 text-xs hover:bg-blue-50 dark:hover:bg-blue-950/50 cursor-pointer transition flex items-center justify-between gap-3 ${
+                                    isSelected ? "bg-blue-100/60 dark:bg-blue-900/40" : ""
+                                  }`}
+                                  onMouseDown={() => {
+                                    setForm((prev: any) => ({
+                                      ...prev,
+                                      sueldok_sync_id: adv.id,
+                                      employee_id: adv.employeeId,
+                                      employee_nombre: adv.nombre,
+                                      employee_ci: adv.ci,
+                                      proveedor: adv.nombre,
+                                      ruc: adv.ci,
+                                      monto: String(adv.monto),
+                                      descripcion: `Anticipo de sueldo - ${adv.nombre}${adv.motivo ? ` (${adv.motivo})` : ''}`,
+                                      fecha_gasto: adv.fecha || prev.fecha_gasto,
+                                      tipo_comprobante: "recibo_dinero",
+                                      iva_10: "",
+                                      iva_5: "",
+                                      exentas: String(adv.monto),
+                                    }))
+                                    setAdvanceDropdownOpen(false)
+                                    setAdvanceSearchQuery("")
+                                  }}
+                                >
+                                  <div className="space-y-0.5 min-w-0">
+                                    <div className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5 truncate">
+                                      <UserCircle2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                                      <span className="truncate">{adv.nombre}</span>
+                                      {adv.cargo && (
+                                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-normal">
+                                          {adv.cargo}
+                                        </span>
+                                      )}
+                                      <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                                        Aprobado SueldOK
+                                      </span>
+                                    </div>
+                                    <div className="text-[11px] text-gray-500 dark:text-gray-400 flex flex-wrap items-center gap-x-2">
+                                      <span>C.I.: <strong className="font-mono text-blue-700 dark:text-blue-300">{adv.ci || "S/D"}</strong></span>
+                                      {adv.motivo && <span className="italic">Motivo: "{adv.motivo}"</span>}
+                                      {adv.fecha && <span className="text-[10px]">Fecha: {adv.fecha}</span>}
+                                      {adv.ya_desembolsado && (
+                                        <span className="text-[9px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950 px-1 rounded border border-amber-200 dark:border-amber-800">
+                                          ⚠️ Ya desembolsado en caja chica
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="text-right shrink-0">
+                                    <div className="text-[10px] text-gray-400 font-medium">Monto Aprobado</div>
+                                    <div className="font-black font-mono text-blue-700 dark:text-blue-300 text-sm">
+                                      ₲ {formatPYG(adv.monto)}
+                                    </div>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Selector secundario: Funcionarios activos en SueldOK */}
+                    <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                          👤 O vincular funcionario activo de SueldOK:
+                        </label>
+                        <span className="text-[10px] text-slate-500">
+                          {staffList.length} colaboradores en SueldOK
+                        </span>
+                      </div>
+
+                      <div className="relative" ref={staffSearchRef}>
                         <input
                           type="text"
-                          placeholder="Buscar colaborador por nombre, C.I. o cargo..."
-                          className="input-field w-full text-xs pl-8 pr-8 border-blue-300 dark:border-blue-700 focus:ring-blue-500 font-semibold"
-                          value={staffSearchQuery || form.employee_nombre}
+                          placeholder="Buscar funcionario en SueldOK por nombre, C.I. o cargo..."
+                          className="input-field w-full text-xs"
+                          value={staffSearchQuery || (form.employee_nombre && !form.sueldok_sync_id ? form.employee_nombre : "")}
                           onFocus={() => {
                             if (staffList.length === 0) {
                               setLoadingStaff(true)
@@ -3574,66 +3840,28 @@ export default function ExpensesPage() {
                             setStaffDropdownOpen(true)
                           }}
                           onChange={e => {
-                            const q = e.target.value
-                            setStaffSearchQuery(q)
-                            setForm((prev: any) => ({
-                              ...prev,
-                              employee_nombre: q,
-                              proveedor: q,
-                              descripcion: prev.descripcion && !prev.descripcion.startsWith("Anticipo de sueldo")
-                                ? prev.descripcion
-                                : `Anticipo de sueldo - ${q}`,
-                            }))
+                            setStaffSearchQuery(e.target.value)
                             setStaffDropdownOpen(true)
                           }}
                         />
-                        <Search className="w-4 h-4 text-blue-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                        {staffSearchQuery ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setStaffSearchQuery("")
-                              setForm((prev: any) => ({
-                                ...prev,
-                                employee_id: "",
-                                employee_nombre: "",
-                                employee_ci: "",
-                                proveedor: "",
-                                ruc: "",
-                              }))
-                            }}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        ) : (
-                          <ChevronDown className="w-4 h-4 text-blue-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                        )}
-                      </div>
 
-                      {staffDropdownOpen && (
-                        <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 rounded-xl shadow-2xl max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 animate-in fade-in-50 zoom-in-95">
-                          <div className="px-3 py-1.5 bg-blue-50/70 dark:bg-blue-950/40 text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase tracking-wider flex justify-between items-center sticky top-0 z-10 backdrop-blur-sm border-b border-blue-100 dark:border-blue-900/50">
-                            <span>Plantel de Colaboradores ({filteredStaffCandidates.length})</span>
-                            {loadingStaff && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
-                          </div>
-
-                          {filteredStaffCandidates.length === 0 && !loadingStaff && (
-                            <div className="p-3 text-center text-xs text-gray-500">
-                              {staffSearchQuery
-                                ? <>No se encontraron colaboradores con "<strong>{staffSearchQuery}</strong>"</>
-                                : "No hay colaboradores registrados en nómina"}
+                        {staffDropdownOpen && (
+                          <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-52 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 animate-in fade-in-50 zoom-in-95">
+                            <div className="px-3 py-1 bg-slate-50 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase sticky top-0 z-10 flex justify-between">
+                              <span>Funcionarios SueldOK ({filteredStaffCandidates.length})</span>
+                              {loadingStaff && <Loader2 className="w-3 h-3 animate-spin text-indigo-500" />}
                             </div>
-                          )}
 
-                          {filteredStaffCandidates.map((s: any) => {
-                            const isSelected = form.employee_id === s.id || form.employee_ci === s.ci
-                            return (
+                            {filteredStaffCandidates.length === 0 && !loadingStaff && (
+                              <div className="p-3 text-center text-xs text-gray-500">
+                                No se encontraron colaboradores en SueldOK.
+                              </div>
+                            )}
+
+                            {filteredStaffCandidates.map((s: any) => (
                               <div
                                 key={s.id}
-                                className={`p-2.5 text-xs hover:bg-blue-50 dark:hover:bg-blue-950/50 cursor-pointer transition flex items-center justify-between gap-3 ${
-                                  isSelected ? "bg-blue-100/60 dark:bg-blue-900/40" : ""
-                                }`}
+                                className="p-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer flex items-center justify-between"
                                 onMouseDown={() => {
                                   setForm((prev: any) => ({
                                     ...prev,
@@ -3652,28 +3880,19 @@ export default function ExpensesPage() {
                                   setStaffDropdownOpen(false)
                                 }}
                               >
-                                <div className="space-y-0.5 min-w-0">
-                                  <div className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-                                    <UserCircle2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-                                    <span className="truncate">{s.nombre}</span>
-                                    {s.cargo && (
-                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-normal">
-                                        {s.cargo}
-                                      </span>
-                                    )}
+                                <div className="min-w-0">
+                                  <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                                    <span>{s.nombre}</span>
+                                    {s.cargo && <span className="text-[10px] text-slate-500 font-normal">({s.cargo})</span>}
                                   </div>
-                                  <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                                    C.I.: <strong className="font-mono text-blue-700 dark:text-blue-300">{s.ci || "S/D"}</strong>
-                                  </div>
+                                  <div className="text-[10px] font-mono text-slate-500">C.I.: {s.ci || "S/D"}</div>
                                 </div>
-                                {isSelected && (
-                                  <Check className="w-4 h-4 text-blue-600 shrink-0" />
-                                )}
+                                <span className="text-[10px] text-blue-600 font-semibold">Seleccionar</span>
                               </div>
-                            )
-                          })}
-                        </div>
-                      )}
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {/* Fila con Periodo de Nómina y Cantidad de Cuotas */}
