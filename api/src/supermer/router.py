@@ -31,7 +31,7 @@ from api.src.supermer.schemas import (
     FreshnessAuditCreate, FreshnessAuditResponse,
     SupplierScorecardResponse,
     AutoApplyMarkdownByBatchInput, AutoApplyMarkdownResult,
-    ForecastEnhanceInput,
+    ForecastEnhanceInput, ProduceDirectInput,
 )
 
 from . import (
@@ -216,6 +216,19 @@ async def list_orders(
     return await service.list_orders(db, user["company_id"], area, estado, desde, hasta, limit, offset)
 
 
+@router.post("/orders/produce-direct", response_model=ProductionOrderResponse, status_code=status.HTTP_201_CREATED)
+async def produce_direct(
+    data: ProduceDirectInput,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        user_uuid = UUID(user["id"]) if "id" in user and user["id"] else None
+        return await service.produce_batch_direct(db, user["company_id"], data, user_id=user_uuid)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/orders/{order_id}", response_model=ProductionOrderResponse)
 async def get_order(
     order_id: str,
@@ -267,11 +280,13 @@ async def complete_order(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
+    user_uuid = UUID(user["id"]) if "id" in user and user["id"] else None
     result = await service.complete_order(
-        db, order_id, data.producto_obtenido,
-        costo_unitario=data.costo_unitario,
+        db, order_id, Decimal(str(data.producto_obtenido)),
+        costo_unitario=Decimal(str(data.costo_unitario)) if data.costo_unitario is not None else None,
         fecha_vencimiento=data.fecha_vencimiento,
         lote_codigo=data.lote_codigo,
+        user_id=user_uuid,
     )
     if not result:
         raise HTTPException(status_code=404, detail="Orden de producción no encontrada")

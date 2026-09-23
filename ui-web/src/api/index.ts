@@ -436,9 +436,67 @@ export interface SalesOrder { id: string; company_id?: string; customer_id?: str
 export interface SalesOrderItem { id?: string; pedido_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; descuento?: number; total?: number; entregado?: number; pendiente?: number; created_at?: string }
 export interface ProductVariant { id: string; product_id?: string; producto?: Product; tipo?: string; valor?: string; sku_variante?: string; codigo_barra?: string; precio_extra?: number; stock?: number; activo?: boolean; created_at?: string }
 export interface PackBarcode { id: string; product_id: string; company_id: string; codigo_barra: string; etiqueta: string; unidades_por_paquete: number; activo: boolean; created_at?: string; updated_at?: string; product_nombre?: string; product_sku?: string }
-export interface SupermerRecipe { id: string; area?: string; nombre?: string; descripcion?: string; producto_terminado_id?: string; producto_terminado_nombre?: string; cantidad_esperada?: number; unidad_medida?: string; rendimiento_esperado?: number; activa?: boolean; items?: SupermerRecipeItem[]; created_at?: string }
-export interface SupermerRecipeItem { id?: string; receta_id?: string; producto_id?: string; producto_nombre?: string; cantidad?: number; unidad_medida?: string; es_opcional?: boolean }
-export interface SupermerOrder { id: string; area?: string; receta_id?: string; receta_nombre?: string; cantidad_objetivo?: number; estado?: string; fecha_inicio?: string; fecha_fin?: string; fecha_vencimiento?: string; responsable_id?: string; responsable_nombre?: string; notas?: string; insumos_usados?: any; producto_obtenido?: number; rendimiento_real?: number; created_at?: string }
+export interface SupermerRecipe {
+  id: string;
+  area?: string;
+  nombre?: string;
+  descripcion?: string;
+  producto_terminado_id?: string;
+  producto_terminado_nombre?: string;
+  producto_terminado_sku?: string;
+  producto_terminado_precio_venta?: number;
+  cantidad_esperada?: number;
+  unidad_medida?: string;
+  rendimiento_esperado?: number;
+  deposito_origen_id?: string;
+  deposito_destino_id?: string;
+  deposito_origen_nombre?: string;
+  deposito_destino_nombre?: string;
+  costo_total_estimado?: number;
+  costo_unitario_estimado?: number;
+  margen_estimado_monto?: number;
+  margen_estimado_pct?: number;
+  activa?: boolean;
+  items?: SupermerRecipeItem[];
+  created_at?: string;
+}
+export interface SupermerRecipeItem {
+  id?: string;
+  receta_id?: string;
+  producto_id?: string;
+  producto_nombre?: string;
+  producto_sku?: string;
+  cantidad?: number;
+  unidad_medida?: string;
+  costo_unitario?: number;
+  subtotal_costo?: number;
+  stock_disponible?: number;
+  es_opcional?: boolean;
+}
+export interface SupermerOrder {
+  id: string;
+  area?: string;
+  receta_id?: string;
+  receta_nombre?: string;
+  producto_terminado_nombre?: string;
+  cantidad_objetivo?: number;
+  estado?: string;
+  deposito_origen_id?: string;
+  deposito_destino_id?: string;
+  deposito_origen_nombre?: string;
+  deposito_destino_nombre?: string;
+  lote_codigo?: string;
+  fecha_inicio?: string;
+  fecha_fin?: string;
+  fecha_vencimiento?: string;
+  responsable_id?: string;
+  responsable_nombre?: string;
+  notas?: string;
+  insumos_usados?: any;
+  producto_obtenido?: number;
+  rendimiento_real?: number;
+  created_at?: string;
+}
 export interface SupermerBatch { id: string; producto_id?: string; producto_nombre?: string; cantidad_obtenida?: number; fecha_produccion?: string; fecha_vencimiento?: string; lote_codigo?: string; costo_unitario?: number; orden_id?: string }
 export interface SupermerWaste { id: string; area?: string; warehouse_id?: string; producto_id?: string; producto_nombre?: string; cantidad?: number; costo_unitario?: number; costo_total?: number; tipo_merma?: string; motivo?: string; fecha?: string; registrado_por?: string; registrado_por_nombre?: string; estado?: "pendiente" | "aprobada" | "rechazada"; aprobado_por?: string; aprobado_por_nombre?: string; aprobado_at?: string; motivo_rechazo?: string }
 export interface SupermerPerishableConfig { id: string; producto_id?: string; producto_nombre?: string; vida_util_dias?: number; requiere_markdown?: boolean; categoria_perecedera?: string }
@@ -3344,6 +3402,7 @@ export const api = {
       create: (data: any) => client.post<SupermerOrder>("/v1/supermer/orders", data),
       update: (id: string, data: any) => client.put<SupermerOrder>(`/v1/supermer/orders/${id}`, data),
       complete: (id: string, data: { producto_obtenido: number; costo_unitario?: number; fecha_vencimiento?: string; lote_codigo?: string }) => client.post<SupermerOrder>(`/v1/supermer/orders/${id}/complete`, data),
+      produceDirect: (data: { receta_id: string; cantidad_producir: number; deposito_origen_id?: string; deposito_destino_id?: string; fecha_vencimiento?: string; lote_codigo?: string; notas?: string }) => client.post<SupermerOrder>("/v1/supermer/orders/produce-direct", data),
     },
     batches: {
       list: (params?: { producto_id?: string; vencimiento_antes?: string }) => client.get<SupermerBatch[]>("/v1/supermer/batches", params as any),

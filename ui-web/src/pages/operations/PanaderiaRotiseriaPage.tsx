@@ -3,14 +3,27 @@ import {
   ChefHat, Plus, Loader2, CheckCircle2,
   DollarSign, Calculator, Layers, Clock, Flame, UtensilsCrossed,
   RefreshCw, Info, Calendar, AlertCircle, AlertTriangle, Package, ArrowRight,
-  TrendingUp, Sparkles, Scale
+  TrendingUp, Sparkles, Scale, Search, Edit, Trash2, Warehouse as WarehouseIcon,
+  Check, Filter, ShieldCheck
 } from "lucide-react"
-import { api } from "../../api"
+import { api, type SupermerRecipe, type SupermerOrder } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import WasteControlPanel from "../../components/operations/WasteControlPanel"
+import RecipeBuilderModal from "../../components/operations/RecipeBuilderModal"
+import ProduceBatchModal from "../../components/operations/ProduceBatchModal"
 import { formatPYG, formatDate } from "../../utils/format"
 
 type Tab = "dashboard" | "recetas" | "planes" | "rotiseria" | "calculadora" | "mermas"
+
+const AREA_FILTERS = [
+  { id: "todas", label: "Todas las Fórmulas", icon: "📋" },
+  { id: "panaderia", label: "Panadería & Confitería", icon: "🥖" },
+  { id: "rotiseria", label: "Rotisería & Cocina", icon: "🍗" },
+  { id: "carniceria", label: "Carnicería & Desposte", icon: "🥩" },
+  { id: "verduleria", label: "Verdulería Pre-pack", icon: "🥗" },
+  { id: "pre_pack", label: "Fraccionamiento", icon: "📦" },
+  { id: "otros", label: "Otros", icon: "⚙️" },
+]
 
 export default function PanaderiaRotiseriaPage() {
   const toast = useToast()
@@ -18,21 +31,35 @@ export default function PanaderiaRotiseriaPage() {
   const [loading, setLoading] = useState(true)
 
   // Datos reales
-  const [bakeryRecipes, setBakeryRecipes] = useState<any[]>([])
+  const [allRecipes, setAllRecipes] = useState<SupermerRecipe[]>([])
+  const [productionOrders, setProductionOrders] = useState<SupermerOrder[]>([])
   const [bakeryPlanes, setBakeryPlanes] = useState<any[]>([])
-  const [rotiseriaRecipes, setRotiseriaRecipes] = useState<any[]>([])
   const [rotiseriaPlanes, setRotiseriaPlanes] = useState<any[]>([])
   const [rotiseriaDash, setRotiseriaDash] = useState<any>(null)
 
-  // Formularios
-  const [showRecetaForm, setShowRecetaForm] = useState(false)
-  const [savingReceta, setSavingReceta] = useState(false)
-  const [recetaArea, setRecetaArea] = useState<"bakery" | "rotiseria">("bakery")
-  const [recetaForm, setRecetaForm] = useState({ nombre: "", rendimiento_piezas: "", costo_estimado: "", tiempo_preparacion_min: "", descripcion: "", activa: true })
+  // Filtros de recetas
+  const [selectedAreaFilter, setSelectedAreaFilter] = useState("todas")
+  const [recipeSearch, setRecipeSearch] = useState("")
 
+  // Modales industriales BOM & Producción
+  const [showRecipeBuilder, setShowRecipeBuilder] = useState(false)
+  const [builderInitialArea, setBuilderInitialArea] = useState<string>("panaderia")
+  const [recipeToEdit, setRecipeToEdit] = useState<SupermerRecipe | null>(null)
+
+  const [showProduceModal, setShowProduceModal] = useState(false)
+  const [recipeToProduce, setRecipeToProduce] = useState<SupermerRecipe | null>(null)
+
+  // Formulario Plan de Cocción Rotisería
   const [showPlanForm, setShowPlanForm] = useState(false)
   const [savingPlan, setSavingPlan] = useState(false)
-  const [planForm, setPlanForm] = useState({ nombre: "", area: "panaderia", tipo_coccion: "horno", temperatura_objetivo: "", tiempo_coccion_min: "", descripcion: "" })
+  const [planForm, setPlanForm] = useState({
+    nombre: "",
+    area: "panaderia",
+    tipo_coccion: "horno",
+    temperatura_objetivo: "",
+    tiempo_coccion_min: "",
+    descripcion: ""
+  })
 
   // Calculadora de % panadero
   const [harinaKg, setHarinaKg] = useState(25)
@@ -53,20 +80,31 @@ export default function PanaderiaRotiseriaPage() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [bkRec, bkPl, rtRec, rtPl, rtDash] = await Promise.allSettled([
-        api.supermer.recipes.list({ area: "panaderia" }),
+      const [recipesRes, ordersRes, bkPl, rtPl, rtDash] = await Promise.allSettled([
+        api.supermer.recipes.list(),
+        api.supermer.orders.list(),
         api.supermer.bakery.plans(),
-        api.rotiseria.recipes.list(),
         api.rotiseria.plans.list(),
         api.rotiseria.dashboard(),
       ])
-      if (bkRec.status === "fulfilled" && Array.isArray(bkRec.value)) setBakeryRecipes(bkRec.value)
-      if (bkPl.status === "fulfilled" && Array.isArray(bkPl.value)) setBakeryPlanes(bkPl.value)
-      if (rtRec.status === "fulfilled" && Array.isArray(rtRec.value)) setRotiseriaRecipes(rtRec.value)
-      if (rtPl.status === "fulfilled" && Array.isArray(rtPl.value)) setRotiseriaPlanes(rtPl.value)
-      if (rtDash.status === "fulfilled") setRotiseriaDash(rtDash.value)
+
+      if (recipesRes.status === "fulfilled" && Array.isArray(recipesRes.value)) {
+        setAllRecipes(recipesRes.value)
+      }
+      if (ordersRes.status === "fulfilled" && Array.isArray(ordersRes.value)) {
+        setProductionOrders(ordersRes.value)
+      }
+      if (bkPl.status === "fulfilled" && Array.isArray(bkPl.value)) {
+        setBakeryPlanes(bkPl.value)
+      }
+      if (rtPl.status === "fulfilled" && Array.isArray(rtPl.value)) {
+        setRotiseriaPlanes(rtPl.value)
+      }
+      if (rtDash.status === "fulfilled") {
+        setRotiseriaDash(rtDash.value)
+      }
     } catch (e: any) {
-      toast.error("Error al cargar panadería", e.message)
+      toast.error("Error al cargar producción", e.message)
     } finally {
       setLoading(false)
     }
@@ -74,30 +112,57 @@ export default function PanaderiaRotiseriaPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  const handleSaveReceta = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSavingReceta(true)
+  // Filtrado de recetas
+  const filteredRecipes = useMemo(() => {
+    return allRecipes.filter(r => {
+      const matchesArea = selectedAreaFilter === "todas" || r.area === selectedAreaFilter
+      const q = recipeSearch.toLowerCase().trim()
+      const matchesSearch = !q ||
+        r.nombre?.toLowerCase().includes(q) ||
+        r.producto_terminado_nombre?.toLowerCase().includes(q) ||
+        r.producto_terminado_sku?.toLowerCase().includes(q)
+      return matchesArea && matchesSearch
+    })
+  }, [allRecipes, selectedAreaFilter, recipeSearch])
+
+  const handleDeleteRecipe = async (id: string, name: string) => {
+    if (!window.confirm(`¿Eliminar la fórmula "${name}"? Esta acción no se puede deshacer.`)) return
     try {
-      if (recetaArea === "bakery") {
-        await api.supermer.recipes.create({ ...recetaForm, area: "panaderia", rendimiento_piezas: parseInt(recetaForm.rendimiento_piezas), costo_estimado: parseFloat(recetaForm.costo_estimado || "0") })
-      } else {
-        await api.rotiseria.recipes.create({ ...recetaForm, activa: true })
-      }
-      toast.success("Receta registrada", `La receta "${recetaForm.nombre}" fue guardada.`)
-      setShowRecetaForm(false)
+      await api.supermer.recipes.delete(id)
+      toast.success("Receta eliminada", `La fórmula "${name}" fue eliminada.`)
       loadData()
     } catch (err: any) {
-      toast.error("Error al guardar receta", err.message)
-    } finally {
-      setSavingReceta(false)
+      toast.error("Error al eliminar", err.message)
     }
+  }
+
+  const handleOpenNewRecipe = (areaName = "panaderia") => {
+    setRecipeToEdit(null)
+    setBuilderInitialArea(areaName)
+    setShowRecipeBuilder(true)
+  }
+
+  const handleOpenEditRecipe = (recipe: SupermerRecipe) => {
+    setRecipeToEdit(recipe)
+    setBuilderInitialArea(recipe.area || "panaderia")
+    setShowRecipeBuilder(true)
+  }
+
+  const handleOpenProduce = (recipe: SupermerRecipe) => {
+    setRecipeToProduce(recipe)
+    setShowProduceModal(true)
   }
 
   const handleSavePlan = async (e: React.FormEvent) => {
     e.preventDefault()
     setSavingPlan(true)
     try {
-      await api.rotiseria.plans.create({ ...planForm, temperatura_objetivo: parseFloat(planForm.temperatura_objetivo || "0"), tiempo_coccion_min: parseInt(planForm.tiempo_coccion_min || "0"), fecha: new Date().toISOString().split("T")[0] })
+      await api.rotiseria.plans.create({
+        ...planForm,
+        temperatura_objetivo: parseFloat(planForm.temperatura_objetivo || "0"),
+        tiempo_coccion_min: parseInt(planForm.tiempo_coccion_min || "0"),
+        fecha: new Date().toISOString().split("T")[0]
+      })
       toast.success("Plan de rotisería creado", "")
       setShowPlanForm(false)
       loadData()
@@ -119,6 +184,10 @@ export default function PanaderiaRotiseriaPage() {
   }
 
   const rtDash = rotiseriaDash || {}
+
+  const bakeryRecipes = allRecipes.filter(r => r.area === "panaderia")
+  const rotiseriaRecipes = allRecipes.filter(r => r.area === "rotiseria")
+  const completedOrders = productionOrders.filter(o => o.estado === "completada")
 
   return (
     <div className="space-y-6 animate-fade-in-up pb-16">
@@ -142,18 +211,18 @@ export default function PanaderiaRotiseriaPage() {
               <div>
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <span className="text-[10px] font-extrabold tracking-widest text-amber-400 uppercase bg-amber-500/10 px-2.5 py-0.5 rounded-md border border-amber-500/20">
-                    OPERACIONES DE SALÓN · PRODUCCIÓN PROPIA & ROTISERÍA
+                    OPERACIONES DE SALÓN · PRODUCCIÓN PROPIA MULTI-SECTOR
                   </span>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                    {bakeryRecipes.length + rotiseriaRecipes.length} Fórmulas de Elaboración
+                    {allRecipes.length} Fórmulas de Elaboración (BOM)
                   </span>
                 </div>
                 <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
-                  Panadería & Rotisería Artesanal
+                  Producción Propia, Panadería & Rotisería
                 </h1>
                 <p className="text-xs text-slate-400 font-medium mt-0.5">
-                  Recetas con costeo de insumos, porcentaje panadero, órdenes de cocción con monitoreo térmico HACCP y rotación
+                  Fichas técnicas industriales, explosión de materias primas, control de depósitos y descarga automática de stock
                 </p>
               </div>
             </div>
@@ -164,7 +233,7 @@ export default function PanaderiaRotiseriaPage() {
                 🏢 Extra Supermercado (Central)
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-amber-300">
-                🥐 {bakeryPlanes.length} planes de horneado
+                ⚡ {completedOrders.length} hornadas/lotes completados
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
                 🍗 {formatPYG(rtDash.ventas_hoy_gs || 0)} ventas rotisería hoy
@@ -190,11 +259,11 @@ export default function PanaderiaRotiseriaPage() {
             </button>
 
             <button
-              onClick={() => setShowRecetaForm(true)}
+              onClick={() => handleOpenNewRecipe("panaderia")}
               className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-600 to-orange-500 hover:from-amber-500 hover:to-orange-400 transition shadow-lg shadow-amber-500/25 flex items-center gap-2"
             >
               <Plus className="w-4 h-4" />
-              Nueva Receta
+              Nueva Ficha Técnica (BOM)
             </button>
           </div>
         </div>
@@ -225,24 +294,24 @@ export default function PanaderiaRotiseriaPage() {
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Lotes Producidos</span>
+              <Flame className="w-4 h-4 text-purple-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-purple-300">
+              {completedOrders.length}
+            </p>
+            <p className="text-[11px] text-slate-400">Hornadas registradas</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Planes Horneado</span>
               <Layers className="w-4 h-4 text-blue-400" />
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
               {bakeryPlanes.length}
             </p>
-            <p className="text-[11px] text-slate-400">Horneadas semanales</p>
-          </div>
-
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cocción Hoy</span>
-              <Flame className="w-4 h-4 text-purple-400" />
-            </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-purple-300">
-              {rotiseriaPlanes.filter((p: any) => p.fecha === new Date().toISOString().split("T")[0]).length}
-            </p>
-            <p className="text-[11px] text-slate-400">Hornadas del día</p>
+            <p className="text-[11px] text-slate-400">Programación semanal</p>
           </div>
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
@@ -273,9 +342,9 @@ export default function PanaderiaRotiseriaPage() {
       <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
           { id: "dashboard", label: "Resumen de Producción", icon: ChefHat },
-          { id: "recetas", label: `Recetas Panadería`, count: bakeryRecipes.length, icon: Layers },
-          { id: "planes", label: `Planes de Horneado`, count: bakeryPlanes.length, icon: Calendar },
-          { id: "rotiseria", label: `Cocción & Rotisería`, count: rotiseriaPlanes.length, icon: Flame },
+          { id: "recetas", label: "Fórmulas & Recetas (BOM)", count: allRecipes.length, icon: Layers },
+          { id: "planes", label: "Producción & Hornadas", count: completedOrders.length, icon: Flame },
+          { id: "rotiseria", label: "Cocción Rotisería", count: rotiseriaPlanes.length, icon: UtensilsCrossed },
           { id: "calculadora", label: "Calculadora Panadero", icon: Calculator },
           { id: "mermas", label: "Mermas y Pérdidas", icon: AlertTriangle },
         ].map((t) => {
@@ -309,18 +378,43 @@ export default function PanaderiaRotiseriaPage() {
       {tab === "dashboard" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
-            <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase">Recetas Panadería Destacadas</h3>
-            {bakeryRecipes.length === 0 ? (
+            <div className="flex items-center justify-between">
+              <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
+                <ChefHat className="w-4 h-4 text-amber-500" /> Fórmulas de Producción Activas
+              </h3>
+              <button
+                onClick={() => setTab("recetas")}
+                className="text-xs text-amber-600 dark:text-amber-400 font-bold hover:underline flex items-center gap-1"
+              >
+                Ver todas <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {allRecipes.length === 0 ? (
               <div className="text-center py-8 text-slate-400 text-xs">
                 <ChefHat className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                <p>Sin recetas. Agregá las fórmulas de tus panes con su costeo por insumo.</p>
+                <p>Sin recetas registradas. Creá tu primera ficha técnica para iniciar.</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {bakeryRecipes.slice(0, 5).map((r: any) => (
+                {allRecipes.slice(0, 5).map((r) => (
                   <div key={r.id} className="flex items-center justify-between p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl text-xs">
-                    <span className="font-extrabold text-slate-900 dark:text-white">{r.nombre}</span>
-                    <span className="font-mono font-bold text-amber-600 dark:text-amber-400">{formatPYG(r.costo_unitario || 0)} / u</span>
+                    <div>
+                      <span className="font-extrabold text-slate-900 dark:text-white block">{r.nombre}</span>
+                      <span className="text-[10px] text-slate-400">
+                        {r.items?.length || 0} materias primas · Rinde {r.cantidad_esperada} {r.unidad_medida}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="font-mono font-bold text-amber-600 dark:text-amber-400 block">
+                        Costo: {formatPYG(r.costo_unitario_estimado || 0)}
+                      </span>
+                      {r.producto_terminado_precio_venta && (
+                        <span className="text-[10px] font-mono text-emerald-600 font-bold">
+                          PVP: {formatPYG(r.producto_terminado_precio_venta)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -328,7 +422,9 @@ export default function PanaderiaRotiseriaPage() {
           </div>
 
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
-            <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase">Control Diario de Rotisería</h3>
+            <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
+              <UtensilsCrossed className="w-4 h-4 text-orange-500" /> Control Diario de Rotisería
+            </h3>
             {Object.keys(rtDash).length === 0 ? (
               <div className="text-center py-8 text-slate-400 text-xs">
                 <Flame className="w-8 h-8 mx-auto mb-2 opacity-40" />
@@ -353,94 +449,321 @@ export default function PanaderiaRotiseriaPage() {
         </div>
       )}
 
-      {/* ══════════════════════ TAB 2: RECETAS PANADERÍA ══════════════════════ */}
+      {/* ══════════════════════ TAB 2: FÓRMULAS & RECETAS (BOM INDUSTRIAL) ══════════════════════ */}
       {tab === "recetas" && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
-          {bakeryRecipes.length === 0 ? (
-            <div className="text-center py-16 text-slate-400 text-xs">
-              <ChefHat className="w-10 h-10 mx-auto mb-3 opacity-40" />
-              <p className="font-bold text-sm text-slate-700 dark:text-slate-300">Sin recetas de panadería</p>
-              <p className="mt-1 max-w-xs mx-auto">Registrá tus fórmulas de panes, facturas y masas con cálculo automático de costo por insumo.</p>
-              <button onClick={() => { setRecetaArea("bakery"); setShowRecetaForm(true) }} className="px-4 py-2 mt-4 rounded-2xl bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1.5">
-                <Plus className="w-3.5 h-3.5" />Primera Receta
+        <div className="space-y-4">
+          {/* BARRA DE FILTROS POR SECTOR Y BÚSQUEDA */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {AREA_FILTERS.map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setSelectedAreaFilter(f.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
+                    selectedAreaFilter === f.id
+                      ? "bg-amber-600 text-white shadow-sm"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200"
+                  }`}
+                >
+                  <span>{f.icon}</span>
+                  <span>{f.label}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1 md:w-64">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Buscar receta o producto..."
+                  value={recipeSearch}
+                  onChange={e => setRecipeSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-medium outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <button
+                onClick={() => handleOpenNewRecipe(selectedAreaFilter !== "todas" ? selectedAreaFilter : "panaderia")}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 hover:from-amber-500 hover:to-orange-400 text-white font-extrabold text-xs shadow-md shadow-amber-500/20 flex items-center gap-1.5 whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5" /> Nueva Ficha
               </button>
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs min-w-[600px] text-left">
-                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-200 dark:border-slate-800">
-                  <tr>
-                    <th className="p-4">Receta</th>
-                    <th className="p-4 text-right">Rendimiento</th>
-                    <th className="p-4 text-right">Costo Unit.</th>
-                    <th className="p-4 text-right">Precio Venta</th>
-                    <th className="p-4 text-center">Margen Bruto</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
-                  {bakeryRecipes.map((r: any) => {
-                    const margen = r.precio_venta && r.costo_unitario ? ((r.precio_venta - r.costo_unitario) / r.precio_venta * 100).toFixed(1) : null
-                    return (
-                      <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                        <td className="p-4">
-                          <p className="font-extrabold text-slate-900 dark:text-white">{r.nombre}</p>
-                          <p className="text-[10px] text-slate-400">{r.descripcion?.slice(0, 60)}</p>
-                        </td>
-                        <td className="p-4 text-right font-mono font-bold text-slate-900 dark:text-white">{r.rendimiento_piezas || "—"} pzas</td>
-                        <td className="p-4 text-right font-mono font-bold text-slate-700 dark:text-slate-300">{formatPYG(r.costo_unitario || 0)}</td>
-                        <td className="p-4 text-right font-mono text-emerald-600 font-black">{r.precio_venta ? formatPYG(r.precio_venta) : "—"}</td>
-                        <td className="p-4 text-center">
-                          {margen ? (
-                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black font-mono ${parseFloat(margen) >= 30 ? "text-emerald-600 bg-emerald-500/10 border border-emerald-500/20" : "text-amber-600 bg-amber-500/10 border border-amber-500/20"}`}>
-                              {margen}%
+          </div>
+
+          {/* TABLA INDUSTRIAL DE RECETAS */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+            {filteredRecipes.length === 0 ? (
+              <div className="text-center py-16 text-slate-400 text-xs space-y-3">
+                <ChefHat className="w-12 h-12 mx-auto opacity-30 text-amber-500" />
+                <p className="font-extrabold text-sm text-slate-700 dark:text-slate-300">
+                  No se encontraron fichas técnicas
+                </p>
+                <p className="max-w-md mx-auto text-slate-400 text-xs">
+                  Creá una receta vinculando materias primas (harina, levadura, etc.) a un producto terminado con rendimiento y depósitos de stock.
+                </p>
+                <button
+                  onClick={() => handleOpenNewRecipe(selectedAreaFilter !== "todas" ? selectedAreaFilter : "panaderia")}
+                  className="px-5 py-2.5 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs inline-flex items-center gap-2 shadow-sm"
+                >
+                  <Plus className="w-4 h-4" /> Crear Primera Receta
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs min-w-[900px] text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="p-4">Fórmula & Producto Terminado</th>
+                      <th className="p-4 text-center">Sector</th>
+                      <th className="p-4 text-right">Rendimiento Base</th>
+                      <th className="p-4 text-center">Insumos</th>
+                      <th className="p-4 text-right">Costo Total Batch</th>
+                      <th className="p-4 text-right">Costo Unit. (PPP)</th>
+                      <th className="p-4 text-right">Precio Venta (PVP)</th>
+                      <th className="p-4 text-center">Margen Bruto</th>
+                      <th className="p-4 text-left">Depósitos</th>
+                      <th className="p-4 text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                    {filteredRecipes.map((r) => {
+                      const margenPct = Number(r.margen_estimado_pct || 0)
+                      return (
+                        <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                          <td className="p-4">
+                            <p className="font-extrabold text-slate-900 dark:text-white text-sm">{r.nombre}</p>
+                            <p className="text-[11px] text-amber-600 dark:text-amber-400 font-bold mt-0.5">
+                              Terminado: {r.producto_terminado_nombre || "—"}
+                            </p>
+                            {r.producto_terminado_sku && (
+                              <p className="text-[10px] font-mono text-slate-400">SKU: {r.producto_terminado_sku}</p>
+                            )}
+                          </td>
+
+                          <td className="p-4 text-center">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                              {r.area}
                             </span>
-                          ) : "—"}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+                          </td>
+
+                          <td className="p-4 text-right font-mono font-bold text-slate-900 dark:text-white">
+                            {r.cantidad_esperada} {r.unidad_medida}
+                          </td>
+
+                          <td className="p-4 text-center">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                              <Package className="w-3 h-3" /> {r.items?.length || 0}
+                            </span>
+                          </td>
+
+                          <td className="p-4 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                            {formatPYG(r.costo_total_estimado || 0)}
+                          </td>
+
+                          <td className="p-4 text-right font-mono font-black text-amber-600 dark:text-amber-400">
+                            {formatPYG(r.costo_unitario_estimado || 0)}
+                          </td>
+
+                          <td className="p-4 text-right font-mono text-emerald-600 font-black">
+                            {r.producto_terminado_precio_venta ? formatPYG(r.producto_terminado_precio_venta) : "—"}
+                          </td>
+
+                          <td className="p-4 text-center">
+                            {r.producto_terminado_precio_venta ? (
+                              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black font-mono ${
+                                margenPct >= 35
+                                  ? "text-emerald-600 bg-emerald-500/10 border border-emerald-500/20"
+                                  : margenPct >= 15
+                                  ? "text-amber-600 bg-amber-500/10 border border-amber-500/20"
+                                  : "text-rose-600 bg-rose-500/10 border border-rose-500/20"
+                              }`}>
+                                {margenPct.toFixed(1)}%
+                              </span>
+                            ) : "—"}
+                          </td>
+
+                          <td className="p-4 text-slate-500 dark:text-slate-400 text-[10px]">
+                            {r.deposito_origen_nombre && (
+                              <p className="truncate max-w-[130px]" title={r.deposito_origen_nombre}>
+                                <strong>Insumos:</strong> {r.deposito_origen_nombre}
+                              </p>
+                            )}
+                            {r.deposito_destino_nombre && (
+                              <p className="truncate max-w-[130px]" title={r.deposito_destino_nombre}>
+                                <strong>Salón:</strong> {r.deposito_destino_nombre}
+                              </p>
+                            )}
+                            {!r.deposito_origen_nombre && !r.deposito_destino_nombre && <p className="text-slate-400">—</p>}
+                          </td>
+
+                          <td className="p-4">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                onClick={() => handleOpenProduce(r)}
+                                title="Hornear / Elaborar Lote (Descarga de stock)"
+                                className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1 shadow-sm transition"
+                              >
+                                <Flame className="w-3.5 h-3.5" /> Hornear
+                              </button>
+
+                              <button
+                                onClick={() => handleOpenEditRecipe(r)}
+                                title="Editar Ficha Técnica"
+                                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+
+                              <button
+                                onClick={() => handleDeleteRecipe(r.id, r.nombre || "receta")}
+                                title="Eliminar Receta"
+                                className="p-1.5 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* ══════════════════════ TAB 3: PLANES DE HORNEADO ══════════════════════ */}
+      {/* ══════════════════════ TAB 3: ÓRDENES & HORNADAS DE PRODUCCIÓN ══════════════════════ */}
       {tab === "planes" && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
-          {bakeryPlanes.length === 0 ? (
-            <div className="text-center py-16 text-slate-400 text-xs">
-              <Calendar className="w-10 h-10 mx-auto mb-3 opacity-40" />
-              <p className="font-bold text-sm text-slate-700 dark:text-slate-300">Sin planes de horneado</p>
-              <p className="mt-1 max-w-xs mx-auto">Programá la producción semanal de panificados con cantidades objetivo por día.</p>
+        <div className="space-y-6">
+          {/* Historial de Órdenes Ejecutadas */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="font-black text-xs text-slate-800 dark:text-slate-200 uppercase flex items-center gap-1.5">
+                  <Flame className="w-4 h-4 text-amber-500" /> Historial de Hornadas & Producción Ejecutada
+                </h3>
+                <p className="text-[10px] text-slate-400">
+                  Lotes elaborados con descuento automático de materias primas e ingreso a salón
+                </p>
+              </div>
+              <span className="text-xs font-mono font-bold text-slate-500">
+                {completedOrders.length} Lotes procesados
+              </span>
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs min-w-[500px] text-left">
-                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-200 dark:border-slate-800">
-                  <tr>
-                    <th className="p-4">Plan de Producción</th>
-                    <th className="p-4 text-center">Día Programado</th>
-                    <th className="p-4 text-center">Estado</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
-                  {bakeryPlanes.map((p: any) => (
-                    <tr key={p.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                      <td className="p-4 font-extrabold text-slate-900 dark:text-white">{p.nombre}</td>
-                      <td className="p-4 text-center text-slate-500 font-medium">{["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"][p.dia_semana] || p.dia_semana}</td>
-                      <td className="p-4 text-center">
-                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${p.activo ? "text-emerald-600 bg-emerald-500/10 border border-emerald-500/20" : "text-slate-400 bg-slate-100"}`}>
-                          {p.activo ? "Activo" : "Inactivo"}
-                        </span>
-                      </td>
+
+            {completedOrders.length === 0 ? (
+              <div className="text-center py-16 text-slate-400 text-xs space-y-2">
+                <Flame className="w-10 h-10 mx-auto opacity-30 text-amber-500" />
+                <p className="font-bold text-slate-700 dark:text-slate-300">Aún no se registraron órdenes de producción</p>
+                <p>Ingresá a la pestaña "Fórmulas & Recetas" y presioná "Hornear" en cualquier receta para generar un lote.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs min-w-[700px] text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="p-4">Lote / Fecha</th>
+                      <th className="p-4">Receta / Producto Elaborado</th>
+                      <th className="p-4 text-right">Cantidad Obtenida</th>
+                      <th className="p-4 text-center">Estado</th>
+                      <th className="p-4 text-left">Depósitos (Origen ➔ Destino)</th>
+                      <th className="p-4 text-left">Responsable / Notas</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                    {completedOrders.map((o) => (
+                      <tr key={o.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                        <td className="p-4">
+                          <p className="font-mono font-black text-amber-600 dark:text-amber-400">
+                            {o.lote_codigo || `LOT-${o.id.slice(0, 8)}`}
+                          </p>
+                          <p className="text-[10px] text-slate-400 font-mono">
+                            {o.fecha_fin ? formatDate(o.fecha_fin) : o.created_at ? formatDate(o.created_at) : "—"}
+                          </p>
+                        </td>
+
+                        <td className="p-4">
+                          <p className="font-extrabold text-slate-900 dark:text-white">
+                            {o.receta_nombre || "Orden Directa"}
+                          </p>
+                          {o.producto_terminado_nombre && (
+                            <p className="text-[10px] text-slate-400">{o.producto_terminado_nombre}</p>
+                          )}
+                        </td>
+
+                        <td className="p-4 text-right font-mono font-black text-slate-900 dark:text-white text-sm">
+                          {o.producto_obtenido || o.cantidad_objetivo} UN
+                        </td>
+
+                        <td className="p-4 text-center">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                            <Check className="w-3 h-3" /> Completada
+                          </span>
+                        </td>
+
+                        <td className="p-4 text-[10px] text-slate-600 dark:text-slate-300">
+                          <p className="font-mono">
+                            <strong>{o.deposito_origen_nombre || "Insumos"}</strong> ➔ <strong>{o.deposito_destino_nombre || "Salón"}</strong>
+                          </p>
+                        </td>
+
+                        <td className="p-4 text-[11px] text-slate-500">
+                          <p className="font-medium text-slate-700 dark:text-slate-300">{o.responsable_nombre || "Panadero"}</p>
+                          {o.notas && <p className="text-[10px] text-slate-400 truncate max-w-xs">{o.notas}</p>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Planes Semanales */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <h3 className="font-black text-xs text-slate-800 dark:text-slate-200 uppercase flex items-center gap-1.5">
+                <Calendar className="w-4 h-4 text-blue-500" /> Programación Semanal de Horneado
+              </h3>
             </div>
-          )}
+            {bakeryPlanes.length === 0 ? (
+              <div className="text-center py-12 text-slate-400 text-xs">
+                <Calendar className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                <p>Sin planes semanales configurados.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs min-w-[500px] text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="p-4">Plan de Producción</th>
+                      <th className="p-4 text-center">Día Programado</th>
+                      <th className="p-4 text-center">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                    {bakeryPlanes.map((p: any) => (
+                      <tr key={p.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                        <td className="p-4 font-extrabold text-slate-900 dark:text-white">{p.nombre}</td>
+                        <td className="p-4 text-center text-slate-500 font-medium">
+                          {["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"][p.dia_semana] || p.dia_semana}
+                        </td>
+                        <td className="p-4 text-center">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${p.activo ? "text-emerald-600 bg-emerald-500/10 border border-emerald-500/20" : "text-slate-400 bg-slate-100"}`}>
+                            {p.activo ? "Activo" : "Inactivo"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -450,7 +773,10 @@ export default function PanaderiaRotiseriaPage() {
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
             <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
               <h3 className="font-black text-xs text-slate-700 dark:text-slate-300 uppercase">Planes de Cocción Rotisería</h3>
-              <button onClick={() => setShowPlanForm(true)} className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-600 to-orange-500 hover:from-amber-500 hover:to-orange-400 shadow-sm flex items-center gap-1.5">
+              <button
+                onClick={() => setShowPlanForm(true)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-600 to-orange-500 hover:from-amber-500 hover:to-orange-400 shadow-sm flex items-center gap-1.5"
+              >
                 <Plus className="w-3.5 h-3.5" />Nuevo Plan
               </button>
             </div>
@@ -495,158 +821,148 @@ export default function PanaderiaRotiseriaPage() {
               </div>
             )}
           </div>
-
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800">
-              <h3 className="font-black text-xs text-slate-700 dark:text-slate-300 uppercase">Recetas de Rotisería</h3>
-            </div>
-            {rotiseriaRecipes.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 text-xs">
-                <UtensilsCrossed className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                <p>Sin recetas de rotisería. Agregá los preparados típicos (pollo al espiedo, milanesas, tartas).</p>
-                <button onClick={() => { setRecetaArea("rotiseria"); setShowRecetaForm(true) }} className="px-4 py-2 mt-3 rounded-2xl bg-orange-600 text-white font-bold text-xs inline-flex items-center gap-1.5">
-                  <Plus className="w-3.5 h-3.5" />Agregar Receta
-                </button>
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                {rotiseriaRecipes.map((r: any) => (
-                  <div key={r.id} className="p-4 flex items-center justify-between text-xs hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                    <p className="font-extrabold text-slate-900 dark:text-white">{r.nombre}</p>
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${r.activa ? "text-emerald-600 bg-emerald-500/10 border border-emerald-500/20" : "text-slate-400 bg-slate-100"}`}>{r.activa ? "Activa" : "Inactiva"}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       )}
 
       {/* ══════════════════════ TAB 5: CALCULADORA PANADERO ══════════════════════ */}
       {tab === "calculadora" && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
-            <div>
-              <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
-                <Calculator className="w-4 h-4 text-amber-500" /> Calculadora de Porcentaje Panadero
-              </h3>
-              <p className="text-[11px] text-slate-400 mt-0.5">Fórmula universal donde la Harina representa el 100% de la base.</p>
-            </div>
-            <div className="space-y-4 text-xs">
-              {[
-                { label: "Harina (Base 100%)", val: harinaKg, setter: setHarinaKg, unit: "kg", isPct: false, min: 1, max: 500 },
-                { label: "Hidratación (Agua)", val: hidratPct, setter: setHidratPct, unit: "%", isPct: true, min: 50, max: 85 },
-                { label: "Sal", val: salPct, setter: setSalPct, unit: "%", isPct: true, min: 1, max: 3 },
-                { label: "Levadura Fresca", val: levPct, setter: setLevPct, unit: "%", isPct: true, min: 0.5, max: 5 },
-                { label: "Grasa / Manteca", val: grasaPct, setter: setGrasaPct, unit: "%", isPct: true, min: 0, max: 20 },
-              ].map((item) => (
-                <div key={item.label} className="space-y-1">
-                  <div className="flex justify-between font-bold">
-                    <span className="text-slate-700 dark:text-slate-300">{item.label}</span>
-                    <span className="font-mono text-amber-600 dark:text-amber-400 font-extrabold">{item.val.toFixed(1)} {item.unit}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={item.min}
-                    max={item.max}
-                    step={item.isPct ? 0.5 : 5}
-                    value={item.val}
-                    onChange={e => item.setter(parseFloat(e.target.value))}
-                    className="w-full accent-amber-500 h-2 bg-slate-100 dark:bg-slate-800 rounded-lg"
-                  />
-                </div>
-              ))}
-            </div>
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6">
+          <div>
+            <h3 className="font-extrabold text-base text-slate-900 dark:text-white uppercase flex items-center gap-2">
+              <Calculator className="w-5 h-5 text-amber-500" /> Calculadora de Porcentaje Panadero
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Escalá cualquier fórmula en base a la harina base (100%) para obtener peso final de masa y rendimientos.
+            </p>
           </div>
 
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-3xl p-5 shadow-sm space-y-4">
-            <h3 className="font-extrabold text-sm text-amber-600 dark:text-amber-300 uppercase">Resultado de Masa & Proporciones</h3>
-            <div className="space-y-2.5 text-xs">
-              {[
-                { label: "Harina", val: harinaKg, pct: 100 },
-                { label: "Agua", val: calc.agua, pct: hidratPct },
-                { label: "Sal", val: calc.sal, pct: salPct },
-                { label: "Levadura", val: calc.lev, pct: levPct },
-                { label: "Grasa", val: calc.grasa, pct: grasaPct },
-              ].map((item) => (
-                <div key={item.label} className="flex items-center justify-between p-3 bg-white dark:bg-slate-900 rounded-2xl border border-amber-500/20">
-                  <span className="font-bold text-slate-800 dark:text-slate-200">{item.label}</span>
-                  <div className="text-right">
-                    <span className="font-black font-mono text-amber-600 dark:text-amber-400">{item.val.toFixed(3)} kg</span>
-                    <span className="ml-2 text-[10px] text-slate-400">({item.pct}%)</span>
-                  </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Harina Base (kg) - 100%</label>
+                <input
+                  type="number"
+                  value={harinaKg}
+                  onChange={e => setHarinaKg(parseFloat(e.target.value) || 0)}
+                  className="w-full p-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono font-black text-lg text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Hidratación (%)</label>
+                  <input
+                    type="number"
+                    value={hidratPct}
+                    onChange={e => setHidratPct(parseFloat(e.target.value) || 0)}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-xs"
+                  />
                 </div>
-              ))}
-              <div className="flex items-center justify-between p-4 bg-gradient-to-r from-amber-600 to-orange-500 text-white rounded-2xl shadow-md shadow-amber-500/20">
-                <span className="font-extrabold uppercase text-xs">Peso Total de Masa</span>
-                <span className="font-black font-mono text-xl">{calc.masa.toFixed(3)} kg</span>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Sal (%)</label>
+                  <input
+                    type="number"
+                    value={salPct}
+                    onChange={e => setSalPct(parseFloat(e.target.value) || 0)}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Levadura (%)</label>
+                  <input
+                    type="number"
+                    value={levPct}
+                    onChange={e => setLevPct(parseFloat(e.target.value) || 0)}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Grasa / Manteca (%)</label>
+                  <input
+                    type="number"
+                    value={grasaPct}
+                    onChange={e => setGrasaPct(parseFloat(e.target.value) || 0)}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-slate-950 to-amber-950 text-white p-5 rounded-3xl border border-amber-500/20 space-y-4">
+              <span className="text-[10px] font-black uppercase text-amber-400 tracking-wider">
+                Masa Final Resultante
+              </span>
+              <div className="space-y-2 border-b border-slate-800 pb-4">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Harina Base:</span>
+                  <span className="font-mono font-bold">{harinaKg.toFixed(2)} kg</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Agua:</span>
+                  <span className="font-mono font-bold text-blue-300">{calc.agua.toFixed(2)} L (kg)</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Sal:</span>
+                  <span className="font-mono font-bold">{calc.sal.toFixed(3)} kg</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Levadura:</span>
+                  <span className="font-mono font-bold">{calc.lev.toFixed(3)} kg</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Grasa:</span>
+                  <span className="font-mono font-bold">{calc.grasa.toFixed(2)} kg</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <div>
+                  <span className="text-xs text-slate-400 block font-bold">Peso Total Pastón:</span>
+                  <p className="text-2xl font-black font-mono text-amber-300">{calc.masa.toFixed(2)} kg</p>
+                </div>
+                <div className="text-right">
+                  <span className="text-xs text-slate-400 block font-bold">Piezas 100g:</span>
+                  <p className="text-2xl font-black font-mono text-white">{Math.floor((calc.masa * 1000) / 100)} u</p>
+                </div>
               </div>
             </div>
           </div>
         </div>
       )}
 
+      {/* ══════════════════════ TAB 6: MERMAS ══════════════════════ */}
       {tab === "mermas" && (
         <WasteControlPanel areas={[
           { value: "panaderia", label: "Panadería" },
           { value: "rotiseria", label: "Rotisería" },
+          { value: "carniceria", label: "Carnicería" },
         ]} />
       )}
 
-      {/* ── MODAL NUEVA RECETA ── */}
-      {showRecetaForm && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-800 p-6 space-y-4">
-            <h2 className="font-extrabold text-base text-slate-900 dark:text-white uppercase flex items-center gap-2">
-              <ChefHat className="w-5 h-5 text-amber-600" /> Nueva Receta ({recetaArea === "bakery" ? "Panadería" : "Rotisería"})
-            </h2>
-            <div className="flex gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => setRecetaArea("bakery")}
-                className={`px-3 py-1.5 rounded-xl font-bold transition ${recetaArea === "bakery" ? "bg-amber-600 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-400"}`}
-              >
-                Panadería
-              </button>
-              <button
-                type="button"
-                onClick={() => setRecetaArea("rotiseria")}
-                className={`px-3 py-1.5 rounded-xl font-bold transition ${recetaArea === "rotiseria" ? "bg-orange-600 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-400"}`}
-              >
-                Rotisería
-              </button>
-            </div>
-            <form onSubmit={handleSaveReceta} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-400 font-bold mb-1">Nombre de la Receta *</label>
-                <input required className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-bold outline-none" value={recetaForm.nombre} onChange={e => setRecetaForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Ej: Pan de Leche 100g" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-400 font-bold mb-1">Rendimiento (Piezas)</label>
-                  <input type="number" className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white outline-none" value={recetaForm.rendimiento_piezas} onChange={e => setRecetaForm(f => ({ ...f, rendimiento_piezas: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="block text-slate-400 font-bold mb-1">Tiempo Prep. (min)</label>
-                  <input type="number" className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white outline-none" value={recetaForm.tiempo_preparacion_min} onChange={e => setRecetaForm(f => ({ ...f, tiempo_preparacion_min: e.target.value }))} />
-                </div>
-              </div>
-              <div>
-                <label className="block text-slate-400 font-bold mb-1">Descripción / Fórmulas</label>
-                <textarea className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white outline-none h-14" value={recetaForm.descripcion} onChange={e => setRecetaForm(f => ({ ...f, descripcion: e.target.value }))} />
-              </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <button type="button" onClick={() => setShowRecetaForm(false)} className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">Cancelar</button>
-                <button type="submit" disabled={savingReceta} className="px-5 py-2.5 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs shadow-md shadow-amber-500/20 flex items-center gap-1.5 transition">
-                  {savingReceta ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}Guardar Receta
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* ── MODAL CONSTRUCTOR DE RECETAS INDUSTRIAL (BOM) ── */}
+      <RecipeBuilderModal
+        isOpen={showRecipeBuilder}
+        onClose={() => {
+          setShowRecipeBuilder(false)
+          setRecipeToEdit(null)
+        }}
+        onSuccess={loadData}
+        initialArea={builderInitialArea}
+        recipeToEdit={recipeToEdit}
+      />
 
-      {/* ── MODAL PLAN COCCIÓN ── */}
+      {/* ── MODAL PRODUCCIÓN DIRECTA / HORNADA CON EXPLOSIÓN DE INSUMOS ── */}
+      <ProduceBatchModal
+        isOpen={showProduceModal}
+        onClose={() => {
+          setShowProduceModal(false)
+          setRecipeToProduce(null)
+        }}
+        onSuccess={loadData}
+        recipe={recipeToProduce}
+      />
+
+      {/* ── MODAL PLAN COCCIÓN ROTISERÍA ── */}
       {showPlanForm && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-800 p-6 space-y-4">
@@ -656,12 +972,22 @@ export default function PanaderiaRotiseriaPage() {
             <form onSubmit={handleSavePlan} className="space-y-3 text-xs">
               <div>
                 <label className="block text-slate-400 font-bold mb-1">Descripción del Lote *</label>
-                <input required className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-bold outline-none" value={planForm.descripcion} onChange={e => setPlanForm(f => ({ ...f, descripcion: e.target.value }))} placeholder="Ej: Pollos al espiedo 12u - Turno mañana" />
+                <input
+                  required
+                  className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-bold outline-none"
+                  value={planForm.descripcion}
+                  onChange={e => setPlanForm(f => ({ ...f, descripcion: e.target.value }))}
+                  placeholder="Ej: Pollos al espiedo 12u - Turno mañana"
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-400 font-bold mb-1">Tipo de Cocción</label>
-                  <select className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white outline-none" value={planForm.tipo_coccion} onChange={e => setPlanForm(f => ({ ...f, tipo_coccion: e.target.value }))}>
+                  <select
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white outline-none"
+                    value={planForm.tipo_coccion}
+                    onChange={e => setPlanForm(f => ({ ...f, tipo_coccion: e.target.value }))}
+                  >
                     <option value="horno">Horno</option>
                     <option value="espiedo">Espiedo</option>
                     <option value="freidora">Freidora</option>
@@ -670,17 +996,39 @@ export default function PanaderiaRotiseriaPage() {
                 </div>
                 <div>
                   <label className="block text-slate-400 font-bold mb-1">Temp. Objetivo (°C)</label>
-                  <input type="number" className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white outline-none" value={planForm.temperatura_objetivo} onChange={e => setPlanForm(f => ({ ...f, temperatura_objetivo: e.target.value }))} placeholder="72" />
+                  <input
+                    type="number"
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white outline-none"
+                    value={planForm.temperatura_objetivo}
+                    onChange={e => setPlanForm(f => ({ ...f, temperatura_objetivo: e.target.value }))}
+                    placeholder="72"
+                  />
                 </div>
                 <div className="col-span-2">
                   <label className="block text-slate-400 font-bold mb-1">Tiempo Estimado (min)</label>
-                  <input type="number" className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white outline-none" value={planForm.tiempo_coccion_min} onChange={e => setPlanForm(f => ({ ...f, tiempo_coccion_min: e.target.value }))} />
+                  <input
+                    type="number"
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white outline-none"
+                    value={planForm.tiempo_coccion_min}
+                    onChange={e => setPlanForm(f => ({ ...f, tiempo_coccion_min: e.target.value }))}
+                  />
                 </div>
               </div>
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <button type="button" onClick={() => setShowPlanForm(false)} className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">Cancelar</button>
-                <button type="submit" disabled={savingPlan} className="px-5 py-2.5 rounded-2xl bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs shadow-md shadow-orange-500/20 flex items-center gap-1.5 transition">
-                  {savingPlan ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Flame className="w-3.5 h-3.5" />}Crear Plan
+                <button
+                  type="button"
+                  onClick={() => setShowPlanForm(false)}
+                  className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingPlan}
+                  className="px-5 py-2.5 rounded-2xl bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs shadow-md shadow-orange-500/20 flex items-center gap-1.5 transition"
+                >
+                  {savingPlan ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Flame className="w-3.5 h-3.5" />}
+                  Crear Plan
                 </button>
               </div>
             </form>

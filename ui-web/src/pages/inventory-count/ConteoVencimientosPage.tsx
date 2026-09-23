@@ -96,6 +96,32 @@ export default function ConteoVencimientosPage() {
   const [manualCode, setManualCode] = useState("")
   const [searching, setSearching] = useState(false)
 
+  // ── Callback ref para garantizar asignación de stream al elemento video en cuanto se monte en el DOM ──
+  const setVideoRef = useCallback((node: HTMLVideoElement | null) => {
+    videoRef.current = node
+    if (node && streamRef.current) {
+      if (node.srcObject !== streamRef.current) {
+        node.srcObject = streamRef.current
+        node.setAttribute("playsinline", "true")
+        node.setAttribute("autoplay", "true")
+        node.muted = true
+        node.play().catch((err) => console.warn("Video play error in ref callback:", err))
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (cameraActive && streamRef.current && videoRef.current) {
+      if (videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current
+        videoRef.current.setAttribute("playsinline", "true")
+        videoRef.current.setAttribute("autoplay", "true")
+        videoRef.current.muted = true
+        videoRef.current.play().catch((err) => console.warn("Video play error in effect:", err))
+      }
+    }
+  }, [cameraActive])
+
   // ── Producto identificado, a la espera de guardar el conteo ──
   const [scannedProduct, setScannedProduct] = useState<Product | null>(null)
   const [cantidadSistema, setCantidadSistema] = useState<number>(0)
@@ -931,19 +957,30 @@ export default function ConteoVencimientosPage() {
 
       {!scannedProduct ? (
         <div className="flex-1 flex flex-col">
-          <div className="relative bg-black aspect-square max-h-[50vh]">
-            {cameraActive ? (
-              <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
-            ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-500">
+          <div className="relative bg-black aspect-square max-h-[50vh] overflow-hidden">
+            {/* El elemento video permanece SIEMPRE en el DOM para que la referencia no sea null */}
+            <video
+              ref={setVideoRef}
+              className={`w-full h-full object-cover ${cameraActive ? "block" : "hidden"}`}
+              muted
+              playsInline
+              autoPlay
+            />
+            {!cameraActive && (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-500 p-4">
                 <Camera className="w-10 h-10 text-slate-600" />
                 <button
+                  type="button"
                   onClick={() => startCamera()}
                   className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 text-sm font-black px-4 py-2.5 rounded-xl cursor-pointer active:scale-95 transition shadow-md shadow-cyan-500/20"
                 >
                   Activar cámara
                 </button>
-                {cameraError && <p className="text-xs text-amber-400 max-w-[80%] text-center">{cameraError}</p>}
+                {cameraError && (
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs max-w-[90%] text-center font-medium">
+                    {cameraError}
+                  </div>
+                )}
               </div>
             )}
             {cameraActive && (

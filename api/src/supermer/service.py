@@ -23,9 +23,10 @@ from api.src.supermer.schemas import (
     ProductionBatchCreate, WasteLogCreate, PerishableConfigCreate,
     MarkdownLogCreate, PurchaseSuggestionCreate, PurchaseSuggestionUpdate,
     ReceiveBatchCreate, FreshnessAuditCreate, ForecastEnhanceInput,
-    ButcheryTemplateUpdate,
+    ButcheryTemplateUpdate, ProduceDirectInput,
 )
 from api.src.products.models import Product
+from api.src.inventory.models import Warehouse, Stock, InventoryMovement
 
 
 # ============================================================
@@ -82,6 +83,96 @@ async def _get_supplier_name(db: AsyncSession, supplier_id: UUID) -> Optional[st
 # RECIPES (BOM)
 # ============================================================
 
+async def _build_recipe_dict(db: AsyncSession, rec: ProductionRecipe) -> dict:
+    pt_r = await db.execute(select(Product).where(Product.id == rec.producto_terminado_id))
+    pt = pt_r.scalar_one_or_none()
+
+    dep_orig_nombre = None
+    if rec.deposito_origen_id:
+        w_orig = await db.get(Warehouse, rec.deposito_origen_id)
+        if w_orig:
+            dep_orig_nombre = w_orig.nombre
+
+    dep_dest_nombre = None
+    if rec.deposito_destino_id:
+        w_dest = await db.get(Warehouse, rec.deposito_destino_id)
+        if w_dest:
+            dep_dest_nombre = w_dest.nombre
+
+    items_q = select(ProductionRecipeItem).where(ProductionRecipeItem.receta_id == rec.id)
+    items_r = await db.execute(items_q)
+    items = items_r.scalars().all()
+
+    items_res = []
+    costo_total_acumulado = Decimal("0")
+
+    for it in items:
+        p_r = await db.execute(select(Product).where(Product.id == it.producto_id))
+        p = p_r.scalar_one_or_none()
+
+        costo_unit = Decimal("0")
+        p_nombre = "Desconocido"
+        p_sku = ""
+        stock_disp = Decimal("0")
+
+        if p:
+            p_nombre = p.nombre
+            p_sku = p.sku or ""
+            costo_unit = Decimal(str(p.costo_promedio or p.ultimo_costo or 0))
+
+        subtotal = Decimal(str(it.cantidad)) * costo_unit
+        costo_total_acumulado += subtotal
+
+        if rec.deposito_origen_id:
+            stk_r = await db.execute(
+                select(Stock.cantidad).where(
+                    Stock.warehouse_id == rec.deposito_origen_id,
+                    Stock.product_id == it.producto_id
+                )
+            )
+            val = stk_r.scalar_one_or_none()
+            if val is not None:
+                stock_disp = Decimal(str(val))
+
+        items_res.append({
+            "id": it.id,
+            "receta_id": it.receta_id,
+            "producto_id": it.producto_id,
+            "cantidad": it.cantidad,
+            "unidad_medida": it.unidad_medida,
+            "es_opcional": it.es_opcional,
+            "producto_nombre": p_nombre,
+            "producto_sku": p_sku,
+            "costo_unitario": costo_unit,
+            "subtotal_costo": subtotal,
+            "stock_disponible": stock_disp,
+        })
+
+    pt_precio_venta = Decimal(str(pt.precio_venta or 0)) if pt else Decimal("0")
+    costo_unitario_estimado = Decimal("0")
+    if rec.cantidad_esperada and Decimal(str(rec.cantidad_esperada)) > 0:
+        costo_unitario_estimado = costo_total_acumulado / Decimal(str(rec.cantidad_esperada))
+
+    margen_monto = pt_precio_venta - costo_unitario_estimado
+    margen_pct = Decimal("0")
+    if pt_precio_venta > 0:
+        margen_pct = (margen_monto / pt_precio_venta) * 100
+
+    return {
+        **{c.name: getattr(rec, c.name) for c in rec.__table__.columns},
+        "deposito_origen_nombre": dep_orig_nombre,
+        "deposito_destino_nombre": dep_dest_nombre,
+        "producto_terminado_nombre": pt.nombre if pt else None,
+        "producto_terminado_sku": pt.sku if pt else None,
+        "producto_terminado_precio_venta": pt_precio_venta,
+        "costo_total_estimado": costo_total_acumulado,
+        "costo_unitario_estimado": costo_unitario_estimado,
+        "margen_estimado_monto": margen_monto,
+        "margen_estimado_pct": round(margen_pct, 1),
+        "items": items_res,
+    }
+
+
 async def list_recipes(
     db: AsyncSession, company_id: str, area: Optional[str] = None,
     activa: Optional[bool] = None, limit: int = 100, offset: int = 0,
@@ -95,24 +186,7 @@ async def list_recipes(
     r = await db.execute(q)
     recipes = r.scalars().all()
 
-    result = []
-    for rec in recipes:
-        items_q = select(ProductionRecipeItem).where(ProductionRecipeItem.receta_id == rec.id)
-        items_r = await db.execute(items_q)
-        items = items_r.scalars().all()
-        prod_nombre = await _get_product_name(db, rec.producto_terminado_id)
-        result.append({
-            **{c.name: getattr(rec, c.name) for c in rec.__table__.columns},
-            "items": [
-                {
-                    **{c.name: getattr(it, c.name) for c in it.__table__.columns},
-                    "producto_nombre": await _get_product_name(db, it.producto_id),
-                }
-                for it in items
-            ],
-            "producto_terminado_nombre": prod_nombre,
-        })
-    return result
+    return [await _build_recipe_dict(db, rec) for rec in recipes]
 
 
 async def get_recipe(db: AsyncSession, recipe_id: str) -> Optional[dict]:
@@ -120,21 +194,7 @@ async def get_recipe(db: AsyncSession, recipe_id: str) -> Optional[dict]:
     rec = r.scalar_one_or_none()
     if not rec:
         return None
-    items_q = select(ProductionRecipeItem).where(ProductionRecipeItem.receta_id == rec.id)
-    items_r = await db.execute(items_q)
-    items = items_r.scalars().all()
-    prod_nombre = await _get_product_name(db, rec.producto_terminado_id)
-    return {
-        **{c.name: getattr(rec, c.name) for c in rec.__table__.columns},
-        "items": [
-            {
-                **{c.name: getattr(it, c.name) for c in it.__table__.columns},
-                "producto_nombre": await _get_product_name(db, it.producto_id),
-            }
-            for it in items
-        ],
-        "producto_terminado_nombre": prod_nombre,
-    }
+    return await _build_recipe_dict(db, rec)
 
 
 async def create_recipe(db: AsyncSession, company_id: str, data: RecipeCreate) -> dict:
@@ -147,6 +207,8 @@ async def create_recipe(db: AsyncSession, company_id: str, data: RecipeCreate) -
         cantidad_esperada=data.cantidad_esperada,
         unidad_medida=data.unidad_medida,
         rendimiento_esperado=data.rendimiento_esperado,
+        deposito_origen_id=data.deposito_origen_id,
+        deposito_destino_id=data.deposito_destino_id,
     )
     db.add(rec)
     await db.flush()
@@ -198,8 +260,44 @@ async def delete_recipe(db: AsyncSession, recipe_id: str) -> bool:
 
 
 # ============================================================
-# PRODUCTION ORDERS
+# PRODUCTION ORDERS & EXECUTION
 # ============================================================
+
+async def _build_order_dict(db: AsyncSession, o: ProductionOrder) -> dict:
+    rec_nombre = None
+    pt_nombre = None
+    if o.receta_id:
+        rec = await db.get(ProductionRecipe, o.receta_id)
+        if rec:
+            rec_nombre = rec.nombre
+            if rec.producto_terminado_id:
+                pt_nombre = await _get_product_name(db, rec.producto_terminado_id)
+
+    resp_nombre = None
+    if o.responsable_id:
+        resp_nombre = await _get_user_name(db, o.responsable_id)
+
+    dep_orig_nombre = None
+    if o.deposito_origen_id:
+        w_orig = await db.get(Warehouse, o.deposito_origen_id)
+        if w_orig:
+            dep_orig_nombre = w_orig.nombre
+
+    dep_dest_nombre = None
+    if o.deposito_destino_id:
+        w_dest = await db.get(Warehouse, o.deposito_destino_id)
+        if w_dest:
+            dep_dest_nombre = w_dest.nombre
+
+    return {
+        **{c.name: getattr(o, c.name) for c in o.__table__.columns},
+        "receta_nombre": rec_nombre,
+        "producto_terminado_nombre": pt_nombre,
+        "responsable_nombre": resp_nombre,
+        "deposito_origen_nombre": dep_orig_nombre,
+        "deposito_destino_nombre": dep_dest_nombre,
+    }
+
 
 async def list_orders(
     db: AsyncSession, company_id: str, area: Optional[str] = None,
@@ -219,21 +317,7 @@ async def list_orders(
     r = await db.execute(q)
     orders = r.scalars().all()
 
-    result = []
-    for o in orders:
-        rec_nombre = None
-        if o.receta_id:
-            rec_r = await db.execute(select(ProductionRecipe.nombre).where(ProductionRecipe.id == o.receta_id))
-            rec_nombre = rec_r.scalar_one_or_none()
-        resp_nombre = None
-        if o.responsable_id:
-            resp_nombre = await _get_user_name(db, o.responsable_id)
-        result.append({
-            **{c.name: getattr(o, c.name) for c in o.__table__.columns},
-            "receta_nombre": rec_nombre,
-            "responsable_nombre": resp_nombre,
-        })
-    return result
+    return [await _build_order_dict(db, o) for o in orders]
 
 
 async def get_order(db: AsyncSession, order_id: str) -> Optional[dict]:
@@ -241,18 +325,7 @@ async def get_order(db: AsyncSession, order_id: str) -> Optional[dict]:
     o = r.scalar_one_or_none()
     if not o:
         return None
-    rec_nombre = None
-    if o.receta_id:
-        rec_r = await db.execute(select(ProductionRecipe.nombre).where(ProductionRecipe.id == o.receta_id))
-        rec_nombre = rec_r.scalar_one_or_none()
-    resp_nombre = None
-    if o.responsable_id:
-        resp_nombre = await _get_user_name(db, o.responsable_id)
-    return {
-        **{c.name: getattr(o, c.name) for c in o.__table__.columns},
-        "receta_nombre": rec_nombre,
-        "responsable_nombre": resp_nombre,
-    }
+    return await _build_order_dict(db, o)
 
 
 async def create_order(db: AsyncSession, company_id: str, data: ProductionOrderCreate) -> dict:
@@ -266,7 +339,10 @@ async def create_order(db: AsyncSession, company_id: str, data: ProductionOrderC
         area=rec.area,
         cantidad_objetivo=data.cantidad_objetivo,
         estado="planificada",
-        fecha_inicio=data.fecha_inicio,
+        deposito_origen_id=data.deposito_origen_id or rec.deposito_origen_id,
+        deposito_destino_id=data.deposito_destino_id or rec.deposito_destino_id,
+        lote_codigo=data.lote_codigo,
+        fecha_inicio=data.fecha_inicio or datetime.utcnow(),
         fecha_vencimiento=data.fecha_vencimiento,
         responsable_id=data.responsable_id,
         notas=data.notas,
@@ -292,34 +368,172 @@ async def complete_order(
     db: AsyncSession, order_id: str, producto_obtenido: Decimal,
     insumos_usados: Optional[dict] = None, costo_unitario: Optional[Decimal] = None,
     fecha_vencimiento: Optional[date] = None, lote_codigo: Optional[str] = None,
+    user_id: Optional[UUID] = None,
 ) -> Optional[dict]:
     r = await db.execute(select(ProductionOrder).where(ProductionOrder.id == order_id))
     o = r.scalar_one_or_none()
     if not o:
         return None
+
+    rec = await db.get(ProductionRecipe, o.receta_id) if o.receta_id else None
+    target_product_id = rec.producto_terminado_id if rec else None
+
     o.estado = "completada"
     o.fecha_fin = datetime.utcnow()
     o.producto_obtenido = producto_obtenido
-    if insumos_usados is not None:
-        o.insumos_usados = insumos_usados
+    if lote_codigo:
+        o.lote_codigo = lote_codigo
+    if fecha_vencimiento:
+        o.fecha_vencimiento = fecha_vencimiento
+
     if o.cantidad_objetivo and producto_obtenido > 0:
         o.rendimiento_real = (producto_obtenido / o.cantidad_objetivo) * 100
-    await db.flush()
 
-    rec = await db.get(ProductionRecipe, o.receta_id)
-    target_product_id = rec.producto_terminado_id if rec else None
+    # 1. Deduct raw materials from source warehouse
+    dep_origen = o.deposito_origen_id or (rec.deposito_origen_id if rec else None)
+    costo_total_insumos = Decimal("0")
+
+    if rec and dep_origen:
+        items_q = select(ProductionRecipeItem).where(ProductionRecipeItem.receta_id == rec.id)
+        items_r = await db.execute(items_q)
+        recipe_items = items_r.scalars().all()
+
+        ratio = (Decimal(str(producto_obtenido)) / Decimal(str(rec.cantidad_esperada))) if (rec.cantidad_esperada and Decimal(str(rec.cantidad_esperada)) > 0) else Decimal("1")
+
+        for it in recipe_items:
+            cant_usada = Decimal(str(it.cantidad)) * ratio
+            if insumos_usados and str(it.producto_id) in insumos_usados:
+                cant_usada = Decimal(str(insumos_usados[str(it.producto_id)]))
+
+            p = await db.get(Product, it.producto_id)
+            c_unit = Decimal(str((p.costo_promedio or p.ultimo_costo or 0) if p else 0))
+            costo_total_insumos += cant_usada * c_unit
+
+            # Stock update
+            stk_r = await db.execute(
+                select(Stock).where(
+                    Stock.warehouse_id == dep_origen,
+                    Stock.product_id == it.producto_id
+                )
+            )
+            stock_row = stk_r.scalar_one_or_none()
+            stk_actual = Decimal(str(stock_row.cantidad)) if stock_row else Decimal("0")
+            nuevo_stk = max(Decimal("0"), stk_actual - cant_usada)
+
+            if stock_row:
+                stock_row.cantidad = int(round(nuevo_stk))
+            else:
+                stock_row = Stock(warehouse_id=dep_origen, product_id=it.producto_id, cantidad=int(round(nuevo_stk)), costo_unitario=c_unit)
+                db.add(stock_row)
+
+            mov = InventoryMovement(
+                company_id=o.company_id,
+                warehouse_id=dep_origen,
+                product_id=it.producto_id,
+                tipo="salida_produccion",
+                cantidad=-int(round(cant_usada)),
+                costo_unitario=c_unit,
+                referencia_type="supermer_production_order",
+                referencia_id=o.id,
+                motivo=f"Consumo producción: {rec.nombre} (Orden #{str(o.id)[:8]})",
+                user_id=user_id or o.responsable_id,
+            )
+            db.add(mov)
+
+    # 2. Calculate final unit cost
+    calculated_costo_unit = costo_unitario
+    if not calculated_costo_unit and producto_obtenido > 0 and costo_total_insumos > 0:
+        calculated_costo_unit = costo_total_insumos / Decimal(str(producto_obtenido))
+
+    # 3. Add finished product to destination warehouse
+    dep_destino = o.deposito_destino_id or (rec.deposito_destino_id if rec else None)
+    if target_product_id and dep_destino and producto_obtenido > 0:
+        stk_dest_r = await db.execute(
+            select(Stock).where(
+                Stock.warehouse_id == dep_destino,
+                Stock.product_id == target_product_id
+            )
+        )
+        stock_dest = stk_dest_r.scalar_one_or_none()
+        stk_dest_actual = Decimal(str(stock_dest.cantidad)) if stock_dest else Decimal("0")
+        nuevo_stk_dest = stk_dest_actual + Decimal(str(producto_obtenido))
+
+        if stock_dest:
+            stock_dest.cantidad = int(round(nuevo_stk_dest))
+            if calculated_costo_unit:
+                stock_dest.costo_unitario = calculated_costo_unit
+        else:
+            stock_dest = Stock(
+                warehouse_id=dep_destino,
+                product_id=target_product_id,
+                cantidad=int(round(nuevo_stk_dest)),
+                costo_unitario=calculated_costo_unit or Decimal("0")
+            )
+            db.add(stock_dest)
+
+        mov_dest = InventoryMovement(
+            company_id=o.company_id,
+            warehouse_id=dep_destino,
+            product_id=target_product_id,
+            tipo="entrada_produccion",
+            cantidad=int(round(producto_obtenido)),
+            costo_unitario=calculated_costo_unit or Decimal("0"),
+            referencia_type="supermer_production_order",
+            referencia_id=o.id,
+            motivo=f"Alta producto terminado: {rec.nombre if rec else ''} (Orden #{str(o.id)[:8]})",
+            user_id=user_id or o.responsable_id,
+        )
+        db.add(mov_dest)
+
+    # 4. Create batch
     batch = ProductionBatch(
         company_id=o.company_id,
         orden_id=o.id,
         producto_id=target_product_id,
         cantidad_obtenida=producto_obtenido,
-        fecha_vencimiento=fecha_vencimiento or date.today() + timedelta(days=7),
-        lote_codigo=lote_codigo,
-        costo_unitario=costo_unitario,
+        fecha_vencimiento=fecha_vencimiento or (date.today() + timedelta(days=7)),
+        lote_codigo=lote_codigo or o.lote_codigo or f"LOT-{datetime.utcnow().strftime('%Y%m%d%H%M')}",
+        costo_unitario=calculated_costo_unit,
     )
     db.add(batch)
+
     await db.commit()
     return await get_order(db, order_id)
+
+
+async def produce_batch_direct(
+    db: AsyncSession, company_id: str, data: ProduceDirectInput, user_id: Optional[UUID] = None
+) -> dict:
+    rec_r = await db.execute(select(ProductionRecipe).where(ProductionRecipe.id == data.receta_id))
+    rec = rec_r.scalar_one_or_none()
+    if not rec:
+        raise ValueError("Receta no encontrada")
+
+    o = ProductionOrder(
+        company_id=company_id,
+        receta_id=rec.id,
+        area=rec.area,
+        cantidad_objetivo=data.cantidad_producir,
+        estado="planificada",
+        deposito_origen_id=data.deposito_origen_id or rec.deposito_origen_id,
+        deposito_destino_id=data.deposito_destino_id or rec.deposito_destino_id,
+        lote_codigo=data.lote_codigo,
+        fecha_inicio=datetime.utcnow(),
+        fecha_vencimiento=data.fecha_vencimiento,
+        responsable_id=user_id,
+        notas=data.notas,
+    )
+    db.add(o)
+    await db.flush()
+
+    return await complete_order(
+        db=db,
+        order_id=str(o.id),
+        producto_obtenido=data.cantidad_producir,
+        fecha_vencimiento=data.fecha_vencimiento,
+        lote_codigo=data.lote_codigo,
+        user_id=user_id,
+    )
 
 
 # ============================================================

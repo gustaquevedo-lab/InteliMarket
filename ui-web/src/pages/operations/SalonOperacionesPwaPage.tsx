@@ -195,6 +195,32 @@ export default function SalonOperacionesPwaPage() {
   const scanLoopRef = useRef<number | null>(null)
   const isProcessingBarcode = useRef<boolean>(false)
 
+  // ── Callback ref para garantizar asignación de stream al elemento video en cuanto se monte en el DOM ──
+  const setVideoRef = useCallback((node: HTMLVideoElement | null) => {
+    videoRef.current = node
+    if (node && streamRef.current) {
+      if (node.srcObject !== streamRef.current) {
+        node.srcObject = streamRef.current
+        node.setAttribute("playsinline", "true")
+        node.setAttribute("autoplay", "true")
+        node.muted = true
+        node.play().catch((err) => console.warn("Video play error in ref callback:", err))
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (cameraActive && streamRef.current && videoRef.current) {
+      if (videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current
+        videoRef.current.setAttribute("playsinline", "true")
+        videoRef.current.setAttribute("autoplay", "true")
+        videoRef.current.muted = true
+        videoRef.current.play().catch((err) => console.warn("Video play error in effect:", err))
+      }
+    }
+  }, [cameraActive])
+
   // ── BUFFER DEL ESCÁNER DE HARDWARE (PISTOLA LÁSER USB / BLUETOOTH) ──
   const barcodeBuffer = useRef("")
   const lastKeyTime = useRef(0)
@@ -1945,7 +1971,7 @@ export default function SalonOperacionesPwaPage() {
                 
                 {/* Video feed */}
                 <video
-                  ref={videoRef}
+                  ref={setVideoRef}
                   playsInline
                   muted
                   className="w-full h-64 sm:h-80 object-cover"
