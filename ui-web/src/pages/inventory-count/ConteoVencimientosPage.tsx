@@ -3,6 +3,7 @@ import {
   Camera, CameraOff, Loader2, Package, Check, X, Plus,
   Calendar, Hash, ImagePlus, ChevronRight, ClipboardList,
   AlertTriangle, CheckCircle2, Search, Download, RefreshCcw,
+  LogIn, LogOut, User as UserIcon, Lock, Eye, EyeOff, ShieldCheck,
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -16,7 +17,7 @@ import { formatPYG } from "../../utils/format"
 // tabla supermer_count_items) que ya tenia estos campos -- no se creo
 // ninguna tabla nueva, solo esta pantalla mobile-first.
 
-interface AreaPreset { key: string; label: string }
+interface AreaPreset { key: string; label: string; iconDesc?: string }
 const AREAS: AreaPreset[] = [
   { key: "salon_general", label: "Salón general" },
   { key: "almacen", label: "Almacén / secos" },
@@ -48,17 +49,36 @@ interface CountedItem {
   foto_evidencia_url?: string | null
 }
 
+interface StaffMember {
+  id: string
+  nombre: string
+  email: string
+  rol: string
+  foto_url?: string | null
+  en_turno?: boolean
+}
+
 export default function ConteoVencimientosPage() {
-  const { user } = useAuth()
+  const { user, login, logout, loading: authLoading } = useAuth()
   const toast = useToast()
 
   // ── Sesion activa ──
   const [session, setSession] = useState<CountSession | null>(null)
   const [openSessions, setOpenSessions] = useState<CountSession[]>([])
-  const [loadingSessions, setLoadingSessions] = useState(true)
+  const [loadingSessions, setLoadingSessions] = useState(false)
   const [selectedArea, setSelectedArea] = useState(AREAS[0].key)
   const [ubicacion, setUbicacion] = useState("")
   const [startingSession, setStartingSession] = useState(false)
+
+  // ── Login Táctil Móvil (cuando no hay sesión activa) ──
+  const [staffList, setStaffList] = useState<StaffMember[]>([])
+  const [loadingStaff, setLoadingStaff] = useState(false)
+  const [selectedStaff, setSelectedStaff] = useState<StaffMember | null>(null)
+  const [loginEmail, setLoginEmail] = useState("")
+  const [loginPassword, setLoginPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
+  const [loggingIn, setLoggingIn] = useState(false)
+  const [loginTab, setLoginTab] = useState<"staff" | "manual">("staff")
 
   // ── Items ya contados en esta sesion ──
   const [items, setItems] = useState<CountedItem[]>([])
@@ -70,6 +90,9 @@ export default function ConteoVencimientosPage() {
   const isProcessing = useRef(false)
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
+  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
+  const [selectedCameraId, setSelectedCameraId] = useState<string>("")
+  const [activeCameraLabel, setActiveCameraLabel] = useState<string>("Cámara Trasera")
   const [manualCode, setManualCode] = useState("")
   const [searching, setSearching] = useState(false)
 
@@ -84,8 +107,32 @@ export default function ConteoVencimientosPage() {
   const [fotoPreview, setFotoPreview] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
-  // ── Cargar sesiones abiertas al entrar ──
+  // ── Cargar lista pública de personal si no hay sesión iniciada ──
   useEffect(() => {
+    if (user) return
+    let cancelled = false
+    setLoadingStaff(true)
+    api.auth.posStaff()
+      .then((res: any) => {
+        if (cancelled) return
+        const list = Array.isArray(res?.staff) ? res.staff : []
+        setStaffList(list)
+      })
+      .catch(() => {
+        // Fallback a login manual silenciosamente
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingStaff(false)
+      })
+    return () => { cancelled = true }
+  }, [user])
+
+  // ── Cargar sesiones abiertas al estar autenticado ──
+  useEffect(() => {
+    if (!user) {
+      setOpenSessions([])
+      return
+    }
     let cancelled = false
     setLoadingSessions(true)
     api.inventory.sessions
@@ -94,10 +141,14 @@ export default function ConteoVencimientosPage() {
         if (cancelled) return
         setOpenSessions((Array.isArray(list) ? list : []) as CountSession[])
       })
-      .catch(() => {})
+      .catch((err: any) => {
+        if (err?.status === 401 || String(err?.message || "").includes("401")) {
+          toast.warning("Sesión vencida", "Por favor ingresá tus credenciales nuevamente.")
+        }
+      })
       .finally(() => { if (!cancelled) setLoadingSessions(false) })
     return () => { cancelled = true }
-  }, [])
+  }, [user, toast])
 
   // ── Refrescar items de la sesion activa ──
   const refreshItems = useCallback(async (sessionId: string) => {
@@ -107,23 +158,67 @@ export default function ConteoVencimientosPage() {
     } catch {}
   }, [])
 
+  // ── Login Táctil / Manual ──
+  const handleLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    const targetEmail = selectedStaff ? selectedStaff.email : loginEmail.trim()
+    if (!targetEmail) {
+      toast.warning("Falta usuario", "Seleccioná tu nombre o ingresá tu correo.")
+      return
+    }
+    if (!loginPassword) {
+      toast.warning("Falta contraseña", "Ingresá tu contraseña o PIN.")
+      return
+    }
+    setLoggingIn(true)
+    try {
+      await login(targetEmail, loginPassword)
+      toast.success("¡Bienvenido!", `Sesión iniciada correctamente.`)
+      setLoginPassword("")
+      setSelectedStaff(null)
+    } catch (err: any) {
+      toast.error("Error de acceso", err?.message || "Contraseña o usuario incorrectos.")
+    } finally {
+      setLoggingIn(false)
+    }
+  }
+
+  const handleLogout = () => {
+    if (confirm("¿Cerrar sesión en Extra Conteo?")) {
+      stopCamera()
+      setSession(null)
+      logout()
+    }
+  }
+
   const startSession = async () => {
+    if (!user) {
+      toast.warning("Acceso requerido", "Iniciá sesión para registrar conteos a tu nombre.")
+      return
+    }
     setStartingSession(true)
     try {
       const codigo = `SAL-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
-      const areaLabel = AREAS.find((a) => a.key === selectedArea)?.label || selectedArea
+      const areaObj = AREAS.find((a) => a.key === selectedArea)
+      const areaLabel = areaObj?.label || selectedArea
       const created = await api.inventory.sessions.create({
         codigo,
         area: areaLabel,
         ubicacion: ubicacion.trim() || undefined,
         tipo: "salon",
-        contador_principal: user?.id,
+        contador_principal: user.id,
       })
       setSession(created as CountSession)
       setItems([])
       toast.success("Sesión iniciada", `Conteo ${codigo} en ${areaLabel}.`)
     } catch (e: any) {
-      toast.error("No se pudo iniciar", e?.message || "Reintentá en un momento.")
+      const isAuthErr = e?.status === 401 || String(e?.message || "").includes("401") || String(e?.message || "").includes("autentic")
+      if (isAuthErr) {
+        toast.error("Sesión Expirada", "Por favor volvé a ingresar tu usuario.")
+        logout()
+      } else {
+        toast.error("No se pudo iniciar", e?.message || "Reintentá en un momento.")
+      }
     } finally {
       setStartingSession(false)
     }
@@ -178,7 +273,7 @@ export default function ConteoVencimientosPage() {
     setCameraActive(false)
   }, [])
 
-  const startCamera = useCallback(async () => {
+  const startCamera = useCallback(async (targetDeviceId?: string) => {
     setCameraError(null)
     try {
       let videoDevices: MediaDeviceInfo[] = []
@@ -186,11 +281,12 @@ export default function ConteoVencimientosPage() {
         if (navigator.mediaDevices?.enumerateDevices) {
           const devices = await navigator.mediaDevices.enumerateDevices()
           videoDevices = devices.filter((d) => d.kind === "videoinput")
+          setAvailableCameras(videoDevices)
         }
       } catch {}
 
-      let chosenId: string | undefined
-      if (videoDevices.length > 0) {
+      let chosenId: string | undefined = targetDeviceId
+      if (!chosenId && videoDevices.length > 0) {
         const back = videoDevices.find((d) => /back|rear|trasera|environment|wide|main/i.test(d.label))
         chosenId = back ? back.deviceId : videoDevices.length > 1 ? videoDevices[videoDevices.length - 1].deviceId : undefined
       }
@@ -219,7 +315,39 @@ export default function ConteoVencimientosPage() {
         }
       }
 
+      // Conmutar si cayó en frontal involuntariamente
+      let activeTrack = stream.getVideoTracks()[0]
+      if (activeTrack) {
+        const currentLabel = (activeTrack.label || "").toLowerCase()
+        const isFront = /front|delantera|user/i.test(currentLabel)
+        if (isFront && videoDevices.length > 1 && !targetDeviceId) {
+          try {
+            const alternateDevice = videoDevices[videoDevices.length - 1]
+            if (alternateDevice.deviceId !== chosenId) {
+              activeTrack.stop()
+              stream = await navigator.mediaDevices.getUserMedia({
+                video: { deviceId: { exact: alternateDevice.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
+                audio: false,
+              })
+              activeTrack = stream.getVideoTracks()[0]
+            }
+          } catch {}
+        }
+      }
+
       streamRef.current = stream
+
+      if (activeTrack) {
+        const label = activeTrack.label || ""
+        setActiveCameraLabel(
+          /back|rear|trasera|environment/i.test(label)
+            ? "Cámara Trasera"
+            : /front|user|delantera/i.test(label)
+            ? "Cámara Frontal"
+            : label || "Cámara Activa"
+        )
+      }
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         videoRef.current.setAttribute("playsinline", "true")
@@ -266,6 +394,22 @@ export default function ConteoVencimientosPage() {
       }
     }
   }, [lookupProduct, toast])
+
+  const switchCamera = () => {
+    if (availableCameras.length <= 1) {
+      stopCamera()
+      setTimeout(() => startCamera(), 200)
+      return
+    }
+    const currentIndex = availableCameras.findIndex(c => c.deviceId === selectedCameraId)
+    const nextIndex = (currentIndex + 1) % availableCameras.length
+    const nextDevice = availableCameras[nextIndex]
+    setSelectedCameraId(nextDevice.deviceId)
+    stopCamera()
+    const desc = nextDevice.label || `Cámara ${nextIndex + 1} de ${availableCameras.length}`
+    toast.info("Cambiando Cámara", desc)
+    setTimeout(() => startCamera(nextDevice.deviceId), 200)
+  }
 
   useEffect(() => () => stopCamera(), [stopCamera])
 
@@ -339,31 +483,239 @@ export default function ConteoVencimientosPage() {
 
   // ═══════════════════════════════ UI ═══════════════════════════════
 
+  // 1. CARGA INICIAL DE AUTENTICACIÓN
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
+        <p className="text-xs text-slate-400 font-bold tracking-wider uppercase">Iniciando Extra Conteo...</p>
+      </div>
+    )
+  }
+
+  // 2. ESTADO SIN SESIÓN: PANTALLA DE LOGIN TÁCTIL DEDICADA
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-between p-4 sm:p-6 select-none relative overflow-x-hidden">
+        {/* Glow ambient background Extra Cyan */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-80 h-80 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
+
+        {/* Encabezado */}
+        <div className="w-full max-w-sm flex items-center justify-between z-10 pt-2">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-cyan-500 flex items-center justify-center text-slate-950 font-black shadow-md shadow-cyan-500/30">
+              <ClipboardList className="w-5 h-5" />
+            </div>
+            <span className="text-xs font-black tracking-widest uppercase text-cyan-400">
+              EXTRA SUPERMERCADO
+            </span>
+          </div>
+          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+            CONTEO APP
+          </span>
+        </div>
+
+        {/* Tarjeta de Login */}
+        <div className="w-full max-w-sm flex flex-col my-auto z-10 py-6">
+          <div className="flex flex-col items-center text-center mb-6">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-cyan-600 to-cyan-400 flex items-center justify-center text-slate-950 shadow-xl shadow-cyan-500/25 mb-3 ring-4 ring-cyan-500/20">
+              <ClipboardList className="w-9 h-9" />
+            </div>
+            <h1 className="font-black text-2xl text-white tracking-tight">Extra Conteo</h1>
+            <p className="text-xs text-slate-400 mt-1 max-w-[280px]">
+              Control de góndolas, arqueo de stock físico y registro de vencimientos.
+            </p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-4 bg-slate-900/90 border border-slate-800 p-5 rounded-3xl shadow-2xl backdrop-blur-xl">
+            {/* Pestañas de Login */}
+            <div className="grid grid-cols-2 p-1 bg-slate-950 rounded-2xl border border-slate-800 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setLoginTab("staff")}
+                className={`py-2 rounded-xl transition ${
+                  loginTab === "staff"
+                    ? "bg-cyan-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                Personal de Tienda
+              </button>
+              <button
+                type="button"
+                onClick={() => setLoginTab("manual")}
+                className={`py-2 rounded-xl transition ${
+                  loginTab === "manual"
+                    ? "bg-cyan-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                Usuario / Correo
+              </button>
+            </div>
+
+            {/* Modo 1: Selector de personal */}
+            {loginTab === "staff" && (
+              <div className="space-y-2">
+                <label className="text-[11px] font-black uppercase tracking-wider text-slate-400 px-1">
+                  Seleccioná tu Usuario:
+                </label>
+                {loadingStaff ? (
+                  <div className="flex items-center justify-center py-6">
+                    <Loader2 className="w-5 h-5 animate-spin text-cyan-400" />
+                  </div>
+                ) : staffList.length > 0 ? (
+                  <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                    {staffList.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => setSelectedStaff(s)}
+                        className={`flex flex-col items-center p-2.5 rounded-2xl border text-center transition cursor-pointer active:scale-95 ${
+                          selectedStaff?.id === s.id
+                            ? "bg-cyan-500/20 border-cyan-400 text-white ring-2 ring-cyan-500/30"
+                            : "bg-slate-950/70 border-slate-800 text-slate-300 hover:border-slate-700"
+                        }`}
+                      >
+                        <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center mb-1.5 overflow-hidden">
+                          {s.foto_url ? (
+                            <img src={s.foto_url} alt={s.nombre} className="w-full h-full object-cover" />
+                          ) : (
+                            <UserIcon className="w-4 h-4 text-cyan-400" />
+                          )}
+                        </div>
+                        <div className="text-xs font-bold truncate w-full">{s.nombre}</div>
+                        <div className="text-[10px] text-slate-400 uppercase tracking-wider">{s.rol}</div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 p-2 text-center">Usá la opción de ingreso manual.</p>
+                )}
+              </div>
+            )}
+
+            {/* Modo 2: Input manual de correo/usuario */}
+            {loginTab === "manual" && (
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-black uppercase tracking-wider text-slate-400 px-1">
+                  Usuario o Correo:
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                    <UserIcon className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="email"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="ej: supervisor@superextra.com.py"
+                    className="w-full pl-10 pr-3 py-3 rounded-2xl bg-slate-950 border border-slate-800 text-white text-sm outline-none focus:border-cyan-500 transition"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Contraseña / PIN */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-black uppercase tracking-wider text-slate-400 px-1">
+                Contraseña o PIN:
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="Ingresá tu contraseña"
+                  className="w-full pl-10 pr-10 py-3 rounded-2xl bg-slate-950 border border-slate-800 text-white text-sm outline-none focus:border-cyan-500 transition"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loggingIn || (loginTab === "staff" && !selectedStaff) || (loginTab === "manual" && !loginEmail)}
+              className="w-full mt-2 py-3.5 rounded-2xl bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 disabled:opacity-50 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 active:scale-95 transition cursor-pointer"
+            >
+              {loggingIn ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                  <span>Validando acceso...</span>
+                </>
+              ) : (
+                <>
+                  <LogIn className="w-4 h-4 text-slate-950" />
+                  <span>Entrar al Conteo</span>
+                </>
+              )}
+            </button>
+          </form>
+        </div>
+
+        {/* Footer info */}
+        <div className="text-center text-[11px] text-slate-400 z-10 pb-2">
+          Extra Supermercado · Sistema de Control Móvil
+        </div>
+      </div>
+    )
+  }
+
+  // 3. VISTA PRINCIPAL (USUARIO AUTENTICADO)
   if (!session) {
+    const selectedAreaObj = AREAS.find((a) => a.key === selectedArea)
+    const selectedAreaLabel = selectedAreaObj?.label || selectedArea
+
     return (
       <div className="min-h-screen bg-slate-950 text-white flex flex-col">
-        <div className="p-4 pt-6 border-b border-slate-800 flex items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <ClipboardList className="w-6 h-6 text-cyan-400" />
-              <h1 className="text-lg font-black">Conteo & Vencimientos</h1>
+        {/* Barra superior con identidad de usuario y descarga de APK */}
+        <div className="p-4 pt-5 border-b border-slate-800/80 bg-slate-900/50 backdrop-blur-md flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shrink-0">
+              <ClipboardList className="w-5 h-5" />
             </div>
-            <p className="text-xs text-slate-400 mt-1">Extra Salón — recorré la góndola, contá y registrá vencimientos.</p>
+            <div className="min-w-0">
+              <h1 className="text-sm font-black truncate">Extra Conteo & Vencimientos</h1>
+              <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+                <span className="font-bold text-slate-300 truncate">{user.nombre || user.email}</span>
+                <span className="text-slate-400">({user.rol || "operador"})</span>
+              </div>
+            </div>
           </div>
-          <a
-            href="/download/extra-conteo.apk"
-            download="extra-conteo.apk"
-            title="Descargar APK Nativo Android Extra Conteo"
-            className="px-2.5 py-1.5 rounded-2xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-700 dark:text-cyan-400 hover:bg-cyan-500/25 active:scale-95 transition cursor-pointer flex items-center gap-1.5 text-xs font-black shadow-sm shrink-0"
-          >
-            <Download className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-            <span className="hidden sm:inline">DESCARGAR APK</span>
-          </a>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleLogout}
+              className="p-2 rounded-xl bg-slate-800/80 hover:bg-rose-500/20 hover:text-rose-400 border border-slate-700/60 text-slate-400 transition cursor-pointer"
+              title="Cerrar sesión de conteo"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+            <a
+              href="/download/extra-conteo.apk"
+              download="extra-conteo.apk"
+              title="Descargar APK Nativo Android Extra Conteo"
+              className="px-2.5 py-1.5 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/25 active:scale-95 transition cursor-pointer flex items-center gap-1.5 text-xs font-black shadow-xs shrink-0"
+            >
+              <Download className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden sm:inline">APK</span>
+            </a>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-5">
           {loadingSessions ? (
-            <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-slate-500" /></div>
+            <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-cyan-400" /></div>
           ) : openSessions.length > 0 ? (
             <div>
               <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Sesiones abiertas — retomar</p>
@@ -372,10 +724,10 @@ export default function ConteoVencimientosPage() {
                   <button
                     key={s.id}
                     onClick={() => resumeSession(s)}
-                    className="w-full flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-left active:scale-[0.98] transition"
+                    className="w-full flex items-center justify-between bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3 text-left active:scale-[0.98] transition hover:border-cyan-500/50"
                   >
                     <div>
-                      <div className="font-bold text-sm">{s.area}</div>
+                      <div className="font-bold text-sm text-cyan-300">{s.area}</div>
                       <div className="text-xs text-slate-400">{s.codigo} · {s.total_items_contados} contados</div>
                     </div>
                     <ChevronRight className="w-5 h-5 text-slate-500" />
@@ -385,54 +737,82 @@ export default function ConteoVencimientosPage() {
             </div>
           ) : null}
 
-          <div>
-            <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Nueva sesión</p>
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              {AREAS.map((a) => (
-                <button
-                  key={a.key}
-                  onClick={() => setSelectedArea(a.key)}
-                  className={`px-3 py-3 rounded-xl text-sm font-bold border transition ${
-                    selectedArea === a.key
-                      ? "bg-blue-600 border-blue-500 text-white"
-                      : "bg-slate-900 border-slate-800 text-slate-300"
-                  }`}
-                >
-                  {a.label}
-                </button>
-              ))}
+          {/* Bloque Nueva Sesión con Selector de Sector */}
+          <div className="bg-slate-900/60 border border-slate-800/80 rounded-3xl p-4 sm:p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-black text-cyan-400 uppercase tracking-wider">Paso 1: Seleccioná el Sector</p>
+              <span className="text-[11px] font-bold text-slate-400">
+                Seleccionado: <span className="text-white">{selectedAreaLabel}</span>
+              </span>
             </div>
-            <input
-              value={ubicacion}
-              onChange={(e) => setUbicacion(e.target.value)}
-              placeholder="Ubicación puntual (opcional) — ej: pasillo 4, góndola derecha"
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500"
-            />
-          </div>
 
-          <button
-            onClick={startSession}
-            disabled={startingSession}
-            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-xl py-4 font-black text-sm flex items-center justify-center gap-2"
-          >
-            {startingSession ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
-            Iniciar conteo
-          </button>
+            <div className="grid grid-cols-2 gap-2.5">
+              {AREAS.map((a) => {
+                const isSelected = selectedArea === a.key
+                return (
+                  <button
+                    key={a.key}
+                    type="button"
+                    onClick={() => setSelectedArea(a.key)}
+                    className={`px-3.5 py-3 rounded-2xl text-sm font-bold border transition text-left flex items-center justify-between cursor-pointer active:scale-95 ${
+                      isSelected
+                        ? "bg-cyan-500/20 border-cyan-400 text-white shadow-lg shadow-cyan-500/10 ring-2 ring-cyan-500/20"
+                        : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700"
+                    }`}
+                  >
+                    <span>{a.label}</span>
+                    {isSelected && <Check className="w-4 h-4 text-cyan-400 shrink-0" />}
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="space-y-1.5 pt-1">
+              <label className="text-[11px] font-black uppercase tracking-wider text-slate-400 px-1">
+                Paso 2: Ubicación Puntual (Opcional):
+              </label>
+              <input
+                value={ubicacion}
+                onChange={(e) => setUbicacion(e.target.value)}
+                placeholder="ej: Pasillo 3, Góndola Central, Heladera 2"
+                className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-3 text-sm outline-none focus:border-cyan-500 text-white placeholder-slate-600 transition"
+              />
+            </div>
+
+            <button
+              onClick={startSession}
+              disabled={startingSession}
+              className="w-full bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-slate-950 font-black text-sm rounded-2xl py-4 flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 active:scale-95 transition disabled:opacity-50 cursor-pointer"
+            >
+              {startingSession ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin text-slate-950" />
+                  <span>Iniciando conteo...</span>
+                </>
+              ) : (
+                <>
+                  <Plus className="w-5 h-5 text-slate-950" />
+                  <span>Iniciar Conteo en: {selectedAreaLabel}</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     )
   }
 
+  // 4. VISTA DE CONTEO EN VIVO CON CÁMARA
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col">
-      <div className="p-3 border-b border-slate-800 flex items-center justify-between">
+      <div className="p-3 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md flex items-center justify-between">
         <div>
-          <div className="font-bold text-sm">{session.area}</div>
+          <div className="font-bold text-sm text-cyan-300">{session.area}</div>
           <div className="text-[11px] text-slate-400">{session.codigo} · {items.length} contados</div>
         </div>
         <button
           onClick={finishSession}
-          className="text-xs font-bold bg-emerald-600 hover:bg-emerald-500 rounded-lg px-3 py-2 flex items-center gap-1"
+          className="text-xs font-bold bg-emerald-600 hover:bg-emerald-500 rounded-xl px-3 py-2 flex items-center gap-1 cursor-pointer transition shadow-sm active:scale-95"
         >
           <CheckCircle2 className="w-4 h-4" /> Finalizar
         </button>
@@ -445,10 +825,10 @@ export default function ConteoVencimientosPage() {
               <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
             ) : (
               <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-500">
-                <Camera className="w-10 h-10" />
+                <Camera className="w-10 h-10 text-slate-600" />
                 <button
-                  onClick={startCamera}
-                  className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold px-4 py-2 rounded-lg"
+                  onClick={() => startCamera()}
+                  className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 text-sm font-black px-4 py-2.5 rounded-xl cursor-pointer active:scale-95 transition shadow-md shadow-cyan-500/20"
                 >
                   Activar cámara
                 </button>
@@ -456,16 +836,30 @@ export default function ConteoVencimientosPage() {
               </div>
             )}
             {cameraActive && (
-              <button
-                onClick={stopCamera}
-                className="absolute top-3 right-3 bg-black/60 rounded-full p-2"
-              >
-                <CameraOff className="w-5 h-5" />
-              </button>
+              <div className="absolute top-3 right-3 flex items-center gap-2">
+                <button
+                  onClick={switchCamera}
+                  className="px-2.5 py-1.5 rounded-full bg-black/60 text-white border border-white/20 hover:bg-black/80 backdrop-blur-md cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+                  title={activeCameraLabel || "Cambiar Cámara"}
+                >
+                  <RefreshCcw className="w-3.5 h-3.5" />
+                  <span className="text-[10px]">
+                    {activeCameraLabel ? (activeCameraLabel.includes("Trasera") ? "Trasera" : activeCameraLabel.includes("Frontal") ? "Frontal" : "Cámara") : "Cámara"}
+                    {availableCameras.length > 1 ? ` (${Math.max(1, availableCameras.findIndex(c => c.deviceId === selectedCameraId) + 1)}/${availableCameras.length})` : ""}
+                  </span>
+                </button>
+                <button
+                  onClick={stopCamera}
+                  className="bg-black/60 rounded-full p-2 text-white border border-white/20 hover:bg-black/80 backdrop-blur-md cursor-pointer"
+                  title="Apagar Cámara"
+                >
+                  <CameraOff className="w-4 h-4" />
+                </button>
+              </div>
             )}
             {searching && (
               <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                <Loader2 className="w-8 h-8 animate-spin" />
+                <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
               </div>
             )}
           </div>
