@@ -46,6 +46,7 @@ export const RendicionAuditModal: React.FC<Props> = ({
   const [submittingAudit, setSubmittingAudit] = useState(false)
   const [submittingReplenish, setSubmittingReplenish] = useState(false)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
+  const [vaultSaldoPYG, setVaultSaldoPYG] = useState<number | null>(null)
 
   // Cargar datos de la rendición
   const fetchDetail = async () => {
@@ -56,6 +57,15 @@ export const RendicionAuditModal: React.FC<Props> = ({
       setRendicion(data.rendicion)
       setExpenses(data.expenses)
       setFund(data.fund)
+
+      // Cargar saldo real de Bóveda Central (Tesorería)
+      api.vault.dashboard()
+        .then(d => {
+          if (d && typeof d.saldo_en_boveda_pyg === "number") {
+            setVaultSaldoPYG(d.saldo_en_boveda_pyg)
+          }
+        })
+        .catch(() => {})
 
       // Inicializar mapa de auditoría con los estados actuales
       const initialMap: Record<string, { estado: string; motivo?: string }> = {}
@@ -163,9 +173,14 @@ export const RendicionAuditModal: React.FC<Props> = ({
       toast.error("Sin Aprobados", "Debe existir al menos un comprobante aprobado para desembolsar reposición")
       return
     }
-    if (medioReposicion === "EFECTIVO_BOVEDA" && !cajaBovedaId) {
-      toast.error("Caja Requerida", "Seleccione la Caja Central / Bóveda para el desembolso")
-      return
+    if (medioReposicion === "EFECTIVO_BOVEDA") {
+      if (vaultSaldoPYG !== null && totalAprobado > vaultSaldoPYG) {
+        toast.error(
+          "Saldo Insuficiente en Bóveda",
+          `El monto a reponer (${formatPYG(totalAprobado)}) supera el saldo disponible en Bóveda Central (${formatPYG(vaultSaldoPYG)}).`
+        )
+        return
+      }
     }
     if (medioReposicion !== "EFECTIVO_BOVEDA" && !bankAccountId) {
       toast.error("Cuenta Requerida", "Seleccione la cuenta bancaria de salida")
@@ -185,7 +200,7 @@ export const RendicionAuditModal: React.FC<Props> = ({
       // Desembolsar reposición
       const res = await api.expenses.rendiciones.replenish(rendicionId, {
         medio_reposicion: medioReposicion,
-        caja_boveda_id: medioReposicion === "EFECTIVO_BOVEDA" ? cajaBovedaId : undefined,
+        caja_boveda_id: undefined,
         bank_account_id: medioReposicion !== "EFECTIVO_BOVEDA" ? bankAccountId : undefined,
         comprobante_pago_ref: comprobantePagoRef || undefined,
         observaciones: observacionesTesoreria || undefined,
@@ -536,19 +551,32 @@ export const RendicionAuditModal: React.FC<Props> = ({
                       {medioReposicion === "EFECTIVO_BOVEDA" ? (
                         <div>
                           <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                            Caja Central / Bóveda de Salida *
+                            Origen de Fondos
                           </label>
-                          <select
-                            className="input-field w-full text-xs"
-                            value={cajaBovedaId}
-                            onChange={e => setCajaBovedaId(e.target.value)}
-                          >
-                            {cashRegisters.map(r => (
-                              <option key={r.id} value={r.id}>
-                                {r.nombre} ({r.codigo})
-                              </option>
-                            ))}
-                          </select>
+                          <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-lg p-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                                <Landmark className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                                Bóveda Central (Tesorería)
+                              </span>
+                              <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-300">
+                                Caja Fuerte
+                              </span>
+                            </div>
+                            <div className="mt-1 flex items-baseline justify-between text-xs">
+                              <span className="text-[11px] text-slate-600 dark:text-slate-400">
+                                Saldo disponible en Bóveda:
+                              </span>
+                              <span className="font-extrabold font-mono text-emerald-700 dark:text-emerald-300">
+                                {vaultSaldoPYG !== null ? formatPYG(vaultSaldoPYG) : "Consultando..."}
+                              </span>
+                            </div>
+                            {vaultSaldoPYG !== null && totalAprobado > vaultSaldoPYG && (
+                              <p className="text-[10px] text-red-600 dark:text-red-400 font-medium mt-1">
+                                ⚠️ El monto a desembolsar ({formatPYG(totalAprobado)}) supera el saldo disponible.
+                              </p>
+                            )}
+                          </div>
                         </div>
                       ) : (
                         <div>

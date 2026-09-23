@@ -2316,22 +2316,100 @@ async def replenish_rendicion(
 
     # 1. Desembolso desde origen de fondos seleccionado
     if data.medio_reposicion == "EFECTIVO_BOVEDA":
-        if not data.caja_boveda_id:
-            raise ValueError("Debe seleccionar la Caja Central / Bóveda para el desembolso en efectivo")
-        from api.src.caja.models import CashRegisterMovement
-        crm = CashRegisterMovement(
-            company_id=cid,
-            register_id=uuid.UUID(data.caja_boveda_id),
-            tipo="retiro",
-            monto=monto_repuesto,
-            moneda="PYG",
-            fecha=datetime.now(TZ_ASUNCION),
-            usuario=tesorero_nombre,
-            observaciones=f"Reposición Fondo Fijo '{fund.nombre}' — Rendición {rendicion.numero_rendicion}",
+        from api.src.caja.models import VaultEntry, CashRegister, CashRegisterMovement
+        now_dt = datetime.now(TZ_ASUNCION)
+
+        # 1. Verificar saldo en Bóveda Central (PYG)
+        q_vault = select(sa_func.coalesce(sa_func.sum(VaultEntry.monto_pyg), Decimal("0"))).where(
+            VaultEntry.company_id == cid,
+            VaultEntry.estado == "en_boveda"
         )
-        db.add(crm)
-        await db.flush()
-        caja_mov_id = crm.id
+        saldo_vault = (await db.execute(q_vault)).scalar() or Decimal("0")
+        if saldo_vault < monto_repuesto:
+            raise ValueError(
+                f"Saldo insuficiente en Bóveda Central. Disponible: ₲ {saldo_vault:,.0f} | Requerido: ₲ {monto_repuesto:,.0f}"
+            )
+
+        # 2. Consumir entradas FIFO de bóveda
+        entries_res = await db.execute(
+            select(VaultEntry).where(
+                VaultEntry.company_id == cid,
+                VaultEntry.estado == "en_boveda",
+                VaultEntry.monto_pyg > Decimal("0")
+            ).order_by(VaultEntry.created_at.asc())
+        )
+        entries = entries_res.scalars().all()
+
+        remaining = monto_repuesto
+        for e in entries:
+            if remaining <= Decimal("0"):
+                break
+            e_monto = Decimal(str(e.monto_pyg or 0))
+            if e_monto <= remaining:
+                if (e.monto_brl and e.monto_brl > 0) or (e.monto_usd and e.monto_usd > 0):
+                    db.add(VaultEntry(
+                        company_id=cid,
+                        branch_id=e.branch_id,
+                        origen="egreso_reposicion_fondo",
+                        handoff_id=e.handoff_id,
+                        monto_pyg=e_monto,
+                        monto_usd=Decimal("0"),
+                        monto_brl=Decimal("0"),
+                        estado="egreso_gasto",
+                        fecha_deposito=now_dt,
+                        observaciones=f"Reposición Fondo Fijo '{fund.nombre}' — Rendición {rendicion.numero_rendicion}",
+                        registrado_por=uuid.UUID(user_id) if user_id else None,
+                    ))
+                    e.monto_pyg = Decimal("0")
+                else:
+                    e.estado = "egreso_gasto"
+                    e.fecha_deposito = now_dt
+                    e.observaciones = f"Reposición Fondo Fijo '{fund.nombre}' — Rendición {rendicion.numero_rendicion}"
+                    if user_id:
+                        e.registrado_por = uuid.UUID(user_id)
+                remaining -= e_monto
+            else:
+                db.add(VaultEntry(
+                    company_id=cid,
+                    branch_id=e.branch_id,
+                    origen="egreso_reposicion_fondo",
+                    handoff_id=e.handoff_id,
+                    monto_pyg=remaining,
+                    monto_usd=Decimal("0"),
+                    monto_brl=Decimal("0"),
+                    estado="egreso_gasto",
+                    fecha_deposito=now_dt,
+                    observaciones=f"Reposición parcial Fondo Fijo '{fund.nombre}' — Rendición {rendicion.numero_rendicion}",
+                    registrado_por=uuid.UUID(user_id) if user_id else None,
+                ))
+                e.monto_pyg = e_monto - remaining
+                remaining = Decimal("0")
+                break
+
+        # 3. Trazabilidad opcional en movimiento de caja
+        reg_id = uuid.UUID(data.caja_boveda_id) if data.caja_boveda_id else None
+        if not reg_id:
+            reg_res = await db.execute(
+                select(CashRegister).where(CashRegister.company_id == cid).order_by(CashRegister.activo.desc(), CashRegister.created_at.asc()).limit(1)
+            )
+            main_reg = reg_res.scalar_one_or_none()
+            if main_reg:
+                reg_id = main_reg.id
+
+        if reg_id:
+            crm = CashRegisterMovement(
+                company_id=cid,
+                register_id=reg_id,
+                tipo="retiro",
+                monto=monto_repuesto,
+                moneda="PYG",
+                fecha=now_dt,
+                usuario=tesorero_nombre,
+                observaciones=f"Reposición Fondo Fijo '{fund.nombre}' — Rendición {rendicion.numero_rendicion}",
+            )
+            db.add(crm)
+            await db.flush()
+            caja_mov_id = crm.id
     elif data.medio_reposicion in ("BANCO_TRANSFERENCIA", "CHEQUE"):
         if not data.bank_account_id:
             raise ValueError("Debe seleccionar la cuenta bancaria para la reposición")
@@ -2473,7 +2551,7 @@ async def replenish_rendicion(
     # 5. Actualizar estado de la Rendición a Pagada
     rendicion.monto_repuesto = monto_repuesto
     rendicion.medio_reposicion = data.medio_reposicion
-    rendicion.caja_boveda_id = uuid.UUID(data.caja_boveda_id) if data.caja_boveda_id else None
+    rendicion.caja_boveda_id = uuid.UUID(data.caja_boveda_id) if data.caja_boveda_id else (reg_id if 'reg_id' in locals() and reg_id else None)
     rendicion.cash_movement_id = caja_mov_id
     rendicion.bank_account_id = uuid.UUID(data.bank_account_id) if data.bank_account_id else None
     rendicion.bank_transaction_id = bank_tx_id
