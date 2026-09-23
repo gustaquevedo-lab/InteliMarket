@@ -7,10 +7,11 @@ import {
   Lightbulb, Sun, Moon, CheckCheck, FileText, Download,
   Hash, RotateCcw, Barcode, FlipHorizontal, ArrowDownCircle, ExternalLink
 } from "lucide-react"
-import { BrowserMultiFormatReader, DecodeHintType, BarcodeFormat } from "@zxing/library"
+import { useBarcodeScannerCamera } from "../../hooks"
 import { api, type PurchaseOrder, type Product } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
+
 import { useTheme } from "../../context/ThemeContext"
 import { formatPYG, formatDate } from "../../utils/format"
 import { soundAlerts } from "../../utils/audioAlerts"
@@ -141,15 +142,6 @@ export default function DepositoRecepcionPage() {
   const [extraAutorizadoPor, setExtraAutorizadoPor] = useState("")
   const [extraMotivo, setExtraMotivo] = useState("Mercadería entregada por el proveedor sin OC previa pero de alta rotación")
 
-  // ── ESCÁNER POR CÁMARA (WEBCAM / MOBILE) ───────────────────────────────────
-  const [cameraActive, setCameraActive] = useState(false)
-  const [torchActive, setTorchActive] = useState(false)
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const scanLoopRef = useRef<number | null>(null)
-  const zxingReaderRef = useRef<BrowserMultiFormatReader | null>(null)
-  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
-  const [selectedCameraId, setSelectedCameraId] = useState<string>("")
 
   // Acordeón y caché de ítems de órdenes en lista principal
   const [expandedPOId, setExpandedPOId] = useState<string | null>(null)
@@ -491,152 +483,30 @@ export default function DepositoRecepcionPage() {
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [processScannedCode])
 
-  // ---------------------------------------------------------------------------
-  // 4. CÁMARA & ESCANEO CON MOTOR HÍBRIDO (ZXING + NATIVE BARCODE DETECTOR)
-  // ---------------------------------------------------------------------------
-  const startCamera = async (deviceId?: string) => {
-    try {
-      stopCamera()
-
-      let videoDevices: MediaDeviceInfo[] = []
+  // ── ESCÁNER POR CÁMARA Y MOTOR UNIVERSAL (ZXing + BarcodeDetector + Detección Trasera) ──
+  const {
+    videoRef,
+    cameraActive,
+    cameraLoading,
+    cameraError,
+    availableCameras,
+    selectedCameraId,
+    activeCameraLabel,
+    hasTorch,
+    torchActive,
+    startCamera,
+    stopCamera,
+    switchCamera,
+    toggleTorch,
+  } = useBarcodeScannerCamera({
+    onScan: (code) => {
       try {
-        const devices = await navigator.mediaDevices.enumerateDevices()
-        videoDevices = devices.filter((d) => d.kind === "videoinput")
-        setAvailableCameras(videoDevices)
+        soundAlerts.playScanSuccess()
       } catch {}
-
-      let targetId = deviceId || selectedCameraId
-      if (!targetId && videoDevices.length > 0) {
-        const back = videoDevices.find((d) => /back|rear|trasera|environment/i.test(d.label))
-        targetId = back ? back.deviceId : videoDevices[videoDevices.length - 1].deviceId
-      }
-      if (targetId) setSelectedCameraId(targetId)
-
-      const constraints: MediaStreamConstraints = {
-        video: targetId
-          ? { deviceId: { exact: targetId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-          : { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints)
-      streamRef.current = stream
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        videoRef.current.setAttribute("playsinline", "true")
-        await videoRef.current.play()
-      }
-      setCameraActive(true)
-
-      // 1. Motor de decodificación universal ZXing (soporta EAN-13, EAN-8, UPC, Code128, etc.)
-      const hints = new Map()
-      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
-        BarcodeFormat.EAN_13,
-        BarcodeFormat.EAN_8,
-        BarcodeFormat.UPC_A,
-        BarcodeFormat.UPC_E,
-        BarcodeFormat.CODE_128,
-        BarcodeFormat.CODE_39,
-        BarcodeFormat.ITF,
-        BarcodeFormat.QR_CODE,
-      ])
-      hints.set(DecodeHintType.TRY_HARDER, true)
-
-      const reader = new BrowserMultiFormatReader(hints, 200)
-      zxingReaderRef.current = reader
-
-      reader.decodeFromStream(stream, videoRef.current!, (result) => {
-        if (result) {
-          const raw = result.getText()
-          const now = Date.now()
-          if (now - lastKeyTime.current > 1200 || raw !== barcodeBuffer.current) {
-            lastKeyTime.current = now
-            barcodeBuffer.current = raw
-            try {
-              navigator.vibrate?.([80])
-            } catch {}
-            processScannedCode(raw)
-          }
-        }
-      })
-
-      // 2. Aceleración por hardware con BarcodeDetector si está disponible en el navegador
-      if ("BarcodeDetector" in window) {
-        try {
-          const barcodeDetector = new (window as any).BarcodeDetector({
-            formats: ["ean_13", "ean_8", "code_128", "qr_code", "upc_a", "upc_e"],
-          })
-
-          const detectLoop = async () => {
-            if (!videoRef.current || videoRef.current.readyState < 2 || !streamRef.current) {
-              scanLoopRef.current = requestAnimationFrame(detectLoop)
-              return
-            }
-            try {
-              const barcodes = await barcodeDetector.detect(videoRef.current)
-              if (barcodes.length > 0) {
-                const raw = barcodes[0].rawValue
-                const now = Date.now()
-                if (now - lastKeyTime.current > 1200 || raw !== barcodeBuffer.current) {
-                  lastKeyTime.current = now
-                  barcodeBuffer.current = raw
-                  try {
-                    navigator.vibrate?.([80])
-                  } catch {}
-                  processScannedCode(raw)
-                }
-              }
-            } catch {}
-            scanLoopRef.current = requestAnimationFrame(detectLoop)
-          }
-          scanLoopRef.current = requestAnimationFrame(detectLoop)
-        } catch {}
-      }
-    } catch (err: any) {
-      toast.error("Error de cámara", "No se pudo acceder a la cámara. Verificá los permisos del dispositivo.")
-    }
-  }
-
-  const stopCamera = () => {
-    if (scanLoopRef.current) {
-      cancelAnimationFrame(scanLoopRef.current)
-      scanLoopRef.current = null
-    }
-    if (zxingReaderRef.current) {
-      try {
-        zxingReaderRef.current.reset()
-      } catch {}
-      zxingReaderRef.current = null
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop())
-      streamRef.current = null
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null
-    }
-    setCameraActive(false)
-    setTorchActive(false)
-  }
-
-  const toggleTorch = async () => {
-    if (!streamRef.current) return
-    const track = streamRef.current.getVideoTracks()[0]
-    if (track && (track.getCapabilities as any)?.()?.torch) {
-      try {
-        await (track as any).applyConstraints({
-          advanced: [{ torch: !torchActive }],
-        })
-        setTorchActive(!torchActive)
-      } catch {}
-    }
-  }
-
-  useEffect(() => {
-    return () => {
-      stopCamera()
-    }
-  }, [])
+      processScannedCode(code)
+    },
+    storageKey: "extra_deposito_camera_id",
+  })
 
   // ---------------------------------------------------------------------------
   // 5. ACCIONES MASIVAS: RECEPCIÓN, LOTES Y VENCIMIENTOS
@@ -1228,9 +1098,17 @@ export default function DepositoRecepcionPage() {
             </button>
           </div>
         </div>
+        {cameraError && (
+
+          <div className="mt-2 max-w-2xl mx-auto p-2.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+            <span>{cameraError}</span>
+          </div>
+        )}
 
         {/* Visor de Cámara Flotante con ZXing & Selector de Cámara */}
         {cameraActive && (
+
           <div className="mt-3 max-w-2xl mx-auto relative rounded-3xl overflow-hidden border-2 border-amber-500 bg-black aspect-video max-h-60 shadow-2xl">
             <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
             
@@ -1249,15 +1127,13 @@ export default function DepositoRecepcionPage() {
               {availableCameras.length > 1 ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    const idx = availableCameras.findIndex((c) => c.deviceId === selectedCameraId)
-                    const next = availableCameras[(idx + 1) % availableCameras.length]
-                    if (next) startCamera(next.deviceId)
-                  }}
+                  onClick={switchCamera}
                   className="px-3 py-1.5 rounded-xl bg-slate-900/85 backdrop-blur-md text-white text-xs font-bold flex items-center gap-1.5 border border-white/20 active:scale-95 transition"
+                  title={activeCameraLabel || "Cambiar Cámara"}
                 >
                   <FlipHorizontal className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Girar Cámara</span>
+                  <span>{activeCameraLabel ? (activeCameraLabel.includes("Trasera") ? "Trasera" : activeCameraLabel.includes("Frontal") ? "Frontal" : "Girar") : "Girar"}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">({Math.max(1, availableCameras.findIndex(c => c.deviceId === selectedCameraId) + 1)}/{availableCameras.length})</span>
                 </button>
               ) : <div />}
 

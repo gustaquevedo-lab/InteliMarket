@@ -9,6 +9,8 @@ import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { api, type Product } from "../../api"
 import { formatPYG } from "../../utils/format"
+import { useBarcodeScannerCamera } from "../../hooks"
+
 
 // ── App movil (Capacitor "Extra Conteo") para el salon de ventas ───────────
 // Dos funciones en una sola pantalla, pedidas explicitamente asi: contar
@@ -83,44 +85,9 @@ export default function ConteoVencimientosPage() {
   // ── Items ya contados en esta sesion ──
   const [items, setItems] = useState<CountedItem[]>([])
 
-  // ── Camara / escaneo ──
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const scanLoopRef = useRef<number | null>(null)
-  const isProcessing = useRef(false)
-  const [cameraActive, setCameraActive] = useState(false)
-  const [cameraError, setCameraError] = useState<string | null>(null)
-  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
-  const [selectedCameraId, setSelectedCameraId] = useState<string>("")
-  const [activeCameraLabel, setActiveCameraLabel] = useState<string>("Cámara Trasera")
+  // ── Cámara / escáner manual ──
   const [manualCode, setManualCode] = useState("")
   const [searching, setSearching] = useState(false)
-
-  // ── Callback ref para garantizar asignación de stream al elemento video en cuanto se monte en el DOM ──
-  const setVideoRef = useCallback((node: HTMLVideoElement | null) => {
-    videoRef.current = node
-    if (node && streamRef.current) {
-      if (node.srcObject !== streamRef.current) {
-        node.srcObject = streamRef.current
-        node.setAttribute("playsinline", "true")
-        node.setAttribute("autoplay", "true")
-        node.muted = true
-        node.play().catch((err) => console.warn("Video play error in ref callback:", err))
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    if (cameraActive && streamRef.current && videoRef.current) {
-      if (videoRef.current.srcObject !== streamRef.current) {
-        videoRef.current.srcObject = streamRef.current
-        videoRef.current.setAttribute("playsinline", "true")
-        videoRef.current.setAttribute("autoplay", "true")
-        videoRef.current.muted = true
-        videoRef.current.play().catch((err) => console.warn("Video play error in effect:", err))
-      }
-    }
-  }, [cameraActive])
 
   // ── Producto identificado, a la espera de guardar el conteo ──
   const [scannedProduct, setScannedProduct] = useState<Product | null>(null)
@@ -342,179 +309,21 @@ export default function ConteoVencimientosPage() {
     }
   }, [toast])
 
-  // ── Camara con BarcodeDetector nativo (mismo patron que el Hub de Salon) ──
-  const stopCamera = useCallback(() => {
-    if (scanLoopRef.current) cancelAnimationFrame(scanLoopRef.current)
-    scanLoopRef.current = null
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop())
-      streamRef.current = null
-    }
-    setCameraActive(false)
-  }, [])
-
-  const startCamera = useCallback(async (targetDeviceId?: string) => {
-    setCameraError(null)
-    try {
-      let stream: MediaStream | null = null
-
-      // 1. Si el usuario seleccionó un dispositivo específico (rotación manual de cámara), usar su deviceId
-      if (targetDeviceId) {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: { deviceId: { exact: targetDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
-            audio: false,
-          })
-          setSelectedCameraId(targetDeviceId)
-        } catch (err) {
-          console.warn("Fallo con deviceId exacto, probando fallback a cámara trasera:", err)
-        }
-      }
-
-      // 2. Si no hay stream aún, solicitar cámara trasera sin pasar deviceId ciego
-      if (!stream) {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { exact: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
-            audio: false,
-          })
-        } catch (exactErr) {
-          console.warn("facingMode exact environment no soportado, probando ideal...", exactErr)
-          try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
-              audio: false,
-            })
-          } catch {
-            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-          }
-        }
-      }
-
-      // 3. Con el stream activo (permisos ya concedidos por el usuario), enumerar dispositivos
-      let freshVideo: MediaDeviceInfo[] = []
-      try {
-        if (navigator.mediaDevices?.enumerateDevices) {
-          const freshDevices = await navigator.mediaDevices.enumerateDevices()
-          freshVideo = freshDevices.filter((d) => d.kind === "videoinput")
-          setAvailableCameras(freshVideo)
-        }
-      } catch {}
-
-      // 4. Verificar el sensor activo
-      let activeTrack = stream.getVideoTracks()[0]
-      if (activeTrack) {
-        const currentLabel = (activeTrack.label || "").toLowerCase()
-        const isFront = /front|delantera|user|selfie/i.test(currentLabel)
-
-        // Si Android abrió la frontal involuntariamente y tenemos más de 1 cámara, buscar la trasera y conmutar
-        if (isFront && freshVideo.length > 1 && !targetDeviceId) {
-          const currentDevId = activeTrack.getSettings ? activeTrack.getSettings().deviceId : undefined
-          const isFrontText = (l: string) => /front|delantera|user|selfie/i.test(l)
-          const isBackText = (l: string) => /back|rear|trasera|environment|extern/i.test(l)
-
-          const realBackDevice =
-            freshVideo.find((d) => isBackText(d.label)) ||
-            freshVideo.find((d) => !isFrontText(d.label) && d.deviceId !== currentDevId) ||
-            freshVideo.find((d) => d.deviceId !== currentDevId)
-
-          if (realBackDevice && realBackDevice.deviceId !== currentDevId) {
-            try {
-              activeTrack.stop()
-              stream = await navigator.mediaDevices.getUserMedia({
-                video: { deviceId: { exact: realBackDevice.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
-                audio: false,
-              })
-              activeTrack = stream.getVideoTracks()[0]
-            } catch (err) {
-              console.warn("Fallo al conmutar a cámara trasera confirmada:", err)
-            }
-          }
-        }
-      }
-
-      streamRef.current = stream
-
-      if (activeTrack) {
-        const settings = activeTrack.getSettings ? activeTrack.getSettings() : {}
-        if (settings.deviceId) {
-          setSelectedCameraId(settings.deviceId)
-        }
-        const label = activeTrack.label || ""
-        const isBack = /back|rear|trasera|environment|extern/i.test(label) || (!/front|delantera|user|selfie/i.test(label) && freshVideo.length > 1)
-        setActiveCameraLabel(
-          isBack
-            ? "Cámara Trasera"
-            : /front|user|delantera|selfie/i.test(label)
-            ? "Cámara Frontal"
-            : label || "Cámara Activa"
-        )
-      }
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        videoRef.current.setAttribute("playsinline", "true")
-        await videoRef.current.play()
-      }
-      setCameraActive(true)
-
-      if ("BarcodeDetector" in window) {
-        const detector = new (window as any).BarcodeDetector({
-          formats: ["ean_13", "ean_8", "code_128", "upc_a", "code_39"],
-        })
-        let lastCode = ""
-        const loop = async () => {
-          if (!videoRef.current || videoRef.current.readyState < 2) {
-            scanLoopRef.current = requestAnimationFrame(loop)
-            return
-          }
-          if (!isProcessing.current) {
-            try {
-              const codes = await detector.detect(videoRef.current)
-              if (codes.length > 0 && codes[0].rawValue && codes[0].rawValue !== lastCode) {
-                lastCode = codes[0].rawValue
-                isProcessing.current = true
-                await lookupProduct(codes[0].rawValue)
-                setTimeout(() => { isProcessing.current = false }, 1800)
-              }
-            } catch {}
-          }
-          scanLoopRef.current = requestAnimationFrame(loop)
-        }
-        scanLoopRef.current = requestAnimationFrame(loop)
-      } else {
-        toast.info("Escaneo visual no disponible", "Este navegador no tiene lector de código nativo. Usá la búsqueda manual.")
-      }
-    } catch (err: any) {
-      setCameraActive(false)
-      const name = err?.name || ""
-      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-        setCameraError("Permiso de cámara denegado. Habilitalo en los ajustes de la app.")
-      } else if (location.protocol !== "https:" && location.hostname !== "localhost") {
-        setCameraError("La cámara requiere una conexión segura (HTTPS). Contactá a soporte.")
-      } else {
-        setCameraError(err?.message || "No se pudo iniciar la cámara. Probá con búsqueda manual.")
-      }
-    }
-  }, [lookupProduct, toast])
-
-  const switchCamera = () => {
-    if (availableCameras.length <= 1) {
-      stopCamera()
-      setTimeout(() => startCamera(), 200)
-      return
-    }
-    const currentIndex = availableCameras.findIndex(c => c.deviceId === selectedCameraId)
-    const nextIndex = (currentIndex + 1) % availableCameras.length
-    const nextDevice = availableCameras[nextIndex]
-    setSelectedCameraId(nextDevice.deviceId)
-    stopCamera()
-    const desc = nextDevice.label || `Cámara ${nextIndex + 1} de ${availableCameras.length}`
-    toast.info("Cambiando Cámara", desc)
-    setTimeout(() => startCamera(nextDevice.deviceId), 200)
-  }
-
-  useEffect(() => () => stopCamera(), [stopCamera])
+  // ── Cámara y escáner universal con fallback ZXing y detección de cámara trasera ──
+  const {
+    videoRef: setVideoRef,
+    cameraActive,
+    cameraError,
+    availableCameras,
+    selectedCameraId,
+    activeCameraLabel,
+    startCamera,
+    stopCamera,
+    switchCamera,
+  } = useBarcodeScannerCamera({
+    onScan: lookupProduct,
+    storageKey: "extra_conteo_camera_id",
+  })
 
   const handleFotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]

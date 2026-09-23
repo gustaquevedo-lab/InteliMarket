@@ -19,6 +19,8 @@ import { useToast } from "../../context/ToastContext"
 import { useTheme } from "../../context/ThemeContext"
 import { api, type Product } from "../../api"
 import { soundAlerts } from "../../utils/audioAlerts"
+import { useBarcodeScannerCamera } from "../../hooks"
+
 
 // Tipos Maestros de Salón de Ventas
 type SalonTab = "gondola" | "produccion" | "mermas" | "reposicion" | "haccp"
@@ -175,51 +177,10 @@ export default function SalonOperacionesPwaPage() {
   const [loadingStock, setLoadingStock] = useState(false)
   const [precioVistoGondola, setPrecioVistoGondola] = useState("")
 
-  // ── ESTADOS DE CÁMARA Y ESCÁNER EN VIVO (BARCODE DETECTOR) ──
-  const [cameraActive, setCameraActive] = useState(false)
-  const [torchActive, setTorchActive] = useState(false)
-  const [hasTorch, setHasTorch] = useState(false)
-  const [facingMode, setFacingMode] = useState<"environment" | "user">("environment")
-  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
-  const [selectedCameraId, setSelectedCameraId] = useState<string>("")
-  const [activeCameraLabel, setActiveCameraLabel] = useState<string>("")
-  const [lastScannedCode, setLastScannedCode] = useState<string>("")
-  const [cameraError, setCameraError] = useState<string | null>(null)
   // "granted" ya lo sabemos sin pedir la cámara (evita el mensaje "otorgue el
   // permiso" cuando el navegador ya lo concedió y lo que falló fue otra cosa:
   // cámara ocupada, facingMode no soportado, contexto no seguro, etc.)
   const [cameraPermission, setCameraPermission] = useState<"unknown" | "granted" | "denied" | "prompt">("unknown")
-
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const scanLoopRef = useRef<number | null>(null)
-  const isProcessingBarcode = useRef<boolean>(false)
-
-  // ── Callback ref para garantizar asignación de stream al elemento video en cuanto se monte en el DOM ──
-  const setVideoRef = useCallback((node: HTMLVideoElement | null) => {
-    videoRef.current = node
-    if (node && streamRef.current) {
-      if (node.srcObject !== streamRef.current) {
-        node.srcObject = streamRef.current
-        node.setAttribute("playsinline", "true")
-        node.setAttribute("autoplay", "true")
-        node.muted = true
-        node.play().catch((err) => console.warn("Video play error in ref callback:", err))
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    if (cameraActive && streamRef.current && videoRef.current) {
-      if (videoRef.current.srcObject !== streamRef.current) {
-        videoRef.current.srcObject = streamRef.current
-        videoRef.current.setAttribute("playsinline", "true")
-        videoRef.current.setAttribute("autoplay", "true")
-        videoRef.current.muted = true
-        videoRef.current.play().catch((err) => console.warn("Video play error in effect:", err))
-      }
-    }
-  }, [cameraActive])
 
   // ── BUFFER DEL ESCÁNER DE HARDWARE (PISTOLA LÁSER USB / BLUETOOTH) ──
   const barcodeBuffer = useRef("")
@@ -666,7 +627,6 @@ export default function SalonOperacionesPwaPage() {
     if (!raw) return
 
     setSearchingProduct(true)
-    setLastScannedCode(raw)
 
     try {
       // 1. Buscar primero en la memoria local
@@ -731,276 +691,32 @@ export default function SalonOperacionesPwaPage() {
     window.location.href = window.location.pathname + "?_t=" + Date.now()
   }
 
-  // ── DETECCIÓN CONTINUA CON BARCODE DETECTOR NATIVO DE CÁMARA ──
-  const startCamera = async (targetDeviceId?: string) => {
-    setCameraError(null)
-    try {
-      if (scanLoopRef.current) {
-        cancelAnimationFrame(scanLoopRef.current)
-        scanLoopRef.current = null
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop())
-        streamRef.current = null
-      }
-
-      let stream: MediaStream | null = null
-
-      // 1. Si el usuario seleccionó un dispositivo específico (rotación manual de cámara), usar su deviceId
-      if (targetDeviceId) {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              deviceId: { exact: targetDeviceId },
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
-            audio: false,
-          })
-          setSelectedCameraId(targetDeviceId)
-        } catch (err) {
-          console.warn("Fallo con deviceId exacto, probando fallback a cámara trasera:", err)
-        }
-      }
-
-      // 2. Si no hay stream aún, solicitar cámara trasera sin pasar deviceId ciego
-      // En Android WebView (Chromium), facingMode: { exact: "environment" } garantiza
-      // que el sistema operativo enlace con LENS_FACING_BACK (cámara trasera principal).
-      if (!stream) {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: { exact: "environment" },
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
-            audio: false,
-          })
-        } catch (exactErr) {
-          console.warn("facingMode exact environment no soportado, probando ideal...", exactErr)
-          try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              video: {
-                facingMode: { ideal: "environment" },
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-              },
-              audio: false,
-            })
-          } catch {
-            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-          }
-        }
-      }
-
-      // 3. Con el stream activo (permisos ya concedidos por el usuario), enumerar dispositivos
-      // Ahora sí los labels vienen poblados desde Android ("camera2 0, facing back", etc.)
-      let freshVideo: MediaDeviceInfo[] = []
-      try {
-        if (navigator.mediaDevices?.enumerateDevices) {
-          const freshDevices = await navigator.mediaDevices.enumerateDevices()
-          freshVideo = freshDevices.filter(d => d.kind === "videoinput")
-          setAvailableCameras(freshVideo)
-        }
-      } catch {}
-
-      // 4. Verificar el sensor activo
-      let activeTrack = stream.getVideoTracks()[0]
-      if (activeTrack) {
-        const currentLabel = (activeTrack.label || "").toLowerCase()
-        const isFront = /front|delantera|user|selfie/i.test(currentLabel)
-
-        // Si Android abrió la frontal involuntariamente y tenemos más de 1 cámara, buscar la trasera y conmutar
-        if (isFront && freshVideo.length > 1 && !targetDeviceId) {
-          const currentDevId = activeTrack.getSettings ? activeTrack.getSettings().deviceId : undefined
-          const isFrontText = (l: string) => /front|delantera|user|selfie/i.test(l)
-          const isBackText = (l: string) => /back|rear|trasera|environment|extern/i.test(l)
-
-          const realBackDevice =
-            freshVideo.find(d => isBackText(d.label)) ||
-            freshVideo.find(d => !isFrontText(d.label) && d.deviceId !== currentDevId) ||
-            freshVideo.find(d => d.deviceId !== currentDevId)
-
-          if (realBackDevice && realBackDevice.deviceId !== currentDevId) {
-            try {
-              activeTrack.stop()
-              stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                  deviceId: { exact: realBackDevice.deviceId },
-                  width: { ideal: 1280 },
-                  height: { ideal: 720 },
-                },
-                audio: false,
-              })
-              activeTrack = stream.getVideoTracks()[0]
-            } catch (err) {
-              console.warn("Fallo al conmutar a cámara trasera confirmada:", err)
-            }
-          }
-        }
-      }
-
-      streamRef.current = stream
-      setCameraPermission("granted")
-
-      if (activeTrack) {
-        const settings = activeTrack.getSettings ? activeTrack.getSettings() : {}
-        if (settings.deviceId) {
-          setSelectedCameraId(settings.deviceId)
-        }
-        const label = activeTrack.label || ""
-        const isBack = /back|rear|trasera|environment|extern/i.test(label) || (!/front|delantera|user|selfie/i.test(label) && freshVideo.length > 1)
-        setActiveCameraLabel(
-          isBack
-            ? "Cámara Trasera"
-            : /front|user|delantera|selfie/i.test(label)
-            ? "Cámara Frontal"
-            : label || "Cámara Activa"
-        )
-
-        const capabilities: any = activeTrack.getCapabilities ? activeTrack.getCapabilities() : {}
-        setHasTorch(!!capabilities.torch)
-      }
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        videoRef.current.setAttribute("playsinline", "true")
-        await videoRef.current.play()
-      }
-
-      setCameraActive(true)
-
-      // Iniciar bucle de BarcodeDetector si está soportado
-      if ("BarcodeDetector" in window) {
-        const barcodeDetector = new (window as any).BarcodeDetector({
-          formats: ["ean_13", "ean_8", "code_128", "qr_code", "upc_a", "code_39"],
-        })
-
-        const detectLoop = async () => {
-          if (!videoRef.current || videoRef.current.readyState < 2) {
-            scanLoopRef.current = requestAnimationFrame(detectLoop)
-            return
-          }
-
-          if (!isProcessingBarcode.current) {
-            try {
-              const barcodes = await barcodeDetector.detect(videoRef.current)
-              if (barcodes.length > 0) {
-                const rawValue = barcodes[0].rawValue
-                if (rawValue && rawValue !== lastScannedCode) {
-                  isProcessingBarcode.current = true
-                  await processScannedCode(rawValue)
-                  // Pausa de 1.8 segundos para evitar spam continuado
-                  setTimeout(() => {
-                    isProcessingBarcode.current = false
-                  }, 1800)
-                }
-              }
-            } catch (err) {
-              // Frame no analizado, continuar silenciosamente
-            }
-          }
-
-          scanLoopRef.current = requestAnimationFrame(detectLoop)
-        }
-
-        scanLoopRef.current = requestAnimationFrame(detectLoop)
-      } else {
-        toast.info(
-          "Lector Visual Activado",
-          "Tu navegador no tiene la API BarcodeDetector nativa. Apuntá el producto y usá la búsqueda rápida o pistola lectora."
-        )
-      }
-    } catch (err: any) {
-      console.error("Error al iniciar cámara:", err)
-      setCameraActive(false)
-
-      const name = err?.name || ""
-      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-        setCameraPermission("denied")
-        setCameraError("Permiso de cámara denegado. Habilitalo en la configuración del navegador o del sistema operativo para este sitio.")
-        toast.error("Permiso de Cámara Denegado", "Habilitá el acceso a la cámara en la configuración del navegador/dispositivo.")
-      } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-        setCameraError("No se encontró ninguna cámara en este dispositivo.")
-        toast.error("Sin Cámara Disponible", "El dispositivo no tiene una cámara utilizable.")
-      } else if (name === "NotReadableError" || name === "TrackStartError") {
-        setCameraError("La cámara está siendo usada por otra aplicación o pestaña. Cerrala e intentá de nuevo.")
-        toast.error("Cámara Ocupada", "Otra app o pestaña está usando la cámara ahora mismo.")
-      } else if (name === "OverconstrainedError" || name === "ConstraintNotSatisfiedError") {
-        setCameraError("La cámara no soporta la configuración pedida. Probá con otra cámara.")
-        toast.error("Configuración No Soportada", "Probá cambiar de cámara.")
-      } else if (!window.isSecureContext) {
-        setCameraError("La cámara solo funciona en conexión segura (HTTPS).")
-        toast.error("Conexión No Segura", "Accedé por HTTPS para poder usar la cámara.")
-      } else {
-        setCameraError(err?.message || "No se pudo acceder a la cámara.")
-        toast.error("Error de Cámara", err?.message || "No se pudo acceder a la cámara.")
-      }
-    }
-  }
-
-  const stopCamera = () => {
-    if (scanLoopRef.current) {
-      cancelAnimationFrame(scanLoopRef.current)
-      scanLoopRef.current = null
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop())
-      streamRef.current = null
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null
-    }
-    setCameraActive(false)
-    setTorchActive(false)
-  }
-
-  const toggleTorch = async () => {
-    if (!streamRef.current) return
-    const track = streamRef.current.getVideoTracks()[0]
-    if (!track) return
-
-    try {
-      const nextTorch = !torchActive
-      await (track as any).applyConstraints({
-        advanced: [{ torch: nextTorch }],
-      })
-      setTorchActive(nextTorch)
-    } catch (err) {
-      toast.warning("Linterna No Disponible", "Este dispositivo no soporta control de linterna.")
-    }
-  }
-
-  const switchCamera = () => {
-    if (availableCameras.length <= 1) {
-      const nextMode = facingMode === "environment" ? "user" : "environment"
-      setFacingMode(nextMode)
-      stopCamera()
-      setTimeout(() => startCamera(), 200)
-      return
-    }
-
-    // Rotar al siguiente dispositivo físico real (ciclo entre todas las cámaras del equipo)
-    const currentIndex = availableCameras.findIndex(c => c.deviceId === selectedCameraId)
-    const nextIndex = (currentIndex + 1) % availableCameras.length
-    const nextDevice = availableCameras[nextIndex]
-
-    setSelectedCameraId(nextDevice.deviceId)
-    stopCamera()
-    const desc = nextDevice.label || `Cámara ${nextIndex + 1} de ${availableCameras.length}`
-    toast.info("Cambiando Cámara", desc)
-    setTimeout(() => startCamera(nextDevice.deviceId), 200)
-  }
+  // ── CÁMARA Y ESCÁNER UNIVERSAL (ZXing + BarcodeDetector + Detección Automática Trasera) ──
+  const {
+    videoRef: setVideoRef,
+    cameraActive,
+    cameraLoading,
+    cameraError,
+    availableCameras,
+    selectedCameraId,
+    activeCameraLabel,
+    hasTorch,
+    torchActive,
+    startCamera,
+    stopCamera,
+    switchCamera,
+    toggleTorch,
+  } = useBarcodeScannerCamera({
+    onScan: processScannedCode,
+    storageKey: "extra_salon_camera_id",
+  })
 
   // Apagar cámara al desmontar o cambiar de tab
   useEffect(() => {
     if (tab !== "gondola") {
       stopCamera()
     }
-    return () => {
-      stopCamera()
-    }
-  }, [tab])
+  }, [tab, stopCamera])
 
   // ── LISTENER PARA PISTOLA LÁSER FÍSICA USB / BLUETOOTH (ZEBRA / HONEYWELL) ──
   useEffect(() => {
