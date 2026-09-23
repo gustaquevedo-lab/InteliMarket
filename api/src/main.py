@@ -155,7 +155,12 @@ from api.src.vouchers.router import router as vouchers_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    start_scheduler()
+    # Con 2 instancias en produccion (deploy sin corte), el scheduler solo
+    # corre en la instancia principal -- si corriera en las 2, cada job
+    # (backups, recordatorios WhatsApp, depreciacion mensual...) se dispara
+    # duplicado. Ver RUN_SCHEDULER en config.py.
+    if settings.run_scheduler:
+        start_scheduler()
     from api.src.plataforma import capture as _capture
     _capture.install_log_handler()
     _capture.start_background()

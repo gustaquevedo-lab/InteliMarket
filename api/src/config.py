@@ -110,6 +110,14 @@ class Settings(BaseSettings):
     # agregarla al entorno sin declararla acá deja el API sin arrancar.
     tz: str = "America/Asuncion"
 
+    # Deploy sin corte: con 2 instancias de uvicorn detras de nginx, el
+    # scheduler en proceso (backups, recordatorios WhatsApp, depreciacion...)
+    # NO debe correr en ambas o cada job se dispara duplicado. Por defecto
+    # corre (instancia principal); la segunda instancia arranca con
+    # RUN_SCHEDULER=false en su propio entorno de systemd, sin tocar el
+    # .env compartido.
+    run_scheduler: bool = True
+
     class Config:
         env_file = ".env"
 
