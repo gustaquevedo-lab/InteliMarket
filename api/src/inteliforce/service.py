@@ -1,13 +1,18 @@
 """Inteliforce service — API movil para la app unificada con SueldOK"""
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
+from math import radians, sin, cos, sqrt, atan2
 import json
 import uuid
+import bcrypt
 
-from api.src.inteliforce.models import InteliforceServiceKey
+from api.src.inteliforce.models import (
+    InteliforceServiceKey, InteliforceDevice,
+    InteliforceVisit, InteliforceIncident, InteliforceMedia, InteliforceLotExpiry,
+)
 from api.src.inteliforce.schemas import SyncRecord
 from api.src.sales_targets.models import SalesRep
 from api.src.auth.jwt import create_access_token
@@ -318,6 +323,326 @@ async def get_customer_360(db: AsyncSession, company_id: str, customer_id: str) 
         "top_productos": top_productos,
         "sugerencias": sugerencias,
     }
+
+
+def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Distancia en metros entre dos coordenadas (fórmula haversine)."""
+    R = 6_371_000
+    φ1, φ2 = radians(lat1), radians(lat2)
+    dφ = radians(lat2 - lat1)
+    dλ = radians(lng2 - lng1)
+    a = sin(dφ / 2) ** 2 + cos(φ1) * cos(φ2) * sin(dλ / 2) ** 2
+    return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+
+
+# ── Auth directa (PIN) ────────────────────────────────────────────────────────
+
+async def set_pin(db: AsyncSession, api_key: str, cedula: str, pin: str) -> bool:
+    """Bootstrap: usa la service key para autorizar el seteo inicial del PIN.
+    La app llama esto una sola vez cuando el supervisor le entrega el dispositivo."""
+    key = await get_service_key(db, api_key)
+    if not key:
+        return False
+    result = await db.execute(
+        select(SalesRep).where(
+            SalesRep.company_id == key.company_id,
+            SalesRep.cedula == cedula,
+            SalesRep.activo == True,
+        )
+    )
+    rep = result.scalar_one_or_none()
+    if not rep:
+        return False
+    pin_hash = bcrypt.hashpw(pin.encode(), bcrypt.gensalt()).decode()
+    await db.execute(
+        text("UPDATE sales_reps SET pin_hash = :h WHERE id = :id"),
+        {"h": pin_hash, "id": str(rep.id)},
+    )
+    await db.commit()
+    return True
+
+
+async def direct_login(db: AsyncSession, company_id: str, cedula: str, pin: str) -> dict | None:
+    """Login directo desde la app Inteliforce sin intermediario SueldOK."""
+    result = await db.execute(
+        select(SalesRep).where(
+            SalesRep.company_id == uuid.UUID(company_id),
+            SalesRep.cedula == cedula,
+            SalesRep.activo == True,
+        )
+    )
+    rep = result.scalar_one_or_none()
+    if not rep:
+        return None
+    pin_hash_row = await db.execute(
+        text("SELECT pin_hash FROM sales_reps WHERE id = :id"), {"id": str(rep.id)}
+    )
+    row = pin_hash_row.fetchone()
+    if not row or not row.pin_hash:
+        return None
+    if not bcrypt.checkpw(pin.encode(), row.pin_hash.encode()):
+        return None
+    token = create_access_token(
+        {
+            "sub": str(rep.user_id or rep.id),
+            "id": str(rep.user_id or rep.id),
+            "company_id": str(rep.company_id),
+            "tenant_id": str(rep.company_id),
+            "rol": rep.rol,
+            "sales_rep_id": str(rep.id),
+        },
+        expires_delta=timedelta(hours=12),
+    )
+    return {"access_token": token, "sales_rep_id": rep.id, "nombre": rep.nombre, "rol": rep.rol}
+
+
+# ── Dispositivos FCM ──────────────────────────────────────────────────────────
+
+async def register_device(db: AsyncSession, rep: SalesRep, fcm_token: str, platform: str, app_version: str | None) -> None:
+    existing = await db.execute(
+        select(InteliforceDevice).where(
+            InteliforceDevice.sales_rep_id == rep.id,
+            InteliforceDevice.fcm_token == fcm_token,
+        )
+    )
+    device = existing.scalar_one_or_none()
+    if device:
+        device.activo = True
+        device.last_seen = datetime.now(timezone.utc)
+        if app_version:
+            device.app_version = app_version
+    else:
+        db.add(InteliforceDevice(
+            sales_rep_id=rep.id,
+            company_id=rep.company_id,
+            fcm_token=fcm_token,
+            platform=platform,
+            app_version=app_version,
+        ))
+    await db.commit()
+
+
+# ── Visitas ───────────────────────────────────────────────────────────────────
+
+async def _get_poi_range(db: AsyncSession, customer_id: str) -> float:
+    """Rango en metros configurado para el POI. Default 150m si no hay config."""
+    r = await db.execute(
+        text("SELECT inteliforce_rango_m FROM customers WHERE id = :id"),
+        {"id": customer_id},
+    )
+    row = r.fetchone()
+    if row and row.inteliforce_rango_m:
+        return float(row.inteliforce_rango_m)
+    return 150.0
+
+
+async def _get_customer_coords(db: AsyncSession, customer_id: str) -> tuple[float, float] | None:
+    r = await db.execute(
+        text("SELECT gps_lat, gps_lng FROM customers WHERE id = :id"),
+        {"id": customer_id},
+    )
+    row = r.fetchone()
+    if row and row.gps_lat and row.gps_lng:
+        return float(row.gps_lat), float(row.gps_lng)
+    return None
+
+
+async def checkin(
+    db: AsyncSession, company_id: str, rep: SalesRep,
+    customer_id: str, lat: float, lng: float, accuracy: float,
+    offline_at: datetime | None = None,
+) -> dict:
+    coords = await _get_customer_coords(db, customer_id)
+    if coords:
+        rango = await _get_poi_range(db, customer_id)
+        distancia = _haversine_m(lat, lng, coords[0], coords[1])
+        umbral = rango + max(accuracy, 0)
+        if distancia > umbral:
+            return {
+                "ok": False,
+                "error": "fuera_de_rango",
+                "distancia_m": round(distancia, 1),
+                "umbral_m": round(umbral, 1),
+                "rango_poi_m": rango,
+                "accuracy_m": accuracy,
+            }
+
+    visit = InteliforceVisit(
+        company_id=uuid.UUID(company_id),
+        sales_rep_id=rep.id,
+        customer_id=uuid.UUID(customer_id),
+        rol=rep.rol,
+        checkin_lat=lat,
+        checkin_lng=lng,
+        checkin_accuracy=accuracy,
+        checkin_at=offline_at or datetime.now(timezone.utc),
+    )
+    db.add(visit)
+    await db.commit()
+    await db.refresh(visit)
+    return {"ok": True, "visit_id": str(visit.id)}
+
+
+async def checkout(
+    db: AsyncSession, visit_id: str, rep: SalesRep,
+    lat: float | None, lng: float | None, notas: str | None, estado: str,
+    sale_id: str | None = None,
+) -> bool:
+    r = await db.execute(
+        select(InteliforceVisit).where(
+            InteliforceVisit.id == uuid.UUID(visit_id),
+            InteliforceVisit.sales_rep_id == rep.id,
+        )
+    )
+    visit = r.scalar_one_or_none()
+    if not visit or visit.estado != "abierta":
+        return False
+    visit.checkout_at = datetime.now(timezone.utc)
+    visit.checkout_lat = lat
+    visit.checkout_lng = lng
+    visit.notas = notas
+    visit.estado = estado
+    if sale_id:
+        visit.sale_id = uuid.UUID(sale_id)
+    await db.commit()
+    return True
+
+
+async def get_visits_today(db: AsyncSession, company_id: str, rep: SalesRep) -> list[dict]:
+    today = date.today()
+    r = await db.execute(
+        text("""
+            SELECT v.id, v.customer_id, c.razon_social, v.estado,
+                   v.checkin_at, v.checkout_at, v.notas, v.sale_id
+            FROM inteliforce_visits v
+            JOIN customers c ON c.id = v.customer_id
+            WHERE v.company_id = :cid AND v.sales_rep_id = :rid
+            AND v.checkin_at::date = :today
+            ORDER BY v.checkin_at DESC
+        """),
+        {"cid": company_id, "rid": str(rep.id), "today": today},
+    )
+    return [dict(row._mapping) for row in r.fetchall()]
+
+
+# ── Incidencias ───────────────────────────────────────────────────────────────
+
+async def create_incident(
+    db: AsyncSession, visit_id: str, rep: SalesRep,
+    tipo: str, descripcion: str, urgencia: str, producto_id: str | None,
+) -> InteliforceIncident:
+    r = await db.execute(
+        select(InteliforceVisit).where(InteliforceVisit.id == uuid.UUID(visit_id))
+    )
+    visit = r.scalar_one_or_none()
+    if not visit:
+        raise ValueError("Visita no encontrada")
+
+    incident = InteliforceIncident(
+        visit_id=visit.id,
+        company_id=visit.company_id,
+        sales_rep_id=rep.id,
+        customer_id=visit.customer_id,
+        tipo=tipo,
+        descripcion=descripcion,
+        urgencia=urgencia,
+        producto_id=uuid.UUID(producto_id) if producto_id else None,
+    )
+    db.add(incident)
+    await db.commit()
+    await db.refresh(incident)
+    return incident
+
+
+# ── Lotes y vencimientos ──────────────────────────────────────────────────────
+
+async def upsert_lot_expiry(
+    db: AsyncSession, company_id: str, customer_id: str, visit_id: str,
+    rep: SalesRep, product_id: str, lote: str | None,
+    fecha_vencimiento: date, cantidad_unidades: int | None,
+) -> InteliforceLotExpiry:
+    r = await db.execute(
+        select(InteliforceLotExpiry).where(
+            InteliforceLotExpiry.customer_id == uuid.UUID(customer_id),
+            InteliforceLotExpiry.product_id == uuid.UUID(product_id),
+            InteliforceLotExpiry.lote == (lote or ""),
+        )
+    )
+    existing = r.scalar_one_or_none()
+    if existing:
+        existing.fecha_vencimiento = fecha_vencimiento
+        existing.cantidad_unidades = cantidad_unidades
+        existing.visit_id = uuid.UUID(visit_id)
+        existing.sales_rep_id = rep.id
+        existing.alerta_enviada = False
+        existing.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+
+    entry = InteliforceLotExpiry(
+        company_id=uuid.UUID(company_id),
+        customer_id=uuid.UUID(customer_id),
+        product_id=uuid.UUID(product_id),
+        visit_id=uuid.UUID(visit_id),
+        sales_rep_id=rep.id,
+        lote=lote or "",
+        fecha_vencimiento=fecha_vencimiento,
+        cantidad_unidades=cantidad_unidades,
+    )
+    db.add(entry)
+    await db.commit()
+    await db.refresh(entry)
+    return entry
+
+
+async def get_lot_expiry_for_customer(db: AsyncSession, company_id: str, customer_id: str) -> list[dict]:
+    r = await db.execute(
+        text("""
+            SELECT le.id, le.product_id, p.nombre as product_nombre,
+                   le.lote, le.fecha_vencimiento, le.cantidad_unidades,
+                   le.updated_at,
+                   (le.fecha_vencimiento - CURRENT_DATE) as dias_para_vencer
+            FROM inteliforce_lot_expiry le
+            JOIN products p ON p.id = le.product_id
+            WHERE le.company_id = :cid AND le.customer_id = :kid AND le.activo = true
+            ORDER BY le.fecha_vencimiento ASC
+        """),
+        {"cid": company_id, "kid": customer_id},
+    )
+    return [dict(row._mapping) for row in r.fetchall()]
+
+
+async def check_expiry_alerts(db: AsyncSession, dias_alerta: int = 30) -> list[dict]:
+    """Devuelve registros próximos a vencer que no han sido notificados aún.
+    El cron llama esto diariamente y dispara las notificaciones FCM."""
+    r = await db.execute(
+        text("""
+            SELECT le.id, le.company_id, le.customer_id, le.product_id,
+                   le.lote, le.fecha_vencimiento,
+                   (le.fecha_vencimiento - CURRENT_DATE) as dias_para_vencer,
+                   c.razon_social as customer_nombre,
+                   p.nombre as producto_nombre,
+                   sr.supervisor_id
+            FROM inteliforce_lot_expiry le
+            JOIN customers c ON c.id = le.customer_id
+            JOIN products p ON p.id = le.product_id
+            JOIN sales_reps sr ON sr.id = le.sales_rep_id
+            WHERE le.activo = true AND le.alerta_enviada = false
+            AND (le.fecha_vencimiento - CURRENT_DATE) <= :dias
+            AND (le.fecha_vencimiento - CURRENT_DATE) >= 0
+        """),
+        {"dias": dias_alerta},
+    )
+    return [dict(row._mapping) for row in r.fetchall()]
+
+
+async def mark_alert_sent(db: AsyncSession, lot_expiry_id: str) -> None:
+    await db.execute(
+        text("UPDATE inteliforce_lot_expiry SET alerta_enviada = true WHERE id = :id"),
+        {"id": lot_expiry_id},
+    )
+    await db.commit()
 
 
 async def sync_records(db: AsyncSession, company_id: str, records: list[SyncRecord]) -> dict:

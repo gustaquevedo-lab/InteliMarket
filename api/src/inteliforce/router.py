@@ -1,9 +1,14 @@
 """Inteliforce router — API movil consumida por la app unificada (SueldOK)"""
 
-from fastapi import APIRouter, Depends, HTTPException, Header, status
+import os
+import shutil
+import uuid as uuid_lib
+
+from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from datetime import date, timedelta
+from typing import Optional
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
@@ -12,6 +17,11 @@ from api.src.inteliforce.schemas import (
     AuthExchangeRequest, AuthExchangeResponse, MeResponse,
     RouteStopResponse, Customer360Response, MobileOrderCreate,
     SyncRequest, SyncResponse, ProductSearchResult,
+    DirectLoginRequest, SetPinRequest,
+    RegisterDeviceRequest,
+    CheckInRequest, CheckOutRequest,
+    IncidentCreate,
+    LotExpiryUpsert,
 )
 
 router = APIRouter(prefix="/api/v1/inteliforce", tags=["inteliforce"])
@@ -153,6 +163,202 @@ async def sync_from_sueldok(
         raise HTTPException(status_code=401, detail="API key invalida")
     result = await service.sync_records(db, str(key.company_id), data.records)
     return result
+
+
+# ── Auth directa (app Inteliforce standalone) ─────────────────────────────────
+
+@router.post("/auth/login")
+async def direct_login(data: DirectLoginRequest, db: AsyncSession = Depends(get_db)):
+    result = await service.direct_login(db, str(data.company_id), data.cedula, data.pin)
+    if not result:
+        raise HTTPException(status_code=401, detail="Credenciales invalidas o PIN no configurado")
+    return result
+
+
+@router.post("/auth/set-pin", status_code=status.HTTP_204_NO_CONTENT)
+async def set_pin(data: SetPinRequest, db: AsyncSession = Depends(get_db)):
+    ok = await service.set_pin(db, data.api_key, data.cedula, data.pin)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Vendedor no encontrado o clave invalida")
+
+
+# ── Dispositivos FCM ──────────────────────────────────────────────────────────
+
+@router.post("/devices/register", status_code=status.HTTP_204_NO_CONTENT)
+async def register_device(
+    data: RegisterDeviceRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    rep = await _current_rep(db, user)
+    await service.register_device(db, rep, data.fcm_token, data.platform, data.app_version)
+
+
+# ── SSE tracking stream ───────────────────────────────────────────────────────
+
+@router.get("/tracking-stream")
+async def tracking_stream(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    from sse_starlette.sse import EventSourceResponse
+    from api.src.inteliforce import sse as sse_mgr
+
+    company_id = user["company_id"]
+    q = sse_mgr.subscribe(company_id)
+
+    async def generator():
+        try:
+            async for chunk in sse_mgr.event_stream(company_id, q):
+                yield chunk
+        finally:
+            sse_mgr.unsubscribe(company_id, q)
+
+    return EventSourceResponse(generator())
+
+
+# ── Visitas ───────────────────────────────────────────────────────────────────
+
+@router.post("/visits", status_code=status.HTTP_201_CREATED)
+async def checkin(data: CheckInRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    rep = await _current_rep(db, user)
+    result = await service.checkin(
+        db, user["company_id"], rep,
+        str(data.customer_id), data.lat, data.lng, data.accuracy, data.offline_at,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=422, detail=result)
+    return result
+
+
+@router.get("/visits/today")
+async def visits_today(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    rep = await _current_rep(db, user)
+    return await service.get_visits_today(db, user["company_id"], rep)
+
+
+@router.patch("/visits/{visit_id}/checkout")
+async def checkout(
+    visit_id: str,
+    data: CheckOutRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    rep = await _current_rep(db, user)
+    ok = await service.checkout(db, visit_id, rep, data.lat, data.lng, data.notas, data.estado)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Visita no encontrada o ya cerrada")
+    return {"ok": True}
+
+
+# ── Media (fotos / videos) ────────────────────────────────────────────────────
+
+MEDIA_DIR = os.getenv("INTELIFORCE_MEDIA_DIR", "/var/intelimarket/media/inteliforce")
+
+
+@router.post("/visits/{visit_id}/media", status_code=status.HTTP_201_CREATED)
+async def upload_media(
+    visit_id: str,
+    file: UploadFile = File(...),
+    tipo: str = Form("foto"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    rep = await _current_rep(db, user)
+    os.makedirs(MEDIA_DIR, exist_ok=True)
+    ext = os.path.splitext(file.filename or "")[-1] or (".jpg" if tipo == "foto" else ".mp4")
+    filename = f"{uuid_lib.uuid4()}{ext}"
+    dest = os.path.join(MEDIA_DIR, filename)
+    with open(dest, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    size_bytes = os.path.getsize(dest)
+    url = f"/static/inteliforce/{filename}"
+
+    from api.src.inteliforce.models import InteliforceMedia
+    from api.src.inteliforce.models import InteliforceVisit
+    from sqlalchemy import select
+
+    r = await db.execute(select(InteliforceVisit).where(InteliforceVisit.id == uuid_lib.UUID(visit_id)))
+    visit = r.scalar_one_or_none()
+    if not visit:
+        raise HTTPException(status_code=404, detail="Visita no encontrada")
+
+    media = InteliforceMedia(
+        visit_id=visit.id,
+        company_id=visit.company_id,
+        sales_rep_id=rep.id,
+        tipo=tipo,
+        url=url,
+        filename=filename,
+        size_bytes=size_bytes,
+    )
+    db.add(media)
+    await db.commit()
+    await db.refresh(media)
+    return {"id": str(media.id), "url": url}
+
+
+# ── Incidencias ───────────────────────────────────────────────────────────────
+
+@router.post("/visits/{visit_id}/incidents", status_code=status.HTTP_201_CREATED)
+async def create_incident(
+    visit_id: str,
+    data: IncidentCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    rep = await _current_rep(db, user)
+    try:
+        incident = await service.create_incident(
+            db, visit_id, rep,
+            data.tipo, data.descripcion, data.urgencia,
+            str(data.producto_id) if data.producto_id else None,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    # notifica al supervisor si existe
+    if rep.supervisor_id:
+        from api.src.inteliforce import notifications
+        r = await db.execute(text("SELECT razon_social FROM customers WHERE id = :id"), {"id": str(incident.customer_id)})
+        row = r.fetchone()
+        customer_nombre = row.razon_social if row else "cliente"
+        await notifications.notify_incident(db, rep.supervisor_id, data.tipo, customer_nombre, rep.nombre)
+        await db.execute(
+            text("UPDATE inteliforce_incidents SET notificado = true WHERE id = :id"),
+            {"id": str(incident.id)},
+        )
+        await db.commit()
+
+    return {"id": str(incident.id)}
+
+
+# ── Lotes y vencimientos ──────────────────────────────────────────────────────
+
+@router.get("/customers/{customer_id}/lot-expiry")
+async def get_lot_expiry(
+    customer_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    await _current_rep(db, user)
+    return await service.get_lot_expiry_for_customer(db, user["company_id"], customer_id)
+
+
+@router.put("/customers/{customer_id}/lot-expiry", status_code=status.HTTP_201_CREATED)
+async def upsert_lot_expiry(
+    customer_id: str,
+    visit_id: str,
+    items: list[LotExpiryUpsert],
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    rep = await _current_rep(db, user)
+    results = []
+    for item in items:
+        entry = await service.upsert_lot_expiry(
+            db, user["company_id"], customer_id, visit_id, rep,
+            str(item.product_id), item.lote, item.fecha_vencimiento, item.cantidad_unidades,
+        )
+        results.append({"id": str(entry.id), "product_id": str(entry.product_id)})
+    return results
 
 
 @router.get("/tracking-logs")
