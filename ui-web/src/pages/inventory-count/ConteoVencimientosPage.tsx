@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import {
   Camera, CameraOff, Loader2, Package, Check, X, Plus,
   Calendar, Hash, ImagePlus, ChevronRight, ClipboardList,
-  AlertTriangle, CheckCircle2, Search, Download,
+  AlertTriangle, CheckCircle2, Search, Download, RefreshCcw,
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -181,13 +181,48 @@ export default function ConteoVencimientosPage() {
   const startCamera = useCallback(async () => {
     setCameraError(null)
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false,
-      })
+      let videoDevices: MediaDeviceInfo[] = []
+      try {
+        if (navigator.mediaDevices?.enumerateDevices) {
+          const devices = await navigator.mediaDevices.enumerateDevices()
+          videoDevices = devices.filter((d) => d.kind === "videoinput")
+        }
+      } catch {}
+
+      let chosenId: string | undefined
+      if (videoDevices.length > 0) {
+        const back = videoDevices.find((d) => /back|rear|trasera|environment|wide|main/i.test(d.label))
+        chosenId = back ? back.deviceId : videoDevices.length > 1 ? videoDevices[videoDevices.length - 1].deviceId : undefined
+      }
+
+      let stream: MediaStream | null = null
+      if (chosenId) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { deviceId: { exact: chosenId }, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false,
+          })
+        } catch {}
+      }
+
+      if (!stream) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { exact: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false,
+          })
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false,
+          })
+        }
+      }
+
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
+        videoRef.current.setAttribute("playsinline", "true")
         await videoRef.current.play()
       }
       setCameraActive(true)

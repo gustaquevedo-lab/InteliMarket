@@ -180,6 +180,9 @@ export default function SalonOperacionesPwaPage() {
   const [torchActive, setTorchActive] = useState(false)
   const [hasTorch, setHasTorch] = useState(false)
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment")
+  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
+  const [selectedCameraId, setSelectedCameraId] = useState<string>("")
+  const [activeCameraLabel, setActiveCameraLabel] = useState<string>("")
   const [lastScannedCode, setLastScannedCode] = useState<string>("")
   const [cameraError, setCameraError] = useState<string | null>(null)
   // "granted" ya lo sabemos sin pedir la cámara (evita el mensaje "otorgue el
@@ -687,40 +690,150 @@ export default function SalonOperacionesPwaPage() {
   }, [products, toast])
 
   // ── DETECCIÓN CONTINUA CON BARCODE DETECTOR NATIVO DE CÁMARA ──
-  const startCamera = async (mode: "environment" | "user" = facingMode) => {
+  const startCamera = async (targetDeviceId?: string) => {
     setCameraError(null)
     try {
+      if (scanLoopRef.current) {
+        cancelAnimationFrame(scanLoopRef.current)
+        scanLoopRef.current = null
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop())
         streamRef.current = null
       }
 
-      const constraints: MediaStreamConstraints = {
-        video: {
-          facingMode: { ideal: mode },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
+      // 1. Enumerar dispositivos de video disponibles antes de pedir stream
+      let videoDevices: MediaDeviceInfo[] = []
+      try {
+        if (navigator.mediaDevices?.enumerateDevices) {
+          const devices = await navigator.mediaDevices.enumerateDevices()
+          videoDevices = devices.filter(d => d.kind === "videoinput")
+          setAvailableCameras(videoDevices)
+        }
+      } catch (e) {
+        console.warn("No se pudieron enumerar dispositivos previos:", e)
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints)
+      let chosenId = targetDeviceId || selectedCameraId
+      if (!chosenId && videoDevices.length > 0) {
+        // Buscar cámara trasera por label
+        const back = videoDevices.find(d => /back|rear|trasera|environment|wide|main/i.test(d.label))
+        if (back) {
+          chosenId = back.deviceId
+        } else if (videoDevices.length > 1) {
+          // En Android WebView la trasera suele ser el último índice (mientras que 0 suele ser la frontal)
+          chosenId = videoDevices[videoDevices.length - 1].deviceId
+        }
+      }
+
+      let stream: MediaStream | null = null
+
+      // A) Si tenemos un deviceId específico elegido, intentar abrirlo directamente
+      if (chosenId) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { exact: chosenId },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          })
+          setSelectedCameraId(chosenId)
+        } catch (err) {
+          console.warn("Fallo con deviceId exacto, probando constraints de cámara trasera...", err)
+        }
+      }
+
+      // B) Si no hay stream aún, forzar cámara trasera mediante facingMode exact y luego ideal
+      if (!stream) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { exact: "environment" },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          })
+        } catch {
+          // Fallback con ideal
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          })
+        }
+      }
+
+      // C) Verificar si Android WebView asignó la cámara frontal por error cuando se quería trasera
+      let activeTrack = stream.getVideoTracks()[0]
+      if (activeTrack) {
+        const currentLabel = (activeTrack.label || "").toLowerCase()
+        const isFront = /front|delantera|user/i.test(currentLabel)
+
+        // Si cayó en la frontal y tenemos más dispositivos disponibles, forzar el último dispositivo (trasera)
+        if (isFront && videoDevices.length > 1 && !targetDeviceId) {
+          try {
+            const alternateDevice = videoDevices[videoDevices.length - 1]
+            if (alternateDevice.deviceId !== chosenId) {
+              activeTrack.stop()
+              stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                  deviceId: { exact: alternateDevice.deviceId },
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 },
+                },
+                audio: false,
+              })
+              activeTrack = stream.getVideoTracks()[0]
+            }
+          } catch (altErr) {
+            console.warn("No se pudo conmutar al dispositivo alternativo:", altErr)
+          }
+        }
+      }
+
       streamRef.current = stream
       setCameraPermission("granted")
 
+      // Con el permiso ya otorgado, re-enumerar para capturar los nombres reales (labels) de cada lente
+      try {
+        if (navigator.mediaDevices?.enumerateDevices) {
+          const freshDevices = await navigator.mediaDevices.enumerateDevices()
+          const freshVideo = freshDevices.filter(d => d.kind === "videoinput")
+          setAvailableCameras(freshVideo)
+        }
+      } catch {}
+
+      if (activeTrack) {
+        const settings = activeTrack.getSettings ? activeTrack.getSettings() : {}
+        if (settings.deviceId) {
+          setSelectedCameraId(settings.deviceId)
+        }
+        const label = activeTrack.label || ""
+        setActiveCameraLabel(
+          /back|rear|trasera|environment/i.test(label)
+            ? "Cámara Trasera"
+            : /front|user|delantera/i.test(label)
+            ? "Cámara Frontal"
+            : label || "Cámara Activa"
+        )
+
+        const capabilities: any = activeTrack.getCapabilities ? activeTrack.getCapabilities() : {}
+        setHasTorch(!!capabilities.torch)
+      }
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream
+        videoRef.current.setAttribute("playsinline", "true")
         await videoRef.current.play()
       }
 
       setCameraActive(true)
-
-      // Verificar si tiene soporte de linterna (Torch)
-      const track = stream.getVideoTracks()[0]
-      if (track) {
-        const capabilities: any = track.getCapabilities ? track.getCapabilities() : {}
-        setHasTorch(!!capabilities.torch)
-      }
 
       // Iniciar bucle de BarcodeDetector si está soportado
       if ("BarcodeDetector" in window) {
@@ -767,10 +880,6 @@ export default function SalonOperacionesPwaPage() {
       console.error("Error al iniciar cámara:", err)
       setCameraActive(false)
 
-      // getUserMedia lanza distintos err.name segun la causa real -- antes
-      // se le mostraba al usuario "otorgue permisos" para CUALQUIER falla
-      // (camara ocupada, facingMode no soportado, hardware ausente,
-      // contexto no seguro), aunque el permiso ya estuviera concedido.
       const name = err?.name || ""
       if (name === "NotAllowedError" || name === "PermissionDeniedError") {
         setCameraPermission("denied")
@@ -783,8 +892,8 @@ export default function SalonOperacionesPwaPage() {
         setCameraError("La cámara está siendo usada por otra aplicación o pestaña. Cerrala e intentá de nuevo.")
         toast.error("Cámara Ocupada", "Otra app o pestaña está usando la cámara ahora mismo.")
       } else if (name === "OverconstrainedError" || name === "ConstraintNotSatisfiedError") {
-        setCameraError("La cámara no soporta la configuración pedida (cámara trasera). Probá con la cámara frontal.")
-        toast.error("Configuración No Soportada", "Probá cambiar a la cámara frontal.")
+        setCameraError("La cámara no soporta la configuración pedida. Probá con otra cámara.")
+        toast.error("Configuración No Soportada", "Probá cambiar de cámara.")
       } else if (!window.isSecureContext) {
         setCameraError("La cámara solo funciona en conexión segura (HTTPS).")
         toast.error("Conexión No Segura", "Accedé por HTTPS para poder usar la cámara.")
@@ -828,10 +937,24 @@ export default function SalonOperacionesPwaPage() {
   }
 
   const switchCamera = () => {
-    const nextMode = facingMode === "environment" ? "user" : "environment"
-    setFacingMode(nextMode)
+    if (availableCameras.length <= 1) {
+      const nextMode = facingMode === "environment" ? "user" : "environment"
+      setFacingMode(nextMode)
+      stopCamera()
+      setTimeout(() => startCamera(), 200)
+      return
+    }
+
+    // Rotar al siguiente dispositivo físico real (ciclo entre todas las cámaras del equipo)
+    const currentIndex = availableCameras.findIndex(c => c.deviceId === selectedCameraId)
+    const nextIndex = (currentIndex + 1) % availableCameras.length
+    const nextDevice = availableCameras[nextIndex]
+
+    setSelectedCameraId(nextDevice.deviceId)
     stopCamera()
-    setTimeout(() => startCamera(nextMode), 200)
+    const desc = nextDevice.label || `Cámara ${nextIndex + 1} de ${availableCameras.length}`
+    toast.info("Cambiando Cámara", desc)
+    setTimeout(() => startCamera(nextDevice.deviceId), 200)
   }
 
   // Apagar cámara al desmontar o cambiar de tab
@@ -1848,10 +1971,14 @@ export default function SalonOperacionesPwaPage() {
 
                     <button
                       onClick={switchCamera}
-                      className="p-2 rounded-full bg-black/60 text-white border border-white/20 hover:bg-black/80 backdrop-blur-md cursor-pointer"
-                      title="Cambiar Cámara Delantera/Trasera"
+                      className="px-2.5 py-1.5 rounded-full bg-black/60 text-white border border-white/20 hover:bg-black/80 backdrop-blur-md cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+                      title={activeCameraLabel || "Cambiar Cámara"}
                     >
-                      <RefreshCcw className="w-4 h-4" />
+                      <RefreshCcw className="w-3.5 h-3.5" />
+                      <span className="text-[10px]">
+                        {activeCameraLabel ? (activeCameraLabel.includes("Trasera") ? "Trasera" : activeCameraLabel.includes("Frontal") ? "Frontal" : "Cámara") : "Cámara"}
+                        {availableCameras.length > 1 ? ` (${Math.max(1, availableCameras.findIndex(c => c.deviceId === selectedCameraId) + 1)}/${availableCameras.length})` : ""}
+                      </span>
                     </button>
 
                     <button
