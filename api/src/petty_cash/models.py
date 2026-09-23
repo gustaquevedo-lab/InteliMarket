@@ -206,7 +206,7 @@ class Expense(Base):
 
     # Clasificación Anticipo de Sueldo (Nómina / SueldOK)
     es_anticipo_sueldo = Column(Boolean, nullable=False, default=False, server_default="false", index=True)
-    employee_id = Column(UUID(as_uuid=True), index=True)
+    employee_id = Column(String(100), index=True)
     employee_nombre = Column(String(150))
     employee_ci = Column(String(30))
     periodo_nomina = Column(String(7), index=True)  # ej. 2026-09

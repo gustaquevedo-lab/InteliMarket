@@ -543,7 +543,7 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         supplier_id=uuid.UUID(data.supplier_id) if data.supplier_id else None,
         supplier_invoice_id=uuid.UUID(data.supplier_invoice_id) if data.supplier_invoice_id else None,
         es_anticipo_sueldo=bool(data.es_anticipo_sueldo),
-        employee_id=uuid.UUID(data.employee_id) if data.employee_id else None,
+        employee_id=str(data.employee_id) if data.employee_id else None,
         employee_nombre=data.employee_nombre,
         employee_ci=data.employee_ci,
         periodo_nomina=data.periodo_nomina,
@@ -1330,10 +1330,14 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
                 ))
 
     # Convertir UUIDs
-    for field in ("cost_center_id", "category_id", "supplier_id", "supplier_invoice_id", "employee_id"):
+    for field in ("cost_center_id", "category_id", "supplier_id", "supplier_invoice_id"):
         if field in update_data:
             val = update_data[field]
             update_data[field] = uuid.UUID(str(val)) if val else None
+
+    if "employee_id" in update_data:
+        val = update_data["employee_id"]
+        update_data["employee_id"] = str(val) if val else None
 
     # Si se reclasifica como anticipo de sueldo:
     if update_data.get("es_anticipo_sueldo"):

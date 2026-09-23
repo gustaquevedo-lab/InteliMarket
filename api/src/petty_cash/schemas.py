@@ -285,7 +285,7 @@ class ExpenseResponse(BaseModel):
     supplier_invoice_id: Optional[UUID] = None
     # Clasificación Anticipo de Sueldo (Nómina / SueldOK)
     es_anticipo_sueldo: bool = False
-    employee_id: Optional[UUID] = None
+    employee_id: Optional[str] = None
     employee_nombre: Optional[str] = None
     employee_ci: Optional[str] = None
     periodo_nomina: Optional[str] = None
