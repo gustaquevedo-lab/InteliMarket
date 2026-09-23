@@ -133,10 +133,12 @@ async def list_invoices(
     # columna "Proveedor", que es ilegible.
     supplier_ids = {i.supplier_id for i in invoices if i.supplier_id}
     if supplier_ids:
-        sup_result = await db.execute(select(Supplier.id, Supplier.razon_social).where(Supplier.id.in_(supplier_ids)))
-        names = {row.id: row.razon_social for row in sup_result.all()}
+        sup_result = await db.execute(select(Supplier.id, Supplier.razon_social, Supplier.ruc).where(Supplier.id.in_(supplier_ids)))
+        sup_map = {row.id: (row.razon_social, row.ruc) for row in sup_result.all()}
         for inv in invoices:
-            inv.supplier_nombre = names.get(inv.supplier_id)
+            if inv.supplier_id in sup_map:
+                inv.supplier_nombre = sup_map[inv.supplier_id][0]
+                inv.supplier_ruc = sup_map[inv.supplier_id][1]
     return invoices
 
 

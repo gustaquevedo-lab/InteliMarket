@@ -187,10 +187,11 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
         "logo_url": company.get("logo_url"),
     }
 
+    po_num = order.get("numero") or "S/N"
     elements = _company_header(
         company_data, styles,
-        f"ORDEN DE COMPRA N° {order.get('numero', 'S/N')}",
-        "Documento Comercial Oficial de Adquisición de Mercaderías",
+        f"ORDEN DE COMPRA N° {po_num}",
+        f"ORDEN DE COMPRA N° {po_num} — Documento Comercial Oficial de Adquisición",
         generated_by,
     )
 
@@ -223,7 +224,7 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
 
     col_der = [
         Paragraph("<b>DATOS DE LA ORDEN</b>", styles["SmallBold"]),
-        Paragraph(f"<b>N° de Orden:</b> {order.get('numero', '—')}", styles["Small"]),
+        Paragraph(f"<b>N° de Orden:</b> {po_num}", styles["SmallBold"]),
         Paragraph(f"<b>Fecha de Emisión:</b> {fecha_emision_str}", styles["Small"]),
         Paragraph(f"<b>Fecha Entrega Requerida:</b> {fecha_entrega_str}", styles["Small"]),
         Paragraph(f"<b>Condición de Pago:</b> {order.get('condiciones_pago') or '30 Días'}", styles["Small"]),
@@ -231,7 +232,7 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
         Paragraph(f"<b>Comprador:</b> {order.get('created_by_name') or generated_by or 'Departamento de Compras'}", styles["Small"]),
     ]
 
-    info_table = Table([[col_izq, col_der]], colWidths=[90 * mm, 90 * mm])
+    info_table = Table([[col_izq, col_der]], colWidths=[93 * mm, 93 * mm])
     info_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), GRAY_LIGHT),
         ("TOPPADDING", (0, 0), (-1, -1), 6),
@@ -275,18 +276,26 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
         sku_code = it.get("sku") or (it.get("producto") or {}).get("sku") or "—"
         barcode = it.get("codigo_barra") or (it.get("producto") or {}).get("codigo_barra") or "—"
 
+        um = str(it.get("unidad_medida") or (it.get("producto") or {}).get("unidad_medida") or "").strip().upper()
+        if cant % 1 == 0:
+            cant_str = f"{int(cant):,}".replace(",", ".")
+        else:
+            cant_str = f"{cant:.3f}".rstrip("0").rstrip(".").replace(".", ",")
+        if um and um != "UN":
+            cant_str = f"{cant_str} {um}"
+
         data.append([
             _cell(str(idx)),
             _cell(sku_code),
             _cell(barcode),
             _cell(prod_desc, bold=True),
-            _num(f"{cant:,.0f}".replace(",", ".")),
+            _num(cant_str),
             _num(_fmt_gs(precio)),
             _cell(f"{tasa}%"),
             _num(_fmt_gs(sub), bold=True),
         ])
 
-    items_table = Table(data, colWidths=[7 * mm, 23 * mm, 27 * mm, 52 * mm, 14 * mm, 27 * mm, 10 * mm, 27 * mm], repeatRows=1)
+    items_table = Table(data, colWidths=[9 * mm, 21 * mm, 26 * mm, 51 * mm, 16 * mm, 26 * mm, 11 * mm, 26 * mm], repeatRows=1)
     items_table.setStyle(_table_style(3))
     elements.append(items_table)
     elements.append(Spacer(1, 8))
@@ -298,19 +307,21 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
 
     summary_data = [
         [
-            Paragraph("<b>LIQUIDACIÓN IVA (INCLUIDO EN TOTAL):</b>", styles["SmallBold"]),
-            Paragraph(f"Gravadas 10%: {_fmt_gs(gravada_10)} | IVA 10%: {_fmt_gs(iva_10)}", styles["Small"]),
-            Paragraph(f"Gravadas 5%: {_fmt_gs(gravada_5)} | IVA 5%: {_fmt_gs(iva_5)}", styles["Small"]),
-            Paragraph(f"Exentas: {_fmt_gs(subtotal_exenta)}", styles["Small"]),
-        ],
-        [
-            Paragraph("<b>TOTAL ORDEN (IVA INCLUIDO):</b>", styles["SmallBold"]),
-            Paragraph(f"<font size=11 color='#1E40AF'><b>{_fmt_gs(total_final)}</b></font>", styles["Normal"]),
-            Paragraph(f"Condición: <b>{order.get('condiciones_pago') or '30 Días'}</b>", styles["Small"]),
-            Paragraph(f"Moneda: <b>{order.get('moneda') or 'PYG'}</b>", styles["Small"]),
+            [
+                Paragraph("<b>LIQUIDACIÓN IVA (INCLUIDO EN TOTAL):</b>", styles["SmallBold"]),
+                Paragraph(f"Gravadas 10%: {_fmt_gs(gravada_10)} | IVA 10%: {_fmt_gs(iva_10)}", styles["Small"]),
+                Paragraph(f"Gravadas 5%: {_fmt_gs(gravada_5)} | IVA 5%: {_fmt_gs(iva_5)}", styles["Small"]),
+                Paragraph(f"Exentas: {_fmt_gs(subtotal_exenta)}", styles["Small"]),
+            ],
+            [
+                Paragraph("<b>TOTAL ORDEN (IVA INCLUIDO):</b>", styles["SmallBold"]),
+                Paragraph(f"<font size=11 color='#1E40AF'><b>{_fmt_gs(total_final)}</b></font>", styles["Normal"]),
+                Paragraph(f"Condición: <b>{order.get('condiciones_pago') or '30 Días'}</b>", styles["Small"]),
+                Paragraph(f"Moneda: <b>{order.get('moneda') or 'PYG'}</b>", styles["Small"]),
+            ]
         ]
     ]
-    summary_table = Table(summary_data, colWidths=[110 * mm, 70 * mm])
+    summary_table = Table(summary_data, colWidths=[110 * mm, 76 * mm])
     summary_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), GRAY_LIGHT),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -336,7 +347,7 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
             Paragraph("____________________________<br/><b>Recibido Conforme</b><br/>Firma y Sello Proveedor", styles["Small"]),
         ]
     ]
-    signatures_table = Table(signatures_data, colWidths=[60 * mm, 60 * mm, 60 * mm])
+    signatures_table = Table(signatures_data, colWidths=[62 * mm, 62 * mm, 62 * mm])
     signatures_table.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),

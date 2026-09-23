@@ -803,6 +803,11 @@ export default function PurchasesPage() {
     setLoadingPODetail(true)
     try {
       if (po.id) {
+        api.purchases.getOrder(po.id).then((fresh) => {
+          if (fresh && fresh.id) {
+            setSelectedPO((prev: any) => (prev?.id === po.id ? { ...prev, ...fresh, numero: fresh.numero || prev?.numero } : prev))
+          }
+        }).catch(() => {})
         const items = await api.purchases.getOrderItems(po.id)
         setPoDetailItems(items || [])
       }
@@ -1398,11 +1403,15 @@ export default function PurchasesPage() {
       setManualPOItems((items || []).map((it: any) => {
         const cant = Number(it.cantidad || 1)
         const prec = Number(it.precio_unitario || 0)
+        const um = it.unidad_medida || it.producto?.unidad_medida || "UN"
+        const isPesable = Boolean(um.toUpperCase() === "KG" || it.producto?.es_pesable || it.producto?.tipo_venta === "peso")
         return {
           product_id: it.product_id,
           nombre: it.producto?.nombre || it.descripcion || "Producto",
           sku: it.producto?.sku || it.sku || "",
           codigo_barra: it.producto?.codigo_barra || it.codigo_barra || "",
+          unidad_medida: um,
+          es_pesable: isPesable,
           cantidad: cant,
           precio_unitario: prec,
           iva_tasa: Number(it.iva_tasa || 10),
@@ -1443,6 +1452,8 @@ export default function PurchasesPage() {
     }
     const cost = customPrice !== undefined ? customPrice : Number(p.costo_unitario || (p as any).precio_costo || p.ultimo_costo || 0)
     const supName = (p as any).supplier_nombre || (p as any).supplier?.razon_social || (suppliers.find(s => s.id === p.supplier_id)?.razon_social) || ""
+    const isPesable = Boolean(p.es_pesable || (p as any).tipo_venta === "peso" || (p as any).tipo_venta === "pesable" || p.unidad_medida?.toUpperCase() === "KG")
+    const defCant = isPesable ? 1 : 10
     setManualPOItems(prev => [
       ...prev,
       {
@@ -1450,10 +1461,12 @@ export default function PurchasesPage() {
         nombre: p.nombre,
         sku: p.sku || "",
         codigo_barra: p.codigo_barra || "",
-        cantidad: 10,
+        unidad_medida: p.unidad_medida || (isPesable ? "KG" : "UN"),
+        es_pesable: isPesable,
+        cantidad: defCant,
         precio_unitario: cost,
         iva_tasa: 10,
-        subtotal: 10 * cost,
+        subtotal: defCant * cost,
         habitual_supplier_id: p.supplier_id,
         habitual_supplier_nombre: p.supplier_id ? supName : "Sin asignar",
         habitual_costo: Number(p.ultimo_costo || p.costo_unitario || cost),
@@ -1475,9 +1488,9 @@ export default function PurchasesPage() {
         [field]: value,
       }
       if (field === "cantidad" || field === "precio_unitario") {
-        const c = Number(field === "cantidad" ? value : copy[idx].cantidad || 1)
-        const p = Number(field === "precio_unitario" ? value : copy[idx].precio_unitario || 0)
-        copy[idx].subtotal = c * p
+        const c = Number(field === "cantidad" ? (value === "" ? 0 : value) : (copy[idx].cantidad || 0))
+        const p = Number(field === "precio_unitario" ? (value === "" ? 0 : value) : (copy[idx].precio_unitario || 0))
+        copy[idx].subtotal = Math.round(c * p)
       }
       return copy
     })
@@ -3532,6 +3545,7 @@ export default function PurchasesPage() {
                                   </button>
                                   <input
                                     type="number"
+                                    step="any"
                                     min={0}
                                     value={qty}
                                     onChange={(e) => {
@@ -5886,6 +5900,10 @@ export default function PurchasesPage() {
       {selectedPO && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
           <style>{`
+            @page {
+              size: A4 portrait;
+              margin: 10mm 12mm;
+            }
             @media print {
               body * {
                 visibility: hidden !important;
@@ -5894,17 +5912,25 @@ export default function PurchasesPage() {
                 visibility: visible !important;
               }
               #po-premium-sheet {
-                position: fixed !important;
+                position: absolute !important;
                 left: 0 !important;
                 top: 0 !important;
                 width: 100% !important;
                 margin: 0 !important;
-                padding: 10mm 15mm !important;
+                padding: 0 !important;
                 background: white !important;
                 color: #111827 !important;
                 box-shadow: none !important;
                 border: none !important;
                 z-index: 999999 !important;
+                overflow: visible !important;
+              }
+              #po-premium-sheet table {
+                page-break-inside: auto !important;
+              }
+              #po-premium-sheet tr {
+                page-break-inside: avoid !important;
+                page-break-after: auto !important;
               }
               .no-print {
                 display: none !important;
@@ -5994,7 +6020,7 @@ export default function PurchasesPage() {
                         Orden de Compra Oficial
                       </span>
                       <div className="text-xl font-black font-mono text-indigo-600 dark:text-indigo-400">
-                        N° {selectedPO.numero}
+                        N° {selectedPO.numero || selectedPO.id?.slice(0, 8) || "S/N"}
                       </div>
                       <div className="text-[11px] text-gray-500">
                         Fecha: <strong>{selectedPO.fecha ? formatDate(selectedPO.fecha) : formatDate(selectedPO.created_at || "")}</strong>
@@ -6031,8 +6057,8 @@ export default function PurchasesPage() {
                   </div>
 
                   {/* Tabla Itemizada de Productos */}
-                  <div className="overflow-x-auto w-full border border-slate-200 dark:border-slate-700 rounded-xl">
-                    <table className="w-full text-left text-xs min-w-[650px]">
+                  <div className="overflow-x-auto print:overflow-visible w-full border border-slate-200 dark:border-slate-700 rounded-xl">
+                    <table className="w-full text-left text-xs min-w-[650px] print:min-w-0">
                       <thead className="bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
                         <tr>
                           <th className="p-2.5 text-center w-8">#</th>
@@ -6070,7 +6096,7 @@ export default function PurchasesPage() {
                                 {it.producto?.nombre || it.descripcion || "Ítem"}
                               </td>
                               <td className="p-2.5 text-right font-mono font-bold">
-                                {cant.toLocaleString()}
+                                {cant % 1 !== 0 ? cant.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 3 }) : cant.toLocaleString()} {it.unidad_medida || it.producto?.unidad_medida || ""}
                               </td>
                               <td className="p-2.5 text-right font-mono text-emerald-600 font-bold">
                                 {Number(it.recibido || it.cantidad_recibida || 0).toLocaleString()}
@@ -6491,6 +6517,7 @@ export default function PurchasesPage() {
                         <td className="p-2.5 text-right">
                           <input
                             type="number"
+                            step="any"
                             min={0}
                             value={it.cantidad_presentacion}
                             onChange={(e) => handleReceiptCantidadPresentacionChange(idx, Number(e.target.value))}
@@ -6535,6 +6562,7 @@ export default function PurchasesPage() {
                         <td className="p-2.5 text-right">
                           <input
                             type="number"
+                            step="any"
                             min={0}
                             value={it.cantidad_rechazada}
                             onChange={(e) => {
@@ -6949,7 +6977,8 @@ export default function PurchasesPage() {
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Cantidad</label>
                   <input
                     type="number"
-                    min={1}
+                    step="any"
+                    min="0.001"
                     value={reqForm.items[0].cantidad}
                     onChange={(e) => setReqForm(prev => {
                       const copy = [...prev.items]
@@ -7268,14 +7297,21 @@ export default function PurchasesPage() {
                               )}
                             </td>
                             <td className="p-2.5 text-right">
-                              <input
-                                type="number"
-                                min={1}
-                                value={it.cantidad}
-                                onChange={(e) => handleManualPOItemChange(idx, "cantidad", Math.max(1, Number(e.target.value)))}
-                                className="input-field w-20 p-1 text-right font-mono font-bold text-xs"
-                                required
-                              />
+                              <div className="flex items-center justify-end gap-1">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0.001"
+                                  value={it.cantidad}
+                                  onChange={(e) => handleManualPOItemChange(idx, "cantidad", e.target.value === "" ? "" : Number(e.target.value))}
+                                  className="input-field w-20 p-1 text-right font-mono font-bold text-xs"
+                                  placeholder="0.00"
+                                  required
+                                />
+                                <span className="text-[10px] font-bold text-slate-500 uppercase w-6 text-left shrink-0">
+                                  {it.unidad_medida || "UN"}
+                                </span>
+                              </div>
                             </td>
                             <td className="p-2.5 text-right">
                               <CurrencyInput

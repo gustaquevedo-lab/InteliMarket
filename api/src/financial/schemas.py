@@ -52,6 +52,7 @@ class SupplierInvoiceResponse(BaseModel):
     company_id: UUID
     supplier_id: UUID
     supplier_nombre: Optional[str] = None
+    supplier_ruc: Optional[str] = None
     numero_factura: str
     timbrado: Optional[str] = None
     cdc: Optional[str] = None
