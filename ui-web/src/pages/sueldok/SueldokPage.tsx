@@ -667,112 +667,113 @@ export default function SueldokPage() {
       </div>
 
       {/* ── 6 KPIS SUPERIORES CANÓNICOS CON FRANJA GRADIENTE (IDÉNTICOS A REPORTS) ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      {/* ── 6 KPIS SUPERIORES CANÓNICOS CON FRANJA GRADIENTE (IDÉNTICOS A REPORTS) ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3.5 xl:gap-3 2xl:gap-4">
         {/* KPI 1: Masa Bruta */}
-        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+        <div className="relative overflow-hidden rounded-2xl p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
           <div className="h-1 w-full bg-gradient-to-r from-indigo-500 to-violet-500 absolute top-0 left-0" />
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Masa Salarial Bruta</span>
-            <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">Masa Bruta</span>
+            <div className="p-1.5 sm:p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 shrink-0">
               <DollarSign className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl font-black font-mono text-slate-900 dark:text-white">
+          <p className="text-lg xl:text-xl 2xl:text-2xl font-black font-mono text-slate-900 dark:text-white tracking-tight whitespace-nowrap truncate" title={formatPYG(totalPayrollGross || metrics.totalPayroll)}>
             {formatPYG(totalPayrollGross || metrics.totalPayroll)}
           </p>
           <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span>{employees.length} funcionarios</span>
-            <span className="text-indigo-600 dark:text-indigo-400 font-bold font-mono">100% Salarios</span>
+            <span className="truncate">{employees.length} funcionarios</span>
+            <span className="text-indigo-600 dark:text-indigo-400 font-bold font-mono text-[11px] shrink-0">100% Salarios</span>
           </div>
         </div>
 
         {/* KPI 2: Masa Neta */}
-        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+        <div className="relative overflow-hidden rounded-2xl p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
           <div className="h-1 w-full bg-gradient-to-r from-emerald-500 to-teal-500 absolute top-0 left-0" />
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Neto a Liquidar</span>
-            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">Neto a Liquidar</span>
+            <div className="p-1.5 sm:p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 shrink-0">
               <CreditCard className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+          <p className="text-lg xl:text-xl 2xl:text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400 tracking-tight whitespace-nowrap truncate" title={formatPYG(totalPayrollNet)}>
             {formatPYG(totalPayrollNet)}
           </p>
           <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span>Bancos / Efectivo</span>
-            <span className="text-emerald-600 font-bold font-mono">Líquido a Pagar</span>
+            <span className="truncate">Bancos/Efectivo</span>
+            <span className="text-emerald-600 font-bold font-mono text-[11px] shrink-0">Líquido</span>
           </div>
         </div>
 
         {/* KPI 3: Aportes IPS */}
-        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+        <div className="relative overflow-hidden rounded-2xl p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
           <div className="h-1 w-full bg-gradient-to-r from-blue-500 to-cyan-500 absolute top-0 left-0" />
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Aportes IPS (25.5%)</span>
-            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">IPS (25.5%)</span>
+            <div className="p-1.5 sm:p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 shrink-0">
               <ShieldCheck className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl font-black font-mono text-blue-600 dark:text-blue-400">
+          <p className="text-lg xl:text-xl 2xl:text-2xl font-black font-mono text-blue-600 dark:text-blue-400 tracking-tight whitespace-nowrap truncate" title={formatPYG(totalIpsWorker + totalIpsEmployer)}>
             {formatPYG(totalIpsWorker + totalIpsEmployer)}
           </p>
           <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span>Obrero: {formatPYG(totalIpsWorker)}</span>
-            <span className="text-blue-600 font-bold font-mono">Patr: 16.5%</span>
+            <span className="truncate">Obr: {formatPYG(totalIpsWorker)}</span>
+            <span className="text-blue-600 font-bold font-mono text-[11px] shrink-0">Patr: 16.5%</span>
           </div>
         </div>
 
         {/* KPI 4: Anticipos */}
-        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+        <div className="relative overflow-hidden rounded-2xl p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
           <div className="h-1 w-full bg-gradient-to-r from-amber-500 to-orange-500 absolute top-0 left-0" />
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Anticipos Mes</span>
-            <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">Anticipos Mes</span>
+            <div className="p-1.5 sm:p-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 shrink-0">
               <PiggyBank className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl font-black font-mono text-amber-600 dark:text-amber-400">
+          <p className="text-lg xl:text-xl 2xl:text-2xl font-black font-mono text-amber-600 dark:text-amber-400 tracking-tight whitespace-nowrap truncate" title={formatPYG(totalAdvancesSum)}>
             {formatPYG(totalAdvancesSum)}
           </p>
           <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span>{advances.length} adelanto(s)</span>
-            <span className="text-amber-600 font-bold font-mono">Quincena</span>
+            <span className="truncate">{advances.length} adelanto(s)</span>
+            <span className="text-amber-600 font-bold font-mono text-[11px] shrink-0">Quincena</span>
           </div>
         </div>
 
         {/* KPI 5: Descuentos */}
-        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+        <div className="relative overflow-hidden rounded-2xl p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
           <div className="h-1 w-full bg-gradient-to-r from-rose-500 to-red-600 absolute top-0 left-0" />
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Descuentos &amp; Arqueos</span>
-            <div className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">Descuentos</span>
+            <div className="p-1.5 sm:p-2 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 shrink-0">
               <Scissors className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl font-black font-mono text-rose-600 dark:text-rose-400">
+          <p className="text-lg xl:text-xl 2xl:text-2xl font-black font-mono text-rose-600 dark:text-rose-400 tracking-tight whitespace-nowrap truncate" title={formatPYG(totalDeductionsSum)}>
             {formatPYG(totalDeductionsSum)}
           </p>
           <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span>{deductions.length} retención(es)</span>
-            <span className="text-rose-600 font-bold font-mono">Faltantes POS</span>
+            <span className="truncate">{deductions.length} retenciones</span>
+            <span className="text-rose-600 font-bold font-mono text-[11px] shrink-0">Faltantes POS</span>
           </div>
         </div>
 
         {/* KPI 6: Asistencia */}
-        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+        <div className="relative overflow-hidden rounded-2xl p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
           <div className="h-1 w-full bg-gradient-to-r from-teal-500 to-emerald-500 absolute top-0 left-0" />
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Presentismo Dahua</span>
-            <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-950/50 text-teal-600 dark:text-teal-400">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">Presentismo</span>
+            <div className="p-1.5 sm:p-2 rounded-xl bg-teal-50 dark:bg-teal-950/50 text-teal-600 dark:text-teal-400 shrink-0">
               <Fingerprint className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl font-black font-mono text-teal-600 dark:text-teal-400">
+          <p className="text-lg xl:text-xl 2xl:text-2xl font-black font-mono text-teal-600 dark:text-teal-400 tracking-tight whitespace-nowrap truncate">
             {metrics.attendanceRate}%
           </p>
           <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span>{metrics.presentToday + metrics.lateToday} presentes</span>
-            <span className="text-teal-600 font-bold font-mono">En Vivo</span>
+            <span className="truncate">{metrics.presentToday + metrics.lateToday} presentes</span>
+            <span className="text-teal-600 font-bold font-mono text-[11px] shrink-0">En Vivo</span>
           </div>
         </div>
       </div>
