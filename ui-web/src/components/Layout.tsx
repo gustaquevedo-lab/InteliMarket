@@ -159,13 +159,12 @@ const navGroups: NavGroup[] = [
       // { icon: Radio, label: "Etiquetas Electrónicas (ESL)", path: "/esl" },
       // DESACTIVADO 2026-09-04: cero llamadas a backend, plataformas/pedidos 100%
       // hardcodeados incluido el badge "3 Canales Conectados". Ver auditoria de sidebar.
-      { icon: CreditCard, label: "Medios de Pago & Gaveta", path: "/reports?tab=medios_pago", keywords: ["tarjetas", "bancard", "dinelco", "qr", "pix", "efectivo", "pos"] },
     ]
   },
   {
     title: "Inteligencia & Sistema",
     items: [
-      { icon: LineChart, label: "Business Intelligence", path: "/reports" },
+      { icon: LineChart, label: "Business Intelligence", path: "/reports", keywords: ["reportes", "ventas", "medios de pago", "tarjetas", "pix", "qr", "gaveta", "arqueo"] },
       { icon: PieChart, label: "Reportes Gerenciales", path: "/gerencial" },
       // REACTIVADO 2026-09-04: la maqueta vieja (nombres reales de empleados en
       // fraude inventado) fue reemplazada por RiskAgentPage -- dashboard y chat
