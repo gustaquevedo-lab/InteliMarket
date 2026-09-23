@@ -204,6 +204,16 @@ class Expense(Base):
     supplier_id = Column(UUID(as_uuid=True), index=True)
     supplier_invoice_id = Column(UUID(as_uuid=True), ForeignKey("supplier_invoices.id", ondelete="SET NULL"), index=True)
 
+    # Clasificación Anticipo de Sueldo (Nómina / SueldOK)
+    es_anticipo_sueldo = Column(Boolean, nullable=False, default=False, server_default="false", index=True)
+    employee_id = Column(UUID(as_uuid=True), index=True)
+    employee_nombre = Column(String(150))
+    employee_ci = Column(String(30))
+    periodo_nomina = Column(String(7), index=True)  # ej. 2026-09
+    cuotas_anticipo = Column(Integer, default=1, server_default="1")
+    sueldok_sync_status = Column(String(30), default="pendiente", server_default="pendiente")
+    sueldok_sync_id = Column(String(100))
+
     # Auditoría comprobante por comprobante
     auditoria_estado = Column(String(20), default="pendiente")  # pendiente | aprobado | observado | rechazado
     auditoria_motivo = Column(Text)

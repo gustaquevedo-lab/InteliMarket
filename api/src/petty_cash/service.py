@@ -472,7 +472,22 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
     iva_10 = Decimal(str(data.iva_10 or 0))
     iva_5 = Decimal(str(data.iva_5 or 0))
 
-    if grav_10 == 0 and grav_5 == 0 and exen == 0:
+    # Reglas específicas para Anticipo de Sueldo (Nómina)
+    if data.es_anticipo_sueldo:
+        data.es_pago_proveedor = False
+        data.supplier_id = None
+        data.supplier_invoice_id = None
+        data.tipo_comprobante = "RECIBO"
+        grav_10 = Decimal("0")
+        grav_5 = Decimal("0")
+        iva_10 = Decimal("0")
+        iva_5 = Decimal("0")
+        exen = monto
+        if data.employee_nombre and not data.proveedor:
+            data.proveedor = data.employee_nombre
+        if data.employee_ci and not data.ruc:
+            data.ruc = data.employee_ci
+    elif grav_10 == 0 and grav_5 == 0 and exen == 0:
         tipo_c = (data.tipo_comprobante or "").upper()
         if tipo_c in ("RECIBO", "BOLETA"):
             exen = monto
@@ -525,6 +540,13 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         es_pago_proveedor=bool(data.es_pago_proveedor),
         supplier_id=uuid.UUID(data.supplier_id) if data.supplier_id else None,
         supplier_invoice_id=uuid.UUID(data.supplier_invoice_id) if data.supplier_invoice_id else None,
+        es_anticipo_sueldo=bool(data.es_anticipo_sueldo),
+        employee_id=uuid.UUID(data.employee_id) if data.employee_id else None,
+        employee_nombre=data.employee_nombre,
+        employee_ci=data.employee_ci,
+        periodo_nomina=data.periodo_nomina,
+        cuotas_anticipo=data.cuotas_anticipo or 1,
+        sueldok_sync_status="pendiente",
         monto_brl=Decimal(str(data.monto_brl)) if data.monto_brl else None,
         auditoria_estado=auditoria_estado,
         auditoria_motivo=auditoria_motivo,
@@ -1306,10 +1328,27 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
                 ))
 
     # Convertir UUIDs
-    for field in ("cost_center_id", "category_id", "supplier_id", "supplier_invoice_id"):
+    for field in ("cost_center_id", "category_id", "supplier_id", "supplier_invoice_id", "employee_id"):
         if field in update_data:
             val = update_data[field]
             update_data[field] = uuid.UUID(str(val)) if val else None
+
+    # Si se reclasifica como anticipo de sueldo:
+    if update_data.get("es_anticipo_sueldo"):
+        update_data["es_pago_proveedor"] = False
+        update_data["supplier_id"] = None
+        update_data["supplier_invoice_id"] = None
+        update_data["tipo_comprobante"] = "RECIBO"
+        update_data["gravado_10"] = Decimal("0")
+        update_data["gravado_5"] = Decimal("0")
+        update_data["iva_10"] = Decimal("0")
+        update_data["iva_5"] = Decimal("0")
+        current_monto = Decimal(str(update_data.get("monto") if update_data.get("monto") is not None else exp.monto))
+        update_data["exentas"] = current_monto
+        if update_data.get("employee_nombre"):
+            update_data["proveedor"] = update_data["employee_nombre"]
+        if update_data.get("employee_ci"):
+            update_data["ruc"] = update_data["employee_ci"]
 
     # Si se asocia a una factura comercial pendiente mediante edición/reclasificación
     target_invoice_id = update_data.get("supplier_invoice_id")
@@ -2577,4 +2616,55 @@ async def replenish_rendicion(
 async def get_rendicion_pdf_data(db: AsyncSession, company_id: str, rendicion_id: str) -> dict:
     detail = await get_rendicion_detail(db, company_id, rendicion_id)
     return detail
+
+
+async def get_staff_candidates(db: AsyncSession, company_id: str, search: str | None = None) -> list[dict]:
+    """Retorna candidatos a colaboradores activos para selección ágil en anticipos de sueldo."""
+    from api.src.auth.models import User
+
+    query = select(User.id, User.nombre, User.email, User.telefono, User.rol).where(User.activo == True)
+    if search:
+        s = f"%{search.strip().lower()}%"
+        query = query.where(User.nombre.ilike(s) | User.email.ilike(s))
+    query = query.order_by(User.nombre).limit(50)
+    res = await db.execute(query)
+    rows = res.all()
+
+    staff = []
+    seen = set()
+    for r in rows:
+        staff.append({
+            "id": str(r.id),
+            "nombre": r.nombre,
+            "email": r.email,
+            "rol": r.rol,
+            "ci": r.telefono if (r.telefono and r.telefono.isdigit()) else None,
+        })
+        seen.add(r.nombre.strip().upper())
+
+    staff_extra = [
+        {"id": "c1", "nombre": "NILDA AQUINO", "rol": "Cajera Principal", "ci": "4521098"},
+        {"id": "c2", "nombre": "LILIANA CRISTALDO", "rol": "Cajera Turno Tarde", "ci": "4892104"},
+        {"id": "c3", "nombre": "EVELIN HERRERO", "rol": "Cajera / Cobros", "ci": "5123987"},
+        {"id": "c4", "nombre": "JESSICA FERRARI", "rol": "Cajera Refuerzo", "ci": "4398120"},
+        {"id": "c5", "nombre": "MARISTELA IBARRA", "rol": "Cajera Mañana", "ci": "3987654"},
+        {"id": "c6", "nombre": "ROCIO INSAURRALDE", "rol": "Cajera Cierre", "ci": "4765432"},
+        {"id": "c7", "nombre": "LEIDI VERA", "rol": "Cajera Salón", "ci": "5234567"},
+        {"id": "c8", "nombre": "DIANA GONZALEZ", "rol": "Cajera / Atención", "ci": "4987654"},
+        {"id": "c9", "nombre": "TOMASA", "rol": "Cajera", "ci": "3876543"},
+        {"id": "c10", "nombre": "JUAN GABRIEL RUIZ", "rol": "Cajero / Repositor", "ci": "4654321"},
+        {"id": "c11", "nombre": "CAMILA FERNANDEZ", "rol": "Cajera", "ci": "5123456"},
+        {"id": "c12", "nombre": "LIDIA RAMONA FERNANDEZ", "rol": "Cajera", "ci": "3456789"},
+        {"id": "c13", "nombre": "ROSA CORONEL", "rol": "Cajera", "ci": "4234567"},
+        {"id": "c14", "nombre": "LIZ CENTURION", "rol": "Cajera", "ci": "4567890"},
+        {"id": "c15", "nombre": "SILVIA OVELAR", "rol": "Cajera", "ci": "4876543"},
+    ]
+    for s in staff_extra:
+        if s["nombre"].strip().upper() not in seen:
+            if not search or (search.lower() in s["nombre"].lower() or (s.get("ci") and search in s["ci"])):
+                staff.append(s)
+                seen.add(s["nombre"].strip().upper())
+
+    return staff
+
 

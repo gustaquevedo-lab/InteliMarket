@@ -389,6 +389,11 @@ export const RendicionAuditModal: React.FC<Props> = ({
                                 <Sparkles className="w-2.5 h-2.5" /> Activo Fijo: {exp.categoria_activo || "General"} ({exp.vida_util_meses || 60}m)
                               </span>
                             )}
+                            {exp.es_anticipo_sueldo && (
+                              <span className="px-1.5 py-0.5 text-[9px] font-extrabold rounded bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 flex items-center gap-1">
+                                👤 Anticipo Sueldo: {exp.employee_nombre || exp.proveedor}
+                              </span>
+                            )}
                             {exp.numero_factura && (
                               <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
                                 Fac: {exp.numero_factura}

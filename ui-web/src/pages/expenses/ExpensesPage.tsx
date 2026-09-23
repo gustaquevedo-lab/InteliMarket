@@ -6,7 +6,7 @@ import {
   Paperclip, ClipboardCheck, Scale, Filter, Eye, RefreshCw, ShieldAlert, ArrowRight,
   SlidersHorizontal, Check, AlertCircle, FileText, Download, Calendar, Tag,
   FileSpreadsheet, Printer, PieChart, BookOpen, FileCheck, ScrollText, CheckCheck,
-  Pencil, Package, RotateCcw, X, ChevronDown
+  Pencil, Package, RotateCcw, X, ChevronDown, UserCheck
 } from "lucide-react"
 import {
   api, API_ORIGIN, type Expense, type ExpenseCategory, type CostCenter,
@@ -81,6 +81,12 @@ export default function ExpensesPage() {
     moneda: "PYG",
     monto_brl: "",
     tipo_cambio: "1350",
+    es_anticipo_sueldo: false,
+    employee_id: "",
+    employee_nombre: "",
+    employee_ci: "",
+    periodo_nomina: getTodayAsuncion().slice(0, 7),
+    cuotas_anticipo: "1",
   })
   const [catForm, setCatForm] = useState({ nombre: "", descripcion: "", presupuesto_mensual: "" })
   const [sectorForm, setSectorForm] = useState({ nombre: "", tipo: "sector", peso_prorateo: "1" })
@@ -178,15 +184,42 @@ export default function ExpensesPage() {
   const [invoiceDropdownOpen, setInvoiceDropdownOpen] = useState(false)
   const invoiceSearchRef = useRef<HTMLDivElement>(null)
 
+  // Buscador ágil de personal para Anticipo de Sueldo (SueldOK)
+  const [staffList, setStaffList] = useState<any[]>([])
+  const [staffSearchQuery, setStaffSearchQuery] = useState("")
+  const [staffDropdownOpen, setStaffDropdownOpen] = useState(false)
+  const [loadingStaff, setLoadingStaff] = useState(false)
+  const staffSearchRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (invoiceSearchRef.current && !invoiceSearchRef.current.contains(e.target as Node)) {
         setInvoiceDropdownOpen(false)
       }
+      if (staffSearchRef.current && !staffSearchRef.current.contains(e.target as Node)) {
+        setStaffDropdownOpen(false)
+      }
     }
     document.addEventListener("mousedown", handleClickOutside)
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
+
+  // Filtrado ágil de colaboradores para anticipo de sueldo
+  const filteredStaffCandidates = useMemo(() => {
+    const q = (staffSearchQuery || "").trim().toLowerCase()
+    if (!q) return staffList.slice(0, 30)
+    const qClean = q.replace(/[^a-z0-9]/g, "")
+    return staffList.filter((s: any) => {
+      const nombre = (s.nombre || "").toLowerCase()
+      const ci = (s.ci || "").toLowerCase()
+      const ciClean = ci.replace(/[^0-9]/g, "")
+      const cargo = (s.cargo || "").toLowerCase()
+      if (nombre.includes(q)) return true
+      if (ci.includes(q) || (qClean && ciClean.includes(qClean))) return true
+      if (cargo.includes(q)) return true
+      return false
+    })
+  }, [staffList, staffSearchQuery])
 
   // Factura vinculada actualmente en el formulario
   const selectedPendingInvoice = useMemo(() => {
@@ -290,7 +323,7 @@ export default function ExpensesPage() {
   const fetchAll = async () => {
     setLoading(true)
     try {
-      const [c, cc, f, ac, pc, bAccs, cRegs, rends, invs, sups] = await Promise.all([
+      const [c, cc, f, ac, pc, bAccs, cRegs, rends, invs, sups, staff] = await Promise.all([
         api.expenses.categories.list().catch(() => []),
         api.expenses.costCenters.list().catch(() => []),
         api.expenses.funds.list().catch(() => []),
@@ -301,6 +334,7 @@ export default function ExpensesPage() {
         api.expenses.rendiciones.list().catch(() => []),
         api.financial.invoices.list({ limit: 1000 }).catch(() => []),
         api.purchases.listSuppliers().catch(() => []),
+        api.expenses.staffCandidates().catch(() => []),
       ])
       setCategories(c)
       setCostCenters(cc)
@@ -312,6 +346,9 @@ export default function ExpensesPage() {
       setPendingInvoices(Array.isArray(invs) ? invs.filter((i: any) => i.estado === "pendiente" || i.estado === "parcial") : [])
       if (Array.isArray(sups)) {
         setSuppliersList(sups)
+      }
+      if (Array.isArray(staff)) {
+        setStaffList(staff)
       }
       if (ac) {
         setApprovalThreshold(ac.umbral_aprobacion)
@@ -477,10 +514,18 @@ export default function ExpensesPage() {
       moneda: "PYG",
       monto_brl: "",
       tipo_cambio: "1350",
+      es_anticipo_sueldo: false,
+      employee_id: "",
+      employee_nombre: "",
+      employee_ci: "",
+      periodo_nomina: getTodayAsuncion().slice(0, 7),
+      cuotas_anticipo: "1",
     })
     setComprobanteFile(null)
     setInvoiceSearchQuery("")
     setInvoiceDropdownOpen(false)
+    setStaffSearchQuery("")
+    setStaffDropdownOpen(false)
     setShowForm(true)
   }
 
@@ -513,10 +558,18 @@ export default function ExpensesPage() {
       moneda: (e as any).moneda || "PYG",
       monto_brl: (e as any).monto_brl ? String((e as any).monto_brl) : "",
       tipo_cambio: (e as any).tipo_cambio ? String((e as any).tipo_cambio) : "1350",
+      es_anticipo_sueldo: Boolean((e as any).es_anticipo_sueldo),
+      employee_id: (e as any).employee_id || "",
+      employee_nombre: (e as any).employee_nombre || "",
+      employee_ci: (e as any).employee_ci || "",
+      periodo_nomina: (e as any).periodo_nomina || getTodayAsuncion().slice(0, 7),
+      cuotas_anticipo: (e as any).cuotas_anticipo ? String((e as any).cuotas_anticipo) : "1",
     })
     setComprobanteFile(null)
     setInvoiceSearchQuery("")
     setInvoiceDropdownOpen(false)
+    setStaffSearchQuery("")
+    setStaffDropdownOpen(false)
     setShowForm(true)
   }
 
@@ -528,6 +581,10 @@ export default function ExpensesPage() {
     }
     if (!form.descripcion) {
       toast.warning("Descripción requerida", "Ingresá el concepto del gasto.")
+      return
+    }
+    if (form.es_anticipo_sueldo && !form.employee_nombre?.trim()) {
+      toast.warning("Colaborador requerido", "Debes indicar el colaborador beneficiario del anticipo de sueldo.")
       return
     }
 
@@ -557,19 +614,25 @@ export default function ExpensesPage() {
           ruc: form.ruc || undefined,
           timbrado: form.timbrado || undefined,
           numero_factura: form.numero_factura || undefined,
-          tipo_comprobante: form.tipo_comprobante,
-          iva_10: form.iva_10 ? Number(form.iva_10) : 0,
-          iva_5: form.iva_5 ? Number(form.iva_5) : 0,
-          exentas: form.exentas ? Number(form.exentas) : 0,
+          tipo_comprobante: form.es_anticipo_sueldo ? "recibo_dinero" : form.tipo_comprobante,
+          iva_10: form.es_anticipo_sueldo ? 0 : (form.iva_10 ? Number(form.iva_10) : 0),
+          iva_5: form.es_anticipo_sueldo ? 0 : (form.iva_5 ? Number(form.iva_5) : 0),
+          exentas: form.es_anticipo_sueldo ? Number(form.monto) : (form.exentas ? Number(form.exentas) : 0),
           tipo_pago: form.tipo_pago,
           fecha_gasto: form.fecha_gasto || undefined,
           es_inversion: form.es_inversion || false,
           categoria_activo: form.es_inversion ? form.asset_categoria : undefined,
           vida_util_meses: form.es_inversion && form.asset_vida_util_meses ? Number(form.asset_vida_util_meses) : undefined,
-          es_pago_proveedor: form.es_pago_proveedor || false,
-          supplier_id: form.supplier_id || undefined,
-          supplier_invoice_id: form.supplier_invoice_id || undefined,
+          es_pago_proveedor: form.es_anticipo_sueldo ? false : (form.es_pago_proveedor || false),
+          supplier_id: form.es_anticipo_sueldo ? undefined : (form.supplier_id || undefined),
+          supplier_invoice_id: form.es_anticipo_sueldo ? undefined : (form.supplier_invoice_id || undefined),
           monto_brl: form.moneda === "BRL" && form.monto_brl ? Number(form.monto_brl) : undefined,
+          es_anticipo_sueldo: form.es_anticipo_sueldo || false,
+          employee_id: form.es_anticipo_sueldo ? (form.employee_id || undefined) : undefined,
+          employee_nombre: form.es_anticipo_sueldo ? (form.employee_nombre || undefined) : undefined,
+          employee_ci: form.es_anticipo_sueldo ? (form.employee_ci || undefined) : undefined,
+          periodo_nomina: form.es_anticipo_sueldo ? (form.periodo_nomina || undefined) : undefined,
+          cuotas_anticipo: form.es_anticipo_sueldo && form.cuotas_anticipo ? Number(form.cuotas_anticipo) : undefined,
           ...(comprobante_url ? { comprobante_url } : {})
         })
         toast.success("Comprobante Actualizado", "Los cambios en el gasto fueron guardados exitosamente.")
@@ -581,17 +644,24 @@ export default function ExpensesPage() {
           cost_center_id: form.cost_center_id || undefined,
           monto: Number(form.monto),
           monto_brl: form.moneda === "BRL" && form.monto_brl ? Number(form.monto_brl) : undefined,
-          iva_10: form.iva_10 ? Number(form.iva_10) : undefined,
-          iva_5: form.iva_5 ? Number(form.iva_5) : undefined,
-          exentas: form.exentas ? Number(form.exentas) : undefined,
+          tipo_comprobante: form.es_anticipo_sueldo ? "recibo_dinero" : form.tipo_comprobante,
+          iva_10: form.es_anticipo_sueldo ? 0 : (form.iva_10 ? Number(form.iva_10) : undefined),
+          iva_5: form.es_anticipo_sueldo ? 0 : (form.iva_5 ? Number(form.iva_5) : undefined),
+          exentas: form.es_anticipo_sueldo ? Number(form.monto) : (form.exentas ? Number(form.exentas) : undefined),
           es_inversion: form.es_inversion || false,
           asset_nombre: form.es_inversion ? form.asset_nombre : undefined,
           asset_codigo_interno: form.es_inversion ? form.asset_codigo_interno : undefined,
           asset_categoria: form.es_inversion ? form.asset_categoria : undefined,
           asset_vida_util_meses: form.es_inversion && form.asset_vida_util_meses ? Number(form.asset_vida_util_meses) : undefined,
-          es_pago_proveedor: form.es_pago_proveedor || false,
-          supplier_id: form.supplier_id || undefined,
-          supplier_invoice_id: form.supplier_invoice_id || undefined,
+          es_pago_proveedor: form.es_anticipo_sueldo ? false : (form.es_pago_proveedor || false),
+          supplier_id: form.es_anticipo_sueldo ? undefined : (form.supplier_id || undefined),
+          supplier_invoice_id: form.es_anticipo_sueldo ? undefined : (form.supplier_invoice_id || undefined),
+          es_anticipo_sueldo: form.es_anticipo_sueldo || false,
+          employee_id: form.es_anticipo_sueldo ? (form.employee_id || undefined) : undefined,
+          employee_nombre: form.es_anticipo_sueldo ? (form.employee_nombre || undefined) : undefined,
+          employee_ci: form.es_anticipo_sueldo ? (form.employee_ci || undefined) : undefined,
+          periodo_nomina: form.es_anticipo_sueldo ? (form.periodo_nomina || undefined) : undefined,
+          cuotas_anticipo: form.es_anticipo_sueldo && form.cuotas_anticipo ? Number(form.cuotas_anticipo) : undefined,
           comprobante_url
         })
         toast.success("Comprobante Registrado", "El gasto quedó en estado Pendiente de Aprobación. Aprobalo para luego asignar la forma de pago.")
@@ -626,6 +696,12 @@ export default function ExpensesPage() {
         moneda: "PYG",
         monto_brl: "",
         tipo_cambio: "1350",
+        es_anticipo_sueldo: false,
+        employee_id: "",
+        employee_nombre: "",
+        employee_ci: "",
+        periodo_nomina: getTodayAsuncion().slice(0, 7),
+        cuotas_anticipo: "1",
       })
       setComprobanteFile(null)
       fetchAll()
@@ -2018,6 +2094,11 @@ export default function ExpensesPage() {
                                     <Package className="w-2.5 h-2.5" /> Mercaderías (Cuentas por Pagar)
                                   </span>
                                 )}
+                                {e.es_anticipo_sueldo && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                    <UserCheck className="w-2.5 h-2.5" /> Anticipo Sueldo: {e.employee_nombre || e.proveedor}
+                                  </span>
+                                )}
                               </div>
 
                               {/* Datos fiscales para ubicar el comprobante físico */}
@@ -3104,12 +3185,12 @@ export default function ExpensesPage() {
                 <span className="font-bold text-gray-700 dark:text-gray-300 block text-[11px] uppercase tracking-wider">
                   Destino del Comprobante:
                 </span>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <button
                     type="button"
-                    onClick={() => setForm((prev: any) => ({ ...prev, es_pago_proveedor: false, supplier_invoice_id: "" }))}
+                    onClick={() => setForm((prev: any) => ({ ...prev, es_pago_proveedor: false, es_anticipo_sueldo: false, supplier_invoice_id: "" }))}
                     className={`p-2.5 rounded-lg border text-left flex items-center gap-2 transition ${
-                      !form.es_pago_proveedor
+                      !form.es_pago_proveedor && !form.es_anticipo_sueldo
                         ? "bg-rose-50 border-rose-400 text-rose-800 dark:bg-rose-950/40 dark:border-rose-700 dark:text-rose-200 font-bold shadow-sm"
                         : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:bg-slate-50"
                     }`}
@@ -3117,23 +3198,54 @@ export default function ExpensesPage() {
                     <ReceiptIcon className="w-4 h-4 text-rose-500 shrink-0" />
                     <div>
                       <div className="text-xs">Gasto Operativo (OPEX)</div>
-                      <div className="text-[10px] text-gray-500 font-normal">Limpieza, papelería, servicios, fletes</div>
+                      <div className="text-[10px] text-gray-500 font-normal">Limpieza, insumos, fletes</div>
                     </div>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => setForm((prev: any) => ({ ...prev, es_pago_proveedor: true }))}
+                    onClick={() => setForm((prev: any) => ({ ...prev, es_pago_proveedor: true, es_anticipo_sueldo: false }))}
                     className={`p-2.5 rounded-lg border text-left flex items-center gap-2 transition ${
-                      form.es_pago_proveedor
+                      form.es_pago_proveedor && !form.es_anticipo_sueldo
                         ? "bg-purple-50 border-purple-400 text-purple-800 dark:bg-purple-950/40 dark:border-purple-700 dark:text-purple-200 font-bold shadow-sm"
                         : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:bg-slate-50"
                     }`}
                   >
                     <Package className="w-4 h-4 text-purple-500 shrink-0" />
                     <div>
-                      <div className="text-xs">Pago a Proveedor Mercadería</div>
-                      <div className="text-[10px] text-gray-500 font-normal">Cuentas por Pagar (Compras reventa)</div>
+                      <div className="text-xs">Pago a Proveedor</div>
+                      <div className="text-[10px] text-gray-500 font-normal">Cuentas por Pagar (Mercaderías)</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const today = getTodayAsuncion()
+                      const currentPeriod = today.slice(0, 7)
+                      setForm((prev: any) => ({
+                        ...prev,
+                        es_pago_proveedor: false,
+                        es_anticipo_sueldo: true,
+                        supplier_invoice_id: "",
+                        tipo_comprobante: "recibo_dinero",
+                        iva_10: "",
+                        iva_5: "",
+                        exentas: prev.monto || "",
+                        periodo_nomina: prev.periodo_nomina || currentPeriod,
+                        cuotas_anticipo: prev.cuotas_anticipo || "1",
+                      }))
+                    }}
+                    className={`p-2.5 rounded-lg border text-left flex items-center gap-2 transition ${
+                      form.es_anticipo_sueldo
+                        ? "bg-blue-50 border-blue-400 text-blue-800 dark:bg-blue-950/40 dark:border-blue-700 dark:text-blue-200 font-bold shadow-sm"
+                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:bg-slate-50"
+                    }`}
+                  >
+                    <UserCheck className="w-4 h-4 text-blue-500 shrink-0" />
+                    <div>
+                      <div className="text-xs">Anticipo de Sueldo</div>
+                      <div className="text-[10px] text-gray-500 font-normal">Vale / Personal SueldOK</div>
                     </div>
                   </button>
                 </div>
@@ -3428,6 +3540,183 @@ export default function ExpensesPage() {
                     <p className="text-[10px] text-purple-600 dark:text-purple-400">
                       ℹ️ Al guardar, se amortizará la deuda comercial en Cuentas por Pagar y no afectará el total de Gasto Operativo (OPEX).
                     </p>
+                  </div>
+                )}
+
+                {form.es_anticipo_sueldo && (
+                  <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-700 space-y-3 animate-in fade-in">
+                    <div className="flex items-center justify-between">
+                      <label className="font-bold text-blue-900 dark:text-blue-200 block text-[11px] flex items-center gap-1.5">
+                        <UserCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        Colaborador Beneficiario del Anticipo *
+                      </label>
+                      <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+                        {staffList.length} colaboradores activos en Nómina
+                      </span>
+                    </div>
+
+                    {/* Buscador ágil de Colaborador */}
+                    <div className="relative" ref={staffSearchRef}>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Buscar colaborador por nombre, C.I. o cargo..."
+                          className="input-field w-full text-xs pl-8 pr-8 border-blue-300 dark:border-blue-700 focus:ring-blue-500 font-semibold"
+                          value={staffSearchQuery || form.employee_nombre}
+                          onFocus={() => {
+                            if (staffList.length === 0) {
+                              setLoadingStaff(true)
+                              api.expenses.staffCandidates()
+                                .then(list => setStaffList(list))
+                                .catch(() => {})
+                                .finally(() => setLoadingStaff(false))
+                            }
+                            setStaffDropdownOpen(true)
+                          }}
+                          onChange={e => {
+                            const q = e.target.value
+                            setStaffSearchQuery(q)
+                            setForm((prev: any) => ({
+                              ...prev,
+                              employee_nombre: q,
+                              proveedor: q,
+                              descripcion: prev.descripcion && !prev.descripcion.startsWith("Anticipo de sueldo")
+                                ? prev.descripcion
+                                : `Anticipo de sueldo - ${q}`,
+                            }))
+                            setStaffDropdownOpen(true)
+                          }}
+                        />
+                        <Search className="w-4 h-4 text-blue-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        {staffSearchQuery ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setStaffSearchQuery("")
+                              setForm((prev: any) => ({
+                                ...prev,
+                                employee_id: "",
+                                employee_nombre: "",
+                                employee_ci: "",
+                                proveedor: "",
+                                ruc: "",
+                              }))
+                            }}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <ChevronDown className="w-4 h-4 text-blue-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        )}
+                      </div>
+
+                      {staffDropdownOpen && (
+                        <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 rounded-xl shadow-2xl max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 animate-in fade-in-50 zoom-in-95">
+                          <div className="px-3 py-1.5 bg-blue-50/70 dark:bg-blue-950/40 text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase tracking-wider flex justify-between items-center sticky top-0 z-10 backdrop-blur-sm border-b border-blue-100 dark:border-blue-900/50">
+                            <span>Plantel de Colaboradores ({filteredStaffCandidates.length})</span>
+                            {loadingStaff && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
+                          </div>
+
+                          {filteredStaffCandidates.length === 0 && !loadingStaff && (
+                            <div className="p-3 text-center text-xs text-gray-500">
+                              {staffSearchQuery
+                                ? <>No se encontraron colaboradores con "<strong>{staffSearchQuery}</strong>"</>
+                                : "No hay colaboradores registrados en nómina"}
+                            </div>
+                          )}
+
+                          {filteredStaffCandidates.map((s: any) => {
+                            const isSelected = form.employee_id === s.id || form.employee_ci === s.ci
+                            return (
+                              <div
+                                key={s.id}
+                                className={`p-2.5 text-xs hover:bg-blue-50 dark:hover:bg-blue-950/50 cursor-pointer transition flex items-center justify-between gap-3 ${
+                                  isSelected ? "bg-blue-100/60 dark:bg-blue-900/40" : ""
+                                }`}
+                                onMouseDown={() => {
+                                  setForm((prev: any) => ({
+                                    ...prev,
+                                    employee_id: s.id,
+                                    employee_nombre: s.nombre,
+                                    employee_ci: s.ci || "",
+                                    proveedor: s.nombre,
+                                    ruc: s.ci || "",
+                                    tipo_comprobante: "recibo_dinero",
+                                    iva_10: "",
+                                    iva_5: "",
+                                    exentas: prev.monto || "",
+                                    descripcion: `Anticipo de sueldo - ${s.nombre}${s.ci ? ` (CI ${s.ci})` : ''}`,
+                                  }))
+                                  setStaffSearchQuery("")
+                                  setStaffDropdownOpen(false)
+                                }}
+                              >
+                                <div className="space-y-0.5 min-w-0">
+                                  <div className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
+                                    <UserCircle2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                                    <span className="truncate">{s.nombre}</span>
+                                    {s.cargo && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-normal">
+                                        {s.cargo}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                                    C.I.: <strong className="font-mono text-blue-700 dark:text-blue-300">{s.ci || "S/D"}</strong>
+                                  </div>
+                                </div>
+                                {isSelected && (
+                                  <Check className="w-4 h-4 text-blue-600 shrink-0" />
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Fila con Periodo de Nómina y Cantidad de Cuotas */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-blue-100 dark:border-blue-900/40">
+                      <div>
+                        <label className="text-[11px] font-bold text-blue-900 dark:text-blue-200 block mb-1">
+                          Periodo de Nómina para Descuento (Mes) *
+                        </label>
+                        <input
+                          type="month"
+                          required
+                          className="input-field w-full text-xs font-mono"
+                          value={form.periodo_nomina || ""}
+                          onChange={e => setForm((prev: any) => ({ ...prev, periodo_nomina: e.target.value }))}
+                        />
+                        <p className="text-[10px] text-gray-500 mt-0.5">Mes en el que SueldOK deducirá el anticipo del salario neto.</p>
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-blue-900 dark:text-blue-200 block mb-1">
+                          Cantidad de Cuotas de Descuento
+                        </label>
+                        <select
+                          className="input-field w-full text-xs"
+                          value={form.cuotas_anticipo || "1"}
+                          onChange={e => setForm((prev: any) => ({ ...prev, cuotas_anticipo: e.target.value }))}
+                        >
+                          <option value="1">1 cuota (descuento íntegro fin de mes)</option>
+                          <option value="2">2 cuotas mensuales consecutivas</option>
+                          <option value="3">3 cuotas mensuales consecutivas</option>
+                          <option value="4">4 cuotas mensuales consecutivas</option>
+                        </select>
+                        <p className="text-[10px] text-gray-500 mt-0.5">Si se divide, se amortizará en partes iguales.</p>
+                      </div>
+                    </div>
+
+                    {/* Alerta de encuadre contable y fiscal */}
+                    <div className="p-2.5 rounded-lg bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-[11px] text-blue-800 dark:text-blue-300 flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-blue-600 mt-0.5" />
+                      <div>
+                        <strong>Tratamiento Contable y Fiscal:</strong> Los anticipos de sueldo son un activo exigible (cuenta a cobrar al personal), no un gasto operativo ni compra gravada. El sistema registrará el comprobante como <strong>Recibo de Dinero / Vale de Anticipo</strong> exento de IVA y lo vinculará automáticamente al módulo de nóminas de SueldOK.
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

@@ -628,6 +628,15 @@ async def export_expenses_report_pdf(
     )
 
 
+@router.get("/staff-candidates")
+async def list_staff_candidates(
+    search: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_staff_candidates(db, user["company_id"], search)
+
+
 @router.get("/{expense_id}", response_model=ExpenseResponse)
 async def get_expense(
     expense_id: str,

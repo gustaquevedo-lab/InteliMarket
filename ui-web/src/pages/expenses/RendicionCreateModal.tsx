@@ -269,6 +269,11 @@ export const RendicionCreateModal: React.FC<Props> = ({
                                 Activo Fijo
                               </span>
                             )}
+                            {exp.es_anticipo_sueldo && (
+                              <span className="px-1.5 py-0.2 text-[9px] font-extrabold rounded bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
+                                Anticipo Sueldo
+                              </span>
+                            )}
                             {exp.numero_factura && (
                               <span className="text-[10px] text-slate-400 font-mono">
                                 Fac: {exp.numero_factura}

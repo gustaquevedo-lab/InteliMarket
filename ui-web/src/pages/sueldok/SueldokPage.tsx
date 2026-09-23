@@ -176,44 +176,7 @@ export default function SueldokPage() {
   const [nominaFeedback, setNominaFeedback] = useState<string | null>(null)
 
   // Almacenamiento local reactivo para anticipos y deducciones nuevos
-  const [localAdvances, setLocalAdvances] = useState<any[]>([
-    {
-      id: "adv-1",
-      employeeId: "emp-camila",
-      nombre: "CAMILA GEOVANNA GONZALEZ ESCOBAR",
-      ci: "4801062",
-      cargo: "GERENTE",
-      depto: "JEFE OPERATIVO",
-      monto: 2500000,
-      estado: "approved",
-      motivo: "Anticipo salarial quincenal",
-      fecha: "2026-09-15",
-    },
-    {
-      id: "adv-2",
-      employeeId: "emp-nilda",
-      nombre: "NILDA AQUINO",
-      ci: "5124890",
-      cargo: "CAJERA PRINCIPAL",
-      depto: "CAJAS",
-      monto: 800000,
-      estado: "approved",
-      motivo: "Gastos médicos particulares",
-      fecha: "2026-09-12",
-    },
-    {
-      id: "adv-3",
-      employeeId: "emp-liliana",
-      nombre: "LILIANA CRISTALDO",
-      ci: "4987123",
-      cargo: "CAJERA",
-      depto: "CAJAS",
-      monto: 600000,
-      estado: "pending",
-      motivo: "Adelanto personal",
-      fecha: "2026-09-18",
-    },
-  ])
+  const [localAdvances, setLocalAdvances] = useState<any[]>([])
 
   const [localDeductions, setLocalDeductions] = useState<any[]>([
     {
@@ -530,7 +493,7 @@ export default function SueldokPage() {
 
     return [
       { name: "IPS Obrero (9%)", valor: totalIpsWorker || 9805500, color: "#3b82f6" },
-      { name: "Anticipos Quincenales", valor: totalAdvancesSum || 3900000, color: "#f59e0b" },
+      { name: "Anticipos Quincenales", valor: totalAdvancesSum, color: "#f59e0b" },
       { name: "Faltantes Arqueo POS", valor: faltantesArqueo || 247790, color: "#f43f5e" },
       { name: "Otras Retenciones", valor: otrasDeducciones || 150000, color: "#8b5cf6" },
     ]

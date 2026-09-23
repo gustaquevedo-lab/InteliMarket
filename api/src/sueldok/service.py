@@ -304,6 +304,46 @@ async def sync_cash_shortage_deduction(
     return {"status": "success", "message": "Novedad registrada localmente para nómina SueldOK", "payload": payload}
 
 
+async def sync_salary_advance_deduction(
+    db: AsyncSession,
+    company_id: str,
+    advance_data: dict,
+) -> dict:
+    """Envía novedad formal de descuento de anticipo salarial desde Fondo Fijo hacia SueldOK."""
+    res = await db.execute(
+        text("SELECT * FROM sueldok_sync_config WHERE company_id = :cid OR enabled = true LIMIT 1"),
+        {"cid": company_id},
+    )
+    row = res.mappings().first()
+    config = dict(row) if row else {"url_base": SUELDOK_BASE_URL, "api_key": SUELDOK_SYSTEM_KEY, "enabled": True}
+
+    payload = {
+        "evento": "ANTICIPO_SUELDO_FONDO_FIJO",
+        "company_id": company_id,
+        "expense_id": str(advance_data.get("id")),
+        "employee_id": str(advance_data.get("employee_id")) if advance_data.get("employee_id") else None,
+        "employee_nombre": advance_data.get("employee_nombre"),
+        "employee_ci": advance_data.get("employee_ci"),
+        "monto_total_gs": float(advance_data.get("monto", 0)),
+        "periodo_nomina": advance_data.get("periodo_nomina"),
+        "cuotas": advance_data.get("cuotas_anticipo", 1),
+        "fund_id": str(advance_data.get("fund_id")) if advance_data.get("fund_id") else None,
+        "fecha_gasto": str(advance_data.get("fecha_gasto")),
+        "comprobante_url": advance_data.get("comprobante_url"),
+        "observaciones": advance_data.get("descripcion"),
+        "registrado_por": str(advance_data.get("registrado_por")) if advance_data.get("registrado_por") else None,
+        "fecha_registro": datetime.now(timezone.utc).isoformat(),
+    }
+
+    if config.get("url_base") and config.get("enabled"):
+        try:
+            return await sync_payroll_data(db, config, payload)
+        except Exception as e:
+            return {"status": "error", "message": str(e), "payload": payload}
+
+    return {"status": "success", "message": "Novedad de anticipo registrada localmente para nómina SueldOK", "payload": payload}
+
+
 def get_available_events() -> list[str]:
     return SYNC_EVENTS
 

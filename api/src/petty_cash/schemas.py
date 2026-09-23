@@ -133,6 +133,13 @@ class ExpenseCreate(BaseModel):
     es_pago_proveedor: Optional[bool] = False
     supplier_id: Optional[str] = None
     supplier_invoice_id: Optional[str] = None
+    # Clasificación Anticipo de Sueldo (Nómina / SueldOK)
+    es_anticipo_sueldo: Optional[bool] = False
+    employee_id: Optional[str] = None
+    employee_nombre: Optional[str] = None
+    employee_ci: Optional[str] = None
+    periodo_nomina: Optional[str] = None
+    cuotas_anticipo: Optional[int] = 1
     monto_brl: Optional[Decimal] = None
     notas: Optional[str] = None
 
@@ -162,6 +169,13 @@ class ExpenseUpdate(BaseModel):
     es_pago_proveedor: Optional[bool] = None
     supplier_id: Optional[str] = None
     supplier_invoice_id: Optional[str] = None
+    # Clasificación Anticipo de Sueldo (Nómina / SueldOK)
+    es_anticipo_sueldo: Optional[bool] = None
+    employee_id: Optional[str] = None
+    employee_nombre: Optional[str] = None
+    employee_ci: Optional[str] = None
+    periodo_nomina: Optional[str] = None
+    cuotas_anticipo: Optional[int] = None
     monto_brl: Optional[Decimal] = None
     fecha_gasto: Optional[date] = None
     notas: Optional[str] = None
@@ -269,6 +283,15 @@ class ExpenseResponse(BaseModel):
     es_pago_proveedor: bool = False
     supplier_id: Optional[UUID] = None
     supplier_invoice_id: Optional[UUID] = None
+    # Clasificación Anticipo de Sueldo (Nómina / SueldOK)
+    es_anticipo_sueldo: bool = False
+    employee_id: Optional[UUID] = None
+    employee_nombre: Optional[str] = None
+    employee_ci: Optional[str] = None
+    periodo_nomina: Optional[str] = None
+    cuotas_anticipo: Optional[int] = 1
+    sueldok_sync_status: Optional[str] = "pendiente"
+    sueldok_sync_id: Optional[str] = None
     # Auditoría
     auditoria_estado: Optional[str] = "pendiente"
     auditoria_motivo: Optional[str] = None

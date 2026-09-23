@@ -1239,6 +1239,14 @@ export interface Expense {
   es_pago_proveedor?: boolean;
   supplier_id?: string | null;
   supplier_invoice_id?: string | null;
+  es_anticipo_sueldo?: boolean;
+  employee_id?: string | null;
+  employee_nombre?: string | null;
+  employee_ci?: string | null;
+  periodo_nomina?: string | null;
+  cuotas_anticipo?: number;
+  sueldok_sync_status?: string | null;
+  sueldok_sync_id?: string | null;
   auditoria_estado?: string;
   auditoria_motivo?: string;
   registrado_por?: string;
@@ -3533,6 +3541,7 @@ export const api = {
       list: () => client.get<CostCenter[]>("/v1/expenses/cost-centers"),
       create: (data: any) => client.post<CostCenter>("/v1/expenses/cost-centers", data),
     },
+    staffCandidates: (search?: string) => client.get<{ id: string; nombre: string; email?: string; rol?: string; ci?: string }[]>("/v1/expenses/staff-candidates", { search }),
     list: (params?: { branch_id?: string; fund_id?: string; rendicion_id?: string; sin_rendicion?: boolean; category_id?: string; estado?: string; desde?: string; hasta?: string; search?: string; monto?: number; monto_min?: number; monto_max?: number; limit?: number; offset?: number }) => client.get<Expense[]>("/v1/expenses", params as any),
     rendiciones: {
       list: (params?: { fund_id?: string; estado?: string }) => client.get<PettyCashRendicion[]>("/v1/petty-cash-funds/rendiciones", params as any),
