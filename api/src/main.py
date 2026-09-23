@@ -326,6 +326,25 @@ async def download_salon_apk():
     return {"error": "APK de Salón no encontrado"}
 
 
+@app.get("/download/conteo-apk")
+@app.get("/download/extra-conteo.apk")
+async def download_conteo_apk():
+    candidate_paths = [
+        Path("/home/intellihouse/intelimarket/downloads/extra-conteo.apk"),
+        Path("/home/intellihouse/intelimarket/ui-web-dist/downloads/extra-conteo.apk"),
+        Path("/home/intellihouse/intelimarket/ui-web/public/downloads/extra-conteo.apk"),
+    ]
+    for cp in candidate_paths:
+        if cp.exists():
+            return FileResponse(
+                path=str(cp),
+                filename="extra-conteo.apk",
+                media_type="application/vnd.android.package-archive",
+                headers={"Content-Disposition": "attachment; filename=extra-conteo.apk"}
+            )
+    return {"error": "APK de Conteo no encontrado"}
+
+
 
 _UPLOADS_DIR = Path(__file__).resolve().parents[2] / "uploads"
 _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)

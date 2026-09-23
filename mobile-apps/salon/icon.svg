@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bgGradSal" cx="50%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#00358e" />
+      <stop offset="45%" stop-color="#002665" />
+      <stop offset="85%" stop-color="#060f22" />
+      <stop offset="100%" stop-color="#020611" />
+    </radialGradient>
+    <linearGradient id="greenGradSal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34D399" />
+      <stop offset="40%" stop-color="#00A651" />
+      <stop offset="100%" stop-color="#04713C" />
+    </linearGradient>
+    <linearGradient id="orangeSal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFA24C" />
+      <stop offset="40%" stop-color="#FF6305" />
+      <stop offset="100%" stop-color="#C84800" />
+    </linearGradient>
+    <filter id="greenGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="dropShadowSal" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.65" />
+    </filter>
+  </defs>
+
+  <!-- Fondo squircle premium -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGradSal)" />
+  <rect width="506" height="506" x="3" y="3" rx="109" fill="none" stroke="url(#greenGradSal)" stroke-width="5" opacity="0.45" />
+
+  <!-- Luz ambiental verde frescura -->
+  <circle cx="256" cy="215" r="140" fill="#00A651" opacity="0.13" filter="url(#greenGlow)" />
+
+  <!-- Icono Central: Carrito de Salón + Fleje / Etiqueta de Precio + Góndola -->
+  <g transform="translate(90, 80)" filter="url(#dropShadowSal)">
+    <!-- Canasta del Carrito de Supermercado -->
+    <!-- Mango ergonómico -->
+    <path d="M 30 55 L 68 55 L 105 160 L 260 160 L 285 75 L 85 75"
+          fill="none" stroke="url(#greenGradSal)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+
+    <!-- Rejilla metálica del carrito -->
+    <line x1="120" y1="95" x2="272" y2="95" stroke="#E2E8F0" stroke-width="5" stroke-linecap="round" opacity="0.9" />
+    <line x1="135" y1="125" x2="258" y2="125" stroke="#E2E8F0" stroke-width="5" stroke-linecap="round" opacity="0.9" />
+    <line x1="150" y1="75" x2="135" y2="155" stroke="#94A3B8" stroke-width="4" opacity="0.7" />
+    <line x1="195" y1="75" x2="185" y2="155" stroke="#94A3B8" stroke-width="4" opacity="0.7" />
+    <line x1="240" y1="75" x2="235" y2="155" stroke="#94A3B8" stroke-width="4" opacity="0.7" />
+
+    <!-- Chasis y Ruedas -->
+    <path d="M 85 190 L 250 190" stroke="#475569" stroke-width="8" stroke-linecap="round" />
+    <circle cx="120" cy="208" r="24" fill="#090D16" stroke="url(#orangeSal)" stroke-width="7" />
+    <circle cx="120" cy="208" r="8" fill="#FFFFFF" />
+
+    <circle cx="235" cy="208" r="24" fill="#090D16" stroke="url(#orangeSal)" stroke-width="7" />
+    <circle cx="235" cy="208" r="8" fill="#FFFFFF" />
+
+    <!-- Etiqueta de Precio / Fleje Flotante con Código de Barras (Operaciones de Salón) -->
+    <g transform="translate(160, 20) rotate(12)">
+      <!-- Tag Background -->
+      <path d="M 12 0 L 80 0 C 88 0 95 7 95 15 L 95 55 C 95 63 88 70 80 70 L 12 70 C 4 70 -2 63 -2 55 L -2 15 C -2 7 4 0 12 0 Z"
+            fill="url(#orangeSal)" stroke="#FFFFFF" stroke-width="3" filter="url(#dropShadowSal)" />
+      <!-- Ojal de la etiqueta -->
+      <circle cx="12" cy="35" r="5" fill="#002665" />
+      <!-- Código de barras simulado en fleje -->
+      <line x1="30" y1="18" x2="30" y2="52" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" />
+      <line x1="40" y1="18" x2="40" y2="52" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" />
+      <line x1="48" y1="18" x2="48" y2="52" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" />
+      <line x1="60" y1="18" x2="60" y2="52" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" />
+      <line x1="70" y1="18" x2="70" y2="52" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" />
+      <line x1="80" y1="18" x2="80" y2="52" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" />
+    </g>
+
+    <!-- Destello de Frescura / Calidad Extra en Góndola -->
+    <polygon points="50,15 54,27 66,31 54,35 50,47 46,35 34,31 46,27" fill="#34D399" filter="url(#greenGlow)" />
+  </g>
+
+  <!-- Badge EXTRA SALÓN -->
+  <g transform="translate(108, 388)">
+    <rect width="296" height="58" rx="29" fill="url(#orangeSal)" filter="url(#dropShadowSal)" />
+    <rect width="292" height="54" x="2" y="2" rx="27" fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.3" />
+    <text x="148" y="38" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif" font-weight="900" font-size="22" text-anchor="middle" letter-spacing="4">
+      EXTRA SALÓN
+    </text>
+  </g>
+</svg>

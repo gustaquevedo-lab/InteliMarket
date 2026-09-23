@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import {
   Camera, CameraOff, Loader2, Package, Check, X, Plus,
   Calendar, Hash, ImagePlus, ChevronRight, ClipboardList,
-  AlertTriangle, CheckCircle2, Search,
+  AlertTriangle, CheckCircle2, Search, Download,
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -307,12 +307,23 @@ export default function ConteoVencimientosPage() {
   if (!session) {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex flex-col">
-        <div className="p-4 pt-6 border-b border-slate-800">
-          <div className="flex items-center gap-2">
-            <ClipboardList className="w-6 h-6 text-blue-400" />
-            <h1 className="text-lg font-black">Conteo & Vencimientos</h1>
+        <div className="p-4 pt-6 border-b border-slate-800 flex items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <ClipboardList className="w-6 h-6 text-cyan-400" />
+              <h1 className="text-lg font-black">Conteo & Vencimientos</h1>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">Extra Salón — recorré la góndola, contá y registrá vencimientos.</p>
           </div>
-          <p className="text-xs text-slate-400 mt-1">Extra Salón — recorré la góndola, contá y registrá vencimientos.</p>
+          <a
+            href="/download/extra-conteo.apk"
+            download="extra-conteo.apk"
+            title="Descargar APK Nativo Android Extra Conteo"
+            className="px-2.5 py-1.5 rounded-2xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-700 dark:text-cyan-400 hover:bg-cyan-500/25 active:scale-95 transition cursor-pointer flex items-center gap-1.5 text-xs font-black shadow-sm shrink-0"
+          >
+            <Download className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+            <span className="hidden sm:inline">DESCARGAR APK</span>
+          </a>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-5">
