@@ -630,46 +630,22 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
 
         check = await get_credit_check(db, str(data.company_id), str(data.customer_id), monto_credito)
 
-        # ── Excepcion de admin cuando el cliente no tiene linea de credito ──
-        # Pedido explicito: sin linea de credito no se puede vender a
-        # credito, salvo que un admin lo autorice -- en ese caso se crea una
-        # cuenta de credito real, con limite justo para esta compra, en vez
-        # de saltarse el control contable. La venta sigue pasando por el
-        # mismo camino auditado de siempre (get_credit_check de nuevo).
-        if check.get("no_account") and data.admin_override_credito and data.user_id:
-            admin_result = await db.execute(select(User).where(User.id == data.user_id))
-            admin_user = admin_result.scalar_one_or_none()
-            if admin_user and (admin_user.rol == "admin" or admin_user.is_superadmin):
-                db.add(CreditAccount(
-                    company_id=data.company_id,
-                    customer_id=data.customer_id,
-                    limite_credito=monto_credito,
-                    saldo_utilizado=Decimal("0"),
-                    saldo_disponible=monto_credito,
-                    activo=True,
-                ))
-                await db.flush()
-                check = await get_credit_check(db, str(data.company_id), str(data.customer_id), monto_credito)
-
         if check.get("no_account"):
-            raise ValueError("El cliente no posee una cuenta de crédito o Extra Club.")
+            raise ValueError("El cliente no posee una cuenta de crédito o Extra Club activa.")
         if check.get("inactive"):
             raise ValueError("La cuenta de crédito del cliente se encuentra inactiva.")
 
-        is_authorized_override = False
-        if getattr(data, "admin_override_credito", False) and data.user_id:
-            admin_result = await db.execute(select(User).where(User.id == data.user_id))
-            admin_user = admin_result.scalar_one_or_none()
-            if admin_user and (admin_user.rol in ("admin", "administrador", "gerente", "supervisor") or admin_user.is_superadmin):
-                is_authorized_override = True
-
-        if not check["ok"] and not is_authorized_override:
+        # ── REGLA GENERAL INMUTABLE E INELUDIBLE: SIN DISPONIBLE NO SE PUEDE FACTURAR A CRÉDITO ──
+        # Si el cliente no tiene saldo disponible suficiente para cubrir la compra,
+        # la venta se rechaza terminantemente. No se permite bajo ningún concepto ni autorización.
+        if not check.get("ok"):
             disp = check.get("saldo_disponible", Decimal("0"))
             lim = check.get("limite_credito", Decimal("0"))
             motivo_mora = f" (en mora por {check.get('dias_mora', 0)} días)" if check.get("en_mora") else ""
             raise ValueError(
                 f"Línea de crédito insuficiente{motivo_mora}: el cliente dispone de {disp:,.0f} Gs. de {lim:,.0f} Gs. "
-                f"Monto a crédito solicitado: {monto_credito:,.0f} Gs. No se puede cerrar la venta sin línea suficiente."
+                f"Monto a crédito solicitado: {monto_credito:,.0f} Gs. "
+                f"Regla ineludible: no se puede facturar a crédito sin saldo disponible. Cobre con otro medio de pago."
             )
 
         credit_result = await process_purchase(
@@ -678,7 +654,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             str(data.customer_id),
             monto_credito,
             sale.id,
-            bypass_limit=is_authorized_override,
+            bypass_limit=False,
         )
         if "error" in credit_result:
             raise ValueError(f"Error en cuenta de crédito: {credit_result['error']}")

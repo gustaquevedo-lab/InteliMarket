@@ -6988,6 +6988,20 @@ export default function POSPage() {
       return
     }
 
+    // ── REGLA GENERAL INELUDIBLE: BLOQUEO RADICAL DE EXTRA CLUB SIN DISPONIBLE ──
+    const montoExtraClubCheck = activeMethods.has("extra_club") ? (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg) : 0
+    if (montoExtraClubCheck > 0) {
+      const tieneLinea = extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.activo
+      const disponible = Number(extraClubCredit && extraClubCredit !== "loading" ? extraClubCredit.saldo_disponible : 0)
+      if (!tieneLinea || disponible < montoExtraClubCheck) {
+        toast.error(
+          "Venta bloqueada: Crédito insuficiente",
+          `El cliente dispone de ${formatPYG(disponible)} y la compra es de ${formatPYG(montoExtraClubCheck)}. Regla general ineludible: no se puede facturar con Extra Club sin saldo disponible. Debe cobrar con otro medio de pago.`
+        )
+        return
+      }
+    }
+
     setSubmitting(true)
     try {
       const saleNumber = `${puntoEmision}-${String(Math.floor(Math.random() * 900000) + 100000).padStart(7, "0")}`
@@ -12733,6 +12747,13 @@ export default function POSPage() {
                                 </div>
                               </div>
                             )}
+
+                            {extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.saldo_disponible < (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg) && (
+                              <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-2">
+                                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                                <span>Saldo insuficiente. Regla ineludible: no se puede facturar con Extra Club sin disponible. Debe cobrar en otro medio de pago.</span>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -13178,8 +13199,16 @@ export default function POSPage() {
                         return
                       }
                       const tieneLinea = extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.activo
-                      if (!tieneLinea && !extraClubAdminOverride) {
-                        toast.warning("Sin línea de crédito", "Este cliente no tiene cuenta de crédito activa. Solo un admin puede autorizar la excepción.")
+                      if (!tieneLinea) {
+                        toast.error("Sin cuenta de crédito activa", "Este cliente no tiene cuenta de crédito activa. No se puede cobrar con Extra Club.")
+                        return
+                      }
+                      const disponible = Number(extraClubCredit.saldo_disponible || 0)
+                      if (disponible < montoExtraClub) {
+                        toast.error(
+                          "Crédito insuficiente",
+                          `El cliente dispone de ${formatPYG(disponible)} y la compra es de ${formatPYG(montoExtraClub)}. Regla ineludible: no se puede facturar a crédito sin saldo disponible bajo ninguna autorización. Cobre con otro medio de pago.`
+                        )
                         return
                       }
                       requestSupervisorAuthorization({ type: "extra_club_payment" })
@@ -13187,16 +13216,24 @@ export default function POSPage() {
                     }
                     handleProcessCheckout()
                   }}
-                  disabled={submitting}
-                  className="flex-1 max-w-lg py-3 px-6 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm shadow-md shadow-emerald-600/30 flex items-center justify-center gap-2 transition cursor-pointer active:scale-[0.99] disabled:opacity-50"
+                  disabled={submitting || (activeMethods.has("extra_club") && Boolean(extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.saldo_disponible < (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg)))}
+                  className={`flex-1 max-w-lg py-3 px-6 rounded-xl font-black text-sm shadow-md flex items-center justify-center gap-2 transition cursor-pointer active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed ${
+                    activeMethods.has("extra_club") && extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.saldo_disponible < (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg)
+                      ? "bg-rose-600 text-white shadow-rose-600/30"
+                      : "bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/30"
+                  }`}
                 >
                   {submitting ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
                     <>
                       <Printer className="w-4 h-4" />
-                      <span>Confirmar Cobro e Imprimir Factura</span>
-                      <span className="text-[10px] font-mono bg-emerald-700/80 px-1.5 py-0.5 rounded border border-emerald-400/40 text-emerald-100">F12 / Enter</span>
+                      <span>
+                        {activeMethods.has("extra_club") && extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.saldo_disponible < (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg)
+                          ? "Crédito Insuficiente (Bloqueado)"
+                          : "Confirmar Cobro e Imprimir Factura"}
+                      </span>
+                      <span className="text-[10px] font-mono bg-black/20 px-1.5 py-0.5 rounded border border-white/20 text-white">F12 / Enter</span>
                     </>
                   )}
                 </button>
