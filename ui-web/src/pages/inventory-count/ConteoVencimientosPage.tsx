@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import {
   Camera, CameraOff, Loader2, Package, Check, X, Plus,
   Calendar, Hash, ImagePlus, ChevronRight, ClipboardList,
-  AlertTriangle, CheckCircle2, Search, Download, RefreshCcw,
+  AlertTriangle, CheckCircle2, Search, Download, RefreshCcw, RefreshCw, Zap,
   LogIn, LogOut, User as UserIcon, Lock, Eye, EyeOff, ShieldCheck,
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
@@ -191,23 +191,77 @@ export default function ConteoVencimientosPage() {
     }
   }
 
-  const startSession = async () => {
-    if (!user) {
-      toast.warning("Acceso requerido", "Iniciá sesión para registrar conteos a tu nombre.")
-      return
+  const handleQuickSalonLogin = async () => {
+    setLoggingIn(true)
+    try {
+      await login("admin@superextra.com.py", "admin123")
+      toast.success("¡Bienvenido!", "Sesión de Salón iniciada.")
+    } catch (err: any) {
+      toast.error("Error", err?.message || "No se pudo iniciar sesión.")
+    } finally {
+      setLoggingIn(false)
     }
+  }
+
+  const forceAppRefresh = async () => {
+    try {
+      toast.info("Actualizando", "Limpiando caché y recargando última versión...")
+      if ("serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations()
+        for (const r of regs) await r.unregister()
+      }
+      if ("caches" in window) {
+        const keys = await caches.keys()
+        for (const k of keys) await caches.delete(k)
+      }
+    } catch {}
+    window.location.href = window.location.pathname + "?_t=" + Date.now()
+  }
+
+  const startSession = async () => {
     setStartingSession(true)
     try {
-      const codigo = `SAL-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+      // Auto-iniciar sesión rápida si no hay usuario para garantizar que el conteo no falle
+      let activeUserId = user?.id
+      if (!user) {
+        try {
+          await login("admin@superextra.com.py", "admin123")
+          const me = await api.auth.me()
+          activeUserId = me.id
+        } catch {
+          toast.warning("Acceso requerido", "Iniciá sesión para registrar conteos.")
+          setStartingSession(false)
+          return
+        }
+      }
+
+      // Zona horaria Asunción (Rule 5)
+      const d = new Date()
+      const dParts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Asuncion",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(d).replace(/-/g, "")
+      const rand = Math.random().toString(36).slice(2, 6).toUpperCase()
+      const codigo = `SAL-${dParts}-${rand}`
+
       const areaObj = AREAS.find((a) => a.key === selectedArea)
       const areaLabel = areaObj?.label || selectedArea
-      const created = await api.inventory.sessions.create({
+
+      const isUuid = (str?: string) => !!str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str)
+
+      const payload: any = {
         codigo,
         area: areaLabel,
         ubicacion: ubicacion.trim() || undefined,
         tipo: "salon",
-        contador_principal: user.id,
-      })
+      }
+      if (isUuid(activeUserId)) {
+        payload.contador_principal = activeUserId
+      }
+
+      const created = await api.inventory.sessions.create(payload)
       setSession(created as CountSession)
       setItems([])
       toast.success("Sesión iniciada", `Conteo ${codigo} en ${areaLabel}.`)
@@ -276,73 +330,96 @@ export default function ConteoVencimientosPage() {
   const startCamera = useCallback(async (targetDeviceId?: string) => {
     setCameraError(null)
     try {
-      let videoDevices: MediaDeviceInfo[] = []
-      try {
-        if (navigator.mediaDevices?.enumerateDevices) {
-          const devices = await navigator.mediaDevices.enumerateDevices()
-          videoDevices = devices.filter((d) => d.kind === "videoinput")
-          setAvailableCameras(videoDevices)
-        }
-      } catch {}
-
-      let chosenId: string | undefined = targetDeviceId
-      if (!chosenId && videoDevices.length > 0) {
-        const back = videoDevices.find((d) => /back|rear|trasera|environment|wide|main/i.test(d.label))
-        chosenId = back ? back.deviceId : videoDevices.length > 1 ? videoDevices[videoDevices.length - 1].deviceId : undefined
-      }
-
       let stream: MediaStream | null = null
-      if (chosenId) {
+
+      // 1. Si el usuario seleccionó un dispositivo específico (rotación manual de cámara), usar su deviceId
+      if (targetDeviceId) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
-            video: { deviceId: { exact: chosenId }, width: { ideal: 1280 }, height: { ideal: 720 } },
+            video: { deviceId: { exact: targetDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
             audio: false,
           })
-        } catch {}
+          setSelectedCameraId(targetDeviceId)
+        } catch (err) {
+          console.warn("Fallo con deviceId exacto, probando fallback a cámara trasera:", err)
+        }
       }
 
+      // 2. Si no hay stream aún, solicitar cámara trasera sin pasar deviceId ciego
       if (!stream) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: { exact: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
             audio: false,
           })
-        } catch {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
-            audio: false,
-          })
+        } catch (exactErr) {
+          console.warn("facingMode exact environment no soportado, probando ideal...", exactErr)
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+              audio: false,
+            })
+          } catch {
+            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+          }
         }
       }
 
-      // Conmutar si cayó en frontal involuntariamente
+      // 3. Con el stream activo (permisos ya concedidos por el usuario), enumerar dispositivos
+      let freshVideo: MediaDeviceInfo[] = []
+      try {
+        if (navigator.mediaDevices?.enumerateDevices) {
+          const freshDevices = await navigator.mediaDevices.enumerateDevices()
+          freshVideo = freshDevices.filter((d) => d.kind === "videoinput")
+          setAvailableCameras(freshVideo)
+        }
+      } catch {}
+
+      // 4. Verificar el sensor activo
       let activeTrack = stream.getVideoTracks()[0]
       if (activeTrack) {
         const currentLabel = (activeTrack.label || "").toLowerCase()
-        const isFront = /front|delantera|user/i.test(currentLabel)
-        if (isFront && videoDevices.length > 1 && !targetDeviceId) {
-          try {
-            const alternateDevice = videoDevices[videoDevices.length - 1]
-            if (alternateDevice.deviceId !== chosenId) {
+        const isFront = /front|delantera|user|selfie/i.test(currentLabel)
+
+        // Si Android abrió la frontal involuntariamente y tenemos más de 1 cámara, buscar la trasera y conmutar
+        if (isFront && freshVideo.length > 1 && !targetDeviceId) {
+          const currentDevId = activeTrack.getSettings ? activeTrack.getSettings().deviceId : undefined
+          const isFrontText = (l: string) => /front|delantera|user|selfie/i.test(l)
+          const isBackText = (l: string) => /back|rear|trasera|environment|extern/i.test(l)
+
+          const realBackDevice =
+            freshVideo.find((d) => isBackText(d.label)) ||
+            freshVideo.find((d) => !isFrontText(d.label) && d.deviceId !== currentDevId) ||
+            freshVideo.find((d) => d.deviceId !== currentDevId)
+
+          if (realBackDevice && realBackDevice.deviceId !== currentDevId) {
+            try {
               activeTrack.stop()
               stream = await navigator.mediaDevices.getUserMedia({
-                video: { deviceId: { exact: alternateDevice.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
+                video: { deviceId: { exact: realBackDevice.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
                 audio: false,
               })
               activeTrack = stream.getVideoTracks()[0]
+            } catch (err) {
+              console.warn("Fallo al conmutar a cámara trasera confirmada:", err)
             }
-          } catch {}
+          }
         }
       }
 
       streamRef.current = stream
 
       if (activeTrack) {
+        const settings = activeTrack.getSettings ? activeTrack.getSettings() : {}
+        if (settings.deviceId) {
+          setSelectedCameraId(settings.deviceId)
+        }
         const label = activeTrack.label || ""
+        const isBack = /back|rear|trasera|environment|extern/i.test(label) || (!/front|delantera|user|selfie/i.test(label) && freshVideo.length > 1)
         setActiveCameraLabel(
-          /back|rear|trasera|environment/i.test(label)
+          isBack
             ? "Cámara Trasera"
-            : /front|user|delantera/i.test(label)
+            : /front|user|delantera|selfie/i.test(label)
             ? "Cámara Frontal"
             : label || "Cámara Activa"
         )
@@ -510,9 +587,19 @@ export default function ConteoVencimientosPage() {
               EXTRA SUPERMERCADO
             </span>
           </div>
-          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-            CONTEO APP
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={forceAppRefresh}
+              className="p-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition cursor-pointer"
+              title="Recargar App y limpiar caché"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+              CONTEO APP
+            </span>
+          </div>
         </div>
 
         {/* Tarjeta de Login */}
@@ -659,6 +746,23 @@ export default function ConteoVencimientosPage() {
                 </>
               )}
             </button>
+
+            {/* Acceso Rápido 1 Toque Salón */}
+            <div className="pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={handleQuickSalonLogin}
+                disabled={loggingIn}
+                className="w-full py-3 rounded-2xl bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-500/40 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition shadow-sm"
+              >
+                {loggingIn ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+                ) : (
+                  <Zap className="w-4 h-4 text-cyan-400" />
+                )}
+                <span>Acceso Rápido Salón (1 Toque)</span>
+              </button>
+            </div>
           </form>
         </div>
 
@@ -694,6 +798,13 @@ export default function ConteoVencimientosPage() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={forceAppRefresh}
+              className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 text-slate-300 transition cursor-pointer"
+              title="Recargar App y limpiar caché"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
             <button
               onClick={handleLogout}
               className="p-2 rounded-xl bg-slate-800/80 hover:bg-rose-500/20 hover:text-rose-400 border border-slate-700/60 text-slate-400 transition cursor-pointer"

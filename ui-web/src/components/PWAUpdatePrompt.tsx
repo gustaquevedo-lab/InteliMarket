@@ -22,14 +22,39 @@ export function PWAUpdatePrompt() {
 
   useEffect(() => {
     setPwaUpdateState(needRefresh[0], () => updateServiceWorker(true))
-    if (needRefresh[0] && !notified.current) {
-      notified.current = true
-      toast.info(
-        "Actualización disponible",
-        "Se aplicará sola la próxima vez que se cierre sesión o se reinicie la aplicación, sin interrumpir la venta actual."
+    if (needRefresh[0]) {
+      const isPosActive = typeof window !== "undefined" && (
+        window.location.pathname.startsWith("/pos") && !!localStorage.getItem("current_cash_session")
       )
+      if (!isPosActive) {
+        // En aplicaciones móviles (Salón, Conteo, Depósito, Supervisor) o ERP web:
+        // aplicar la nueva versión de inmediato sin esperar a reinicio manual
+        updateServiceWorker(true)
+      } else if (!notified.current) {
+        notified.current = true
+        toast.info(
+          "Actualización disponible",
+          "Se aplicará sola la próxima vez que se cierre sesión o se reinicie la aplicación, sin interrumpir la venta actual."
+        )
+      }
     }
   }, [needRefresh, toast, updateServiceWorker])
+
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+      let refreshing = false
+      const onControllerChange = () => {
+        if (!refreshing) {
+          refreshing = true
+          window.location.reload()
+        }
+      }
+      navigator.serviceWorker.addEventListener("controllerchange", onControllerChange)
+      return () => {
+        navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange)
+      }
+    }
+  }, [])
 
   return null
 }

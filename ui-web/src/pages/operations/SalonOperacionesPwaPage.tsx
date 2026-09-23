@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import {
   UtensilsCrossed, Tag, Monitor,
-  Plus, Check, X, RefreshCcw, Trash2,
+  Plus, Check, X, RefreshCcw, RefreshCw, Trash2,
   Clock, Scan, Printer, Download,
   Sun, Moon,
   Loader2, Thermometer,
@@ -689,6 +689,22 @@ export default function SalonOperacionesPwaPage() {
     }
   }, [products, toast])
 
+  // ── FORZAR ACTUALIZACIÓN Y LIMPIEZA DE CACHÉ DE LA APP ──
+  const forceAppRefresh = async () => {
+    try {
+      toast.info("Actualizando", "Limpiando caché y recargando última versión...")
+      if ("serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations()
+        for (const r of regs) await r.unregister()
+      }
+      if ("caches" in window) {
+        const keys = await caches.keys()
+        for (const k of keys) await caches.delete(k)
+      }
+    } catch {}
+    window.location.href = window.location.pathname + "?_t=" + Date.now()
+  }
+
   // ── DETECCIÓN CONTINUA CON BARCODE DETECTOR NATIVO DE CÁMARA ──
   const startCamera = async (targetDeviceId?: string) => {
     setCameraError(null)
@@ -702,50 +718,28 @@ export default function SalonOperacionesPwaPage() {
         streamRef.current = null
       }
 
-      // 1. Enumerar dispositivos de video disponibles antes de pedir stream
-      let videoDevices: MediaDeviceInfo[] = []
-      try {
-        if (navigator.mediaDevices?.enumerateDevices) {
-          const devices = await navigator.mediaDevices.enumerateDevices()
-          videoDevices = devices.filter(d => d.kind === "videoinput")
-          setAvailableCameras(videoDevices)
-        }
-      } catch (e) {
-        console.warn("No se pudieron enumerar dispositivos previos:", e)
-      }
-
-      let chosenId = targetDeviceId || selectedCameraId
-      if (!chosenId && videoDevices.length > 0) {
-        // Buscar cámara trasera por label
-        const back = videoDevices.find(d => /back|rear|trasera|environment|wide|main/i.test(d.label))
-        if (back) {
-          chosenId = back.deviceId
-        } else if (videoDevices.length > 1) {
-          // En Android WebView la trasera suele ser el último índice (mientras que 0 suele ser la frontal)
-          chosenId = videoDevices[videoDevices.length - 1].deviceId
-        }
-      }
-
       let stream: MediaStream | null = null
 
-      // A) Si tenemos un deviceId específico elegido, intentar abrirlo directamente
-      if (chosenId) {
+      // 1. Si el usuario seleccionó un dispositivo específico (rotación manual de cámara), usar su deviceId
+      if (targetDeviceId) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             video: {
-              deviceId: { exact: chosenId },
+              deviceId: { exact: targetDeviceId },
               width: { ideal: 1280 },
               height: { ideal: 720 },
             },
             audio: false,
           })
-          setSelectedCameraId(chosenId)
+          setSelectedCameraId(targetDeviceId)
         } catch (err) {
-          console.warn("Fallo con deviceId exacto, probando constraints de cámara trasera...", err)
+          console.warn("Fallo con deviceId exacto, probando fallback a cámara trasera:", err)
         }
       }
 
-      // B) Si no hay stream aún, forzar cámara trasera mediante facingMode exact y luego ideal
+      // 2. Si no hay stream aún, solicitar cámara trasera sin pasar deviceId ciego
+      // En Android WebView (Chromium), facingMode: { exact: "environment" } garantiza
+      // que el sistema operativo enlace con LENS_FACING_BACK (cámara trasera principal).
       if (!stream) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
@@ -756,43 +750,66 @@ export default function SalonOperacionesPwaPage() {
             },
             audio: false,
           })
-        } catch {
-          // Fallback con ideal
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: { ideal: "environment" },
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
-            audio: false,
-          })
+        } catch (exactErr) {
+          console.warn("facingMode exact environment no soportado, probando ideal...", exactErr)
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                facingMode: { ideal: "environment" },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              },
+              audio: false,
+            })
+          } catch {
+            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+          }
         }
       }
 
-      // C) Verificar si Android WebView asignó la cámara frontal por error cuando se quería trasera
+      // 3. Con el stream activo (permisos ya concedidos por el usuario), enumerar dispositivos
+      // Ahora sí los labels vienen poblados desde Android ("camera2 0, facing back", etc.)
+      let freshVideo: MediaDeviceInfo[] = []
+      try {
+        if (navigator.mediaDevices?.enumerateDevices) {
+          const freshDevices = await navigator.mediaDevices.enumerateDevices()
+          freshVideo = freshDevices.filter(d => d.kind === "videoinput")
+          setAvailableCameras(freshVideo)
+        }
+      } catch {}
+
+      // 4. Verificar el sensor activo
       let activeTrack = stream.getVideoTracks()[0]
       if (activeTrack) {
         const currentLabel = (activeTrack.label || "").toLowerCase()
-        const isFront = /front|delantera|user/i.test(currentLabel)
+        const isFront = /front|delantera|user|selfie/i.test(currentLabel)
 
-        // Si cayó en la frontal y tenemos más dispositivos disponibles, forzar el último dispositivo (trasera)
-        if (isFront && videoDevices.length > 1 && !targetDeviceId) {
-          try {
-            const alternateDevice = videoDevices[videoDevices.length - 1]
-            if (alternateDevice.deviceId !== chosenId) {
+        // Si Android abrió la frontal involuntariamente y tenemos más de 1 cámara, buscar la trasera y conmutar
+        if (isFront && freshVideo.length > 1 && !targetDeviceId) {
+          const currentDevId = activeTrack.getSettings ? activeTrack.getSettings().deviceId : undefined
+          const isFrontText = (l: string) => /front|delantera|user|selfie/i.test(l)
+          const isBackText = (l: string) => /back|rear|trasera|environment|extern/i.test(l)
+
+          const realBackDevice =
+            freshVideo.find(d => isBackText(d.label)) ||
+            freshVideo.find(d => !isFrontText(d.label) && d.deviceId !== currentDevId) ||
+            freshVideo.find(d => d.deviceId !== currentDevId)
+
+          if (realBackDevice && realBackDevice.deviceId !== currentDevId) {
+            try {
               activeTrack.stop()
               stream = await navigator.mediaDevices.getUserMedia({
                 video: {
-                  deviceId: { exact: alternateDevice.deviceId },
+                  deviceId: { exact: realBackDevice.deviceId },
                   width: { ideal: 1280 },
                   height: { ideal: 720 },
                 },
                 audio: false,
               })
               activeTrack = stream.getVideoTracks()[0]
+            } catch (err) {
+              console.warn("Fallo al conmutar a cámara trasera confirmada:", err)
             }
-          } catch (altErr) {
-            console.warn("No se pudo conmutar al dispositivo alternativo:", altErr)
           }
         }
       }
@@ -800,25 +817,17 @@ export default function SalonOperacionesPwaPage() {
       streamRef.current = stream
       setCameraPermission("granted")
 
-      // Con el permiso ya otorgado, re-enumerar para capturar los nombres reales (labels) de cada lente
-      try {
-        if (navigator.mediaDevices?.enumerateDevices) {
-          const freshDevices = await navigator.mediaDevices.enumerateDevices()
-          const freshVideo = freshDevices.filter(d => d.kind === "videoinput")
-          setAvailableCameras(freshVideo)
-        }
-      } catch {}
-
       if (activeTrack) {
         const settings = activeTrack.getSettings ? activeTrack.getSettings() : {}
         if (settings.deviceId) {
           setSelectedCameraId(settings.deviceId)
         }
         const label = activeTrack.label || ""
+        const isBack = /back|rear|trasera|environment|extern/i.test(label) || (!/front|delantera|user|selfie/i.test(label) && freshVideo.length > 1)
         setActiveCameraLabel(
-          /back|rear|trasera|environment/i.test(label)
+          isBack
             ? "Cámara Trasera"
-            : /front|user|delantera/i.test(label)
+            : /front|user|delantera|selfie/i.test(label)
             ? "Cámara Frontal"
             : label || "Cámara Activa"
         )
@@ -1749,6 +1758,15 @@ export default function SalonOperacionesPwaPage() {
 
             {/* Acciones de Cabecera */}
             <div className="flex items-center gap-2 shrink-0">
+              {/* Botón Recargar App (Limpiar Caché y Actualizar) */}
+              <button
+                onClick={forceAppRefresh}
+                className="p-2 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-300 hover:text-white transition cursor-pointer flex items-center justify-center text-xs font-bold backdrop-blur-md"
+                title="Recargar App y Actualizar a la Última Versión"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+
               {/* Botón Descarga APK */}
               <a
                 href="/download/extra-salon.apk"

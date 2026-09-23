@@ -878,8 +878,8 @@ class PhysicalCountSession(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    codigo = Column(String(20), nullable=False)
-    area = Column(String(50), nullable=False)
+    codigo = Column(String(50), nullable=False)
+    area = Column(String(100), nullable=False)
     ubicacion = Column(String(100))
     tipo = Column(String(20), default="ciclico")  # completo, ciclico, abc, por_area
     abc_category = Column(String(1))
