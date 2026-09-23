@@ -171,13 +171,30 @@ export default function DepositoRecepcionPage() {
       const pending = (res || []).filter(
         (o) => ["confirmado", "enviada", "enviado", "parcial"].includes(o.estado || "")
       )
+      // Ordenar por última actualización/creación de modo que órdenes modificadas o creadas recientemente aparezcan primero
+      pending.sort((a, b) => {
+        const timeA = new Date(a.updated_at || a.fecha || a.created_at || 0).getTime()
+        const timeB = new Date(b.updated_at || b.fecha || b.created_at || 0).getTime()
+        return timeB - timeA
+      })
       setOrders(pending)
     } catch (err: any) {
-      toast.error("Error de conexión", "No se pudieron obtener las órdenes pendientes.")
+      const isAuthError =
+        err?.status === 401 ||
+        err?.response?.status === 401 ||
+        err?.message?.includes("401") ||
+        err?.message?.toLowerCase().includes("unauthorized") ||
+        err?.message?.toLowerCase().includes("token")
+      if (isAuthError) {
+        toast.warning("Sesión Expirada", "Su sesión ha vencido. Por favor, vuelva a ingresar.")
+        logout()
+      } else {
+        toast.error("Error de conexión", "No se pudieron obtener las órdenes pendientes.")
+      }
     } finally {
       setLoadingOrders(false)
     }
-  }, [user, toast])
+  }, [user, toast, logout])
 
   // Auto-restaurar borrador al abrir o recargar la página
   useEffect(() => {
@@ -270,22 +287,34 @@ export default function DepositoRecepcionPage() {
       if (!forceFresh && po.id) {
         const savedDraft = loadDraftFromStorage(po.id)
         if (savedDraft && Array.isArray(savedDraft.itemsDraft) && savedDraft.itemsDraft.length > 0) {
-          const validatedItems = savedDraft.itemsDraft.map((it: any, idx: number) => ({
-            ...it,
-            draft_id: it.draft_id || `${it.product_id || "prod"}-${idx}-${Date.now()}`,
-          }))
-          setSelectedPO(savedDraft.po || po)
-          setItemsDraft(validatedItems)
-          setProveedorRef(savedDraft.proveedorRef || "")
-          setObservaciones(savedDraft.observaciones || "")
-          setRestoredFromDraft(true)
-          setDraftLastSaved(savedDraft.savedAt || new Date().toISOString())
-          setItemSearchQuery("")
-          setItemStatusFilter("todos")
-          setViewState("receiving")
-          toast.info("Borrador Recuperado", "Se restauraron todos los lotes y cantidades cargadas previamente.")
-          window.scrollTo({ top: 0, behavior: "smooth" })
-          return
+          const poUpdatedTime = po.updated_at ? new Date(po.updated_at).getTime() : 0
+          const draftSavedTime = savedDraft.savedAt ? new Date(savedDraft.savedAt).getTime() : 0
+
+          // Si la orden fue modificada en compras después de guardar el borrador en depósito:
+          if (poUpdatedTime > 0 && draftSavedTime > 0 && poUpdatedTime > draftSavedTime + 3000) {
+            toast.info(
+              "Orden Modificada en Compras",
+              "La orden fue modificada recientemente en el sistema. Se cargará la lista actualizada de productos desde el servidor."
+            )
+            // No restaurar el borrador viejo desactualizado; dejar que cargue del servidor
+          } else {
+            const validatedItems = savedDraft.itemsDraft.map((it: any, idx: number) => ({
+              ...it,
+              draft_id: it.draft_id || `${it.product_id || "prod"}-${idx}-${Date.now()}`,
+            }))
+            setSelectedPO(savedDraft.po || po)
+            setItemsDraft(validatedItems)
+            setProveedorRef(savedDraft.proveedorRef || "")
+            setObservaciones(savedDraft.observaciones || "")
+            setRestoredFromDraft(true)
+            setDraftLastSaved(savedDraft.savedAt || new Date().toISOString())
+            setItemSearchQuery("")
+            setItemStatusFilter("todos")
+            setViewState("receiving")
+            toast.info("Borrador Recuperado", "Se restauraron todos los lotes y cantidades cargadas previamente.")
+            window.scrollTo({ top: 0, behavior: "smooth" })
+            return
+          }
         }
       }
 
@@ -1385,7 +1414,7 @@ export default function DepositoRecepcionPage() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1">
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <span className="font-mono text-sm font-black text-amber-600 dark:text-amber-400">
                               {po.numero}
                             </span>
@@ -1393,6 +1422,11 @@ export default function DepositoRecepcionPage() {
                             <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
                               {formatDate(po.fecha || "")}
                             </span>
+                            {po.updated_at && po.created_at && new Date(po.updated_at).getTime() - new Date(po.created_at).getTime() > 60000 && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30">
+                                🔄 Actualizada
+                              </span>
+                            )}
                           </div>
                           <h3 className="font-black text-base sm:text-lg text-slate-900 dark:text-white mt-1 break-words">
                             {po.supplier?.razon_social || "Proveedor"}

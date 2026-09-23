@@ -1,6 +1,6 @@
 """Purchases service — suppliers, orders, receipts, requisitions, forecasting, suggestions, budgets, reports"""
 
-from sqlalchemy import select, text, case
+from sqlalchemy import select, text, case, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone, date, timedelta
@@ -331,7 +331,7 @@ async def list_purchase_orders(
         query = query.where(PurchaseOrder.supplier_id == uuid.UUID(supplier_id))
     if estado:
         query = query.where(PurchaseOrder.estado == estado)
-    query = query.order_by(PurchaseOrder.fecha.desc())
+    query = query.order_by(func.coalesce(PurchaseOrder.updated_at, PurchaseOrder.fecha).desc())
     result = await db.execute(query)
     orders = list(result.scalars().all())
     await _attach_suppliers(db, orders)

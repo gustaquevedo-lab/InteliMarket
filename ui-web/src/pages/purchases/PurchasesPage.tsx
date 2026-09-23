@@ -6338,13 +6338,12 @@ export default function PurchasesPage() {
                       <label className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 block mb-1">
                         Monto Final Alcanzado en Reales (R$) *
                       </label>
-                      <input
-                        type="number"
-                        step="0.01"
+                      <CurrencyInput
+                        currency="BRL"
                         required={receiptForm.es_br}
-                        placeholder="Ej: 450.00"
+                        placeholder="0,00"
                         value={receiptForm.total_brl || ""}
-                        onChange={(e) => setReceiptForm(prev => ({ ...prev, total_brl: e.target.value }))}
+                        onChangeValue={(numVal) => setReceiptForm(prev => ({ ...prev, total_brl: String(numVal) }))}
                         className="input-field w-full text-xs font-mono font-bold text-right border-emerald-400 text-emerald-600"
                       />
                     </div>
@@ -6770,17 +6769,16 @@ export default function PurchasesPage() {
                         <label className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 block mb-1">
                           Monto Total Reales (R$) *
                         </label>
-                        <input
-                          type="number"
-                          step="0.01"
+                        <CurrencyInput
+                          currency="BRL"
                           required
-                          placeholder="Ej: 350.00"
+                          placeholder="0,00"
                           value={manualInvoiceForm.total_brl}
-                          onChange={(e) => {
-                            const brl = e.target.value
+                          onChangeValue={(numVal) => {
+                            const brl = numVal
                             const tc = Number(manualInvoiceForm.tipo_cambio || 1350)
-                            const pyg = Math.round(Number(brl) * tc)
-                            setManualInvoiceForm(prev => ({ ...prev, total_brl: brl, total_pyg: String(pyg) }))
+                            const pyg = Math.round(brl * tc)
+                            setManualInvoiceForm(prev => ({ ...prev, total_brl: String(brl), total_pyg: String(pyg) }))
                           }}
                           className="input-field w-full text-xs font-mono font-bold text-right border-emerald-400 text-emerald-600 dark:text-emerald-400"
                         />
@@ -6963,13 +6961,12 @@ export default function PurchasesPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Precio Estimado (Gs.)</label>
-                  <input
-                    type="number"
-                    min={0}
+                  <CurrencyInput
+                    currency="PYG"
                     value={reqForm.items[0].precio_estimado}
-                    onChange={(e) => setReqForm(prev => {
+                    onChangeValue={(val) => setReqForm(prev => {
                       const copy = [...prev.items]
-                      copy[0].precio_estimado = Number(e.target.value)
+                      copy[0].precio_estimado = val
                       return { ...prev, items: copy }
                     })}
                     className="input-field w-full text-xs font-mono"
@@ -7281,11 +7278,10 @@ export default function PurchasesPage() {
                               />
                             </td>
                             <td className="p-2.5 text-right">
-                              <input
-                                type="number"
-                                min={0}
+                              <CurrencyInput
+                                currency={(suppliers.find(s => s.id === manualPOSupplierId)?.moneda_default as any) || "PYG"}
                                 value={it.precio_unitario}
-                                onChange={(e) => handleManualPOItemChange(idx, "precio_unitario", Math.max(0, Number(e.target.value)))}
+                                onChangeValue={(val) => handleManualPOItemChange(idx, "precio_unitario", Math.max(0, val))}
                                 className="input-field w-32 p-1 text-right font-mono font-bold text-xs"
                                 required
                               />
@@ -8716,13 +8712,12 @@ export default function PurchasesPage() {
                           <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
                             Valor Unitario (Gs.) <span className="text-red-500">*</span>
                           </label>
-                          <input
-                            type="number"
-                            step="any"
-                            min="0"
+                          <CurrencyInput
+                            currency="PYG"
+                            required
                             value={returnUnitPrice}
-                            onChange={(e) => setReturnUnitPrice(e.target.value)}
-                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono font-bold"
+                            onChangeValue={(val) => setReturnUnitPrice(String(val))}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono font-bold text-right"
                           />
                         </div>
 
@@ -9736,11 +9731,10 @@ export default function PurchasesPage() {
                       <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
                         Límite de Crédito ({supplierForm.moneda_default})
                       </label>
-                      <input
-                        type="number"
-                        min="0"
+                      <CurrencyInput
+                        currency={supplierForm.moneda_default === "BRL" ? "BRL" : supplierForm.moneda_default === "USD" ? "USD" : "PYG"}
                         value={supplierForm.limite_credito}
-                        onChange={(e) => setSupplierForm(prev => ({ ...prev, limite_credito: Number(e.target.value) || 0 }))}
+                        onChangeValue={(val) => setSupplierForm(prev => ({ ...prev, limite_credito: val }))}
                         placeholder="0 = Sin límite fijado"
                         className="input-field w-full text-xs font-mono font-bold"
                       />
