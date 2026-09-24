@@ -14,7 +14,7 @@ export interface SupplierOption {
 export interface SupplierSearchInputProps {
   value: string
   supplierId?: string
-  onSelectSupplier: (supplier: { id?: string; name: string; ruc?: string }) => void
+  onSelectSupplier: (supplier: { id?: string; name: string; ruc?: string; supplier?: SupplierOption }) => void
   onClear?: () => void
   suppliers?: SupplierOption[]
   label?: string
@@ -22,6 +22,7 @@ export interface SupplierSearchInputProps {
   required?: boolean
   disabled?: boolean
   className?: string
+  allowManual?: boolean
 }
 
 let cachedSuppliers: SupplierOption[] | null = null
@@ -33,10 +34,11 @@ export default function SupplierSearchInput({
   onClear,
   suppliers: propSuppliers,
   label = "Beneficiario / Proveedor",
-  placeholder = "Buscar proveedor por Razón Social o RUC...",
+  placeholder = "Buscar por Razón Social, Nombre Fantasía o RUC...",
   required = false,
   disabled = false,
   className = "",
+  allowManual = true,
 }: SupplierSearchInputProps) {
   const [internalSuppliers, setInternalSuppliers] = useState<SupplierOption[]>(() => propSuppliers || cachedSuppliers || [])
   const [loading, setLoading] = useState(false)
@@ -81,16 +83,21 @@ export default function SupplierSearchInput({
 
   const filteredSuppliers = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return internalSuppliers.slice(0, 15)
+    if (!q) return internalSuppliers.slice(0, 20)
+    const qClean = q.replace(/[^0-9kK]/g, "")
     return internalSuppliers
       .filter((s) => {
         const razon = (s.razon_social || "").toLowerCase()
         const fantasia = (s.nombre_fantasia || "").toLowerCase()
         const nombre = (s.nombre || "").toLowerCase()
-        const ruc = (s.ruc || "").toLowerCase()
-        return razon.includes(q) || fantasia.includes(q) || nombre.includes(q) || ruc.includes(q)
+        const rucRaw = (s.ruc || "").toLowerCase()
+        const rucClean = rucRaw.replace(/[^0-9kK]/g, "")
+        
+        const matchText = razon.includes(q) || fantasia.includes(q) || nombre.includes(q)
+        const matchRuc = rucRaw.includes(q) || (qClean.length >= 2 && rucClean.includes(qClean))
+        return matchText || matchRuc
       })
-      .slice(0, 20)
+      .slice(0, 30)
   }, [internalSuppliers, query])
 
   const selectedSupplierObj = useMemo(() => {
@@ -102,13 +109,14 @@ export default function SupplierSearchInput({
     return internalSuppliers.find(
       (s) =>
         (s.razon_social && s.razon_social.toLowerCase() === value.toLowerCase()) ||
+        (s.nombre_fantasia && s.nombre_fantasia.toLowerCase() === value.toLowerCase()) ||
         (s.nombre && s.nombre.toLowerCase() === value.toLowerCase())
     )
   }, [supplierId, value, internalSuppliers])
 
   const handleSelect = (s: SupplierOption) => {
     const name = s.razon_social || s.nombre_fantasia || s.nombre || ""
-    onSelectSupplier({ id: s.id, name, ruc: s.ruc })
+    onSelectSupplier({ id: s.id, name, ruc: s.ruc, supplier: s })
     setQuery("")
     setIsOpen(false)
   }
@@ -218,8 +226,8 @@ export default function SupplierSearchInput({
           {/* Menú Desplegable con Resultados */}
           {isOpen && (
             <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-1 duration-150">
-              {/* Opción de usar el texto manual tipeado */}
-              {query.trim().length > 0 && (
+              {/* Opción de usar el texto manual tipeado (solo si allowManual es true) */}
+              {allowManual && query.trim().length > 0 && (
                 <button
                   type="button"
                   onClick={handleManualBeneficiary}
@@ -246,8 +254,8 @@ export default function SupplierSearchInput({
                     </div>
                   ) : (
                     <div>
-                      <p>No se encontraron proveedores con ese criterio.</p>
-                      {query.trim() && (
+                      <p>No se encontraron proveedores con ese criterio de búsqueda.</p>
+                      {allowManual && query.trim() && (
                         <p className="text-[11px] text-slate-500 mt-1">
                           Podés pulsar arriba para usarlo como beneficiario manual.
                         </p>

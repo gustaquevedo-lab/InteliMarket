@@ -4,6 +4,8 @@ import { api, type SupplierInvoice, type Budget, type PaymentRun, type CashFlowP
 import { formatPYG, formatDate, getTodayAsuncion } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
 import { useAuth } from "../../context/AuthContext"
+import CurrencyInput from "../../components/CurrencyInput"
+import SupplierSearchInput from "../../components/SupplierSearchInput"
 import {
   Search, Plus, Loader2, DollarSign, Building2, Landmark, PiggyBank, TrendingUp,
   BarChart3, CheckCircle, XCircle, AlertTriangle, Receipt, FileText, Calendar, Clock,
@@ -144,6 +146,7 @@ export default function FinancialPage() {
     timbrado: "",
     numero_factura_origen: "",
     fecha: getTodayAsuncion(),
+    fecha_recepcion: getTodayAsuncion(),
     monto: "",
     motivo: "",
     motivo_categoria: "devolucion_rotura",
@@ -268,6 +271,7 @@ export default function FinancialPage() {
         timbrado: ncForm.timbrado || undefined,
         numero_factura_origen: ncForm.numero_factura_origen || undefined,
         fecha: ncForm.fecha,
+        fecha_recepcion: ncForm.fecha_recepcion || ncForm.fecha,
         motivo: ncForm.motivo,
         motivo_categoria: ncForm.motivo_categoria,
         impacto_contable: ncForm.impacto_contable,
@@ -284,6 +288,7 @@ export default function FinancialPage() {
         timbrado: "",
         numero_factura_origen: "",
         fecha: getTodayAsuncion(),
+        fecha_recepcion: getTodayAsuncion(),
         monto: "",
         motivo: "",
         motivo_categoria: "devolucion_rotura",
@@ -583,6 +588,7 @@ export default function FinancialPage() {
     const map = new Map<string, {
       supplier_id: string
       supplier_nombre: string
+      nombre_fantasia?: string
       ruc: string
       telefono?: string
       invoices: SupplierInvoice[]
@@ -606,7 +612,8 @@ export default function FinancialPage() {
       if (s.id) {
         map.set(s.id, {
           supplier_id: s.id,
-          supplier_nombre: s.nombre || s.razon_social || "Proveedor",
+          supplier_nombre: s.razon_social || s.nombre || "Proveedor",
+          nombre_fantasia: s.nombre_fantasia || "",
           ruc: s.ruc || "",
           telefono: s.telefono || "",
           invoices: [],
@@ -773,10 +780,16 @@ export default function FinancialPage() {
 
     // Filtros y Búsqueda en los Cards
     return list.filter(item => {
+      const q = apSupplierSearch.trim().toLowerCase()
+      const qClean = q.replace(/[^0-9kK]/g, "")
+      const rucClean = item.ruc.replace(/[^0-9kK]/g, "")
+
       const matchSearch =
-        !apSupplierSearch ||
-        item.supplier_nombre.toLowerCase().includes(apSupplierSearch.toLowerCase()) ||
-        item.ruc.toLowerCase().includes(apSupplierSearch.toLowerCase())
+        !q ||
+        item.supplier_nombre.toLowerCase().includes(q) ||
+        (item.nombre_fantasia && item.nombre_fantasia.toLowerCase().includes(q)) ||
+        item.ruc.toLowerCase().includes(q) ||
+        (qClean.length >= 2 && rucClean.includes(qClean))
 
       let matchFilter = true
       if (apSupplierFilter === "con_vencidas") matchFilter = item.tieneVencidas
@@ -1973,14 +1986,18 @@ export default function FinancialPage() {
                           </select>
                         </div>
 
-                        <div className="w-56">
-                          <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Proveedor</label>
-                          <select className="input-field w-full text-xs" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
-                            <option value="todos">Todos los Proveedores ({availableSuppliers.length})</option>
-                            {availableSuppliers.map(s => (
-                              <option key={s.id} value={s.id}>{s.nombre}</option>
-                            ))}
-                          </select>
+                        <div className="w-72">
+                          <SupplierSearchInput
+                            value={filterSupplier === "todos" ? "" : (availableSuppliers.find(s => s.id === filterSupplier)?.nombre || allSuppliers.find(s => s.id === filterSupplier)?.razon_social || allSuppliers.find(s => s.id === filterSupplier)?.nombre_fantasia || "")}
+                            supplierId={filterSupplier === "todos" ? undefined : filterSupplier}
+                            suppliers={allSuppliers}
+                            allowManual={false}
+                            label="Proveedor"
+                            placeholder="Buscar proveedor (nombre, fantasía, RUC)..."
+                            onSelectSupplier={(s) => setFilterSupplier(s.id || "todos")}
+                            onClear={() => setFilterSupplier("todos")}
+                            className="text-xs"
+                          />
                         </div>
 
                         <div className="w-40">
@@ -2565,16 +2582,19 @@ export default function FinancialPage() {
                   />
                 </div>
 
-                <select
-                  value={ncFilterSupplier}
-                  onChange={e => setNcFilterSupplier(e.target.value)}
-                  className="input-field md:w-56 text-xs"
-                >
-                  <option value="todos">Todos los Proveedores</option>
-                  {allSuppliers.map(s => (
-                    <option key={s.id} value={s.id}>{s.razon_social}</option>
-                  ))}
-                </select>
+                {/* Buscador de Proveedor sin Dropdown plano */}
+                <div className="w-full md:w-72">
+                  <SupplierSearchInput
+                    value={ncFilterSupplier === "todos" ? "" : (allSuppliers.find(s => s.id === ncFilterSupplier)?.razon_social || allSuppliers.find(s => s.id === ncFilterSupplier)?.nombre_fantasia || "")}
+                    supplierId={ncFilterSupplier === "todos" ? undefined : ncFilterSupplier}
+                    suppliers={allSuppliers}
+                    allowManual={false}
+                    placeholder="Filtrar proveedor (nombre, fantasía, RUC)..."
+                    onSelectSupplier={(s) => setNcFilterSupplier(s.id || "todos")}
+                    onClear={() => setNcFilterSupplier("todos")}
+                    className="text-xs"
+                  />
+                </div>
 
                 <select
                   value={ncFilterMotivo}
@@ -2621,9 +2641,11 @@ export default function FinancialPage() {
                       <thead>
                         <tr className="bg-gray-50 dark:bg-slate-800/80 text-[11px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
                           <th className="p-3.5">Proveedor</th>
-                          <th className="p-3.5">N° NC & Timbrado</th>
+                          <th className="p-3.5">Timbrado</th>
+                          <th className="p-3.5">N° NC</th>
                           <th className="p-3.5">Factura Origen</th>
-                          <th className="p-3.5">Fecha</th>
+                          <th className="p-3.5">Emisión</th>
+                          <th className="p-3.5">Recepción</th>
                           <th className="p-3.5">Motivo & Imputación</th>
                           <th className="p-3.5 text-right">Monto Original</th>
                           <th className="p-3.5 text-right">Saldo Disponible</th>
@@ -2642,15 +2664,20 @@ export default function FinancialPage() {
                               <td className="p-3.5 font-bold text-gray-900 dark:text-white">
                                 <div>{cn.supplier_nombre || "Proveedor Desconocido"}</div>
                               </td>
-                              <td className="p-3.5 font-mono text-xs text-gray-900 dark:text-white">
-                                <div className="font-bold">{cn.numero}</div>
-                                {cn.timbrado && <div className="text-[10px] text-gray-400 font-normal">Timb: {cn.timbrado}</div>}
+                              <td className="p-3.5 font-mono text-xs text-gray-500">
+                                {cn.timbrado || "—"}
+                              </td>
+                              <td className="p-3.5 font-mono font-bold text-xs text-purple-700 dark:text-purple-300">
+                                {cn.numero}
                               </td>
                               <td className="p-3.5 font-mono text-xs text-gray-500">
                                 {cn.numero_factura_origen || "—"}
                               </td>
                               <td className="p-3.5 font-mono text-xs text-gray-500">
-                                {cn.fecha ? new Date(cn.fecha).toLocaleDateString("es-PY") : "—"}
+                                {cn.fecha ? formatDate(cn.fecha) : "—"}
+                              </td>
+                              <td className="p-3.5 font-mono text-xs text-indigo-600 dark:text-indigo-400 font-semibold">
+                                {cn.fecha_recepcion ? formatDate(cn.fecha_recepcion) : (cn.fecha ? formatDate(cn.fecha) : "—")}
                               </td>
                               <td className="p-3.5 text-xs">
                                 <div className="font-medium text-gray-800 dark:text-gray-200">{cn.motivo}</div>
@@ -2918,8 +2945,9 @@ export default function FinancialPage() {
       {/* 🧾 MODAL: REGISTRAR NOTA DE CRÉDITO DE PROVEEDOR (FASE 4) */}
       {showNCModal && (
         <div className="modal-overlay" onClick={() => setShowNCModal(false)}>
-          <div className="modal-content max-w-2xl" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-indigo-50/50 to-purple-50/50 dark:from-slate-800 dark:to-slate-800/80">
+          <div className="modal-content max-w-2xl max-h-[90vh] flex flex-col overflow-hidden p-0 shadow-2xl rounded-2xl" onClick={e => e.stopPropagation()}>
+            {/* Header Fijo */}
+            <div className="p-5 sm:p-6 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-indigo-50/50 to-purple-50/50 dark:from-slate-800 dark:to-slate-800/80 shrink-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <div className="p-2 rounded-xl bg-indigo-600 text-white shadow-md">
@@ -2938,22 +2966,22 @@ export default function FinancialPage() {
               </div>
             </div>
 
-            <form onSubmit={handleCreateNC}>
-              <div className="p-6 space-y-4 text-xs max-h-[75vh] overflow-y-auto">
-                {/* Proveedor */}
+            {/* Formulario con cuerpo scrolleable y footer fijo */}
+            <form onSubmit={handleCreateNC} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-5 sm:p-6 space-y-4 text-xs flex-1 overflow-y-auto">
+                {/* Proveedor con Buscador Inteligente por Nombre, Fantasía y RUC */}
                 <div>
-                  <label className="label-field font-bold">Proveedor Emisor *</label>
-                  <select
-                    className="input-field"
-                    value={ncForm.supplier_id}
-                    onChange={e => setNcForm({ ...ncForm, supplier_id: e.target.value })}
+                  <SupplierSearchInput
+                    value={allSuppliers.find(s => s.id === ncForm.supplier_id)?.razon_social || allSuppliers.find(s => s.id === ncForm.supplier_id)?.nombre_fantasia || ""}
+                    supplierId={ncForm.supplier_id}
+                    suppliers={allSuppliers}
+                    allowManual={false}
+                    label="Proveedor Emisor *"
+                    placeholder="Buscar por Razón Social, Nombre Fantasía o RUC..."
+                    onSelectSupplier={(s) => setNcForm(prev => ({ ...prev, supplier_id: s.id || "" }))}
+                    onClear={() => setNcForm(prev => ({ ...prev, supplier_id: "" }))}
                     required
-                  >
-                    <option value="">Seleccione un proveedor...</option>
-                    {allSuppliers.map(s => (
-                      <option key={s.id} value={s.id}>{s.razon_social} (RUC: {s.ruc})</option>
-                    ))}
-                  </select>
+                  />
                 </div>
 
                 {/* N° NC y Timbrado */}
@@ -2961,7 +2989,7 @@ export default function FinancialPage() {
                   <div>
                     <label className="label-field font-bold">N° Nota de Crédito *</label>
                     <input
-                      className="input-field font-mono"
+                      className="input-field font-mono font-bold"
                       placeholder="001-001-0001234"
                       value={ncForm.numero}
                       onChange={e => setNcForm({ ...ncForm, numero: e.target.value })}
@@ -2969,7 +2997,7 @@ export default function FinancialPage() {
                     />
                   </div>
                   <div>
-                    <label className="label-field">Timbrado Fiscal</label>
+                    <label className="label-field font-bold">Timbrado Fiscal</label>
                     <input
                       className="input-field font-mono"
                       placeholder="18545636"
@@ -2979,10 +3007,10 @@ export default function FinancialPage() {
                   </div>
                 </div>
 
-                {/* Factura Origen y Fecha */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* Factura Origen, Fecha de Emisión y Fecha de Recepción */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="label-field">N° Factura Origen (Referencia)</label>
+                    <label className="label-field">Factura Origen (Ref.)</label>
                     <input
                       className="input-field font-mono"
                       placeholder="001-001-0009876"
@@ -3000,18 +3028,27 @@ export default function FinancialPage() {
                       required
                     />
                   </div>
+                  <div>
+                    <label className="label-field font-bold text-indigo-600 dark:text-indigo-400">Fecha de Recepción *</label>
+                    <input
+                      type="date"
+                      className="input-field font-mono border-indigo-300 dark:border-indigo-700 bg-indigo-50/20 dark:bg-indigo-950/20"
+                      value={ncForm.fecha_recepcion}
+                      onChange={e => setNcForm({ ...ncForm, fecha_recepcion: e.target.value })}
+                      required
+                    />
+                  </div>
                 </div>
 
-                {/* Monto y Categoría de Motivo */}
+                {/* Monto con separador de miles y Categoría de Motivo */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <label className="label-field font-bold">Monto Total (₲) *</label>
-                    <input
-                      type="number"
-                      className="input-field font-mono text-sm font-bold text-indigo-600 dark:text-indigo-400"
-                      placeholder="Ej: 350000"
+                    <CurrencyInput
                       value={ncForm.monto}
-                      onChange={e => setNcForm({ ...ncForm, monto: e.target.value })}
+                      onChangeValue={(numVal) => setNcForm(prev => ({ ...prev, monto: numVal > 0 ? String(numVal) : "" }))}
+                      placeholder="0"
+                      className="input-field font-mono text-sm font-black text-indigo-600 dark:text-indigo-400"
                       required
                     />
                   </div>
@@ -3163,7 +3200,8 @@ export default function FinancialPage() {
                 </div>
               </div>
 
-              <div className="p-6 border-t border-gray-100 dark:border-gray-700 flex justify-end gap-3 bg-gray-50 dark:bg-slate-850">
+              {/* Footer Fijo Siempre Visible (Sin Desbordarse) */}
+              <div className="p-4 sm:p-5 border-t border-gray-100 dark:border-gray-700 flex justify-end items-center gap-3 bg-gray-50 dark:bg-slate-850 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowNCModal(false)}

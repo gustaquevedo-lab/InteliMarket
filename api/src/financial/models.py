@@ -246,6 +246,7 @@ class SupplierCreditNote(Base):
     numero_factura_origen = Column(String(50))
     timbrado = Column(String(30))
     fecha = Column(Date, nullable=False)
+    fecha_recepcion = Column(Date, nullable=True)
     motivo = Column(String(150))
     motivo_categoria = Column(String(50), nullable=True)  # 8 categorias: devolucion_rotura, devolucion_vencimiento, diferencia_precio, error_facturacion, faltante_recepcion, descuento_acordado, flete_no_pactado, bonificacion_volumen
     impacto_contable = Column(String(30), default="otros_ingresos")  # otros_ingresos | recuperacion_merma

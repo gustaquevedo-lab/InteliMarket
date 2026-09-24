@@ -539,6 +539,7 @@ class SupplierCreditNoteCreate(BaseModel):
     numero_factura_origen: Optional[str] = None
     timbrado: Optional[str] = None
     fecha: date
+    fecha_recepcion: Optional[date] = None
     motivo: str
     motivo_categoria: Optional[str] = "devolucion_rotura"
     impacto_contable: Optional[str] = "otros_ingresos"

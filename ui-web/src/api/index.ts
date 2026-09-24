@@ -3727,6 +3727,7 @@ export const api = {
           numero_factura_origen?: string;
           timbrado?: string;
           fecha: string;
+          fecha_recepcion?: string;
           motivo: string;
           motivo_categoria?: string;
           impacto_contable?: string;
