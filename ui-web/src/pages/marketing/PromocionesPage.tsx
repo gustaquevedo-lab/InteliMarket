@@ -409,6 +409,8 @@ export default function PromocionesPage() {
         (p.nombre || "").toLowerCase().includes(s) ||
         (p.descripcion || "").toLowerCase().includes(s) ||
         String(p.legacy_id || "").includes(s) ||
+        String(p.numero || "").includes(s) ||
+        String((p as any).codigo || "").toLowerCase().includes(s) ||
         Boolean(
           (p as any).productos_detalle &&
           ((p as any).productos_detalle as any[]).some((pr: any) =>
@@ -903,9 +905,11 @@ export default function PromocionesPage() {
       const costoRef = (promo.costo_unitario_referencia as number | undefined) ?? 0
       const precioPromoRef = (promo.precio_fijo_promocional as number | undefined) ?? 0
       prodsDetalle.forEach(det => {
-        // Usar precio_venta y costo_promedio devueltos directamente por el backend
+        // Usar precio_regular (o precio_venta) y costo_promedio devueltos por el backend
         const costo = det.costo_promedio != null ? Number(det.costo_promedio) : costoRef
-        const precioReg = det.precio_venta != null ? Number(det.precio_venta) : 0
+        const precioReg = det.precio_regular != null && Number(det.precio_regular) > 0
+          ? Number(det.precio_regular)
+          : (det.precio_venta != null ? Number(det.precio_venta) : 0)
         const hasSavedPrice = savedPrecios && savedPrecios[det.id] !== undefined
         const precioPromo = hasSavedPrice
           ? Number(savedPrecios[det.id])
@@ -1341,9 +1345,16 @@ export default function PromocionesPage() {
 
                         {/* Nombre y Mecánica */}
                         <td className="p-3.5">
-                          <p className="font-extrabold text-gray-900 dark:text-white text-xs line-clamp-2 leading-snug" title={promo.nombre}>
-                            {promo.nombre}
-                          </p>
+                          <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                            {(promo.numero || (promo as any).codigo) && (
+                              <span className="font-mono font-black text-[11px] text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800 shadow-2xs">
+                                #{promo.numero ?? (promo as any).codigo}
+                              </span>
+                            )}
+                            <p className="font-extrabold text-gray-900 dark:text-white text-xs line-clamp-2 leading-snug" title={promo.nombre}>
+                              {promo.nombre}
+                            </p>
+                          </div>
                           <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mt-0.5">
                             {TIPO_LABELS[promo.tipo] || promo.tipo}
                           </p>
@@ -1609,6 +1620,11 @@ export default function PromocionesPage() {
                   }`}>
                     {viewingPromo.activo ? "ACTIVA EN SALÓN" : "PAUSADA"}
                   </span>
+                  {(viewingPromo.numero || (viewingPromo as any).codigo) && (
+                    <span className="text-[10px] font-mono font-black text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
+                      #{viewingPromo.numero ?? (viewingPromo as any).codigo}
+                    </span>
+                  )}
                   {viewingPromo.legacy_id && (
                     <span className="text-[10px] font-mono font-bold text-blue-600">Ñemuha #{viewingPromo.legacy_id}</span>
                   )}
@@ -1697,7 +1713,11 @@ export default function PromocionesPage() {
                             <span className="text-[10px] text-gray-500 dark:text-gray-400 font-mono flex items-center gap-2 mt-0.5">
                               {prod?.sku && <span className="text-indigo-600 dark:text-indigo-400 font-semibold">SKU: {prod.sku}</span>}
                               {prod?.codigo_barra && <span>CB: {prod.codigo_barra}</span>}
-                              {(prod as any)?.precio_venta && <span className="line-through text-gray-400">Reg: {formatPYG(Number((prod as any).precio_venta))}</span>}
+                              {((prod as any)?.precio_regular || (prod as any)?.precio_venta) && (
+                                <span className="line-through text-gray-400">
+                                  Reg: {formatPYG(Number((prod as any).precio_regular || (prod as any).precio_venta))}
+                                </span>
+                              )}
                             </span>
                           </div>
                           <div className="text-right shrink-0">

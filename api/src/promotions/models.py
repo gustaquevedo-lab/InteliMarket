@@ -9,6 +9,7 @@ class Promotion(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    numero = Column(Integer, index=True, nullable=True)  # Identificador numérico correlativo autoincremental
     nombre = Column(String(150), nullable=False)
     descripcion = Column(Text)
 

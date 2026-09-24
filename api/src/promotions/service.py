@@ -278,7 +278,7 @@ async def get_promotion(db: AsyncSession, promo_id: str) -> Promotion | None:
             prods_res = await db.execute(
                 select(
                     Product.id, Product.nombre, Product.sku, Product.codigo_barra,
-                    Product.precio_venta, Product.costo_promedio
+                    Product.precio_venta, Product.costo_promedio, Product.precio_regular
                 ).where(
                     Product.id.in_(promo.producto_ids)
                 )
@@ -291,6 +291,7 @@ async def get_promotion(db: AsyncSession, promo_id: str) -> Promotion | None:
                     "codigo_barra": row[3],
                     "precio_venta": float(row[4]) if row[4] is not None else 0,
                     "costo_promedio": float(row[5]) if row[5] is not None else 0,
+                    "precio_regular": float(row[6]) if row[6] is not None else None,
                 }
                 for row in prods_res.all()
             }
@@ -346,7 +347,7 @@ async def list_promotions(
         prods_res = await db.execute(
             select(
                 Product.id, Product.nombre, Product.sku, Product.codigo_barra,
-                Product.precio_venta, Product.costo_promedio
+                Product.precio_venta, Product.costo_promedio, Product.precio_regular
             ).where(
                 Product.id.in_(list(all_pids))
             )
@@ -359,6 +360,7 @@ async def list_promotions(
                 "codigo_barra": row[3],
                 "precio_venta": float(row[4]) if row[4] is not None else 0,
                 "costo_promedio": float(row[5]) if row[5] is not None else 0,
+                "precio_regular": float(row[6]) if row[6] is not None else None,
             }
 
     for p in promos:
@@ -1483,6 +1485,12 @@ async def get_promotion_analytics_360(
     for pid, prod in products_map.items():
         costo = float(prod.costo_promedio or prod.ultimo_costo or 0)
         reg = float(prod.precio_regular or prod.precio_venta or 0)
+        precio_especifico = None
+        if p.precios_por_producto and isinstance(p.precios_por_producto, dict):
+            p_val = p.precios_por_producto.get(str(pid))
+            if p_val is not None and float(p_val) > 0:
+                precio_especifico = Decimal(str(p_val))
+
         promo_p = float(calcular_precio_promocional(
             tipo=p.tipo,
             precio_regular=Decimal(str(reg)),
@@ -1490,7 +1498,8 @@ async def get_promotion_analytics_360(
             precio_fijo_promocional=p.precio_fijo_promocional,
             costo_unitario_referencia=Decimal(str(costo)),
             base_calculo_pct=getattr(p, 'base_calculo_pct', 'venta') or 'venta',
-            terminacion_psicologica=p.terminacion_psicologica
+            terminacion_psicologica=p.terminacion_psicologica,
+            precio_producto_especifico=precio_especifico,
         ))
         product_stats[str(pid)] = {
             "producto_id": str(pid),
@@ -1732,6 +1741,8 @@ async def get_promotion_analytics_360(
 
     return PromotionAnalytics360Response(
         promotion_id=str(p.id),
+        numero=p.numero,
+        codigo=f"PRM-{p.numero:04d}" if p.numero else None,
         nombre=p.nombre,
         tipo=p.tipo,
         origen=getattr(p, 'origen', 'manual') or 'manual',

@@ -135,7 +135,12 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {(data?.numero || data?.codigo) && (
+                  <span className="font-mono font-black text-xs px-2.5 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/80 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 shadow-2xs">
+                    #{data.numero ?? data.codigo}
+                  </span>
+                )}
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
                   {data?.nombre || "Detalle de Promoción 360°"}
                 </h2>
@@ -779,8 +784,8 @@ export const Promotion360Modal: React.FC<Promotion360ModalProps> = ({
                         </p>
                       </div>
                       <div className="text-right">
-                        <span className="text-[10px] font-bold uppercase px-2.5 py-1 bg-amber-100 text-amber-900 rounded border border-amber-300 inline-block">
-                          DIRECTIVA COMERCIAL N° PROMO-{promoId.slice(0, 8).toUpperCase()}
+                        <span className="text-[10px] font-bold uppercase px-2.5 py-1 bg-amber-100 text-amber-900 rounded border border-amber-300 inline-block font-mono">
+                          DIRECTIVA COMERCIAL N° {data?.numero ? `PRM-${String(data.numero).padStart(4, '0')}` : (data?.codigo || `PROMO-${promoId.slice(0, 8).toUpperCase()}`)}
                         </span>
                         <p className="text-[10px] text-slate-500 mt-1">
                           Emisión: {new Date().toLocaleDateString("es-PY")} (Hora Asunción)

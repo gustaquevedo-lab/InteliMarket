@@ -1110,6 +1110,8 @@ export interface Promotion {
 
   id: string
   company_id?: string
+  numero?: number
+  codigo?: string
   nombre: string
   descripcion?: string
   tipo: string
@@ -1175,7 +1177,7 @@ export interface Promotion {
   monto_total_nc_comprometido?: number
   fecha_vencimiento_lote?: string
   // Productos detalle (enriquecido por el backend tras fetch)
-  productos_detalle?: Array<{ id: string; nombre: string; sku?: string; codigo_barra?: string; precio_venta?: number; costo_promedio?: number }>
+  productos_detalle?: Array<{ id: string; nombre: string; sku?: string; codigo_barra?: string; precio_venta?: number; costo_promedio?: number; precio_regular?: number }>
 }
 export interface PromotionUsage { id: string; promotion_id?: string; sale_id?: string; customer_id?: string; branch_id?: string; codigo_cupon?: string; descuento_aplicado?: number; items_aplicados?: string[]; created_at?: string }
 export interface MobileDashboard { recepciones_pendientes: number; inventarios_pendientes: number; sugerencias_pendientes: number; entregas_hoy: number }

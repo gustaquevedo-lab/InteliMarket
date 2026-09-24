@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, computed_field
 from typing import Optional, List, Any
 from datetime import date, time, datetime
 from decimal import Decimal
@@ -155,6 +155,7 @@ class PromotionResponse(BaseModel):
 
     id: Any
     company_id: Optional[Any] = None
+    numero: Optional[int] = None
     nombre: str
     descripcion: Optional[str] = None
     tipo: str
@@ -220,6 +221,13 @@ class PromotionResponse(BaseModel):
     activo: bool = True
     created_at: Optional[datetime] = None
     productos_detalle: Optional[list[dict]] = None
+
+    @computed_field
+    @property
+    def codigo(self) -> Optional[str]:
+        if self.numero is not None:
+            return f"PRM-{self.numero:04d}"
+        return None
 
 
 class ExpiringPromotionAlert(BaseModel):
@@ -408,6 +416,8 @@ class PromotionAIInsight(BaseModel):
 
 class PromotionAnalytics360Response(BaseModel):
     promotion_id: str
+    numero: Optional[int] = None
+    codigo: Optional[str] = None
     nombre: str
     tipo: str
     origen: str
